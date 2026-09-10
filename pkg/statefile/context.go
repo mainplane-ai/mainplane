@@ -61,32 +61,43 @@ const (
 	StatusFailed      Status = "failed"      // the last record is an error
 )
 
+// Waiting returns the calls closed by a step that have no result, in file order.
+func Waiting(chain []Record) []Record {
+	calls := map[string][]Record{} // step id -> calls
+	var waiting []Record
+	for _, r := range chain {
+		switch r.Kind {
+		case Call:
+			calls[r.Step] = append(calls[r.Step], r)
+		case Step:
+			waiting = append(waiting, calls[r.ID]...)
+		case Result:
+			for i, c := range waiting {
+				if c.ID == r.For {
+					waiting = append(waiting[:i], waiting[i+1:]...)
+					break
+				}
+			}
+		case Start, Link, Config, System, Message, Text, Thinking, Summary, Error:
+		}
+	}
+	return waiting
+}
+
 // Derive reads status off the tip. Stepping is the lock's word, not the
 // file's, so a caller that holds the lock knows better than this.
 func Derive(chain []Record) Status {
 	if chain[len(chain)-1].Kind == Error {
 		return StatusFailed
 	}
-	var last *Record
-	calls := map[string][]string{} // step id -> call ids
-	waiting := map[string]bool{}
-	for i := range chain {
-		r := &chain[i]
-		switch r.Kind {
-		case Call:
-			calls[r.Step] = append(calls[r.Step], r.ID)
-		case Step:
-			last = r
-			for _, id := range calls[r.ID] {
-				waiting[id] = true
-			}
-		case Result:
-			delete(waiting, r.For)
-		case Start, Link, Config, System, Message, Text, Thinking, Summary, Error:
-		}
-	}
-	if len(waiting) > 0 {
+	if len(Waiting(chain)) > 0 {
 		return StatusInterrupted
+	}
+	var last *Record
+	for i := range chain {
+		if chain[i].Kind == Step {
+			last = &chain[i]
+		}
 	}
 	for _, r := range chain {
 		if (r.Kind == Message || r.Kind == Result) && (last == nil || !seen(r, *last)) {
