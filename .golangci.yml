@@ -1,0 +1,53 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - depguard
+    - exhaustive
+    - gocognit
+    - errorlint
+    - nilerr
+  settings:
+    gocognit:
+      min-complexity: 30
+    exhaustive:
+      default-signifies-exhaustive: false
+    depguard:
+      rules:
+        no-sql:
+          files: ["**/pkg/**"]
+          deny:
+            - pkg: database/sql
+              desc: no SQL in the open repo. cloud implements the interfaces
+            - pkg: github.com/jackc/pgx
+              desc: no SQL in the open repo. cloud implements the interfaces
+        worker:
+          files: ["**/pkg/worker/**"]
+          deny:
+            - pkg: github.com/mainplane-ai/mainplane/pkg/central
+              desc: worker never imports central
+            - pkg: github.com/mainplane-ai/mainplane/pkg/harness
+              desc: worker never imports harness
+            - pkg: github.com/mainplane-ai/mainplane/pkg/coordinator
+              desc: worker never imports coordinator
+        central:
+          files: ["**/pkg/central/**"]
+          deny:
+            - pkg: github.com/mainplane-ai/mainplane/pkg/worker
+              desc: central never imports worker
+            - pkg: github.com/mainplane-ai/mainplane/pkg/mesh
+              desc: central never imports mesh
+        api:
+          files: ["**/pkg/api/**"]
+          allow:
+            - $gostd
+
+formatters:
+  enable:
+    - gofumpt

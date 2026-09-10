@@ -1,0 +1,19 @@
+version: "3"
+
+tasks:
+  lint:
+    cmds:
+      - golangci-lint run ./...
+      - gofumpt -l .
+      - go mod tidy -diff
+
+  test:
+    cmds:
+      - go test -race ./...
+
+  vuln:
+    cmds:
+      - go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  ci:
+    deps: [lint, test, vuln]
