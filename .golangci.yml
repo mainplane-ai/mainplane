@@ -1,6 +1,12 @@
 version: "2"
 
+run:
+  relative-path-mode: gomod
+
 linters:
+  exclusions:
+    paths:
+      - working_dir
   default: none
   enable:
     - errcheck
