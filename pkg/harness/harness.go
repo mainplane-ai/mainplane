@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
@@ -20,14 +21,19 @@ type Harness struct {
 	Workers   map[string]Worker
 }
 
-// check rejects a config that names a provider or tool set this harness lacks.
-// Validated on write, trusted on read.
+// check rejects a config that names a provider, tool set, or worker this
+// harness lacks. Validated on write, trusted on read.
 func (h Harness) check(conf statefile.Conf) error {
 	if _, ok := h.Providers[conf.Provider]; !ok {
 		return fmt.Errorf("unknown provider %q", conf.Provider)
 	}
 	if _, ok := toolSets[conf.Tools]; !ok {
 		return fmt.Errorf("unknown tool set %q", conf.Tools)
+	}
+	for _, w := range conf.Workers {
+		if _, ok := h.Workers[w]; !ok {
+			return fmt.Errorf("unknown worker %q", w)
+		}
 	}
 	return nil
 }
@@ -154,7 +160,7 @@ func (h Harness) Step(ctx context.Context, id string) (status statefile.Status, 
 		return "", err
 	}
 	for _, c := range calls {
-		if err := f.Append(h.execute(ctx, c)); err != nil {
+		if err := f.Append(h.execute(ctx, conf, c)); err != nil {
 			return "", err
 		}
 	}
@@ -178,8 +184,9 @@ func result(call, text string) statefile.Record {
 	return statefile.Record{Header: statefile.Header{Kind: statefile.Result, For: call, Type: "text/plain"}, Body: []byte(text)}
 }
 
-// execute routes a call to the worker its arguments name.
-func (h Harness) execute(ctx context.Context, call statefile.Record) statefile.Record {
+// execute routes a call to the worker its arguments name. The session reaches
+// only the workers its config lists.
+func (h Harness) execute(ctx context.Context, conf statefile.Conf, call statefile.Record) statefile.Record {
 	var c provider.Call
 	if err := json.Unmarshal(call.Body, &c); err != nil {
 		return result(call.ID, "error: "+err.Error())
@@ -189,7 +196,7 @@ func (h Harness) execute(ctx context.Context, call statefile.Record) statefile.R
 		return result(call.ID, "error: "+err.Error())
 	}
 	w, ok := h.Workers[a.Worker]
-	if !ok {
+	if !ok || !slices.Contains(conf.Workers, a.Worker) {
 		return result(call.ID, "error: unknown worker "+a.Worker)
 	}
 	r := execute(ctx, w, c.Name, a)

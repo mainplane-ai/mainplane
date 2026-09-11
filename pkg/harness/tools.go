@@ -77,6 +77,9 @@ func execute(ctx context.Context, w Worker, tool string, a args) statefile.Recor
 			return fail(err)
 		}
 		r.Exit = &exit
+		if exit != 0 {
+			return ok(fmt.Sprintf("exit %d\n%s", exit, out))
+		}
 		return ok(string(out))
 	case "read":
 		b, err := w.Read(ctx, a.Path)

@@ -139,28 +139,32 @@ func indexSeq(lines, seq []string) int {
 	return -1
 }
 
+// applyPatch computes every file before writing any, so a hunk that fails to
+// match leaves the worker as it was and the model can retry the whole patch.
 func applyPatch(ctx context.Context, w Worker, input string) error {
 	secs, err := parsePatch(input)
 	if err != nil {
 		return err
 	}
-	for _, s := range secs {
-		if s.add != nil {
-			if err := w.Write(ctx, s.path, []byte(strings.Join(s.add, "\n")+"\n")); err != nil {
+	out := make([][]byte, len(secs))
+	for i, s := range secs {
+		lines := s.add
+		if s.add == nil {
+			b, err := w.Read(ctx, s.path)
+			if err != nil {
 				return err
 			}
-			continue
+			if text := strings.ReplaceAll(string(b), "\r\n", "\n"); text != "" {
+				lines = strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+			}
+			if lines, err = apply(lines, s.hunks); err != nil {
+				return fmt.Errorf("%s: %w", s.path, err)
+			}
 		}
-		b, err := w.Read(ctx, s.path)
-		if err != nil {
-			return err
-		}
-		text := strings.ReplaceAll(string(b), "\r\n", "\n")
-		lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-		if lines, err = apply(lines, s.hunks); err != nil {
-			return fmt.Errorf("%s: %w", s.path, err)
-		}
-		if err := w.Write(ctx, s.path, []byte(strings.Join(lines, "\n")+"\n")); err != nil {
+		out[i] = []byte(strings.Join(lines, "\n") + "\n")
+	}
+	for i, s := range secs {
+		if err := w.Write(ctx, s.path, out[i]); err != nil {
 			return err
 		}
 	}
