@@ -16,6 +16,7 @@ import (
 const (
 	anthMaxTokens      = 16384
 	anthThinkingBudget = 2048
+	anthCacheTTL       = 300 // ephemeral, refreshed on every hit
 )
 
 func Anthropic(key string) Provider {
@@ -83,13 +84,6 @@ type anthBlock struct {
 	CacheControl *anthCache      `json:"cache_control,omitempty"`
 }
 
-// anthMarks is the step's cache header: whether the system prompt carried a
-// marker and the n of the record whose block carried the second one.
-type anthMarks struct {
-	System bool `json:"system"`
-	Last   int  `json:"last,omitempty"`
-}
-
 var ephemeral = &anthCache{Type: "ephemeral"}
 
 func (anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
@@ -101,9 +95,10 @@ func (anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
 		Thinking:  anthThinking{Type: "enabled", BudgetTokens: anthThinkingBudget},
 		Messages:  []anthMsg{},
 	}
-	marks := anthMarks{System: len(system) > 0}
-	if marks.System {
+	var marks []int
+	if len(system) > 0 {
 		body.System = []anthBlock{{Type: "text", Text: systemText(system), CacheControl: ephemeral}}
+		marks = append(marks, system[len(system)-1].N)
 	}
 	for _, t := range req.Tools {
 		body.Tools = append(body.Tools, anthTool{Name: t.Name, Description: t.Description, InputSchema: t.Schema})
@@ -121,11 +116,11 @@ func (anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
 		blocks := anthUser(t.Records)
 		if i == len(turns)-1 {
 			blocks[len(blocks)-1].CacheControl = ephemeral
-			marks.Last = t.Records[len(t.Records)-1].N
+			marks = append(marks, t.Records[len(t.Records)-1].N)
 		}
 		body.Messages = append(body.Messages, anthMsg{Role: "user", Content: blocks})
 	}
-	cache, err := marshal(marks)
+	cache, err := cacheHeader(anthCacheTTL, marks...)
 	if err != nil {
 		return nil, nil, err
 	}

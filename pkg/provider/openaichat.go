@@ -96,7 +96,7 @@ func (openaiChat) Compile(req Request) ([]byte, json.RawMessage, error) {
 		}
 		body.Messages = append(body.Messages, m)
 	}
-	b, err := marshal(body)
+	b, err := marshal(body) // no cache header: third-party caches are their own business
 	return b, nil, err
 }
 

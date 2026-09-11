@@ -24,6 +24,7 @@ import (
 const (
 	bedrockMaxTokens      = 16384
 	bedrockThinkingBudget = 1024
+	bedrockCacheTTL       = 300
 )
 
 func Bedrock(region, accessKey, secretKey, sessionToken string) Provider {
@@ -120,13 +121,6 @@ type bedCachePoint struct {
 	Type string `json:"type"`
 }
 
-// bedMarks is the step's cache header: whether the system prompt carried a
-// cache point and the n of the record whose block preceded the second one.
-type bedMarks struct {
-	System bool `json:"system"`
-	Last   int  `json:"last,omitempty"`
-}
-
 // bedReasoning is the shape of a Bedrock thinking record body.
 type bedReasoning struct {
 	ReasoningText   *bedReasoningText `json:"reasoningText,omitempty"`
@@ -147,9 +141,10 @@ func (bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
 		InferenceConfig:              bedInference{MaxTokens: bedrockMaxTokens},
 		AdditionalModelRequestFields: bedAdditional{bedThinking{Type: "enabled", BudgetTokens: bedrockThinkingBudget}},
 	}
-	marks := bedMarks{System: len(system) > 0}
-	if marks.System {
+	var marks []int
+	if len(system) > 0 {
 		body.System = []bedBlock{{Text: systemText(system)}, {CachePoint: cachePoint}}
+		marks = append(marks, system[len(system)-1].N)
 	}
 	if len(req.Tools) > 0 {
 		body.ToolConfig = &bedToolConfig{}
@@ -174,11 +169,11 @@ func (bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
 		blocks := bedUser(t.Records)
 		if i == len(turns)-1 {
 			blocks = append(blocks, bedBlock{CachePoint: cachePoint})
-			marks.Last = t.Records[len(t.Records)-1].N
+			marks = append(marks, t.Records[len(t.Records)-1].N)
 		}
 		body.Messages = append(body.Messages, bedMsg{Role: "user", Content: blocks})
 	}
-	cache, err := marshal(marks)
+	cache, err := cacheHeader(bedrockCacheTTL, marks...)
 	if err != nil {
 		return nil, nil, err
 	}

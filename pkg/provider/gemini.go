@@ -13,7 +13,10 @@ import (
 
 // thinkingBudget is the legacy control that every Gemini 2.5 and 3 model still
 // accepts. 2048 is modest; the model may use less.
-const geminiThinkingBudget = 2048
+const (
+	geminiThinkingBudget = 2048
+	geminiCacheTTL       = 300 // forecast: implicit caching has no documented ttl
+)
 
 func Gemini(key string) Provider {
 	return Provider{
@@ -127,8 +130,12 @@ func (gemini) Compile(req Request) ([]byte, json.RawMessage, error) {
 			body.Contents = append(body.Contents, gemContent{Role: "model", Parts: parts})
 		}
 	}
+	cache, err := cacheHeader(geminiCacheTTL, req.Context[len(req.Context)-1].N)
+	if err != nil {
+		return nil, nil, err
+	}
 	b, err := marshal(body)
-	return b, nil, err
+	return b, cache, err
 }
 
 // gemSchema strips the JSON Schema keywords the parameters field rejects.

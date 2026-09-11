@@ -11,7 +11,10 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
-const respEffort = "low"
+const (
+	respEffort   = "low"
+	respCacheTTL = 300 // forecast: openai evicts after 5 to 10 idle minutes
+)
 
 func OpenAI(key string) Provider {
 	return Provider{
@@ -30,6 +33,7 @@ type openai struct{}
 type respReq struct {
 	Model        string        `json:"model"`
 	Store        bool          `json:"store"`
+	CacheKey     string        `json:"prompt_cache_key,omitempty"`
 	Stream       bool          `json:"stream"`
 	Include      []string      `json:"include"`
 	Reasoning    respReasoning `json:"reasoning"`
@@ -80,6 +84,7 @@ func (openai) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
 	body := respReq{
 		Model:        req.Model,
+		CacheKey:     req.Key,
 		Stream:       true,
 		Include:      []string{"reasoning.encrypted_content"},
 		Reasoning:    respReasoning{Effort: respEffort, Summary: "auto"},
@@ -100,8 +105,12 @@ func (openai) Compile(req Request) ([]byte, json.RawMessage, error) {
 		}
 		body.Input = append(body.Input, items...)
 	}
+	cache, err := cacheHeader(respCacheTTL, req.Context[len(req.Context)-1].N)
+	if err != nil {
+		return nil, nil, err
+	}
 	b, err := marshal(body)
-	return b, nil, err
+	return b, cache, err
 }
 
 func imageURL(r statefile.Record) string {
@@ -157,18 +166,10 @@ type respEvent struct {
 	Type     string          `json:"type"`
 	Item     json.RawMessage `json:"item"`
 	Response *respResponse   `json:"response"`
-	Code     string          `json:"code"`
-	Message  string          `json:"message"`
 }
 
 type respResponse struct {
 	Usage *respUsage `json:"usage"`
-	Error *respError `json:"error"`
-}
-
-type respError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
 }
 
 type respUsage struct {
@@ -224,10 +225,8 @@ func (openai) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Hea
 			return err
 		}
 		switch e.Type {
-		case "error":
-			return fmt.Errorf("openai: %s: %s", e.Code, e.Message)
-		case "response.failed":
-			return fmt.Errorf("openai: %s: %s", e.Response.Error.Code, e.Response.Error.Message)
+		case "error", "response.failed":
+			return fmt.Errorf("openai: %s", data)
 		case "response.output_item.done":
 			r, ok, err := respRecord(e.Item)
 			if err != nil {
