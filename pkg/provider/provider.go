@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
@@ -28,11 +29,11 @@ type Request struct {
 	Context []statefile.Record // statefile.Build output
 }
 
-// Envelope is one wire shape. Compile is deterministic. Stream calls emit once
-// per block as the stream completes it and returns the step header with
-// provider, model, usage, and cache filled.
+// Envelope is one wire shape. Compile is deterministic and returns the cache
+// markers it placed, which go on the step record. Stream calls emit once per
+// block as the stream completes it and returns the step header with usage.
 type Envelope interface {
-	Compile(req Request) (body []byte, err error)
+	Compile(req Request) (body []byte, cache json.RawMessage, err error)
 	Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error)
 }
 
@@ -48,7 +49,7 @@ type Provider struct {
 // Step is one LLM call. Blocks are emitted as they complete; the returned
 // header is the step record minus kind, id, and upto.
 func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Record)) (statefile.Header, error) {
-	body, err := p.Envelope.Compile(req)
+	body, cache, err := p.Envelope.Compile(req)
 	if err != nil {
 		return statefile.Header{}, err
 	}
@@ -82,8 +83,29 @@ func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Rec
 		return statefile.Header{}, err
 	}
 	sum := sha256.Sum256(body)
-	h.Provider, h.Model, h.Request = p.Name, req.Model, "sha256:"+hex.EncodeToString(sum[:])
+	h.Provider, h.Model, h.Request, h.Cache = p.Name, req.Model, "sha256:"+hex.EncodeToString(sum[:]), cache
 	return h, nil
+}
+
+// systemText joins the leading system records into the system prompt.
+func systemText(system []statefile.Record) string {
+	parts := make([]string, len(system))
+	for i, r := range system {
+		parts[i] = string(r.Body)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// marshal is json.Marshal without HTML escaping, so text and arguments keep
+// the bytes the model emitted.
+func marshal(v any) ([]byte, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(b.Bytes(), "\n"), nil
 }
 
 // Split separates the leading system records, which are the system prompt,

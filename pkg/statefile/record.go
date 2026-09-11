@@ -47,6 +47,8 @@ type Position struct {
 	N       int    `json:"n"`
 }
 
+// Usage counts tokens. Input excludes cache reads and writes on every
+// provider, so Input + CacheRead + CacheWrite is the prompt.
 type Usage struct {
 	Input      int `json:"input"`
 	Output     int `json:"output"`
