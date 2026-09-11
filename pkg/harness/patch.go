@@ -20,8 +20,9 @@ import (
 //	*** End of File
 //	*** End Patch
 //
-// Delete File and Move to need a primitive the worker lacks and are refused
-// before anything is written.
+// Delete File and Move to are refused before anything is written: the worker
+// has no delete primitive and run does the job. opencode deletes and refuses
+// moves; codex does both.
 
 type hunk struct {
 	locators []string

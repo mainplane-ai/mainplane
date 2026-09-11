@@ -29,7 +29,6 @@ const (
 
 func Bedrock(region, accessKey, secretKey, sessionToken string) Provider {
 	return Provider{
-		Name:     "bedrock",
 		URL:      "https://bedrock-runtime." + region + ".amazonaws.com/model",
 		Key:      secretKey,
 		Envelope: bedrock{},
@@ -41,6 +40,8 @@ func Bedrock(region, accessKey, secretKey, sessionToken string) Provider {
 }
 
 type bedrock struct{}
+
+func (bedrock) Name() string { return "bedrock" }
 
 type bedReq struct {
 	System                       []bedBlock     `json:"system,omitempty"`
@@ -134,7 +135,7 @@ type bedReasoningText struct {
 
 var cachePoint = &bedCachePoint{Type: "default"}
 
-func (bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
+func (e bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
 	body := bedReq{
 		Messages:                     []bedMsg{},
@@ -157,7 +158,7 @@ func (bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
 	turns := Turns(rest)
 	for i, t := range turns {
 		if t.Assistant {
-			content, err := bedAssistant(t.Records)
+			content, err := e.assistant(t.Records)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -207,14 +208,14 @@ func bedUser(recs []statefile.Record) []bedBlock {
 	return blocks
 }
 
-func bedAssistant(recs []statefile.Record) ([]bedBlock, error) {
+func (e bedrock) assistant(recs []statefile.Record) ([]bedBlock, error) {
 	var content []bedBlock
 	for _, r := range recs {
 		switch r.Kind {
 		case statefile.Text:
 			content = append(content, bedBlock{Text: string(r.Body)})
 		case statefile.Thinking:
-			if r.Provider == "bedrock" {
+			if r.Provider == e.Name() {
 				content = append(content, bedBlock{ReasoningContent: r.Body})
 			}
 		case statefile.Call:
@@ -299,12 +300,7 @@ func (p *bedPart) record() (statefile.Record, bool, error) {
 	case "text":
 		r.Kind, r.Type, r.Body = statefile.Text, "text/plain", []byte(p.text)
 	case "toolUse":
-		input := p.input
-		if input == "" {
-			input = "{}"
-		}
-		r.ID, r.Kind, r.Type = p.id, statefile.Call, "application/json"
-		r.Body, err = marshal(Call{Name: p.name, Arguments: json.RawMessage(input)})
+		r, err = callRecord(p.id, p.name, p.input)
 	case "reasoning":
 		r.Kind, r.Type = statefile.Thinking, "application/json"
 		reasoning := bedReasoning{RedactedContent: p.redacted}
