@@ -14,12 +14,6 @@ import (
 
 const version = "dev"
 
-// Worker executes one tool and returns the result's type, body, and exit. A
-// tool that fails is still a result; the model reads the failure.
-type Worker interface {
-	Execute(ctx context.Context, tool string, args json.RawMessage) statefile.Record
-}
-
 type Harness struct {
 	Sessions  statefile.Sessions
 	Providers map[string]provider.Provider
@@ -190,7 +184,7 @@ func (h Harness) execute(ctx context.Context, call statefile.Record) statefile.R
 	if err := json.Unmarshal(call.Body, &c); err != nil {
 		return result(call.ID, "error: "+err.Error())
 	}
-	var a struct{ Worker string }
+	var a args
 	if err := json.Unmarshal(c.Arguments, &a); err != nil {
 		return result(call.ID, "error: "+err.Error())
 	}
@@ -198,7 +192,7 @@ func (h Harness) execute(ctx context.Context, call statefile.Record) statefile.R
 	if !ok {
 		return result(call.ID, "error: unknown worker "+a.Worker)
 	}
-	r := w.Execute(ctx, c.Name, c.Arguments)
+	r := execute(ctx, w, c.Name, a)
 	r.Kind, r.For = statefile.Result, call.ID
 	return r
 }
