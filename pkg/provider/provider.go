@@ -14,6 +14,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
+	neturl "net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -125,6 +126,9 @@ func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Rec
 	url := p.URL
 	if p.Endpoint != nil {
 		url = p.Endpoint(p.URL, req.Model)
+	}
+	if _, err := neturl.ParseRequestURI(url); err != nil {
+		return statefile.Header{}, err // configuration, not transient: checked before the retry loop
 	}
 	for attempt := 0; ; attempt++ {
 		h, emitted, err := p.once(ctx, url, body, emit)

@@ -86,9 +86,6 @@ func execute(ctx context.Context, w Worker, tool string, a args) statefile.Recor
 			return fail(err)
 		}
 		r.Exit = &exit
-		if exit != 0 {
-			return ok(fmt.Sprintf("exit %d\n%s", exit, out))
-		}
 		return ok(string(out))
 	case "read":
 		b, err := w.Read(ctx, a.Path)
@@ -125,7 +122,7 @@ func execute(ctx context.Context, w Worker, tool string, a args) statefile.Recor
 // clip keeps the head, or the tail, of b within the limits and reports the
 // lines cut. A single line over the byte limit is cut mid-line.
 func clip(b []byte, tail bool) ([]byte, int) {
-	lines := bytes.Split(b, []byte("\n"))
+	lines := bytes.Split(bytes.TrimSuffix(b, []byte("\n")), []byte("\n"))
 	if len(lines) <= maxLines && len(b) <= maxBytes {
 		return b, 0
 	}
@@ -150,29 +147,31 @@ func clip(b []byte, tail bool) ([]byte, int) {
 	return bytes.Join(kept, []byte("\n")), len(lines) - n
 }
 
-// limit cuts a result over the limits and keeps the whole where the model can
+// finish cuts a result over the limits and keeps the whole where the model can
 // reach it: a read's file is already on the worker; anything else is written
 // to the worker's scratch under the call id. Run keeps its tail, where the
-// error is; the rest keep their head.
-func limit(ctx context.Context, w Worker, id, tool string, a args, r statefile.Record) statefile.Record {
+// error is; the rest keep their head. A non-zero exit is prefixed last, so
+// the cut cannot take it.
+func finish(ctx context.Context, w Worker, id, tool string, a args, r statefile.Record) statefile.Record {
 	kept, cut := clip(r.Body, tool == "run")
-	if cut == 0 {
-		return r
-	}
-	full := a.Path
-	if tool != "read" {
-		full = w.Scratch() + "/output/" + id
-		if err := w.Write(ctx, full, r.Body); err != nil {
-			r.Body = []byte("error: saving full output: " + err.Error())
-			return r
+	if cut > 0 {
+		full := a.Path
+		if tool != "read" {
+			full = w.Scratch() + "/output/" + id
+			if err := w.Write(ctx, full, r.Body); err != nil {
+				return statefile.Record{Header: r.Header, Body: []byte("error: saving full output: " + err.Error())}
+			}
+		}
+		r.Truncated, r.FullOutput = true, full
+		note := fmt.Sprintf("[%d lines cut, whole output at %s]", cut, full)
+		if tool == "run" {
+			r.Body = append([]byte(note+"\n"), kept...)
+		} else {
+			r.Body = append(kept, []byte("\n"+note)...)
 		}
 	}
-	r.Truncated, r.FullOutput = true, full
-	note := fmt.Sprintf("[%d lines cut, whole output at %s]", cut, full)
-	if tool == "run" {
-		r.Body = append([]byte(note+"\n"), kept...)
-	} else {
-		r.Body = append(kept, []byte("\n"+note)...)
+	if r.Exit != nil && *r.Exit != 0 {
+		r.Body = append(fmt.Appendf(nil, "exit %d\n", *r.Exit), r.Body...)
 	}
 	return r
 }
