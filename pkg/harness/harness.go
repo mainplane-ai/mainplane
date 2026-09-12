@@ -160,7 +160,7 @@ func (h Harness) Step(ctx context.Context, id string) (status statefile.Status, 
 		return "", err
 	}
 	for _, c := range calls {
-		if err := f.Append(h.execute(ctx, conf, c)); err != nil {
+		if err := f.Append(h.execute(ctx, id, conf, c)); err != nil {
 			return "", err
 		}
 	}
@@ -186,7 +186,7 @@ func result(call, text string) statefile.Record {
 
 // execute routes a call to the worker its arguments name. The session reaches
 // only the workers its config lists.
-func (h Harness) execute(ctx context.Context, conf statefile.Conf, call statefile.Record) statefile.Record {
+func (h Harness) execute(ctx context.Context, id string, conf statefile.Conf, call statefile.Record) statefile.Record {
 	var c provider.Call
 	if err := json.Unmarshal(call.Body, &c); err != nil {
 		return result(call.ID, "error: "+err.Error())
@@ -199,7 +199,8 @@ func (h Harness) execute(ctx context.Context, conf statefile.Conf, call statefil
 	if !ok || !slices.Contains(conf.Workers, a.Worker) {
 		return result(call.ID, "error: unknown worker "+a.Worker)
 	}
-	r := finish(ctx, w, call.ID, c.Name, a, execute(ctx, w, c.Name, a))
+	r, dropped := execute(ctx, w, id, c.Name, a)
+	r = finish(c.Name, a, r, dropped)
 	r.Kind, r.For = statefile.Result, call.ID
 	return r
 }
