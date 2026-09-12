@@ -139,10 +139,10 @@ func (e bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
 		InferenceConfig:              bedInference{MaxTokens: bedrockMaxTokens},
 		AdditionalModelRequestFields: bedAdditional{bedThinking{Type: "enabled", BudgetTokens: bedrockThinkingBudget}},
 	}
-	var marks []int
+	var marks []string
 	if len(system) > 0 {
 		body.System = []bedBlock{{Text: systemText(system)}, {CachePoint: cachePoint}}
-		marks = append(marks, system[len(system)-1].N)
+		marks = append(marks, system[len(system)-1].ID)
 	}
 	if len(req.Tools) > 0 {
 		body.ToolConfig = &bedToolConfig{}
@@ -167,7 +167,7 @@ func (e bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
 		blocks := bedUser(t.Records)
 		if i == len(turns)-1 {
 			blocks = append(blocks, bedBlock{CachePoint: cachePoint})
-			marks = append(marks, t.Records[len(t.Records)-1].N)
+			marks = append(marks, t.Records[len(t.Records)-1].ID)
 		}
 		body.Messages = append(body.Messages, bedMsg{Role: "user", Content: blocks})
 	}

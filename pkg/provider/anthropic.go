@@ -96,10 +96,10 @@ func (e anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
 		Thinking:  anthThinking{Type: "enabled", BudgetTokens: anthThinkingBudget},
 		Messages:  []anthMsg{},
 	}
-	var marks []int
+	var marks []string
 	if len(system) > 0 {
 		body.System = []anthBlock{{Type: "text", Text: systemText(system), CacheControl: ephemeral}}
-		marks = append(marks, system[len(system)-1].N)
+		marks = append(marks, system[len(system)-1].ID)
 	}
 	for _, t := range req.Tools {
 		body.Tools = append(body.Tools, anthTool{Name: t.Name, Description: t.Description, InputSchema: t.Schema})
@@ -117,7 +117,7 @@ func (e anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
 		blocks := anthUser(t.Records)
 		if i == len(turns)-1 {
 			blocks[len(blocks)-1].CacheControl = ephemeral
-			marks = append(marks, t.Records[len(t.Records)-1].N)
+			marks = append(marks, t.Records[len(t.Records)-1].ID)
 		}
 		body.Messages = append(body.Messages, anthMsg{Role: "user", Content: blocks})
 	}

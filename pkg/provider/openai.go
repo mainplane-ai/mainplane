@@ -106,7 +106,7 @@ func (e openai) Compile(req Request) ([]byte, json.RawMessage, error) {
 		}
 		body.Input = append(body.Input, items...)
 	}
-	cache, err := cacheHeader(respCacheTTL, req.Context[len(req.Context)-1].N)
+	cache, err := cacheHeader(respCacheTTL, req.Context[len(req.Context)-1].ID)
 	if err != nil {
 		return nil, nil, err
 	}
