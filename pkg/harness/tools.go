@@ -155,15 +155,16 @@ func clip(b []byte, tail bool) ([]byte, int) {
 func finish(ctx context.Context, w Worker, id, tool string, a args, r statefile.Record) statefile.Record {
 	kept, cut := clip(r.Body, tool == "run")
 	if cut > 0 {
-		full := a.Path
+		full, err := a.Path, error(nil)
 		if tool != "read" {
 			full = w.Scratch() + "/output/" + id
-			if err := w.Write(ctx, full, r.Body); err != nil {
-				return statefile.Record{Header: r.Header, Body: []byte("error: saving full output: " + err.Error())}
-			}
+			err = w.Write(ctx, full, r.Body)
+		}
+		note := fmt.Sprintf("[%d lines cut, whole output at %s]", cut, full)
+		if err != nil {
+			full, note = "", fmt.Sprintf("[%d lines cut, whole output lost: %s]", cut, err)
 		}
 		r.Truncated, r.FullOutput = true, full
-		note := fmt.Sprintf("[%d lines cut, whole output at %s]", cut, full)
 		if tool == "run" {
 			r.Body = append([]byte(note+"\n"), kept...)
 		} else {

@@ -127,8 +127,8 @@ func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Rec
 	if p.Endpoint != nil {
 		url = p.Endpoint(p.URL, req.Model)
 	}
-	if _, err := neturl.ParseRequestURI(url); err != nil {
-		return statefile.Header{}, err // configuration, not transient: checked before the retry loop
+	if u, err := neturl.Parse(url); err != nil || u.Host == "" || u.Scheme != "http" && u.Scheme != "https" {
+		return statefile.Header{}, fmt.Errorf("bad url %q", url) // configuration, not transient: checked before the retry loop
 	}
 	for attempt := 0; ; attempt++ {
 		h, emitted, err := p.once(ctx, url, body, emit)
