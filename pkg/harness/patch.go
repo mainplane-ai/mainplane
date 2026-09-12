@@ -114,7 +114,7 @@ func apply(lines []string, hunks []hunk) ([]string, error) {
 		switch {
 		case h.eof:
 			at = len(lines) - len(h.old)
-			if at < cursor || !slices.Equal(lines[at:], h.old) {
+			if at < cursor || !equalAny(lines[at:], h.old) {
 				return nil, fmt.Errorf("hunk does not match end of file:\n%s", strings.Join(h.old, "\n"))
 			}
 		case len(h.old) > 0:
@@ -130,10 +130,30 @@ func apply(lines []string, hunks []hunk) ([]string, error) {
 	return lines, nil
 }
 
+// norms are the passes a hunk match tries, in order, as codex does: exact,
+// then ignoring trailing whitespace, then ignoring all edge whitespace. Models
+// re-indent what they quote; the file's indentation is the one that stays.
+var norms = []func(string) string{
+	func(s string) string { return s },
+	func(s string) string { return strings.TrimRight(s, " \t") },
+	strings.TrimSpace,
+}
+
+func equal(a, b []string, norm func(string) string) bool {
+	return slices.EqualFunc(a, b, func(x, y string) bool { return norm(x) == norm(y) })
+}
+
+func equalAny(a, b []string) bool {
+	return slices.ContainsFunc(norms, func(norm func(string) string) bool { return equal(a, b, norm) })
+}
+
+// indexSeq finds seq in lines, a looser pass only when the stricter found nothing.
 func indexSeq(lines, seq []string) int {
-	for i := 0; i+len(seq) <= len(lines); i++ {
-		if slices.Equal(lines[i:i+len(seq)], seq) {
-			return i
+	for _, norm := range norms {
+		for i := 0; i+len(seq) <= len(lines); i++ {
+			if equal(lines[i:i+len(seq)], seq, norm) {
+				return i
+			}
 		}
 	}
 	return -1

@@ -30,18 +30,19 @@ type Request struct {
 	Context []statefile.Record // statefile.Build output
 }
 
-// Cache is the step record's cache header. Marks are the n of the records
-// through which the prefix is cached: anthropic and bedrock put a breakpoint
-// after the system prompt and after the last user block; openai and gemini
-// cache every prefix, so the mark is the last record. TTL is seconds from the
-// step's time: the provider's promise for anthropic and bedrock, a forecast
-// for the rest. The next step's usage.cache_read is the truth.
+// Cache is the step record's cache header. Marks are the ids of the records
+// through which the prefix is cached; ids because a chain spans files and n
+// repeats across them. Anthropic and bedrock put a breakpoint after the
+// system prompt and after the last user block; openai and gemini cache every
+// prefix, so the mark is the last record. TTL is seconds from the step's
+// time: the provider's promise for anthropic and bedrock, a forecast for the
+// rest. The next step's usage.cache_read is the truth.
 type Cache struct {
-	TTL   int   `json:"ttl"`
-	Marks []int `json:"marks"`
+	TTL   int      `json:"ttl"`
+	Marks []string `json:"marks"`
 }
 
-func cacheHeader(ttl int, marks ...int) (json.RawMessage, error) {
+func cacheHeader(ttl int, marks ...string) (json.RawMessage, error) {
 	return marshal(Cache{TTL: ttl, Marks: marks})
 }
 

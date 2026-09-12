@@ -131,7 +131,7 @@ func (e gemini) Compile(req Request) ([]byte, json.RawMessage, error) {
 			body.Contents = append(body.Contents, gemContent{Role: "model", Parts: parts})
 		}
 	}
-	cache, err := cacheHeader(geminiCacheTTL, req.Context[len(req.Context)-1].N)
+	cache, err := cacheHeader(geminiCacheTTL, req.Context[len(req.Context)-1].ID)
 	if err != nil {
 		return nil, nil, err
 	}
