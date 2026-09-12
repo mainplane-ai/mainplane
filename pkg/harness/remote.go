@@ -28,6 +28,7 @@ type Remote struct {
 	wmu   sync.Mutex
 	cmu   sync.Mutex
 	calls map[string]chan worker.Frame
+	done  chan struct{} // closed when the connection ends
 }
 
 // Connect reads the worker's hello and starts routing its replies.
@@ -40,7 +41,7 @@ func Connect(conn net.Conn) (*Remote, error) {
 	if hello.Kind != worker.Hello {
 		return nil, fmt.Errorf("first frame is %q, want hello", hello.Kind)
 	}
-	r := &Remote{Header: hello.Header, conn: conn, calls: map[string]chan worker.Frame{}}
+	r := &Remote{Header: hello.Header, conn: conn, calls: map[string]chan worker.Frame{}, done: make(chan struct{})}
 	go r.recv(br)
 	return r, nil
 }
@@ -55,6 +56,7 @@ func (r *Remote) recv(br *bufio.Reader) {
 			}
 			r.calls = nil
 			r.cmu.Unlock()
+			close(r.done)
 			return
 		}
 		if ch, ok := r.calls[f.ID]; ok {

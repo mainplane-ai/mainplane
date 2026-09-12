@@ -18,7 +18,7 @@ const version = "dev"
 type Harness struct {
 	Sessions  statefile.Sessions
 	Providers map[string]provider.Provider
-	Workers   map[string]Worker
+	Workers   *Pool
 }
 
 // check rejects a config that names a provider, tool set, or worker this
@@ -31,7 +31,7 @@ func (h Harness) check(conf statefile.Conf) error {
 		return fmt.Errorf("unknown tool set %q", conf.Tools)
 	}
 	for _, w := range conf.Workers {
-		if _, ok := h.Workers[w]; !ok {
+		if _, ok := h.Workers.Get(w); !ok {
 			return fmt.Errorf("unknown worker %q", w)
 		}
 	}
@@ -195,9 +195,12 @@ func (h Harness) execute(ctx context.Context, id string, conf statefile.Conf, ca
 	if err := json.Unmarshal(c.Arguments, &a); err != nil {
 		return result(call.ID, "error: "+err.Error())
 	}
-	w, ok := h.Workers[a.Worker]
-	if !ok || !slices.Contains(conf.Workers, a.Worker) {
+	if !slices.Contains(conf.Workers, a.Worker) {
 		return result(call.ID, "error: unknown worker "+a.Worker)
+	}
+	w, ok := h.Workers.Get(a.Worker)
+	if !ok {
+		return result(call.ID, "error: worker "+a.Worker+" is not connected")
 	}
 	r, dropped := execute(ctx, w, id, c.Name, a)
 	r = finish(c.Name, a, r, dropped)

@@ -47,6 +47,7 @@ type Header struct {
 	Exit int    `json:"exit,omitempty"` // result
 	Full string `json:"full,omitempty"` // result: file holding all the output, when over the limits
 
+	Name    string   `json:"name,omitempty"`    // hello: what sessions call this worker
 	OS      string   `json:"os,omitempty"`      // hello
 	Arch    string   `json:"arch,omitempty"`    // hello
 	Interps []string `json:"interps,omitempty"` // hello: first is the default
