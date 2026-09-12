@@ -43,6 +43,7 @@ func main() {
 			log.Printf("connected to %s as %s", os.Args[2], l.Name)
 			wait = redialMin
 			err = worker.Serve(conn, l)
+			_ = conn.Close()
 		}
 		log.Printf("%v, redial in %s", err, wait)
 		time.Sleep(wait)

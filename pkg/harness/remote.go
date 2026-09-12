@@ -56,6 +56,7 @@ func (r *Remote) recv(br *bufio.Reader) {
 			}
 			r.calls = nil
 			r.cmu.Unlock()
+			_ = r.conn.Close()
 			close(r.done)
 			return
 		}

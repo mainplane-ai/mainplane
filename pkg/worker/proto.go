@@ -83,6 +83,9 @@ func Decode(br *bufio.Reader) (Frame, error) {
 	if err := json.Unmarshal(line, &f.Header); err != nil {
 		return Frame{}, fmt.Errorf("frame header: %w", err)
 	}
+	if f.Len < 0 {
+		return Frame{}, fmt.Errorf("frame header: len %d", f.Len)
+	}
 	f.Body = make([]byte, f.Len)
 	if _, err := io.ReadFull(br, f.Body); err != nil {
 		return Frame{}, err
