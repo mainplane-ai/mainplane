@@ -9,10 +9,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
@@ -64,6 +68,53 @@ type Provider struct {
 	Endpoint func(url, model string) string      // nil means URL as is
 }
 
+// Retry numbers are opencode's. A failure before the first block is out is
+// retried: 429, 5xx, a network error, or a stream that errors before emitting.
+// After a block is out the harness holds partial state, so that is terminal.
+const (
+	retries   = 5
+	retryBase = 2 * time.Second // doubles per attempt, plus up to 25% jitter
+	retryCap  = 30 * time.Second
+)
+
+// httpError is a non-200 response. After is the Retry-After header, 0 if none.
+type httpError struct {
+	name, status string
+	code         int
+	body         []byte
+	after        time.Duration
+}
+
+func (e *httpError) Error() string { return fmt.Sprintf("%s: %s: %s", e.name, e.status, e.body) }
+
+func transient(err error) bool {
+	var he *httpError
+	if errors.As(err, &he) {
+		return he.code == http.StatusTooManyRequests || he.code >= 500
+	}
+	return true // network or early stream failure
+}
+
+func backoff(attempt int, err error) time.Duration {
+	var he *httpError
+	if errors.As(err, &he) && he.after > 0 {
+		return he.after
+	}
+	d := retryBase << attempt
+	return min(d+time.Duration(rand.Int64N(int64(d/4))), retryCap)
+}
+
+func retryAfter(h http.Header) time.Duration {
+	v := h.Get("Retry-After")
+	if s, err := strconv.Atoi(v); err == nil {
+		return time.Duration(s) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		return time.Until(t)
+	}
+	return 0
+}
+
 // Step is one LLM call. Blocks are emitted as they complete; the returned
 // header is the step record minus kind, id, and upto.
 func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Record)) (statefile.Header, error) {
@@ -75,35 +126,51 @@ func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Rec
 	if p.Endpoint != nil {
 		url = p.Endpoint(p.URL, req.Model)
 	}
+	for attempt := 0; ; attempt++ {
+		h, emitted, err := p.once(ctx, url, body, emit)
+		if err == nil {
+			sum := sha256.Sum256(body)
+			h.Provider, h.Model, h.Request, h.Cache = p.Envelope.Name(), req.Model, "sha256:"+hex.EncodeToString(sum[:]), cache
+			return h, nil
+		}
+		if emitted || attempt == retries || !transient(err) {
+			return statefile.Header{}, err
+		}
+		select {
+		case <-time.After(backoff(attempt, err)):
+		case <-ctx.Done():
+			return statefile.Header{}, ctx.Err()
+		}
+	}
+}
+
+// once is one HTTP attempt. emitted reports whether any block reached emit.
+func (p Provider) once(ctx context.Context, url string, body []byte, emit func(statefile.Record)) (h statefile.Header, emitted bool, err error) {
 	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return statefile.Header{}, err
+		return h, false, err
 	}
 	hr.Header.Set("Content-Type", "application/json")
 	p.Headers(hr, p.Key)
 	resp, err := http.DefaultClient.Do(hr)
 	if err != nil {
-		return statefile.Header{}, err
+		return h, false, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	name := p.Envelope.Name()
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return statefile.Header{}, fmt.Errorf("%s: %s: %s", name, resp.Status, msg)
+		return h, false, &httpError{name: name, status: resp.Status, code: resp.StatusCode, body: msg, after: retryAfter(resp.Header)}
 	}
 	tagged := func(r statefile.Record) {
+		emitted = true
 		if r.Kind == statefile.Thinking {
 			r.Provider = name
 		}
 		emit(r)
 	}
-	h, err := p.Envelope.Stream(resp.Body, tagged)
-	if err != nil {
-		return statefile.Header{}, err
-	}
-	sum := sha256.Sum256(body)
-	h.Provider, h.Model, h.Request, h.Cache = name, req.Model, "sha256:"+hex.EncodeToString(sum[:]), cache
-	return h, nil
+	h, err = p.Envelope.Stream(resp.Body, tagged)
+	return h, emitted, err
 }
 
 // callRecord builds a call record. Providers stream nothing for a tool called

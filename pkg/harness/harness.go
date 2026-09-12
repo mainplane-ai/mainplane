@@ -199,7 +199,7 @@ func (h Harness) execute(ctx context.Context, conf statefile.Conf, call statefil
 	if !ok || !slices.Contains(conf.Workers, a.Worker) {
 		return result(call.ID, "error: unknown worker "+a.Worker)
 	}
-	r := execute(ctx, w, c.Name, a)
+	r := limit(ctx, w, call.ID, c.Name, a, execute(ctx, w, c.Name, a))
 	r.Kind, r.For = statefile.Result, call.ID
 	return r
 }

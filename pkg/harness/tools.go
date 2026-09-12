@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/mainplane-ai/mainplane/pkg/provider"
@@ -24,11 +25,19 @@ func System(model string) string {
 	return defaultSystem
 }
 
-// Worker is the three primitives every worker has. Tools are built on them here.
+// Result limits are opencode's: what current models handle in one result.
+const (
+	maxBytes = 50 << 10
+	maxLines = 2000
+)
+
+// Worker is the three primitives every worker has, plus where its scratch
+// directory is. Tools are built on them here. Write creates missing parents.
 type Worker interface {
 	Run(ctx context.Context, interpreter, code string) (out []byte, exit int, err error)
 	Read(ctx context.Context, path string) ([]byte, error)
 	Write(ctx context.Context, path string, data []byte) error
+	Scratch() string
 }
 
 // ToolSet picks the set a model family was trained on. GPT-5 and GPT-6
@@ -111,4 +120,59 @@ func execute(ctx context.Context, w Worker, tool string, a args) statefile.Recor
 		return ok("ok")
 	}
 	return fail(fmt.Errorf("unknown tool %s", tool))
+}
+
+// clip keeps the head, or the tail, of b within the limits and reports the
+// lines cut. A single line over the byte limit is cut mid-line.
+func clip(b []byte, tail bool) ([]byte, int) {
+	lines := bytes.Split(b, []byte("\n"))
+	if len(lines) <= maxLines && len(b) <= maxBytes {
+		return b, 0
+	}
+	if tail {
+		slices.Reverse(lines)
+	}
+	n, size := 0, 0
+	for n < len(lines) && n < maxLines && size+len(lines[n])+1 <= maxBytes {
+		size += len(lines[n]) + 1
+		n++
+	}
+	if n == 0 {
+		if tail {
+			return b[len(b)-maxBytes:], len(lines)
+		}
+		return b[:maxBytes], len(lines)
+	}
+	kept := lines[:n]
+	if tail {
+		slices.Reverse(kept)
+	}
+	return bytes.Join(kept, []byte("\n")), len(lines) - n
+}
+
+// limit cuts a result over the limits and keeps the whole where the model can
+// reach it: a read's file is already on the worker; anything else is written
+// to the worker's scratch under the call id. Run keeps its tail, where the
+// error is; the rest keep their head.
+func limit(ctx context.Context, w Worker, id, tool string, a args, r statefile.Record) statefile.Record {
+	kept, cut := clip(r.Body, tool == "run")
+	if cut == 0 {
+		return r
+	}
+	full := a.Path
+	if tool != "read" {
+		full = w.Scratch() + "/output/" + id
+		if err := w.Write(ctx, full, r.Body); err != nil {
+			r.Body = []byte("error: saving full output: " + err.Error())
+			return r
+		}
+	}
+	r.Truncated, r.FullOutput = true, full
+	note := fmt.Sprintf("[%d lines cut, whole output at %s]", cut, full)
+	if tool == "run" {
+		r.Body = append([]byte(note+"\n"), kept...)
+	} else {
+		r.Body = append(kept, []byte("\n"+note)...)
+	}
+	return r
 }
