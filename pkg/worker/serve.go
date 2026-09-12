@@ -15,9 +15,10 @@ import (
 	"time"
 )
 
-// Local is what this machine offers: where spilled output lands and which
-// interpreters it has. The first interpreter is the default.
+// Local is what this machine offers: its name, where spilled output lands, and
+// which interpreters it has. The first interpreter is the default.
 type Local struct {
+	Name    string
 	Scratch string
 	Interps []string
 }
@@ -36,7 +37,7 @@ type server struct {
 // environment queue on it.
 func Serve(conn net.Conn, l Local) error {
 	s := &server{Local: l, conn: conn, envs: map[string]*env{}, dead: map[string]bool{}}
-	if err := s.send(Frame{Header: Header{Kind: Hello, OS: runtime.GOOS, Arch: runtime.GOARCH, Interps: l.Interps, Scratch: l.Scratch}}); err != nil {
+	if err := s.send(Frame{Header: Header{Kind: Hello, Name: l.Name, OS: runtime.GOOS, Arch: runtime.GOARCH, Interps: l.Interps, Scratch: l.Scratch}}); err != nil {
 		return err
 	}
 	br := bufio.NewReader(conn)
