@@ -65,6 +65,7 @@ type Header struct {
 	Time time.Time `json:"time"`
 	Len  int       `json:"len"`
 	Type string    `json:"type,omitempty"`
+	File int       `json:"file,omitempty"` // which state file. Filled on load, never written: the file knows its own number
 
 	Step     string `json:"step,omitempty"`     // text, thinking, call: the step that closes it
 	Provider string `json:"provider,omitempty"` // thinking: who signed it. step: who served it
@@ -91,8 +92,10 @@ type Header struct {
 type Record struct {
 	Header
 	Body []byte
-	// Seq is the index of the file within a loaded chain. Not stored.
-	Seq int `json:"-"`
+	// Seq is the index of the file within a loaded chain, Session the session
+	// that file belongs to. Filled on load, not stored.
+	Seq     int    `json:"-"`
+	Session string `json:"-"`
 }
 
 // Conf is the body of the config record: record 2 of every file.
@@ -110,9 +113,10 @@ func NewID() string {
 	return hex.EncodeToString(b)
 }
 
-var errTorn = errors.New("torn record")
+var ErrTorn = errors.New("torn record")
 
-func encode(r Record) ([]byte, error) {
+// Encode is the bytes of one record: header line, body, newline.
+func Encode(r Record) ([]byte, error) {
 	r.Len = len(r.Body)
 	h, err := json.Marshal(r.Header)
 	if err != nil {
@@ -126,15 +130,15 @@ func encode(r Record) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// decode reads one record. io.EOF at a record boundary is returned as is.
-// EOF anywhere inside a record is errTorn.
-func decode(br *bufio.Reader) (Record, error) {
+// Decode reads one record. io.EOF at a record boundary is returned as is.
+// EOF anywhere inside a record is ErrTorn.
+func Decode(br *bufio.Reader) (Record, error) {
 	line, err := br.ReadBytes('\n')
 	if errors.Is(err, io.EOF) {
 		if len(line) == 0 {
 			return Record{}, io.EOF
 		}
-		return Record{}, errTorn
+		return Record{}, ErrTorn
 	}
 	if err != nil {
 		return Record{}, err
@@ -145,10 +149,10 @@ func decode(br *bufio.Reader) (Record, error) {
 	}
 	r.Body = make([]byte, r.Len)
 	if _, err := io.ReadFull(br, r.Body); err != nil {
-		return Record{}, errTorn
+		return Record{}, ErrTorn
 	}
 	if nl, err := br.ReadByte(); err != nil || nl != '\n' {
-		return Record{}, errTorn
+		return Record{}, ErrTorn
 	}
 	return r, nil
 }

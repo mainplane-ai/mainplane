@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"log"
 	"net"
 	"sync"
 )
@@ -11,22 +12,22 @@ import (
 // a lost connection forgets the worker until it dials again.
 type Pool struct {
 	mu sync.Mutex
-	m  map[string]Worker
+	m  map[string]*Remote
 }
 
-func NewPool() *Pool { return &Pool{m: map[string]Worker{}} }
+func NewPool() *Pool { return &Pool{m: map[string]*Remote{}} }
 
-func (p *Pool) Add(name string, w Worker) {
+func (p *Pool) Add(r *Remote) {
 	p.mu.Lock()
-	p.m[name] = w
+	p.m[r.Name] = r
 	p.mu.Unlock()
 }
 
-func (p *Pool) Get(name string) (Worker, bool) {
+func (p *Pool) Get(name string) (*Remote, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	w, ok := p.m[name]
-	return w, ok
+	r, ok := p.m[name]
+	return r, ok
 }
 
 // Listen accepts workers on addr until ctx ends. A worker that dials again
@@ -56,10 +57,12 @@ func (p *Pool) admit(conn net.Conn) {
 		_ = conn.Close()
 		return
 	}
-	p.Add(r.Name, r)
+	log.Printf("worker %s connected: %s %s", r.Name, r.OS, r.Arch)
+	p.Add(r)
 	<-r.done
+	log.Printf("worker %s disconnected", r.Name)
 	p.mu.Lock()
-	if p.m[r.Name] == Worker(r) {
+	if p.m[r.Name] == r {
 		delete(p.m, r.Name)
 	}
 	p.mu.Unlock()

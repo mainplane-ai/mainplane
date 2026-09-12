@@ -34,12 +34,32 @@ func (s Sessions) Live(id string) (int, error) {
 	return live, nil
 }
 
+// List returns every session id: the directory names.
+func (s Sessions) List() ([]string, error) {
+	entries, err := os.ReadDir(s.Dir)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, e := range entries {
+		if e.IsDir() {
+			ids = append(ids, e.Name())
+		}
+	}
+	return ids, nil
+}
+
 // Start creates a session with one file: start, then config.
 func (s Sessions) Start(id string, config []byte) (*File, error) {
 	if err := os.MkdirAll(filepath.Join(s.Dir, id), 0o755); err != nil {
 		return nil, err
 	}
-	return Create(s.path(id, 1), Record{Header: Header{Kind: Start}}, config)
+	f, err := Create(s.path(id, 1), Record{Header: Header{Kind: Start}}, config)
+	if err != nil {
+		return nil, err
+	}
+	f.Num = 1
+	return f, nil
 }
 
 // Link adds the next file to a session, or the first file to a new one, whose
@@ -54,7 +74,12 @@ func (s Sessions) Link(id string, from Position, mode Mode, config []byte) (*Fil
 		return nil, err
 	}
 	first := Record{Header: Header{Kind: Link, From: &from, Mode: mode}}
-	return Create(s.path(id, live+1), first, config)
+	f, err := Create(s.path(id, live+1), first, config)
+	if err != nil {
+		return nil, err
+	}
+	f.Num = live + 1
+	return f, nil
 }
 
 // Open opens a session's live file for appending.
@@ -66,7 +91,12 @@ func (s Sessions) Open(id string) (*File, error) {
 	if live == 0 {
 		return nil, fmt.Errorf("session %s: no state file", id)
 	}
-	return Open(s.path(id, live))
+	f, err := Open(s.path(id, live))
+	if err != nil {
+		return nil, err
+	}
+	f.Num = live
+	return f, nil
 }
 
 // Load returns the records the live file stands for: its own, preceded by
@@ -80,11 +110,12 @@ func (s Sessions) Load(id string) ([]Record, error) {
 	if live == 0 {
 		return nil, fmt.Errorf("session %s: no state file", id)
 	}
-	return s.chain(Position{Session: id, File: live, N: 0})
+	return s.LoadAt(Position{Session: id, File: live, N: 0})
 }
 
-// chain loads a file up to position n (0 means all), after its own ancestry.
-func (s Sessions) chain(p Position) ([]Record, error) {
+// LoadAt loads a file up to position n (0 means all), after its own ancestry.
+// Every record carries the number of the file it came from.
+func (s Sessions) LoadAt(p Position) ([]Record, error) {
 	recs, err := Read(s.path(p.Session, p.File))
 	if err != nil {
 		return nil, err
@@ -94,7 +125,7 @@ func (s Sessions) chain(p Position) ([]Record, error) {
 	}
 	var out []Record
 	if len(recs) > 0 && recs[0].Kind == Link && recs[0].Mode == Continue {
-		if out, err = s.chain(*recs[0].From); err != nil {
+		if out, err = s.LoadAt(*recs[0].From); err != nil {
 			return nil, err
 		}
 	}
@@ -103,7 +134,7 @@ func (s Sessions) chain(p Position) ([]Record, error) {
 		seq = out[len(out)-1].Seq + 1
 	}
 	for _, r := range recs {
-		r.Seq = seq
+		r.Seq, r.File, r.Session = seq, p.File, p.Session
 		out = append(out, r)
 	}
 	return out, nil

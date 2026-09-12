@@ -26,8 +26,8 @@ func scan(f *os.File) ([]Record, int64, error) {
 	var recs []Record
 	var good int64
 	for {
-		r, err := decode(br)
-		if errors.Is(err, io.EOF) || errors.Is(err, errTorn) {
+		r, err := Decode(br)
+		if errors.Is(err, io.EOF) || errors.Is(err, ErrTorn) {
 			return recs, good, nil
 		}
 		if err != nil {
@@ -42,6 +42,7 @@ func scan(f *os.File) ([]Record, int64, error) {
 // File is a state file open for appending. One writer per file.
 type File struct {
 	Path string
+	Num  int // the file's number in its session, when opened through Sessions
 	f    *os.File
 	n    int
 }
@@ -81,12 +82,12 @@ func Open(path string) (*File, error) {
 
 // Append writes one record and fills in n, id, time, and len.
 func (sf *File) Append(r Record) error {
-	r.N = sf.n + 1
+	r.N, r.File = sf.n+1, 0
 	if r.ID == "" {
 		r.ID = NewID()
 	}
 	r.Time = time.Now().UTC().Truncate(time.Millisecond)
-	b, err := encode(r)
+	b, err := Encode(r)
 	if err != nil {
 		return err
 	}
