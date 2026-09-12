@@ -105,6 +105,7 @@ func (r *Remote) call(h worker.Header, body []byte, on func(worker.Frame)) error
 // file the result names.
 func (r *Remote) Run(_ context.Context, session, interpreter, code string) (Output, error) {
 	var o Output
+	mid := false // the tail starts inside a line already counted
 	err := r.call(worker.Header{Kind: worker.Run, Session: session, Interp: interpreter, Timeout: int(runTimeout.Seconds())}, []byte(code), func(f worker.Frame) {
 		if f.Kind == worker.Result {
 			o.Exit, o.Full = f.Exit, f.Full
@@ -117,7 +118,10 @@ func (r *Remote) Run(_ context.Context, session, interpreter, code string) (Outp
 				drop += i + 1
 			}
 			o.Cut += bytes.Count(o.Body[:drop], []byte("\n"))
-			if o.Body[drop-1] != '\n' {
+			if mid {
+				o.Cut--
+			}
+			if mid = o.Body[drop-1] != '\n'; mid {
 				o.Cut++
 			}
 			o.Body = slices.Clone(o.Body[drop:])

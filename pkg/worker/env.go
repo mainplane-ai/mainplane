@@ -63,9 +63,10 @@ func start(it interp) (*env, error) {
 
 // kill ends the interpreter and everything it started, then closes our end of
 // the pipe so a run blocked reading returns even if some child kept the write
-// end open.
+// end open. The tree kill is best effort; the interpreter's own death is not.
 func (e *env) kill() {
 	killTree(e.cmd.Process)
+	_ = e.cmd.Process.Kill()
 	_ = e.pipe.Close()
 }
 
