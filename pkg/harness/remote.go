@@ -100,8 +100,9 @@ func (r *Remote) call(h worker.Header, body []byte, on func(worker.Frame)) error
 }
 
 // Run streams the output and keeps a tail within the result limits. Past twice
-// the byte limit the front is dropped at a line start and the lines counted;
-// the worker has the whole in the file the result names.
+// the byte limit the front is dropped at a line start and the lines counted,
+// a line cut in the middle counting as one; the worker has the whole in the
+// file the result names.
 func (r *Remote) Run(_ context.Context, session, interpreter, code string) (Output, error) {
 	var o Output
 	err := r.call(worker.Header{Kind: worker.Run, Session: session, Interp: interpreter, Timeout: int(runTimeout.Seconds())}, []byte(code), func(f worker.Frame) {
@@ -112,10 +113,13 @@ func (r *Remote) Run(_ context.Context, session, interpreter, code string) (Outp
 		o.Body = append(o.Body, f.Body...)
 		if len(o.Body) > 2*worker.MaxBytes {
 			drop := len(o.Body) - worker.MaxBytes
-			if i := bytes.IndexByte(o.Body[drop:], '\n'); i >= 0 {
+			if i := bytes.IndexByte(o.Body[drop:len(o.Body)-1], '\n'); i >= 0 {
 				drop += i + 1
 			}
 			o.Cut += bytes.Count(o.Body[:drop], []byte("\n"))
+			if o.Body[drop-1] != '\n' {
+				o.Cut++
+			}
 			o.Body = slices.Clone(o.Body[drop:])
 		}
 	})

@@ -117,33 +117,49 @@ func (s *server) run(f Frame) (Frame, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(f.Timeout)*time.Second)
 	defer cancel()
 	exit, alive, err := e.run(ctx, string(f.Body), "mp-done-"+f.ID, emit)
+	if err != nil && alive {
+		// output could not be delivered; what the process still holds is unread
+		e.kill()
+		alive = false
+	}
 	s.release(key, e, alive)
+	full := sp.close()
 	if ctx.Err() != nil {
 		return Frame{}, fmt.Errorf("timed out after %ds, environment was reset", f.Timeout)
 	}
 	if err != nil {
 		return Frame{}, err
 	}
-	return Frame{Header: Header{Kind: Result, Exit: exit, Full: sp.close()}}, nil
+	return Frame{Header: Header{Kind: Result, Exit: exit, Full: full}}, nil
 }
 
 // acquire finds or starts the environment for key and holds it for one run.
+// An environment that ended while this run waited for it is not used: the
+// loop finds its replacement and the reset flag its end left.
 func (s *server) acquire(key, name string) (*env, bool, error) {
-	s.emu.Lock()
-	e, ok := s.envs[key]
-	if !ok {
-		var err error
-		if e, err = start(interps[name]); err != nil {
-			s.emu.Unlock()
-			return nil, false, err
+	for {
+		s.emu.Lock()
+		e, ok := s.envs[key]
+		if !ok {
+			var err error
+			if e, err = start(interps[name]); err != nil {
+				s.emu.Unlock()
+				return nil, false, err
+			}
+			s.envs[key] = e
 		}
-		s.envs[key] = e
+		reset := s.dead[key]
+		delete(s.dead, key)
+		s.emu.Unlock()
+		e.mu.Lock()
+		s.emu.Lock()
+		current := s.envs[key] == e
+		s.emu.Unlock()
+		if current {
+			return e, reset, nil
+		}
+		e.mu.Unlock()
 	}
-	reset := s.dead[key]
-	delete(s.dead, key)
-	s.emu.Unlock()
-	e.mu.Lock()
-	return e, reset, nil
 }
 
 // release hands the environment back. A dead one is forgotten so the next run
