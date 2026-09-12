@@ -45,16 +45,18 @@ func cacheHeader(ttl int, marks ...int) (json.RawMessage, error) {
 	return marshal(Cache{TTL: ttl, Marks: marks})
 }
 
-// Envelope is one wire shape. Compile is deterministic and returns the cache
-// markers it placed, which go on the step record. Stream calls emit once per
-// block as the stream completes it and returns the step header with usage.
+// Envelope is one wire shape. Name tags the thinking and step records it
+// produces; only thinking with its own name is replayed. Compile is
+// deterministic and returns the cache markers it placed, which go on the step
+// record. Stream calls emit once per block as the stream completes it and
+// returns the step header with usage.
 type Envelope interface {
+	Name() string
 	Compile(req Request) (body []byte, cache json.RawMessage, err error)
 	Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error)
 }
 
 type Provider struct {
-	Name     string // the provider tag on thinking and step records
 	URL      string // full endpoint. gemini and bedrock take the model in the path, see Endpoint
 	Key      string
 	Envelope Envelope
@@ -84,13 +86,14 @@ func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Rec
 		return statefile.Header{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	name := p.Envelope.Name()
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return statefile.Header{}, fmt.Errorf("%s: %s: %s", p.Name, resp.Status, msg)
+		return statefile.Header{}, fmt.Errorf("%s: %s: %s", name, resp.Status, msg)
 	}
 	tagged := func(r statefile.Record) {
 		if r.Kind == statefile.Thinking {
-			r.Provider = p.Name
+			r.Provider = name
 		}
 		emit(r)
 	}
@@ -99,8 +102,18 @@ func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Rec
 		return statefile.Header{}, err
 	}
 	sum := sha256.Sum256(body)
-	h.Provider, h.Model, h.Request, h.Cache = p.Name, req.Model, "sha256:"+hex.EncodeToString(sum[:]), cache
+	h.Provider, h.Model, h.Request, h.Cache = name, req.Model, "sha256:"+hex.EncodeToString(sum[:]), cache
 	return h, nil
+}
+
+// callRecord builds a call record. Providers stream nothing for a tool called
+// without arguments; the body always holds an object.
+func callRecord(id, name, args string) (statefile.Record, error) {
+	if args == "" {
+		args = "{}"
+	}
+	body, err := marshal(Call{Name: name, Arguments: json.RawMessage(args)})
+	return statefile.Record{Header: statefile.Header{ID: id, Kind: statefile.Call, Type: "application/json"}, Body: body}, err
 }
 
 // systemText joins the leading system records into the system prompt.

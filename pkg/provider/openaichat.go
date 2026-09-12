@@ -13,7 +13,6 @@ import (
 // Thinking records are never replayed.
 func OpenAIChat(base, key string) Provider {
 	return Provider{
-		Name:     "openai-chat",
 		URL:      strings.TrimSuffix(base, "/") + "/v1/chat/completions",
 		Key:      key,
 		Envelope: openaiChat{},
@@ -22,6 +21,8 @@ func OpenAIChat(base, key string) Provider {
 }
 
 type openaiChat struct{}
+
+func (openaiChat) Name() string { return "openai-chat" }
 
 type chatReq struct {
 	Model         string            `json:"model"`
@@ -218,15 +219,11 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 		emit(statefile.Record{Header: statefile.Header{Kind: statefile.Text, Type: "text/plain"}, Body: []byte(text.String())})
 	}
 	for _, c := range calls {
-		args := c.Function.Arguments
-		if args == "" {
-			args = "{}"
-		}
-		body, err := marshal(Call{Name: c.Function.Name, Arguments: json.RawMessage(args)})
+		r, err := callRecord(c.ID, c.Function.Name, c.Function.Arguments)
 		if err != nil {
 			return statefile.Header{}, err
 		}
-		emit(statefile.Record{Header: statefile.Header{Kind: statefile.Call, ID: c.ID, Type: "application/json"}, Body: body})
+		emit(r)
 	}
 	return statefile.Header{Usage: &usage}, nil
 }

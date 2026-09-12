@@ -21,7 +21,6 @@ const (
 
 func Anthropic(key string) Provider {
 	return Provider{
-		Name:     "anthropic",
 		URL:      "https://api.anthropic.com/v1/messages",
 		Key:      key,
 		Envelope: anthropic{},
@@ -33,6 +32,8 @@ func Anthropic(key string) Provider {
 }
 
 type anthropic struct{}
+
+func (anthropic) Name() string { return "anthropic" }
 
 type anthReq struct {
 	Model     string       `json:"model"`
@@ -86,7 +87,7 @@ type anthBlock struct {
 
 var ephemeral = &anthCache{Type: "ephemeral"}
 
-func (anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
+func (e anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
 	body := anthReq{
 		Model:     req.Model,
@@ -106,7 +107,7 @@ func (anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
 	turns := Turns(rest)
 	for i, t := range turns {
 		if t.Assistant {
-			content, err := anthAssistant(t.Records)
+			content, err := e.assistant(t.Records)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -151,14 +152,14 @@ func anthUser(recs []statefile.Record) []anthBlock {
 	return blocks
 }
 
-func anthAssistant(recs []statefile.Record) ([]any, error) {
+func (e anthropic) assistant(recs []statefile.Record) ([]any, error) {
 	var content []any
 	for _, r := range recs {
 		switch r.Kind {
 		case statefile.Text:
 			content = append(content, anthBlock{Type: "text", Text: string(r.Body)})
 		case statefile.Thinking:
-			if r.Provider == "anthropic" {
+			if r.Provider == e.Name() {
 				content = append(content, json.RawMessage(r.Body))
 			}
 		case statefile.Call:
@@ -263,12 +264,7 @@ func (p *anthPart) record() (statefile.Record, bool, error) {
 			Data string `json:"data"`
 		}{p.Type, p.Data})
 	case "tool_use":
-		args := p.args
-		if args == "" {
-			args = "{}"
-		}
-		r.ID, r.Kind, r.Type = p.ID, statefile.Call, "application/json"
-		r.Body, err = marshal(Call{Name: p.Name, Arguments: json.RawMessage(args)})
+		r, err = callRecord(p.ID, p.Name, p.args)
 	default:
 		return r, false, fmt.Errorf("anthropic: unknown block %q", p.Type)
 	}

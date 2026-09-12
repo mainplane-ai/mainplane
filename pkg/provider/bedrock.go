@@ -1,11 +1,8 @@
 package provider
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
@@ -27,20 +23,22 @@ const (
 	bedrockCacheTTL       = 300
 )
 
-func Bedrock(region, accessKey, secretKey, sessionToken string) Provider {
+// Bedrock authenticates with a Bedrock API key (AWS_BEARER_TOKEN_BEDROCK),
+// not SigV4. Model is an inference profile id such as
+// us.anthropic.claude-haiku-4-5-20251001-v1:0.
+func Bedrock(region, key string) Provider {
 	return Provider{
-		Name:     "bedrock",
 		URL:      "https://bedrock-runtime." + region + ".amazonaws.com/model",
-		Key:      secretKey,
+		Key:      key,
 		Envelope: bedrock{},
-		Headers: func(r *http.Request, key string) {
-			sigv4(r, region, accessKey, key, sessionToken, time.Now().UTC())
-		},
-		Endpoint: func(url, model string) string { return url + "/" + awsEscape(model) + "/converse-stream" },
+		Headers:  func(r *http.Request, key string) { r.Header.Set("Authorization", "Bearer "+key) },
+		Endpoint: func(url, model string) string { return url + "/" + model + "/converse-stream" },
 	}
 }
 
 type bedrock struct{}
+
+func (bedrock) Name() string { return "bedrock" }
 
 type bedReq struct {
 	System                       []bedBlock     `json:"system,omitempty"`
@@ -134,7 +132,7 @@ type bedReasoningText struct {
 
 var cachePoint = &bedCachePoint{Type: "default"}
 
-func (bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
+func (e bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
 	body := bedReq{
 		Messages:                     []bedMsg{},
@@ -157,7 +155,7 @@ func (bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
 	turns := Turns(rest)
 	for i, t := range turns {
 		if t.Assistant {
-			content, err := bedAssistant(t.Records)
+			content, err := e.assistant(t.Records)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -207,14 +205,14 @@ func bedUser(recs []statefile.Record) []bedBlock {
 	return blocks
 }
 
-func bedAssistant(recs []statefile.Record) ([]bedBlock, error) {
+func (e bedrock) assistant(recs []statefile.Record) ([]bedBlock, error) {
 	var content []bedBlock
 	for _, r := range recs {
 		switch r.Kind {
 		case statefile.Text:
 			content = append(content, bedBlock{Text: string(r.Body)})
 		case statefile.Thinking:
-			if r.Provider == "bedrock" {
+			if r.Provider == e.Name() {
 				content = append(content, bedBlock{ReasoningContent: r.Body})
 			}
 		case statefile.Call:
@@ -299,12 +297,7 @@ func (p *bedPart) record() (statefile.Record, bool, error) {
 	case "text":
 		r.Kind, r.Type, r.Body = statefile.Text, "text/plain", []byte(p.text)
 	case "toolUse":
-		input := p.input
-		if input == "" {
-			input = "{}"
-		}
-		r.ID, r.Kind, r.Type = p.id, statefile.Call, "application/json"
-		r.Body, err = marshal(Call{Name: p.name, Arguments: json.RawMessage(input)})
+		r, err = callRecord(p.id, p.name, p.input)
 	case "reasoning":
 		r.Kind, r.Type = statefile.Thinking, "application/json"
 		reasoning := bedReasoning{RedactedContent: p.redacted}
@@ -429,63 +422,4 @@ func eventHeaders(b []byte) (map[string]string, error) {
 		b = b[size:]
 	}
 	return out, nil
-}
-
-// awsEscape percent-encodes everything but RFC 3986 unreserved characters, as
-// SigV4 wants each path segment. url.PathEscape keeps ':' which model ids use.
-func awsEscape(s string) string {
-	var sb strings.Builder
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if 'A' <= c && c <= 'Z' || 'a' <= c && c <= 'z' || '0' <= c && c <= '9' || c == '-' || c == '_' || c == '.' || c == '~' {
-			sb.WriteByte(c)
-			continue
-		}
-		fmt.Fprintf(&sb, "%%%02X", c)
-	}
-	return sb.String()
-}
-
-// sigv4 signs r for the bedrock service. Signed headers: content-type, host,
-// x-amz-date, and x-amz-security-token when a session token is set.
-func sigv4(r *http.Request, region, access, secret, token string, now time.Time) {
-	body, _ := r.GetBody()         // Step builds the request over a bytes.Reader; GetBody cannot fail
-	payload, _ := io.ReadAll(body) // and neither can reading it
-	sum := sha256.Sum256(payload)
-	date, stamp := now.Format("20060102"), now.Format("20060102T150405Z")
-	r.Header.Set("X-Amz-Date", stamp)
-	if token != "" {
-		r.Header.Set("X-Amz-Security-Token", token)
-	}
-	names := []string{"content-type", "host", "x-amz-date"}
-	values := []string{r.Header.Get("Content-Type"), r.URL.Host, stamp}
-	if token != "" {
-		names, values = append(names, "x-amz-security-token"), append(values, token)
-	}
-	var canonical strings.Builder
-	for i, n := range names {
-		canonical.WriteString(n + ":" + values[i] + "\n")
-	}
-	signed := strings.Join(names, ";")
-	// SigV4 encodes the path twice for every service but S3; the escaped path
-	// holds only unreserved characters, '/', and %XX, so this is the second pass.
-	uri := strings.ReplaceAll(r.URL.EscapedPath(), "%", "%25")
-	request := strings.Join([]string{
-		r.Method, uri, r.URL.RawQuery, canonical.String(), signed, hex.EncodeToString(sum[:]),
-	}, "\n")
-	scope := date + "/" + region + "/bedrock/aws4_request"
-	reqSum := sha256.Sum256([]byte(request))
-	toSign := strings.Join([]string{"AWS4-HMAC-SHA256", stamp, scope, hex.EncodeToString(reqSum[:])}, "\n")
-	key := []byte("AWS4" + secret)
-	for _, s := range []string{date, region, "bedrock", "aws4_request"} {
-		key = hmacSHA256(key, s)
-	}
-	r.Header.Set("Authorization", fmt.Sprintf("AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
-		access, scope, signed, hex.EncodeToString(hmacSHA256(key, toSign))))
-}
-
-func hmacSHA256(key []byte, data string) []byte {
-	m := hmac.New(sha256.New, key)
-	m.Write([]byte(data))
-	return m.Sum(nil)
 }

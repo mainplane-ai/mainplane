@@ -2,9 +2,9 @@ package statefile
 
 // seen reports whether record r was in the context that step s was built from.
 // Records in earlier files of the chain always were; records in the step's own
-// file were if their index is within upto.
+// file were if their index is within upto; records in later files never were.
 func seen(r, s Record) bool {
-	return r.Seq < s.Seq || r.N <= s.Upto
+	return r.Seq < s.Seq || r.Seq == s.Seq && r.N <= s.Upto
 }
 
 func isBlock(k Kind) bool { return k == Text || k == Thinking || k == Call }

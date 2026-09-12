@@ -11,7 +11,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
-// thinkingBudget is the legacy control that every Gemini 2.5 and 3 model still
+// geminiThinkingBudget is the legacy control that every Gemini 2.5 and 3 model still
 // accepts. 2048 is modest; the model may use less.
 const (
 	geminiThinkingBudget = 2048
@@ -20,7 +20,6 @@ const (
 
 func Gemini(key string) Provider {
 	return Provider{
-		Name:     "gemini",
 		URL:      "https://generativelanguage.googleapis.com/v1beta/models",
 		Key:      key,
 		Envelope: gemini{},
@@ -30,6 +29,8 @@ func Gemini(key string) Provider {
 }
 
 type gemini struct{}
+
+func (gemini) Name() string { return "gemini" }
 
 type gemReq struct {
 	SystemInstruction *gemContent  `json:"systemInstruction,omitempty"`
@@ -96,7 +97,7 @@ type gemInline struct {
 	Data     string `json:"data"`
 }
 
-func (gemini) Compile(req Request) ([]byte, json.RawMessage, error) {
+func (e gemini) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
 	body := gemReq{
 		Contents:         []gemContent{},
@@ -122,7 +123,7 @@ func (gemini) Compile(req Request) ([]byte, json.RawMessage, error) {
 			body.Contents = append(body.Contents, gemUser(t.Records, names)...)
 			continue
 		}
-		parts, err := gemModel(t.Records, names)
+		parts, err := e.model(t.Records, names)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -191,13 +192,13 @@ func gemUser(recs []statefile.Record, names map[string]string) []gemContent {
 	return out
 }
 
-func gemModel(recs []statefile.Record, names map[string]string) ([]gemPart, error) {
+func (e gemini) model(recs []statefile.Record, names map[string]string) ([]gemPart, error) {
 	var parts []gemPart
 	var pending string // signature waiting for the part it was emitted on
 	for _, r := range recs {
 		switch r.Kind {
 		case statefile.Thinking:
-			if r.Provider != "gemini" {
+			if r.Provider != e.Name() {
 				continue
 			}
 			var p gemPart
@@ -323,15 +324,11 @@ func gemCall(p gemPart, emit func(statefile.Record)) error {
 	if id == "" {
 		id = statefile.NewID()
 	}
-	args := p.FunctionCall.Args
-	if len(args) == 0 {
-		args = json.RawMessage("{}")
-	}
-	body, err := marshal(Call{Name: p.FunctionCall.Name, Arguments: args})
+	r, err := callRecord(id, p.FunctionCall.Name, string(p.FunctionCall.Args))
 	if err != nil {
 		return err
 	}
-	emit(statefile.Record{Header: statefile.Header{Kind: statefile.Call, ID: id, Type: "application/json"}, Body: body})
+	emit(r)
 	return nil
 }
 

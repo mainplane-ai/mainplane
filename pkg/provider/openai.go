@@ -18,7 +18,6 @@ const (
 
 func OpenAI(key string) Provider {
 	return Provider{
-		Name:     "openai",
 		URL:      "https://api.openai.com/v1/responses",
 		Key:      key,
 		Envelope: openai{},
@@ -29,6 +28,8 @@ func OpenAI(key string) Provider {
 func bearer(r *http.Request, key string) { r.Header.Set("Authorization", "Bearer "+key) }
 
 type openai struct{}
+
+func (openai) Name() string { return "openai" }
 
 type respReq struct {
 	Model        string        `json:"model"`
@@ -80,7 +81,7 @@ type respOutput struct {
 	Output any    `json:"output"`
 }
 
-func (openai) Compile(req Request) ([]byte, json.RawMessage, error) {
+func (e openai) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
 	body := respReq{
 		Model:        req.Model,
@@ -99,7 +100,7 @@ func (openai) Compile(req Request) ([]byte, json.RawMessage, error) {
 			body.Input = append(body.Input, respUser(t.Records)...)
 			continue
 		}
-		items, err := respAssistant(t.Records)
+		items, err := e.assistant(t.Records)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -139,14 +140,14 @@ func respUser(recs []statefile.Record) []any {
 	return items
 }
 
-func respAssistant(recs []statefile.Record) ([]any, error) {
+func (e openai) assistant(recs []statefile.Record) ([]any, error) {
 	var items []any
 	for _, r := range recs {
 		switch r.Kind {
 		case statefile.Text:
 			items = append(items, respMessage{Role: "assistant", Content: []respPart{{Type: "output_text", Text: string(r.Body)}}})
 		case statefile.Thinking:
-			if r.Provider == "openai" {
+			if r.Provider == e.Name() {
 				items = append(items, json.RawMessage(r.Body))
 			}
 		case statefile.Call:
@@ -206,11 +207,8 @@ func respRecord(raw json.RawMessage) (statefile.Record, bool, error) {
 	case "reasoning":
 		r.Kind, r.Type, r.Body = statefile.Thinking, "application/json", raw
 	case "function_call":
-		body, err := marshal(Call{Name: item.Name, Arguments: json.RawMessage(item.Arguments)})
-		if err != nil {
-			return r, false, err
-		}
-		r.ID, r.Kind, r.Type, r.Body = item.CallID, statefile.Call, "application/json", body
+		r, err := callRecord(item.CallID, item.Name, item.Arguments)
+		return r, err == nil, err
 	default:
 		return r, false, fmt.Errorf("openai: unknown output item %q", item.Type)
 	}
