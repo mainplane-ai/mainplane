@@ -10,6 +10,7 @@ import (
 
 	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
+	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 const defaultSystem = "You are mainplane, an agent"
@@ -25,19 +26,25 @@ func System(model string) string {
 	return defaultSystem
 }
 
-// Result limits are opencode's: what current models handle in one result.
-const (
-	maxBytes = 50 << 10
-	maxLines = 2000
-)
-
-// Worker is the three primitives every worker has, plus where its scratch
-// directory is. Tools are built on them here. Write creates missing parents.
+// Worker is the three primitives every worker has, and Kill. Tools are built
+// on the primitives here. Write creates missing parents. Run's environment
+// persists per session and interpreter until Kill; the harness decides when
+// a session's environments stop being worth keeping.
 type Worker interface {
-	Run(ctx context.Context, interpreter, code string) (out []byte, exit int, err error)
+	Run(ctx context.Context, session, interpreter, code string) (Output, error)
 	Read(ctx context.Context, path string) ([]byte, error)
 	Write(ctx context.Context, path string, data []byte) error
-	Scratch() string
+	Kill(ctx context.Context, session string) error
+}
+
+// Output is what a run left: the tail the worker's side kept, the exit code,
+// the lines dropped before the tail, and the file on the worker holding all
+// of it when the output went over the limits.
+type Output struct {
+	Body []byte
+	Exit int
+	Cut  int
+	Full string
 }
 
 // ToolSet picks the set a model family was trained on. GPT-5 and GPT-6
@@ -75,18 +82,21 @@ type args struct {
 }
 
 // execute runs one tool on a worker. A failure is a result the model reads.
-func execute(ctx context.Context, w Worker, tool string, a args) statefile.Record {
+// A run's result also reports the lines the worker's side already dropped from
+// its output; the file holding the whole is in the header.
+func execute(ctx context.Context, w Worker, session, tool string, a args) (statefile.Record, int) {
 	r := statefile.Record{Header: statefile.Header{Type: "text/plain"}}
-	ok := func(body string) statefile.Record { r.Body = []byte(body); return r }
-	fail := func(err error) statefile.Record { return ok("error: " + err.Error()) }
+	ok := func(body string) (statefile.Record, int) { r.Body = []byte(body); return r, 0 }
+	fail := func(err error) (statefile.Record, int) { return ok("error: " + err.Error()) }
 	switch tool {
 	case "run":
-		out, exit, err := w.Run(ctx, a.Interpreter, a.Code)
+		o, err := w.Run(ctx, session, a.Interpreter, a.Code)
 		if err != nil {
 			return fail(err)
 		}
-		r.Exit = &exit
-		return ok(string(out))
+		r.Exit, r.FullOutput = &o.Exit, o.Full
+		r.Body = o.Body
+		return r, o.Cut
 	case "read":
 		b, err := w.Read(ctx, a.Path)
 		if err != nil {
@@ -123,22 +133,22 @@ func execute(ctx context.Context, w Worker, tool string, a args) statefile.Recor
 // lines cut. A single line over the byte limit is cut mid-line.
 func clip(b []byte, tail bool) ([]byte, int) {
 	lines := bytes.Split(bytes.TrimSuffix(b, []byte("\n")), []byte("\n"))
-	if len(lines) <= maxLines && len(b) <= maxBytes {
+	if len(lines) <= worker.MaxLines && len(b) <= worker.MaxBytes {
 		return b, 0
 	}
 	if tail {
 		slices.Reverse(lines)
 	}
 	n, size := 0, 0
-	for n < len(lines) && n < maxLines && size+len(lines[n])+1 <= maxBytes {
+	for n < len(lines) && n < worker.MaxLines && size+len(lines[n])+1 <= worker.MaxBytes {
 		size += len(lines[n]) + 1
 		n++
 	}
 	if n == 0 {
 		if tail {
-			return b[len(b)-maxBytes:], len(lines)
+			return b[len(b)-worker.MaxBytes:], len(lines)
 		}
-		return b[:maxBytes], len(lines)
+		return b[:worker.MaxBytes], len(lines)
 	}
 	kept := lines[:n]
 	if tail {
@@ -147,24 +157,18 @@ func clip(b []byte, tail bool) ([]byte, int) {
 	return bytes.Join(kept, []byte("\n")), len(lines) - n
 }
 
-// finish cuts a result over the limits and keeps the whole where the model can
-// reach it: a read's file is already on the worker; anything else is written
-// to the worker's scratch under the call id. Run keeps its tail, where the
-// error is; the rest keep their head. A non-zero exit is prefixed last, so
-// the cut cannot take it.
-func finish(ctx context.Context, w Worker, id, tool string, a args, r statefile.Record) statefile.Record {
+// finish cuts a result over the limits and names where the whole is: a read's
+// own file, or the file the worker spilled a run to. Run keeps its tail,
+// where the error is; the rest keep their head. A non-zero exit is prefixed
+// last, so the cut cannot take it.
+func finish(tool string, a args, r statefile.Record, dropped int) statefile.Record {
 	kept, cut := clip(r.Body, tool == "run")
-	if cut > 0 {
-		full, err := a.Path, error(nil)
-		if tool != "read" {
-			full = w.Scratch() + "/output/" + id
-			err = w.Write(ctx, full, r.Body)
+	if cut += dropped; cut > 0 {
+		if tool == "read" {
+			r.FullOutput = a.Path
 		}
-		note := fmt.Sprintf("[%d lines cut, whole output at %s]", cut, full)
-		if err != nil {
-			full, note = "", fmt.Sprintf("[%d lines cut, whole output lost: %s]", cut, err)
-		}
-		r.Truncated, r.FullOutput = true, full
+		r.Truncated = true
+		note := fmt.Sprintf("[%d lines cut, whole output at %s]", cut, r.FullOutput)
 		if tool == "run" {
 			r.Body = append([]byte(note+"\n"), kept...)
 		} else {
