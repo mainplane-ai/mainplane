@@ -116,8 +116,11 @@ func NewID() string {
 // ValidID is true for what NewID makes. Ids from outside become paths, so
 // anything else is refused before it reaches the filesystem.
 func ValidID(id string) bool {
+	if len(id) != 8 {
+		return false
+	}
 	_, err := hex.DecodeString(id)
-	return len(id) == 8 && err == nil
+	return err == nil
 }
 
 var ErrTorn = errors.New("torn record")
