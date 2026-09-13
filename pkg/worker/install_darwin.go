@@ -41,7 +41,7 @@ func Install(name, addr string) error {
 	if err := os.MkdirAll(scratch, 0o755); err != nil {
 		return err
 	}
-	if err := os.Chown(scratch, uid, gid); err != nil {
+	if err := os.Lchown(scratch, uid, gid); err != nil {
 		return err
 	}
 	log := filepath.Join(scratch, "mainplaned.log")
