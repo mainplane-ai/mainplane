@@ -7,10 +7,14 @@ import (
 )
 
 // Redial waits grow from a blink, so a harness restart costs no visible time,
-// to a minute, so a harness down for a day is not hammered.
+// to five seconds: a harness is restarted often while it is developed, and a
+// worker that takes a minute to come back reads as a failure. A dial a second
+// against a dead harness costs nothing. A handshake gets longer than the wait:
+// a first connect over a relayed path can take seconds.
 const (
-	redialMin = 200 * time.Millisecond
-	redialMax = time.Minute
+	redialMin   = 200 * time.Millisecond
+	redialMax   = 5 * time.Second
+	dialTimeout = 30 * time.Second
 )
 
 // Default is the interpreter each OS ships with. The first is the default.
@@ -21,7 +25,7 @@ var Default = map[string][]string{"windows": {"pwsh"}, "linux": {"bash"}, "darwi
 func Dial(addr string, l Local) {
 	wait := redialMin
 	for {
-		conn, err := net.DialTimeout("tcp", addr, redialMax)
+		conn, err := net.DialTimeout("tcp", addr, dialTimeout)
 		if err == nil {
 			log.Printf("connected to %s as %s", addr, l.Name)
 			wait = redialMin

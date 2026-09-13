@@ -20,14 +20,16 @@ const chunk = 32 << 10
 // An interpreter is a program that reads code on stdin. done is the line the
 // worker appends after the code: it prints the mark and the exit code of what
 // ran before, so the worker knows where the output ends. pwsh's $? is a bool,
-// so its exit is 0 or 1; the text of the failure is in the output.
+// so its exit is 0 or 1; the text of the failure is in the output. bash is a
+// login shell: the worker is a service with the service manager's bare PATH,
+// and the operator's profile is where their tools are.
 type interp struct {
 	argv []string
 	done string
 }
 
 var interps = map[string]interp{
-	"bash": {[]string{"bash"}, `echo "%s $?"`},
+	"bash": {[]string{"bash", "-l"}, `echo "%s $?"`},
 	"pwsh": {[]string{"pwsh", "-NoProfile", "-NonInteractive", "-Command", "-"}, `"%s $(if($?){0}else{1})"`},
 }
 
