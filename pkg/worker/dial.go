@@ -7,10 +7,12 @@ import (
 )
 
 // Redial waits grow from a blink, so a harness restart costs no visible time,
-// to a minute, so a harness down for a day is not hammered.
+// to five seconds: a harness is restarted often while it is developed, and a
+// worker that takes a minute to come back reads as a failure. A dial a second
+// against a dead harness costs nothing.
 const (
 	redialMin = 200 * time.Millisecond
-	redialMax = time.Minute
+	redialMax = 5 * time.Second
 )
 
 // Default is the interpreter each OS ships with. The first is the default.
