@@ -223,31 +223,31 @@ func Split(ctx []statefile.Record) (system, rest []statefile.Record) {
 // Turns groups the non-system context into alternating turns in API order:
 // user turns hold results, messages, later system records, summaries, and
 // errors; assistant turns hold the blocks one step closed. The step record
-// ends its assistant turn and is kept for its cache markers.
+// ends its assistant turn. A step that closed no blocks, a model that said
+// nothing, is no turn at all: every provider rejects an empty assistant turn,
+// and every provider merges the user turns around it.
 type Turn struct {
 	Assistant bool
 	Records   []statefile.Record
-	Step      *statefile.Record
+	closed    bool
 }
 
 func Turns(rest []statefile.Record) []Turn {
 	var turns []Turn
 	push := func(assistant bool, r statefile.Record) {
-		if n := len(turns); n == 0 || turns[n-1].Assistant != assistant || turns[n-1].Step != nil {
+		if n := len(turns); n == 0 || turns[n-1].Assistant != assistant || turns[n-1].closed {
 			turns = append(turns, Turn{Assistant: assistant})
 		}
 		turns[len(turns)-1].Records = append(turns[len(turns)-1].Records, r)
 	}
-	for i := range rest {
-		r := rest[i]
+	for _, r := range rest {
 		switch r.Kind {
 		case statefile.Text, statefile.Thinking, statefile.Call:
 			push(true, r)
 		case statefile.Step:
-			if n := len(turns); n == 0 || !turns[n-1].Assistant || turns[n-1].Step != nil {
-				turns = append(turns, Turn{Assistant: true})
+			if n := len(turns); n > 0 && turns[n-1].Assistant {
+				turns[n-1].closed = true
 			}
-			turns[len(turns)-1].Step = &rest[i]
 		case statefile.Result, statefile.Message, statefile.System, statefile.Summary, statefile.Error:
 			push(false, r)
 		case statefile.Start, statefile.Link, statefile.Config:

@@ -59,6 +59,7 @@ const (
 	StatusClosed      Status = "closed"      // the last step addressed everything and made no calls
 	StatusInterrupted Status = "interrupted" // a closed call has no result and nobody holds the lock
 	StatusFailed      Status = "failed"      // the last record is an error
+	StatusStepping    Status = "stepping"    // the harness holds the session. Never derived from the file
 )
 
 // Waiting returns the calls closed by a step that have no result, in file order.
