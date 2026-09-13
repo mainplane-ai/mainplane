@@ -60,10 +60,10 @@ func (p *Pool) admit(conn net.Conn) {
 	log.Printf("worker %s connected: %s %s", r.Name, r.OS, r.Arch)
 	p.Add(r)
 	<-r.done
-	log.Printf("worker %s disconnected", r.Name)
 	p.mu.Lock()
 	if p.m[r.Name] == r {
 		delete(p.m, r.Name)
+		log.Printf("worker %s disconnected", r.Name)
 	}
 	p.mu.Unlock()
 }

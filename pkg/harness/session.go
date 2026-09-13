@@ -165,14 +165,10 @@ func (h *Harness) Status(id string) (statefile.Status, int, error) {
 	return statefile.Derive(chain), chain[len(chain)-1].File, nil
 }
 
-// Wait returns when the session's file changes or ctx ends.
-func (h *Harness) Wait(ctx context.Context, id string) {
+// Changed is a channel closed at the session's next append.
+func (h *Harness) Changed(id string) <-chan struct{} {
 	s := h.session(id)
 	s.mu.Lock()
-	ch := s.changed
-	s.mu.Unlock()
-	select {
-	case <-ch:
-	case <-ctx.Done():
-	}
+	defer s.mu.Unlock()
+	return s.changed
 }

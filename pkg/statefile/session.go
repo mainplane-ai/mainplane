@@ -120,6 +120,9 @@ func (s Sessions) LoadAt(p Position) ([]Record, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(recs) == 0 {
+		return nil, fmt.Errorf("session %s: file %d holds no record", p.Session, p.File)
+	}
 	if p.N > 0 && p.N <= len(recs) {
 		recs = recs[:p.N-1]
 	}

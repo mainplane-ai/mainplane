@@ -106,8 +106,14 @@ func (h *Harness) Link(id string, l Link) (int, error) {
 	if l.From == nil {
 		return 0, fmt.Errorf("session %s does not exist, a link needs from", id)
 	}
+	if !statefile.ValidID(l.From.Session) {
+		return 0, fmt.Errorf("bad session id %q", l.From.Session)
+	}
 	if l.Mode == "" {
 		l.Mode = statefile.Continue
+	}
+	if l.Mode != statefile.Continue && l.Mode != statefile.Restart {
+		return 0, fmt.Errorf("unknown mode %q", l.Mode)
 	}
 	if l.Config == nil {
 		src, err := h.Sessions.LoadAt(*l.From)
@@ -130,6 +136,11 @@ func (h *Harness) Link(id string, l Link) (int, error) {
 	f, err := h.Sessions.Link(id, *l.From, l.Mode, body)
 	if err != nil {
 		return 0, err
+	}
+	if l.Mode == statefile.Restart {
+		if err := f.Append(statefile.Record{Header: statefile.Header{Kind: statefile.System, Type: "text/plain", Source: "harness"}, Body: []byte(System(l.Config.Model))}); err != nil {
+			return 0, err
+		}
 	}
 	return f.Num, f.Close()
 }

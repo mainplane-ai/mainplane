@@ -21,7 +21,7 @@ var Default = map[string][]string{"windows": {"pwsh"}, "linux": {"bash"}, "darwi
 func Dial(addr string, l Local) {
 	wait := redialMin
 	for {
-		conn, err := net.Dial("tcp", addr)
+		conn, err := net.DialTimeout("tcp", addr, redialMax)
 		if err == nil {
 			log.Printf("connected to %s as %s", addr, l.Name)
 			wait = redialMin

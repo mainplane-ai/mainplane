@@ -113,6 +113,13 @@ func NewID() string {
 	return hex.EncodeToString(b)
 }
 
+// ValidID is true for what NewID makes. Ids from outside become paths, so
+// anything else is refused before it reaches the filesystem.
+func ValidID(id string) bool {
+	_, err := hex.DecodeString(id)
+	return len(id) == 8 && err == nil
+}
+
 var ErrTorn = errors.New("torn record")
 
 // Encode is the bytes of one record: header line, body, newline.
@@ -146,6 +153,9 @@ func Decode(br *bufio.Reader) (Record, error) {
 	var r Record
 	if err := json.Unmarshal(line, &r.Header); err != nil {
 		return Record{}, fmt.Errorf("header: %w", err)
+	}
+	if r.Len < 0 {
+		return Record{}, fmt.Errorf("header: len %d", r.Len)
 	}
 	r.Body = make([]byte, r.Len)
 	if _, err := io.ReadFull(br, r.Body); err != nil {

@@ -61,8 +61,9 @@ func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
 	return out, nil
 }
 
-// Harness runs the harness role until ctx ends: workers dial in, connectors
-// call over HTTP, every session that was open on start resumes.
+// Harness runs the harness role until ctx ends or one listener fails: workers
+// dial in, connectors call over HTTP, every session that was open on start
+// resumes. Whichever ends first ends the other.
 func Harness(ctx context.Context, c Config) error {
 	ps, err := providers(c.Providers)
 	if err != nil {
@@ -71,22 +72,22 @@ func Harness(ctx context.Context, c Config) error {
 	if err := os.MkdirAll(c.Admin, 0o755); err != nil {
 		return err
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	h := &harness.Harness{Sessions: statefile.Sessions{Dir: c.Admin}, Providers: ps, Workers: harness.NewPool()}
-	go func() {
-		if err := h.Workers.Listen(ctx, c.Workers); ctx.Err() == nil {
-			log.Fatal(err)
-		}
-	}()
-	if err := h.Resume(ctx); err != nil {
-		return err
-	}
 	srv := &http.Server{Addr: c.HTTP, Handler: harness.Handler(ctx, h)}
+	errs := make(chan error, 2)
+	go func() { errs <- h.Workers.Listen(ctx, c.Workers) }()
 	go func() {
 		<-ctx.Done()
 		_ = srv.Close()
 	}()
+	if err := h.Resume(ctx); err != nil {
+		return err
+	}
 	log.Printf("harness: workers on %s, http on %s, sessions in %s", c.Workers, c.HTTP, c.Admin)
-	if err := srv.ListenAndServe(); ctx.Err() == nil {
+	go func() { errs <- srv.ListenAndServe() }()
+	if err := <-errs; ctx.Err() == nil {
 		return err
 	}
 	return nil
