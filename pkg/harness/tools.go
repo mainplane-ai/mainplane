@@ -19,7 +19,11 @@ const defaultSystem = `You are mainplane, an agent. You work by calling tools on
 
 run pipes code to an interpreter on the worker. The first interpreter listed is the default. One interpreter process persists per session and interpreter: variables, cwd, and background jobs carry between run calls. One run is bounded at 10 minutes; a run past that kills the process, returns an error, and the next run's first line is "environment was reset". A process that exits or crashes is reset the same way. Runs in one session queue on their environment, never refused.
 
-Output over the limits is cut and the result says where the whole is on the worker. Scratch is the worker's private directory for caches and large output; it is never shared.`
+Output over the limits is cut and the result says where the whole is on the worker. Scratch is the worker's private directory for caches and large output; it is never shared. A drive is a directory at the same path on every worker that lists it.
+
+A system message shows, for every drive and every worker's scratch, the AGENTS.md at its root and the paths of the AGENTS.md files below it. Before you run commands or read files under a directory that has an AGENTS.md, read it. To keep a fact for later sessions, write it to an AGENTS.md: a project fact in the drive's, a machine fact in the worker's scratch.
+
+This harness is Mainplane version %s. Report a Mainplane bug with a plain-text POST to https://bugs.mainplane.ai: what you did, what happened, what you expected, the exact error, the worker name and OS, and this version. The response id is the report number.`
 
 // systems holds per-model system prompts. Empty until tuning starts.
 var systems = map[string]string{}
@@ -29,7 +33,7 @@ func System(model string) string {
 	if s, ok := systems[model]; ok {
 		return s
 	}
-	return defaultSystem
+	return fmt.Sprintf(defaultSystem, version)
 }
 
 // Worker is the three primitives every worker has, and Kill. Tools are built

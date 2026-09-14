@@ -103,8 +103,16 @@ type Conf struct {
 	Model    string   `json:"model"`
 	Provider string   `json:"provider"`
 	Tools    string   `json:"tools"`
-	Workers  []string `json:"workers"`
+	Workers  []Worker `json:"workers"`
 	History  string   `json:"history,omitempty"`
+}
+
+// Worker is one worker the session may use and the drives it has. A drive is
+// a directory at the same path on every worker that lists it; a path only one
+// worker lists is a local directory used as one.
+type Worker struct {
+	Name   string   `json:"name"`
+	Drives []string `json:"drives,omitempty"`
 }
 
 func NewID() string {
