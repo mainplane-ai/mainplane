@@ -33,7 +33,7 @@ func System(model string) string {
 	if s, ok := systems[model]; ok {
 		return s
 	}
-	return fmt.Sprintf(defaultSystem, version)
+	return fmt.Sprintf(defaultSystem, Version)
 }
 
 // Worker is the three primitives every worker has, and Kill. Tools are built

@@ -4,7 +4,11 @@ import (
 	"context"
 	"log"
 	"net"
+	"slices"
+	"strings"
 	"sync"
+
+	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 // Pool is the set of workers connected right now, keyed by the name each
@@ -28,6 +32,18 @@ func (p *Pool) Get(name string) (*Remote, bool) {
 	defer p.mu.Unlock()
 	r, ok := p.m[name]
 	return r, ok
+}
+
+// List is every connected worker's hello, sorted by name.
+func (p *Pool) List() []worker.Header {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]worker.Header, 0, len(p.m))
+	for _, r := range p.m {
+		out = append(out, r.Header)
+	}
+	slices.SortFunc(out, func(a, b worker.Header) int { return strings.Compare(a.Name, b.Name) })
+	return out
 }
 
 // Listen accepts workers on addr until ctx ends. A worker that dials again

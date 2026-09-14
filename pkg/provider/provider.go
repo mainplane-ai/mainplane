@@ -36,10 +36,9 @@ type Request struct {
 }
 
 // Cache is the step record's cache header. Marks are the ids of the records
-// through which the prefix is cached; ids because a chain spans files and n
-// repeats across them. Anthropic and bedrock put a breakpoint after the
-// system prompt and after the last user block; openai and gemini cache every
-// prefix, so the mark is the last record. TTL is seconds from the step's
+// through which the prefix is cached. Anthropic and bedrock put a breakpoint
+// after the system prompt and after the last user block; openai and gemini
+// cache every prefix, so the mark is the last record. TTL is seconds from the step's
 // time: the provider's promise for anthropic and bedrock, a forecast for the
 // rest. The next step's usage.cache_read is the truth.
 type Cache struct {
@@ -248,9 +247,9 @@ func Turns(rest []statefile.Record) []Turn {
 			if n := len(turns); n > 0 && turns[n-1].Assistant {
 				turns[n-1].closed = true
 			}
-		case statefile.Result, statefile.Message, statefile.System, statefile.Summary, statefile.Error:
+		case statefile.Result, statefile.Message, statefile.System, statefile.Error:
 			push(false, r)
-		case statefile.Start, statefile.Link, statefile.Config:
+		case statefile.Start, statefile.Config:
 		}
 	}
 	return turns
