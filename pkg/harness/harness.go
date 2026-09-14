@@ -49,12 +49,17 @@ type Link struct {
 	Config *statefile.Conf     `json:"config,omitempty"`
 }
 
+func system(source, body string) statefile.Record {
+	return statefile.Record{Header: statefile.Header{Kind: statefile.System, Type: "text/plain", Source: source}, Body: []byte(body)}
+}
+
 // Create makes a session and returns its id. With From it is a fork; without,
-// a fresh session that needs a config, and starts with the system prompt.
-func (h *Harness) Create(l Link) (string, error) {
+// a fresh session that needs a config, and starts with the system prompt and
+// the AGENTS.md scan.
+func (h *Harness) Create(ctx context.Context, l Link) (string, error) {
 	id := statefile.NewID()
 	if l.From != nil {
-		_, err := h.Link(id, l)
+		_, err := h.Link(ctx, id, l)
 		return id, err
 	}
 	if l.Config == nil {
@@ -71,7 +76,10 @@ func (h *Harness) Create(l Link) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := f.Append(statefile.Record{Header: statefile.Header{Kind: statefile.System, Type: "text/plain", Source: "harness"}, Body: []byte(System(l.Config.Model))}); err != nil {
+	if err := f.Append(system("harness", System(l.Config.Model))); err != nil {
+		return "", err
+	}
+	if err := f.Append(system("agents", h.agents(ctx, id, *l.Config))); err != nil {
 		return "", err
 	}
 	return id, f.Close()
@@ -79,8 +87,9 @@ func (h *Harness) Create(l Link) (string, error) {
 
 // Link adds a file to session id and returns its number. A session that is
 // stepping or has a call outstanding cannot be linked onto: the next step
-// would replay what the model never saw.
-func (h *Harness) Link(id string, l Link) (int, error) {
+// would replay what the model never saw. Every new file scans AGENTS.md
+// again; a restart also gets the system prompt again.
+func (h *Harness) Link(ctx context.Context, id string, l Link) (int, error) {
 	s := h.session(id)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -138,9 +147,12 @@ func (h *Harness) Link(id string, l Link) (int, error) {
 		return 0, err
 	}
 	if l.Mode == statefile.Restart {
-		if err := f.Append(statefile.Record{Header: statefile.Header{Kind: statefile.System, Type: "text/plain", Source: "harness"}, Body: []byte(System(l.Config.Model))}); err != nil {
+		if err := f.Append(system("harness", System(l.Config.Model))); err != nil {
 			return 0, err
 		}
+	}
+	if err := f.Append(system("agents", h.agents(ctx, id, *l.Config))); err != nil {
+		return 0, err
 	}
 	return f.Num, f.Close()
 }
@@ -156,14 +168,14 @@ func config(chain []statefile.Record) (statefile.Conf, error) {
 }
 
 // workers is the session's worker list as the model reads it: what each named
-// worker is right now, or that it is not connected.
-func (h *Harness) workers(names []string) string {
+// worker is right now and the drives it has, or that it is not connected.
+func (h *Harness) workers(workers []statefile.Worker) string {
 	var b strings.Builder
-	for _, name := range names {
-		if r, ok := h.Workers.Get(name); ok {
-			fmt.Fprintf(&b, "worker %s: %s, %s, scratch %s\n", name, r.OS, strings.Join(r.Interps, " "), r.Scratch)
+	for _, w := range workers {
+		if r, ok := h.Workers.Get(w.Name); ok {
+			fmt.Fprintf(&b, "worker %s: %s, %s, scratch %s, drives %q\n", w.Name, r.OS, strings.Join(r.Interps, " "), r.Scratch, w.Drives)
 		} else {
-			fmt.Fprintf(&b, "worker %s: not connected\n", name)
+			fmt.Fprintf(&b, "worker %s: not connected\n", w.Name)
 		}
 	}
 	return b.String()
@@ -204,7 +216,7 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 		return "", err
 	}
 	if list := h.workers(conf.Workers); list != last(chain, "workers") {
-		if _, err := s.append(statefile.Record{Header: statefile.Header{Kind: statefile.System, Type: "text/plain", Source: "workers"}, Body: []byte(list)}); err != nil {
+		if _, err := s.append(system("workers", list)); err != nil {
 			return "", err
 		}
 		if chain, err = h.Sessions.Load(id); err != nil {
@@ -293,7 +305,7 @@ func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, c
 	if err := json.Unmarshal(c.Arguments, &a); err != nil {
 		return result(call.ID, "error: "+err.Error())
 	}
-	if !slices.Contains(conf.Workers, a.Worker) {
+	if !slices.ContainsFunc(conf.Workers, func(w statefile.Worker) bool { return w.Name == a.Worker }) {
 		return result(call.ID, "error: unknown worker "+a.Worker)
 	}
 	w, ok := h.Workers.Get(a.Worker)

@@ -50,7 +50,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 			fail(w, err)
 			return
 		}
-		id, err := h.Create(l)
+		id, err := h.Create(ctx, l)
 		if err != nil {
 			fail(w, err)
 			return
@@ -63,7 +63,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 			fail(w, err)
 			return
 		}
-		file, err := h.Link(r.PathValue("id"), l)
+		file, err := h.Link(ctx, r.PathValue("id"), l)
 		if err != nil {
 			fail(w, err)
 			return
