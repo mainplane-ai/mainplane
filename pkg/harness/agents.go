@@ -58,10 +58,11 @@ func (h *Harness) scan(ctx context.Context, b *strings.Builder, id, name, kind, 
 }
 
 // listing prints every AGENTS.md under root to agentsDepth, in the
-// interpreter's own language so the model can rerun or deepen it.
+// interpreter's own language so the model can rerun or deepen it. Root is
+// quoted for that language, so an apostrophe in a path stays in the path.
 func listing(interp, root string) string {
 	if interp == "pwsh" {
-		return fmt.Sprintf("Get-ChildItem -LiteralPath '%s' -Recurse -Depth %d -Filter AGENTS.md -Name", root, agentsDepth-1)
+		return fmt.Sprintf("Get-ChildItem -LiteralPath '%s' -Recurse -Depth %d -Filter AGENTS.md -Name", strings.ReplaceAll(root, "'", "''"), agentsDepth-1)
 	}
-	return fmt.Sprintf("find '%s' -maxdepth %d -name AGENTS.md", root, agentsDepth)
+	return fmt.Sprintf("find '%s' -maxdepth %d -name AGENTS.md", strings.ReplaceAll(root, "'", `'\''`), agentsDepth)
 }
