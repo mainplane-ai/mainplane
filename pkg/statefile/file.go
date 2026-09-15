@@ -81,10 +81,12 @@ func Copy(src, dst string, n int) error {
 	if err != nil {
 		return err
 	}
-	if _, err := in.Seek(0, io.SeekStart); err != nil {
-		return err
+	if _, err = in.Seek(0, io.SeekStart); err == nil {
+		_, err = io.CopyN(out, in, end)
 	}
-	if _, err := io.CopyN(out, in, end); err != nil {
+	if err != nil {
+		_ = out.Close()
+		_ = os.Remove(dst)
 		return err
 	}
 	return out.Close()

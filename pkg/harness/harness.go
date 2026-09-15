@@ -36,8 +36,8 @@ type Harness struct {
 func (h *Harness) provider(model string) (provider.Provider, string, error) {
 	name, m, ok := strings.Cut(model, "/")
 	p, known := h.Providers[name]
-	if !ok || !known {
-		return provider.Provider{}, "", fmt.Errorf("unknown provider in model %q", model)
+	if !ok || !known || m == "" {
+		return provider.Provider{}, "", fmt.Errorf("model %q is not provider/model with a known provider", model)
 	}
 	return p, m, nil
 }
@@ -123,6 +123,9 @@ func (h *Harness) cut(from string, n int) error {
 		if chain[n-1].Kind != statefile.Message {
 			return fmt.Errorf("record %d is a %s, a cut must fall before a message or at a closed tip", n, chain[n-1].Kind)
 		}
+		if len(statefile.Waiting(chain[:n-1])) > 0 {
+			return fmt.Errorf("record %d was posted mid-step, a cut there leaves a call without its result", n)
+		}
 		return nil
 	}
 	if n != len(chain)+1 {
@@ -159,7 +162,8 @@ func (h *Harness) workers(workers []statefile.Worker) string {
 }
 
 // Step runs one cycle and returns the status after it. A failed session is
-// stepped only when a run asked for it. Interrupted sessions get a result for
+// stepped only when a run asked for it; every step spends the ask, so a run
+// on a closed session does not carry over to a later failure. Interrupted sessions get a result for
 // every orphan call and become open; the next cycle steps. Past the context
 // limit nothing is called: the error says so and the session is failed. The
 // worker list enters as a system record whenever it differs from the last one
@@ -171,7 +175,7 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	}
 	s := h.session(id)
 	status = statefile.Derive(chain)
-	if status == statefile.StatusClosed || status == statefile.StatusFailed && !s.takeRetry() {
+	if retry := s.takeRetry(); status == statefile.StatusClosed || status == statefile.StatusFailed && !retry {
 		return status, nil
 	}
 	if err := s.hold(h.Sessions, id); err != nil {
@@ -255,7 +259,10 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 		return "", err
 	}
 	for _, c := range calls {
-		r := h.execute(ctx, id, conf, c)
+		var r statefile.Record
+		if ctx.Err() == nil {
+			r = h.execute(ctx, id, conf, c)
+		}
 		if ctx.Err() != nil {
 			r = result(c.ID, "stopped, effect unknown")
 		}

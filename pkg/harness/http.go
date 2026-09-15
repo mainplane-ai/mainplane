@@ -148,7 +148,7 @@ func page(infos []Info, status, after, limit string) []Info {
 			infos = infos[i+1:]
 		}
 	}
-	if n, err := strconv.Atoi(limit); err == nil && n < len(infos) {
+	if n, err := strconv.Atoi(limit); err == nil && n >= 0 && n < len(infos) {
 		infos = infos[:n]
 	}
 	return infos
@@ -157,7 +157,10 @@ func page(infos []Info, status, after, limit string) []Info {
 // parts reads a post body as one part, or as each part of a multipart body
 // with its own content type.
 func parts(ctype string, body io.Reader) ([]Part, error) {
-	mt, params, _ := mime.ParseMediaType(ctype)
+	mt, params, err := mime.ParseMediaType(ctype)
+	if err != nil {
+		return nil, fmt.Errorf("content type: %w", err)
+	}
 	if !strings.HasPrefix(mt, "multipart/") {
 		b, err := io.ReadAll(body)
 		return []Part{{Type: ctype, Body: b}}, err
@@ -167,6 +170,9 @@ func parts(ctype string, body io.Reader) ([]Part, error) {
 	for {
 		p, err := mr.NextPart()
 		if errors.Is(err, io.EOF) {
+			if len(out) == 0 {
+				return nil, fmt.Errorf("multipart body has no parts")
+			}
 			return out, nil
 		}
 		if err != nil {
@@ -214,14 +220,14 @@ func (h *Harness) serveRecords(w http.ResponseWriter, r *http.Request) {
 }
 
 // records is the file after record n. Records are numbered from 1 with no
-// gaps, so n is an offset.
+// gaps, so n is an offset; past the tip it is a cursor from some other file.
 func (h *Harness) records(id string, after int) ([]statefile.Record, error) {
 	chain, err := h.Sessions.Load(id)
 	if err != nil {
 		return nil, err
 	}
-	if after >= len(chain) {
-		return nil, nil
+	if after > len(chain) {
+		return nil, fmt.Errorf("after %d, session has %d records", after, len(chain))
 	}
 	return chain[max(after, 0):], nil
 }

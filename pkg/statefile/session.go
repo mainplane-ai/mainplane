@@ -1,6 +1,8 @@
 package statefile
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -17,13 +19,15 @@ func (s Sessions) Path(id string) string {
 
 // List returns every session id: the file names.
 func (s Sessions) List() ([]string, error) {
-	names, err := filepath.Glob(filepath.Join(s.Dir, "*.state"))
+	entries, err := os.ReadDir(s.Dir)
 	if err != nil {
 		return nil, err
 	}
-	ids := make([]string, len(names))
-	for i, name := range names {
-		ids[i] = strings.TrimSuffix(filepath.Base(name), ".state")
+	var ids []string
+	for _, e := range entries {
+		if id, ok := strings.CutSuffix(e.Name(), ".state"); ok {
+			ids = append(ids, id)
+		}
 	}
 	return ids, nil
 }
@@ -44,7 +48,12 @@ func (s Sessions) Open(id string) (*File, error) {
 	return Open(s.Path(id))
 }
 
-// Load returns a session's records.
+// Load returns a session's records. A file with none is a create that died
+// before its first write, not a session.
 func (s Sessions) Load(id string) ([]Record, error) {
-	return Read(s.Path(id))
+	recs, err := Read(s.Path(id))
+	if err == nil && len(recs) == 0 {
+		return nil, fmt.Errorf("session %s has no records", id)
+	}
+	return recs, err
 }

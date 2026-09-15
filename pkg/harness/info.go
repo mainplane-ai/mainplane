@@ -46,7 +46,6 @@ func (h *Harness) Info(id string) (Info, error) {
 	}
 	h.lockIndex()
 	h.index[id] = info
-	delete(h.dirty, id)
 	h.imu.Unlock()
 	return info, nil
 }
@@ -69,7 +68,9 @@ func (h *Harness) touch(id string) {
 
 // List is every session, newest updated first, from the index. Entries a
 // write touched since the last list are read again; the rest are served from
-// memory. Resume fills the index on start, and touch adds a created session.
+// memory. The mark is cleared before the read, so a write that lands during
+// the read marks it again. Resume fills the index on start, and touch adds a
+// created session.
 func (h *Harness) List() ([]Info, error) {
 	h.lockIndex()
 	ids := make([]string, 0, len(h.index)+len(h.dirty))
@@ -86,6 +87,7 @@ func (h *Harness) List() ([]Info, error) {
 	for _, id := range ids {
 		h.imu.Lock()
 		info, stale := h.index[id], h.dirty[id]
+		delete(h.dirty, id)
 		h.imu.Unlock()
 		if stale {
 			var err error
