@@ -30,7 +30,8 @@ const maxPost = 8 << 20
 //	GET  /sessions/{id}               -> Info
 //	GET  /sessions/{id}/records       ?after=N  ?wait=30s to long poll             -> records
 //	POST /sessions/{id}/records       one body, or multipart; ?via= names the      -> {"n"}
-//	                                  connector. one message record per part
+//	                                  connector. one message record per part,
+//	                                  each with its Content-Type
 //	POST /sessions/{id}/run           ?via=  step from the tip, whatever it is     -> {"status"}
 //	POST /sessions/{id}/stop          ?via=  cut the step, write it down           -> {"status"}
 //	GET  /workers                     -> connected workers' hellos
@@ -154,8 +155,9 @@ func page(infos []Info, status, after, limit string) []Info {
 	return infos
 }
 
-// parts reads a post body as one part, or as each part of a multipart body
-// with its own content type.
+// parts reads a post body as one part, or as each part of a multipart body.
+// Every part states its content type: the record's Type is the client's word,
+// never a guess.
 func parts(ctype string, body io.Reader) ([]Part, error) {
 	mt, params, err := mime.ParseMediaType(ctype)
 	if err != nil {
@@ -177,6 +179,9 @@ func parts(ctype string, body io.Reader) ([]Part, error) {
 		}
 		if err != nil {
 			return nil, err
+		}
+		if p.Header.Get("Content-Type") == "" {
+			return nil, fmt.Errorf("part %d has no content type", len(out)+1)
 		}
 		b, err := io.ReadAll(p)
 		if err != nil {

@@ -69,7 +69,8 @@ func (h *Harness) touch(id string) {
 // List is every session, newest updated first, from the index. Entries a
 // write touched since the last list are read again; the rest are served from
 // memory. The mark is cleared before the read, so a write that lands during
-// the read marks it again. Resume fills the index on start, and touch adds a
+// the read marks it again. A file that does not read is logged and left out
+// until its next write. Resume fills the index on start, and touch adds a
 // created session.
 func (h *Harness) List() ([]Info, error) {
 	h.lockIndex()
@@ -92,7 +93,8 @@ func (h *Harness) List() ([]Info, error) {
 		if stale {
 			var err error
 			if info, err = h.Info(id); err != nil {
-				return nil, err
+				log.Printf("session %s: %v", id, err)
+				continue
 			}
 		}
 		infos = append(infos, info)

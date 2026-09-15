@@ -228,7 +228,8 @@ func (h *Harness) Stop(ctx context.Context, id, via string) error {
 
 // Resume kicks every session that needs a step. This is the open-files index,
 // rebuilt from the tips on start; a failed session waits for a run or a
-// message.
+// message. A file that does not read is logged and left out, not a reason to
+// stay down.
 func (h *Harness) Resume(ctx context.Context) error {
 	ids, err := h.Sessions.List()
 	if err != nil {
@@ -237,7 +238,8 @@ func (h *Harness) Resume(ctx context.Context) error {
 	for _, id := range ids {
 		info, err := h.Info(id)
 		if err != nil {
-			return err
+			log.Printf("session %s: %v", id, err)
+			continue
 		}
 		if info.Status == statefile.StatusOpen || info.Status == statefile.StatusInterrupted {
 			h.Kick(ctx, id)
