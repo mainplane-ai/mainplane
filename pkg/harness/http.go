@@ -29,11 +29,12 @@ const maxPost = 8 << 20
 //	POST /sessions                    Create body                                  -> {"id"}
 //	GET  /sessions/{id}               -> Info
 //	GET  /sessions/{id}/records       ?after=N  ?wait=30s to long poll             -> records
-//	POST /sessions/{id}/records       one body, or multipart; ?via= names the      -> {"n"}
-//	                                  connector. one message record per part,
-//	                                  each with its Content-Type
-//	POST /sessions/{id}/run           ?via=  step from the tip, whatever it is     -> {"status"}
-//	POST /sessions/{id}/stop          ?via=  cut the step, write it down           -> {"status"}
+//	POST /sessions/{id}/records       one body, or multipart; ?via= required,      -> {"n"}
+//	                                  who is posting. one message record per
+//	                                  part, each with its Content-Type
+//	POST /sessions/{id}/run           step from the tip, whatever it is            -> {"status"}
+//	POST /sessions/{id}/stop          ?via= required. cut the step, write it       -> 204; the records
+//	                                  down                                            say what happened
 //	GET  /workers                     -> connected workers' hellos
 //	GET  /providers                   -> names this harness can serve as provider/model
 //	GET  /                            -> {"version"}
@@ -46,11 +47,12 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(v)
 	}
-	via := func(r *http.Request) string {
+	// via is who acts. The record carries it, so no one guesses it.
+	via := func(r *http.Request) (string, error) {
 		if v := r.URL.Query().Get("via"); v != "" {
-			return v
+			return v, nil
 		}
-		return "http"
+		return "", errors.New("?via= names who is acting")
 	}
 	// handle refuses an {id} that is not one of ours before it becomes a path.
 	handle := func(pattern string, fn http.HandlerFunc) {
@@ -107,12 +109,17 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 	})
 	handle("GET /sessions/{id}/records", h.serveRecords)
 	handle("POST /sessions/{id}/records", func(w http.ResponseWriter, r *http.Request) {
+		via, err := via(r)
+		if err != nil {
+			fail(w, err)
+			return
+		}
 		parts, err := parts(r.Header.Get("Content-Type"), http.MaxBytesReader(w, r.Body, maxPost))
 		if err != nil {
 			fail(w, err)
 			return
 		}
-		n, err := h.Post(ctx, r.PathValue("id"), via(r), parts)
+		n, err := h.Post(ctx, r.PathValue("id"), via, parts)
 		if err != nil {
 			fail(w, err)
 			return
@@ -129,11 +136,16 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		reply(w, map[string]statefile.Status{"status": statefile.StatusStepping})
 	})
 	handle("POST /sessions/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
-		if err := h.Stop(ctx, r.PathValue("id"), via(r)); err != nil {
+		via, err := via(r)
+		if err != nil {
 			fail(w, err)
 			return
 		}
-		reply(w, map[string]statefile.Status{"status": statefile.StatusFailed})
+		if err := h.Stop(ctx, r.PathValue("id"), via); err != nil {
+			fail(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	return mux
 }
