@@ -1,20 +1,16 @@
 package statefile
 
 // seen reports whether record r was in the context that step s was built from.
-// Records in earlier files of the chain always were; records in the step's own
-// file were if their index is within upto; records in later files never were.
-func seen(r, s Record) bool {
-	return r.Seq < s.Seq || r.Seq == s.Seq && r.N <= s.Upto
-}
+func seen(r, s Record) bool { return r.N <= s.Upto }
 
 func isBlock(k Kind) bool { return k == Text || k == Thinking || k == Call }
 
-// Build reorders a loaded chain into context order and returns it with the
-// index the next step's upto must carry. File order is time order; the API
-// wants each step's results directly after it. So for each step: the results
-// it saw, then the messages it saw as one user turn, then its blocks, then the
-// step record itself. Blocks no step closed are dropped. Start, link, and
-// config never enter.
+// Build reorders a file into context order and returns it with the index the
+// next step's upto must carry. File order is time order; the API wants each
+// step's results directly after it. So for each step: the results it saw,
+// then the messages it saw as one user turn, then its blocks, then the step
+// record itself. Blocks no step closed are dropped. Start and config never
+// enter.
 func Build(chain []Record) ([]Record, int) {
 	var ctx, pending []Record
 	blocks := map[string][]Record{}
@@ -36,7 +32,7 @@ func Build(chain []Record) ([]Record, int) {
 	}
 	for _, r := range chain {
 		switch {
-		case r.Kind == Start || r.Kind == Link || r.Kind == Config:
+		case r.Kind == Start || r.Kind == Config:
 		case isBlock(r.Kind):
 			blocks[r.Step] = append(blocks[r.Step], r)
 		case r.Kind == Step:
@@ -79,10 +75,30 @@ func Waiting(chain []Record) []Record {
 					break
 				}
 			}
-		case Start, Link, Config, System, Message, Text, Thinking, Summary, Error:
+		case Start, Config, System, Message, Text, Thinking, Error:
 		}
 	}
 	return waiting
+}
+
+// LastStep is the newest step record, or nil.
+func LastStep(chain []Record) *Record {
+	for i := len(chain) - 1; i >= 0; i-- {
+		if chain[i].Kind == Step {
+			return &chain[i]
+		}
+	}
+	return nil
+}
+
+// Prompt is the size of the last step's prompt in tokens: what the context
+// costs now. Input excludes cache reads and writes on every provider.
+func Prompt(chain []Record) int {
+	s := LastStep(chain)
+	if s == nil || s.Usage == nil {
+		return 0
+	}
+	return s.Usage.Input + s.Usage.CacheRead + s.Usage.CacheWrite
 }
 
 // Derive reads status off the tip. Stepping is the lock's word, not the
@@ -94,12 +110,7 @@ func Derive(chain []Record) Status {
 	if len(Waiting(chain)) > 0 {
 		return StatusInterrupted
 	}
-	var last *Record
-	for i := range chain {
-		if chain[i].Kind == Step {
-			last = &chain[i]
-		}
-	}
+	last := LastStep(chain)
 	for _, r := range chain {
 		if (r.Kind == Message || r.Kind == Result) && (last == nil || !seen(r, *last)) {
 			return StatusOpen

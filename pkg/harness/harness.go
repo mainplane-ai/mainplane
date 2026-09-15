@@ -1,4 +1,4 @@
-// Package harness steps a session: load the chain, build the context, call the
+// Package harness steps a session: load the file, build the context, call the
 // provider, append what comes back, execute the calls, repeat until the model
 // stops calling tools.
 package harness
@@ -15,7 +15,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
-const version = "dev"
+const Version = "dev"
 
 type Harness struct {
 	Sessions  statefile.Sessions
@@ -24,51 +24,70 @@ type Harness struct {
 
 	mu sync.Mutex
 	s  map[string]*session
+
+	imu   sync.Mutex
+	index map[string]Info
+	dirty map[string]bool
 }
 
-// check rejects a config that names a provider or tool set this harness lacks.
-// Workers are not checked: the config is the whitelist, and a worker named
-// before it dials in is a worker the session waits for.
-func (h *Harness) check(conf statefile.Conf) error {
-	if _, ok := h.Providers[conf.Provider]; !ok {
-		return fmt.Errorf("unknown provider %q", conf.Provider)
+// provider splits a config's provider/model string and finds the provider.
+// The model part is what the provider is asked for; an openrouter-style id
+// with its own slash survives, because only the first is cut.
+func (h *Harness) provider(model string) (provider.Provider, string, error) {
+	name, m, ok := strings.Cut(model, "/")
+	p, known := h.Providers[name]
+	if !ok || !known || m == "" {
+		return provider.Provider{}, "", fmt.Errorf("model %q is not provider/model with a known provider", model)
 	}
-	if _, ok := toolSets[conf.Tools]; !ok {
-		return fmt.Errorf("unknown tool set %q", conf.Tools)
-	}
-	return nil
+	return p, m, nil
 }
 
-// Link is one link operation: a new file whose first record points at From.
-// Fork, revert, compaction, and config change are all this shape. From
-// defaults to the tip of the session linked onto, Mode to continue, Config to
-// the config in force at From.
-type Link struct {
-	From   *statefile.Position `json:"from,omitempty"`
-	Mode   statefile.Mode      `json:"mode,omitempty"`
-	Config *statefile.Conf     `json:"config,omitempty"`
+// Create is the body of POST /sessions. From set is a copy of records 1
+// through N-1 of that session; otherwise a fresh session from Model, Context,
+// and Workers. Workers are not checked: the config is the whitelist, and a
+// worker named before it dials in is a worker the session waits for.
+type Create struct {
+	From    string             `json:"from,omitempty"`
+	N       int                `json:"n,omitempty"`
+	Model   string             `json:"model,omitempty"`
+	Context int                `json:"context,omitempty"`
+	Workers []statefile.Worker `json:"workers,omitempty"`
 }
 
 func system(source, body string) statefile.Record {
 	return statefile.Record{Header: statefile.Header{Kind: statefile.System, Type: "text/plain", Source: source}, Body: []byte(body)}
 }
 
-// Create makes a session and returns its id. With From it is a fork; without,
-// a fresh session that needs a config, and starts with the system prompt and
-// the AGENTS.md scan.
-func (h *Harness) Create(ctx context.Context, l Link) (string, error) {
+// Create makes a session and returns its id. A fresh one starts with the
+// system prompt and the AGENTS.md scan. A copy is byte for byte and gets
+// nothing appended: it already holds both.
+func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
 	id := statefile.NewID()
-	if l.From != nil {
-		_, err := h.Link(ctx, id, l)
-		return id, err
+	if c.From != "" {
+		if c.Model != "" || c.Context != 0 || c.Workers != nil {
+			return "", fmt.Errorf("a copy takes no config")
+		}
+		if err := h.cut(c.From, c.N); err != nil {
+			return "", err
+		}
+		if err := h.Sessions.Copy(c.From, id, c.N); err != nil {
+			return "", err
+		}
+		h.touch(id)
+		return id, nil
 	}
-	if l.Config == nil {
-		return "", fmt.Errorf("a fresh session needs a config")
-	}
-	if err := h.check(*l.Config); err != nil {
+	_, model, err := h.provider(c.Model)
+	if err != nil {
 		return "", err
 	}
-	body, err := json.Marshal(l.Config)
+	if c.Context <= 0 {
+		return "", fmt.Errorf("context limit must be set")
+	}
+	conf := statefile.Conf{Model: c.Model, Tools: ToolSet(model), Workers: c.Workers, Context: c.Context}
+	if conf.Workers == nil {
+		conf.Workers = []statefile.Worker{}
+	}
+	body, err := json.Marshal(conf)
 	if err != nil {
 		return "", err
 	}
@@ -76,85 +95,46 @@ func (h *Harness) Create(ctx context.Context, l Link) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := f.Append(system("harness", System(l.Config.Model))); err != nil {
+	if err := f.Append(system("harness", System(model))); err != nil {
 		return "", err
 	}
-	if err := f.Append(system("agents", h.agents(ctx, id, *l.Config))); err != nil {
+	if err := f.Append(system("agents", h.agents(ctx, id, conf))); err != nil {
 		return "", err
 	}
+	h.touch(id)
 	return id, f.Close()
 }
 
-// Link adds a file to session id and returns its number. A session that is
-// stepping or has a call outstanding cannot be linked onto: the next step
-// would replay what the model never saw. Every new file scans AGENTS.md
-// again; a restart also gets the system prompt again.
-func (h *Harness) Link(ctx context.Context, id string, l Link) (int, error) {
-	s := h.session(id)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.f != nil {
-		return 0, fmt.Errorf("session %s is stepping", id)
+// cut refuses a copy a provider would reject: the cut must fall before a
+// message record or at the tip of a closed session, so no call is left
+// without its result and no step is split.
+func (h *Harness) cut(from string, n int) error {
+	if !statefile.ValidID(from) {
+		return fmt.Errorf("bad session id %q", from)
 	}
-	live, err := h.Sessions.Live(id)
+	chain, err := h.Sessions.Load(from)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	if live > 0 {
-		chain, err := h.Sessions.Load(id)
-		if err != nil {
-			return 0, err
+	if n <= 2 {
+		return fmt.Errorf("n must keep start and config")
+	}
+	if n <= len(chain) {
+		if chain[n-1].Kind != statefile.Message {
+			return fmt.Errorf("record %d is a %s, a cut must fall before a message or at a closed tip", n, chain[n-1].Kind)
 		}
-		if st := statefile.Derive(chain); st != statefile.StatusClosed {
-			return 0, fmt.Errorf("session %s is %s, links need closed", id, st)
+		if len(statefile.Waiting(chain[:n-1])) > 0 {
+			return fmt.Errorf("record %d was posted mid-step, a cut there leaves a call without its result", n)
 		}
-		if l.From == nil {
-			l.From = &statefile.Position{Session: id, File: live, N: chain[len(chain)-1].N + 1}
-		}
+		return nil
 	}
-	if l.From == nil {
-		return 0, fmt.Errorf("session %s does not exist, a link needs from", id)
+	if n != len(chain)+1 {
+		return fmt.Errorf("session %s has %d records", from, len(chain))
 	}
-	if !statefile.ValidID(l.From.Session) {
-		return 0, fmt.Errorf("bad session id %q", l.From.Session)
+	if st := h.status(from, chain); st != statefile.StatusClosed {
+		return fmt.Errorf("session %s is %s, a cut at the tip needs closed", from, st)
 	}
-	if l.Mode == "" {
-		l.Mode = statefile.Continue
-	}
-	if l.Mode != statefile.Continue && l.Mode != statefile.Restart {
-		return 0, fmt.Errorf("unknown mode %q", l.Mode)
-	}
-	if l.Config == nil {
-		src, err := h.Sessions.LoadAt(*l.From)
-		if err != nil {
-			return 0, err
-		}
-		conf, err := config(src)
-		if err != nil {
-			return 0, err
-		}
-		l.Config = &conf
-	}
-	if err := h.check(*l.Config); err != nil {
-		return 0, err
-	}
-	body, err := json.Marshal(l.Config)
-	if err != nil {
-		return 0, err
-	}
-	f, err := h.Sessions.Link(id, *l.From, l.Mode, body)
-	if err != nil {
-		return 0, err
-	}
-	if l.Mode == statefile.Restart {
-		if err := f.Append(system("harness", System(l.Config.Model))); err != nil {
-			return 0, err
-		}
-	}
-	if err := f.Append(system("agents", h.agents(ctx, id, *l.Config))); err != nil {
-		return 0, err
-	}
-	return f.Num, f.Close()
+	return nil
 }
 
 func config(chain []statefile.Record) (statefile.Conf, error) {
@@ -181,20 +161,23 @@ func (h *Harness) workers(workers []statefile.Worker) string {
 	return b.String()
 }
 
-// Step runs one cycle and returns the status after it. Interrupted sessions
-// get a result for every orphan call and become open; the next cycle steps.
-// The worker list enters as a system record whenever it differs from the last
-// one the model saw.
+// Step runs one cycle and returns the status after it. A failed session is
+// stepped only when a run asked for it; every step spends the ask, so a run
+// on a closed session does not carry over to a later failure. Interrupted sessions get a result for
+// every orphan call and become open; the next cycle steps. Past the context
+// limit nothing is called: the error says so and the session is failed. The
+// worker list enters as a system record whenever it differs from the last one
+// the model saw.
 func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status, err error) {
 	chain, err := h.Sessions.Load(id)
 	if err != nil {
 		return "", err
 	}
+	s := h.session(id)
 	status = statefile.Derive(chain)
-	if status == statefile.StatusClosed || status == statefile.StatusFailed {
+	if retry := s.takeRetry(); status == statefile.StatusClosed || status == statefile.StatusFailed && !retry {
 		return status, nil
 	}
-	s := h.session(id)
 	if err := s.hold(h.Sessions, id); err != nil {
 		return "", err
 	}
@@ -205,7 +188,7 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	}()
 	if status == statefile.StatusInterrupted {
 		for _, c := range statefile.Waiting(chain) {
-			if _, err := s.append(result(c.ID, "interrupted, effect unknown")); err != nil {
+			if _, err := h.append(s, result(c.ID, "interrupted, effect unknown")); err != nil {
 				return "", err
 			}
 		}
@@ -215,8 +198,12 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	if err != nil {
 		return "", err
 	}
+	if p := statefile.Prompt(chain); p > conf.Context {
+		_, err := h.append(s, errorRecord("", fmt.Sprintf("context %d exceeds limit %d", p, conf.Context)))
+		return statefile.StatusFailed, err
+	}
 	if list := h.workers(conf.Workers); list != last(chain, "workers") {
-		if _, err := s.append(system("workers", list)); err != nil {
+		if _, err := h.append(s, system("workers", list)); err != nil {
 			return "", err
 		}
 		if chain, err = h.Sessions.Load(id); err != nil {
@@ -226,15 +213,25 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	return h.step(ctx, s, id, conf, chain)
 }
 
+func errorRecord(via, text string) statefile.Record {
+	return statefile.Record{Header: statefile.Header{Kind: statefile.Error, Type: "text/plain", Via: via}, Body: []byte(text)}
+}
+
 // step is one provider call: blocks as they stream, the step record, then a
-// result for every call.
+// result for every call. A stop cancels ctx: the stream ends without a step
+// record, every call not yet answered gets a stopped result, and the last
+// record is an error naming who stopped it.
 func (h *Harness) step(ctx context.Context, s *session, id string, conf statefile.Conf, chain []statefile.Record) (statefile.Status, error) {
+	p, model, err := h.provider(conf.Model)
+	if err != nil {
+		return "", err
+	}
 	records, upto := statefile.Build(chain)
 	stepID := statefile.NewID()
 	var calls []statefile.Record
 	var appendErr error
-	req := provider.Request{Model: conf.Model, Key: id, Tools: Tools(conf.Tools), Context: records}
-	hdr, err := h.Providers[conf.Provider].Step(ctx, req, func(r statefile.Record) {
+	req := provider.Request{Model: model, Key: id, Tools: Tools(conf.Tools), Context: records}
+	hdr, err := p.Step(ctx, req, func(r statefile.Record) {
 		r.Step = stepID
 		if r.ID == "" {
 			r.ID = statefile.NewID()
@@ -243,26 +240,39 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 			calls = append(calls, r)
 		}
 		if appendErr == nil {
-			_, appendErr = s.append(r)
+			_, appendErr = h.append(s, r)
 		}
 	})
 	if appendErr != nil {
 		return "", appendErr
 	}
 	if err != nil {
-		if _, err := s.append(statefile.Record{Header: statefile.Header{Kind: statefile.Error, Type: "text/plain"}, Body: []byte(err.Error())}); err != nil {
-			return "", err
+		if via := s.stoppedBy(); via != "" {
+			_, err := h.append(s, errorRecord(via, "stopped via "+via))
+			return statefile.StatusFailed, err
 		}
-		return statefile.StatusFailed, nil
+		_, err := h.append(s, errorRecord("", err.Error()))
+		return statefile.StatusFailed, err
 	}
-	hdr.Kind, hdr.ID, hdr.Upto, hdr.Harness = statefile.Step, stepID, upto, version
-	if _, err := s.append(statefile.Record{Header: hdr}); err != nil {
+	hdr.Kind, hdr.ID, hdr.Upto, hdr.Harness = statefile.Step, stepID, upto, Version
+	if _, err := h.append(s, statefile.Record{Header: hdr}); err != nil {
 		return "", err
 	}
 	for _, c := range calls {
-		if _, err := s.append(h.execute(ctx, id, conf, c)); err != nil {
+		var r statefile.Record
+		if ctx.Err() == nil {
+			r = h.execute(ctx, id, conf, c)
+		}
+		if ctx.Err() != nil {
+			r = result(c.ID, "stopped, effect unknown")
+		}
+		if _, err := h.append(s, r); err != nil {
 			return "", err
 		}
+	}
+	if via := s.stoppedBy(); via != "" {
+		_, err := h.append(s, errorRecord(via, "stopped via "+via))
+		return statefile.StatusFailed, err
 	}
 	if len(calls) == 0 {
 		return statefile.StatusClosed, nil

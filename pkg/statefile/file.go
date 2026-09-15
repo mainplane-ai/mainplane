@@ -3,6 +3,7 @@ package statefile
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"time"
@@ -42,23 +43,53 @@ func scan(f *os.File) ([]Record, int64, error) {
 // File is a state file open for appending. One writer per file.
 type File struct {
 	Path string
-	Num  int // the file's number in its session, when opened through Sessions
 	f    *os.File
 	n    int
 }
 
-// Create makes a new file whose first two records are first (start or link)
-// and config.
-func Create(path string, first Record, config []byte) (*File, error) {
+// Create makes a new file whose first two records are start and config.
+func Create(path string, config []byte) (*File, error) {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return nil, err
 	}
 	sf := &File{Path: path, f: f}
-	if err := sf.Append(first); err != nil {
+	if err := sf.Append(Record{Header: Header{Kind: Start}}); err != nil {
 		return nil, err
 	}
 	return sf, sf.Append(Record{Header: Header{Kind: Config, Type: "application/json"}, Body: config})
+}
+
+// Copy makes dst from records 1 through n-1 of src, byte for byte. The
+// prefix of an append-only file never changes, so the copy is the same
+// value under a new name.
+func Copy(src, dst string, n int) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	br := bufio.NewReader(in)
+	for i := 1; i < n; i++ {
+		if _, err := Decode(br); err != nil {
+			return fmt.Errorf("record %d: %w", i, err)
+		}
+	}
+	end, _ := in.Seek(0, io.SeekCurrent)
+	end -= int64(br.Buffered())
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err = in.Seek(0, io.SeekStart); err == nil {
+		_, err = io.CopyN(out, in, end)
+	}
+	if err != nil {
+		_ = out.Close()
+		_ = os.Remove(dst)
+		return err
+	}
+	return out.Close()
 }
 
 // Open opens an existing file for appending. A torn final record is cut off.
@@ -82,7 +113,7 @@ func Open(path string) (*File, error) {
 
 // Append writes one record and fills in n, id, time, and len.
 func (sf *File) Append(r Record) error {
-	r.N, r.File = sf.n+1, 0
+	r.N = sf.n + 1
 	if r.ID == "" {
 		r.ID = NewID()
 	}

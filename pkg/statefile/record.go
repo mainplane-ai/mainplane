@@ -19,7 +19,6 @@ type Kind string
 
 const (
 	Start    Kind = "start"
-	Link     Kind = "link"
 	Config   Kind = "config"
 	System   Kind = "system"
 	Message  Kind = "message"
@@ -28,24 +27,8 @@ const (
 	Call     Kind = "call"
 	Step     Kind = "step"
 	Result   Kind = "result"
-	Summary  Kind = "summary"
 	Error    Kind = "error"
 )
-
-type Mode string
-
-const (
-	Continue Mode = "continue"
-	Restart  Mode = "restart"
-)
-
-// Position names a record in a state file. A prefix of an append-only file
-// never changes, so a position is a value.
-type Position struct {
-	Session string `json:"session"`
-	File    int    `json:"file"`
-	N       int    `json:"n"`
-}
 
 // Usage counts tokens. Input excludes cache reads and writes on every
 // provider, so Input + CacheRead + CacheWrite is the prompt.
@@ -65,7 +48,6 @@ type Header struct {
 	Time time.Time `json:"time"`
 	Len  int       `json:"len"`
 	Type string    `json:"type,omitempty"`
-	File int       `json:"file,omitempty"` // which state file. Filled on load, never written: the file knows its own number
 
 	Step     string `json:"step,omitempty"`     // text, thinking, call: the step that closes it
 	Provider string `json:"provider,omitempty"` // thinking: who signed it. step: who served it
@@ -75,10 +57,7 @@ type Header struct {
 	Truncated  bool   `json:"truncated,omitempty"`   // result
 	FullOutput string `json:"full_output,omitempty"` // result: path in worker scratch
 
-	From *Position `json:"from,omitempty"` // link
-	Mode Mode      `json:"mode,omitempty"` // link
-
-	Via    string `json:"via,omitempty"`    // message: connector name
+	Via    string `json:"via,omitempty"`    // message: connector name. error: who stopped the session
 	Source string `json:"source,omitempty"` // system: where the text came from
 
 	Upto    int             `json:"upto,omitempty"`    // step: last record in its context
@@ -92,19 +71,16 @@ type Header struct {
 type Record struct {
 	Header
 	Body []byte
-	// Seq is the index of the file within a loaded chain, Session the session
-	// that file belongs to. Filled on load, not stored.
-	Seq     int    `json:"-"`
-	Session string `json:"-"`
 }
 
-// Conf is the body of the config record: record 2 of every file.
+// Conf is the body of the config record, record 2, fixed for the session's
+// life. Model is one provider/model string. Context is the token limit past
+// which the harness refuses to step.
 type Conf struct {
-	Model    string   `json:"model"`
-	Provider string   `json:"provider"`
-	Tools    string   `json:"tools"`
-	Workers  []Worker `json:"workers"`
-	History  string   `json:"history,omitempty"`
+	Model   string   `json:"model"`
+	Tools   string   `json:"tools"`
+	Workers []Worker `json:"workers"`
+	Context int      `json:"context"`
 }
 
 // Worker is one worker the session may use and the drives it has. A drive is

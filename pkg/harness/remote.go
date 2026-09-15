@@ -21,14 +21,16 @@ const runTimeout = 10 * time.Minute
 
 // Remote is a worker on the far end of a connection. Its hello header says
 // what it is. Requests are multiplexed by id; a call waits for its terminal
-// frame or the connection's end, not for ctx: the worker's timeout bounds it.
+// frame, the connection's end, or ctx: the worker's timeout bounds a run, and
+// a stop cuts it short.
 type Remote struct {
 	worker.Header
 	conn  net.Conn
 	wmu   sync.Mutex
 	cmu   sync.Mutex
 	calls map[string]chan worker.Frame
-	done  chan struct{} // closed when the connection ends
+	left  map[string]chan struct{} // closed by a call that stopped listening
+	done  chan struct{}            // closed when the connection ends
 }
 
 // Connect reads the worker's hello and starts routing its replies.
@@ -41,7 +43,7 @@ func Connect(conn net.Conn) (*Remote, error) {
 	if hello.Kind != worker.Hello {
 		return nil, fmt.Errorf("first frame is %q, want hello", hello.Kind)
 	}
-	r := &Remote{Header: hello.Header, conn: conn, calls: map[string]chan worker.Frame{}, done: make(chan struct{})}
+	r := &Remote{Header: hello.Header, conn: conn, calls: map[string]chan worker.Frame{}, left: map[string]chan struct{}{}, done: make(chan struct{})}
 	go r.recv(br)
 	return r, nil
 }
@@ -54,33 +56,43 @@ func (r *Remote) recv(br *bufio.Reader) {
 			for _, ch := range r.calls {
 				close(ch)
 			}
-			r.calls = nil
+			r.calls, r.left = nil, nil
 			r.cmu.Unlock()
 			_ = r.conn.Close()
 			close(r.done)
 			return
 		}
 		if ch, ok := r.calls[f.ID]; ok {
-			ch <- f
+			select {
+			case ch <- f:
+			case <-r.gone(f.ID):
+			}
 		}
 		r.cmu.Unlock()
 	}
 }
 
-// call sends one request and feeds every reply to on until the terminal one.
-func (r *Remote) call(h worker.Header, body []byte, on func(worker.Frame)) error {
+// gone is the channel a call closes when it stops listening, so a reply to a
+// stopped call is dropped instead of blocking the connection.
+func (r *Remote) gone(id string) <-chan struct{} { return r.left[id] }
+
+// call sends one request and feeds every reply to on until the terminal one,
+// or until ctx ends.
+func (r *Remote) call(ctx context.Context, h worker.Header, body []byte, on func(worker.Frame)) error {
 	id := statefile.NewID()
-	ch := make(chan worker.Frame)
+	ch, left := make(chan worker.Frame), make(chan struct{})
 	r.cmu.Lock()
 	if r.calls == nil {
 		r.cmu.Unlock()
 		return errors.New("worker connection lost")
 	}
-	r.calls[id] = ch
+	r.calls[id], r.left[id] = ch, left
 	r.cmu.Unlock()
 	defer func() {
+		close(left)
 		r.cmu.Lock()
 		delete(r.calls, id)
+		delete(r.left, id)
 		r.cmu.Unlock()
 	}()
 	h.ID = id
@@ -90,26 +102,33 @@ func (r *Remote) call(h worker.Header, body []byte, on func(worker.Frame)) error
 	if err != nil {
 		return err
 	}
-	for f := range ch {
-		if f.Kind == worker.Error {
-			return errors.New(string(f.Body))
-		}
-		on(f)
-		if f.Kind != worker.Output {
-			return nil
+	for {
+		select {
+		case f, ok := <-ch:
+			if !ok {
+				return errors.New("worker connection lost")
+			}
+			if f.Kind == worker.Error {
+				return errors.New(string(f.Body))
+			}
+			on(f)
+			if f.Kind != worker.Output {
+				return nil
+			}
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
-	return errors.New("worker connection lost")
 }
 
 // Run streams the output and keeps a tail within the result limits. Past twice
 // the byte limit the front is dropped at a line start and the lines counted,
 // a line cut in the middle counting as one; the worker has the whole in the
 // file the result names.
-func (r *Remote) Run(_ context.Context, session, interpreter, code string) (Output, error) {
+func (r *Remote) Run(ctx context.Context, session, interpreter, code string) (Output, error) {
 	var o Output
 	mid := false // the tail starts inside a line already counted
-	err := r.call(worker.Header{Kind: worker.Run, Session: session, Interp: interpreter, Timeout: int(runTimeout.Seconds())}, []byte(code), func(f worker.Frame) {
+	err := r.call(ctx, worker.Header{Kind: worker.Run, Session: session, Interp: interpreter, Timeout: int(runTimeout.Seconds())}, []byte(code), func(f worker.Frame) {
 		if f.Kind == worker.Result {
 			o.Exit, o.Full = f.Exit, f.Full
 			return
@@ -133,16 +152,16 @@ func (r *Remote) Run(_ context.Context, session, interpreter, code string) (Outp
 	return o, err
 }
 
-func (r *Remote) Read(_ context.Context, path string) ([]byte, error) {
+func (r *Remote) Read(ctx context.Context, path string) ([]byte, error) {
 	var b []byte
-	err := r.call(worker.Header{Kind: worker.Read, Path: path}, nil, func(f worker.Frame) { b = f.Body })
+	err := r.call(ctx, worker.Header{Kind: worker.Read, Path: path}, nil, func(f worker.Frame) { b = f.Body })
 	return b, err
 }
 
-func (r *Remote) Write(_ context.Context, path string, data []byte) error {
-	return r.call(worker.Header{Kind: worker.Write, Path: path}, data, func(worker.Frame) {})
+func (r *Remote) Write(ctx context.Context, path string, data []byte) error {
+	return r.call(ctx, worker.Header{Kind: worker.Write, Path: path}, data, func(worker.Frame) {})
 }
 
-func (r *Remote) Kill(_ context.Context, session string) error {
-	return r.call(worker.Header{Kind: worker.Kill, Session: session}, nil, func(worker.Frame) {})
+func (r *Remote) Kill(ctx context.Context, session string) error {
+	return r.call(ctx, worker.Header{Kind: worker.Kill, Session: session}, nil, func(worker.Frame) {})
 }

@@ -177,9 +177,13 @@ func gemUser(recs []statefile.Record, names map[string]string) []gemContent {
 				parts = append(parts, gemPart{InlineData: &gemInline{MimeType: r.Type, Data: base64.StdEncoding.EncodeToString(r.Body)}})
 			}
 			responses = append(responses, gemPart{FunctionResponse: fr})
-		case statefile.Message, statefile.System, statefile.Summary, statefile.Error:
-			parts = append(parts, gemPart{Text: string(r.Body)})
-		case statefile.Start, statefile.Link, statefile.Config, statefile.Text, statefile.Thinking, statefile.Call, statefile.Step:
+		case statefile.Message, statefile.System, statefile.Error:
+			if strings.HasPrefix(r.Type, "image/") {
+				parts = append(parts, gemPart{InlineData: &gemInline{MimeType: r.Type, Data: base64.StdEncoding.EncodeToString(r.Body)}})
+			} else {
+				parts = append(parts, gemPart{Text: string(r.Body)})
+			}
+		case statefile.Start, statefile.Config, statefile.Text, statefile.Thinking, statefile.Call, statefile.Step:
 		}
 	}
 	var out []gemContent
@@ -224,8 +228,8 @@ func (e gemini) model(recs []statefile.Record, names map[string]string) ([]gemPa
 				ThoughtSignature: pending,
 			})
 			pending = ""
-		case statefile.Start, statefile.Link, statefile.Config, statefile.System, statefile.Message,
-			statefile.Step, statefile.Result, statefile.Summary, statefile.Error:
+		case statefile.Start, statefile.Config, statefile.System, statefile.Message,
+			statefile.Step, statefile.Result, statefile.Error:
 		}
 	}
 	return parts, nil

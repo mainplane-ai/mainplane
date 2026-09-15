@@ -197,9 +197,13 @@ func bedUser(recs []statefile.Record) []bedBlock {
 				res.Content = []bedBlock{{Text: "(empty)"}} // Converse rejects empty text blocks
 			}
 			blocks = append(blocks, bedBlock{ToolResult: res})
-		case statefile.Message, statefile.System, statefile.Summary, statefile.Error:
-			blocks = append(blocks, bedBlock{Text: string(r.Body)})
-		case statefile.Start, statefile.Link, statefile.Config, statefile.Text, statefile.Thinking, statefile.Call, statefile.Step:
+		case statefile.Message, statefile.System, statefile.Error:
+			if strings.HasPrefix(r.Type, "image/") {
+				blocks = append(blocks, bedBlock{Image: &bedImage{Format: strings.TrimPrefix(r.Type, "image/"), Source: bedSource{Bytes: base64.StdEncoding.EncodeToString(r.Body)}}})
+			} else {
+				blocks = append(blocks, bedBlock{Text: string(r.Body)})
+			}
+		case statefile.Start, statefile.Config, statefile.Text, statefile.Thinking, statefile.Call, statefile.Step:
 		}
 	}
 	return blocks
@@ -221,8 +225,8 @@ func (e bedrock) assistant(recs []statefile.Record) ([]bedBlock, error) {
 				return nil, fmt.Errorf("call %s: %w", r.ID, err)
 			}
 			content = append(content, bedBlock{ToolUse: &bedToolUse{ToolUseID: r.ID, Name: c.Name, Input: c.Arguments}})
-		case statefile.Start, statefile.Link, statefile.Config, statefile.System, statefile.Message,
-			statefile.Step, statefile.Result, statefile.Summary, statefile.Error:
+		case statefile.Start, statefile.Config, statefile.System, statefile.Message,
+			statefile.Step, statefile.Result, statefile.Error:
 		}
 	}
 	return content, nil
