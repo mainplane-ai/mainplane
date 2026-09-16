@@ -1,7 +1,8 @@
-// mainplane is the device binary.
+// mainplane is the device binary: the worker, and the plainest connector.
 //
 //	mainplane mainplaned <name> <harness host:port>    make this machine a worker
 //	mainplane install    <name> <harness host:port>    and again at every boot
+//	mainplane <verb> <url> ...                         one verb per harness route, see cli.go
 package main
 
 import (
@@ -15,27 +16,48 @@ import (
 )
 
 func main() {
-	if len(os.Args) != 4 {
+	if len(os.Args) < 2 {
 		usage()
 	}
-	name, addr := os.Args[2], os.Args[3]
 	switch os.Args[1] {
-	case "mainplaned":
+	case "mainplaned", "install":
+		if len(os.Args) != 4 {
+			usage()
+		}
+		name, addr := os.Args[2], os.Args[3]
+		if os.Args[1] == "install" {
+			if err := worker.Install(name, addr); err != nil {
+				log.Fatal(err)
+			}
+			return
+		}
 		home, err := os.UserHomeDir()
 		if err != nil {
 			log.Fatal(err)
 		}
 		worker.Dial(addr, worker.Local{Name: name, Scratch: filepath.Join(home, ".mainplane"), Interps: worker.Default[runtime.GOOS]})
-	case "install":
-		if err := worker.Install(name, addr); err != nil {
-			log.Fatal(err)
-		}
 	default:
-		usage()
+		cli(os.Args[1], os.Args[2:])
 	}
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: mainplane mainplaned|install <name> <harness host:port>")
+	fmt.Fprint(os.Stderr, `usage: mainplane <verb> ...
+
+  mainplaned <name> <harness host:port>   make this machine a worker
+  install    <name> <harness host:port>   and again at every boot
+
+  every verb below takes the harness url first, as http://host:port
+  new        <url> <json>                 POST /sessions  {"model","context","workers"} or {"from","n"}
+  message    <url> <id> <text> [file...]  POST /sessions/{id}/records, one record per part
+  tail       <url> <id> [after]           GET  /sessions/{id}/records, rendered
+  chat       <url> <id>                   tail that follows; every stdin line is a message
+  run        <url> <id>                   POST /sessions/{id}/run
+  stop       <url> <id>                   POST /sessions/{id}/stop
+  info       <url> <id>                   GET  /sessions/{id}
+  sessions   <url> [status]               GET  /sessions
+  workers    <url>                        GET  /workers
+  providers  <url>                        GET  /providers
+`)
 	os.Exit(2)
 }
