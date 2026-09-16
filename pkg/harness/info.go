@@ -104,7 +104,7 @@ func (h *Harness) List() ([]Info, error) {
 }
 
 // copyLogs writes the session's file to every worker its config lists, at
-// <scratch>/logs/<id>.state, image bodies dropped so rg works on it. A
+// <scratch>/logs/<id>.log, image bodies dropped so rg works on it. A
 // worker not connected is skipped; the session's next stop writes again.
 func (h *Harness) copyLogs(ctx context.Context, id string) {
 	chain, err := h.Sessions.Load(id)
@@ -134,7 +134,7 @@ func (h *Harness) copyLogs(ctx context.Context, id string) {
 		if !ok {
 			continue
 		}
-		if err := r.Write(ctx, r.Scratch+"/logs/"+id+".state", b); err != nil {
+		if err := r.Write(ctx, r.Scratch+"/logs/"+id+".log", b); err != nil {
 			log.Printf("session %s: log copy to %s: %v", id, w.Name, err)
 		}
 	}
