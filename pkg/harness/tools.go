@@ -76,6 +76,7 @@ Context Management:
 - An AGENTS.md for project specific context should be placed in the root directory of that project
 - The root AGENTS.md of every worker scratch and every drive is read automatically at the start of every agent session
 - A terminal command to list AGENTS.md file paths up to depth 3 for every worker scratch and every drive is executed automatically at the start of every agent session. Those files are listed, not read
+- The intention of an AGENTS.md in a directory is that agents read it before working in that directory
 
 Bug reporting:
 - This harness is Mainplane version %s
@@ -163,7 +164,7 @@ var (
 	read  = provider.Tool{Name: "read", Description: "Read a file on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"}},"required":["worker","path"]}`)}
 	write = provider.Tool{Name: "write", Description: "Write a file on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"},"content":{"type":"string"}},"required":["worker","path","content"]}`)}
 	edit  = provider.Tool{Name: "edit", Description: "Edit a file with replacement on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"},"old":{"type":"string"},"new":{"type":"string"}},"required":["worker","path","old","new"]}`)}
-	patch = provider.Tool{Name: "patch", Description: "Apply a file patch on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"input":{"type":"string"}},"required":["worker","input"]}`)}
+	patch = provider.Tool{Name: "patch", Description: "Apply a patch in the apply_patch format on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"input":{"type":"string"}},"required":["worker","input"]}`)}
 )
 
 // toolSets are the named tool lists a config record can name. Every tool takes
