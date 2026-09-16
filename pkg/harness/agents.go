@@ -20,7 +20,7 @@ const agentsDepth = 3
 // model knows what ran and how to run more.
 func (h *Harness) agents(ctx context.Context, id string, conf statefile.Conf) string {
 	var b strings.Builder
-	b.WriteString("Run at file start with your tools, once. Rules in an AGENTS.md apply to everything below it.\n")
+	b.WriteString("The following read and run calls were made automatically at the start of this session to gather AGENTS.md context. Rules in an AGENTS.md apply to everything below it.\n")
 	seen := map[string]bool{}
 	for _, w := range conf.Workers {
 		for _, d := range w.Drives {
