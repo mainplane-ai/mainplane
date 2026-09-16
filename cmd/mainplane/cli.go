@@ -28,36 +28,36 @@ const via = "cli"
 // resultLines is how much of a result chat and tail show before the count.
 const resultLines = 20
 
+// arity is how many arguments each verb takes after the url, least and most;
+// -1 is any number.
+var arity = map[string][2]int{
+	"new": {1, 1}, "message": {2, -1}, "tail": {1, 2}, "chat": {1, 1}, "run": {1, 1}, "stop": {1, 1},
+	"info": {1, 1}, "sessions": {0, 1}, "workers": {0, 0}, "providers": {0, 0},
+}
+
 // cli is the harness API as verbs: one verb, one route, its reply printed.
 // Nothing is remembered between runs, nothing is defaulted, and a reply the
-// harness refuses is printed as it came and exits 1.
+// harness refuses is printed as it came and exits 1. The command line is
+// checked whole before the harness is asked anything.
 func cli(verb string, args []string) {
-	if len(args) == 0 || !strings.HasPrefix(args[0], "http://") && !strings.HasPrefix(args[0], "https://") {
+	a, ok := arity[verb]
+	if !ok || len(args) == 0 || !strings.HasPrefix(args[0], "http://") && !strings.HasPrefix(args[0], "https://") {
 		usage()
 	}
 	c := client{strings.TrimSuffix(args[0], "/")}
-	c.version()
 	args = args[1:]
-	want := func(n int) {
-		if len(args) != n {
-			usage()
-		}
+	if len(args) < a[0] || a[1] >= 0 && len(args) > a[1] {
+		usage()
 	}
+	c.version()
 	switch verb {
 	case "new":
-		want(1)
 		var out struct{ ID string }
 		c.call("POST", "/sessions", "application/json", strings.NewReader(args[0]), &out)
 		fmt.Println(out.ID)
 	case "message":
-		if len(args) < 2 {
-			usage()
-		}
 		fmt.Println(c.post(args[0], args[1], args[2:]))
 	case "tail":
-		if len(args) != 1 && len(args) != 2 {
-			usage()
-		}
 		after := 0
 		if len(args) == 2 {
 			var err error
@@ -69,36 +69,25 @@ func cli(verb string, args []string) {
 			render(r)
 		}
 	case "chat":
-		want(1)
 		c.chat(args[0])
 	case "run":
-		want(1)
 		var out struct{ Status string }
 		c.call("POST", "/sessions/"+args[0]+"/run", "", nil, &out)
 		fmt.Println(out.Status)
 	case "stop":
-		want(1)
 		c.call("POST", "/sessions/"+args[0]+"/stop?via="+via, "", nil, nil)
 	case "info":
-		want(1)
 		c.raw("/sessions/" + args[0])
 	case "sessions":
-		if len(args) > 1 {
-			usage()
-		}
 		var infos []harness.Info
 		c.call("GET", "/sessions?status="+strings.Join(args, ""), "", nil, &infos)
 		for _, i := range infos {
 			fmt.Printf("%s  %-11s  %-40s  n=%-5d prompt=%d/%d  %s\n", i.ID, i.Status, i.Config.Model, i.N, i.Prompt, i.Config.Context, i.Updated.Local().Format(time.DateTime))
 		}
 	case "workers":
-		want(0)
 		c.raw("/workers")
 	case "providers":
-		want(0)
 		c.raw("/providers")
-	default:
-		usage()
 	}
 }
 
@@ -222,11 +211,14 @@ func (c client) chat(id string) {
 	}()
 	go func() {
 		sc := bufio.NewScanner(os.Stdin)
-		sc.Buffer(make([]byte, 1<<20), 1<<20)
+		sc.Buffer(make([]byte, 64<<10), harness.MaxPost)
 		for sc.Scan() {
 			if line := sc.Text(); line != "" {
 				c.post(id, line, nil)
 			}
+		}
+		if err := sc.Err(); err != nil {
+			die(err)
 		}
 		quit <- os.Interrupt
 	}()

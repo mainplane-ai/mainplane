@@ -17,9 +17,9 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
-// maxPost bounds one post: a paragraph and a screenshot, typed or pasted by a
+// MaxPost bounds one post: a paragraph and a screenshot, typed or pasted by a
 // person. A file goes to a worker, not into the state file.
-const maxPost = 8 << 20
+const MaxPost = 8 << 20
 
 // Handler is the harness's HTTP surface: seven verbs on a session and three
 // reads of the environment. Records go out in the state file's own bytes,
@@ -114,7 +114,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 			fail(w, err)
 			return
 		}
-		parts, err := parts(r.Header.Get("Content-Type"), http.MaxBytesReader(w, r.Body, maxPost))
+		parts, err := parts(r.Header.Get("Content-Type"), http.MaxBytesReader(w, r.Body, MaxPost))
 		if err != nil {
 			fail(w, err)
 			return
