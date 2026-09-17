@@ -52,6 +52,7 @@ type Create struct {
 	Model   string             `json:"model,omitempty"`
 	Context int                `json:"context,omitempty"`
 	Workers []statefile.Worker `json:"workers,omitempty"`
+	Input   []string           `json:"input,omitempty"`
 }
 
 func system(source, body string) statefile.Record {
@@ -64,7 +65,7 @@ func system(source, body string) statefile.Record {
 func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
 	id := statefile.NewID()
 	if c.From != "" {
-		if c.Model != "" || c.Context != 0 || c.Workers != nil {
+		if c.Model != "" || c.Context != 0 || c.Workers != nil || c.Input != nil {
 			return "", fmt.Errorf("a copy takes no config")
 		}
 		if err := h.cut(c.From, c.N); err != nil {
@@ -76,14 +77,19 @@ func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
 		h.touch(id)
 		return id, nil
 	}
-	_, model, err := h.provider(c.Model)
+	p, model, err := h.provider(c.Model)
 	if err != nil {
 		return "", err
 	}
 	if c.Context <= 0 {
 		return "", fmt.Errorf("context limit must be set")
 	}
-	conf := statefile.Conf{Model: c.Model, Tools: ToolSet(model), Workers: c.Workers, Context: c.Context}
+	for _, t := range c.Input {
+		if !p.Envelope.Accepts(t) {
+			return "", fmt.Errorf("%s does not take %s as input", p.Envelope.Name(), t)
+		}
+	}
+	conf := statefile.Conf{Model: c.Model, Tools: ToolSet(model), Workers: c.Workers, Context: c.Context, Input: c.Input}
 	if conf.Workers == nil {
 		conf.Workers = []statefile.Worker{}
 	}
@@ -230,7 +236,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 	stepID := statefile.NewID()
 	var calls []statefile.Record
 	var appendErr error
-	req := provider.Request{Model: model, Key: id, Tools: Tools(conf.Tools), Context: records}
+	req := provider.Request{Model: model, Key: id, Tools: Tools(conf.Tools, conf.Input), Context: records}
 	hdr, err := p.Step(ctx, req, func(r statefile.Record) {
 		r.Step = stepID
 		if r.ID == "" {
@@ -322,7 +328,7 @@ func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, c
 	if !ok {
 		return result(call.ID, "error: worker "+a.Worker+" is not connected")
 	}
-	r, dropped := execute(ctx, w, id, c.Name, a)
+	r, dropped := execute(ctx, w, id, c.Name, a, conf.Input)
 	r = finish(c.Name, a, r, dropped)
 	r.Kind, r.For = statefile.Result, call.ID
 	return r

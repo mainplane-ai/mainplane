@@ -9,6 +9,7 @@ import (
 	"hash/crc32"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
@@ -39,6 +40,8 @@ func Bedrock(region, key string) Provider {
 type bedrock struct{}
 
 func (bedrock) Name() string { return "bedrock" }
+
+func (bedrock) Accepts(typ string) bool { return slices.Contains(images, typ) }
 
 type bedReq struct {
 	System                       []bedBlock     `json:"system,omitempty"`
@@ -186,7 +189,7 @@ func bedUser(recs []statefile.Record) []bedBlock {
 		case statefile.Result:
 			res := &bedToolResult{ToolUseID: r.For}
 			switch {
-			case strings.HasPrefix(r.Type, "image/"):
+			case slices.Contains(images, r.Type):
 				res.Content = []bedBlock{{Image: &bedImage{
 					Format: strings.TrimPrefix(r.Type, "image/"),
 					Source: bedSource{Bytes: base64.StdEncoding.EncodeToString(r.Body)},
@@ -198,7 +201,7 @@ func bedUser(recs []statefile.Record) []bedBlock {
 			}
 			blocks = append(blocks, bedBlock{ToolResult: res})
 		case statefile.Message, statefile.System, statefile.Error:
-			if strings.HasPrefix(r.Type, "image/") {
+			if slices.Contains(images, r.Type) {
 				blocks = append(blocks, bedBlock{Image: &bedImage{Format: strings.TrimPrefix(r.Type, "image/"), Source: bedSource{Bytes: base64.StdEncoding.EncodeToString(r.Body)}}})
 			} else {
 				blocks = append(blocks, bedBlock{Text: string(r.Body)})

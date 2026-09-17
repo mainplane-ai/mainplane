@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
+	"slices"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
@@ -34,6 +34,8 @@ func Anthropic(key string) Provider {
 type anthropic struct{}
 
 func (anthropic) Name() string { return "anthropic" }
+
+func (anthropic) Accepts(typ string) bool { return slices.Contains(images, typ) }
 
 type anthReq struct {
 	Model     string       `json:"model"`
@@ -136,7 +138,7 @@ func anthUser(recs []statefile.Record) []anthBlock {
 		case statefile.Result:
 			b := anthBlock{Type: "tool_result", ToolUseID: r.For}
 			switch {
-			case strings.HasPrefix(r.Type, "image/"):
+			case slices.Contains(images, r.Type):
 				b.Content = []anthBlock{{Type: "image", Source: &anthSource{
 					Type: "base64", MediaType: r.Type, Data: base64.StdEncoding.EncodeToString(r.Body),
 				}}}
@@ -145,7 +147,7 @@ func anthUser(recs []statefile.Record) []anthBlock {
 			}
 			blocks = append(blocks, b)
 		case statefile.Message, statefile.System, statefile.Error:
-			if strings.HasPrefix(r.Type, "image/") {
+			if slices.Contains(images, r.Type) {
 				blocks = append(blocks, anthBlock{Type: "image", Source: &anthSource{Type: "base64", MediaType: r.Type, Data: base64.StdEncoding.EncodeToString(r.Body)}})
 			} else {
 				blocks = append(blocks, anthBlock{Type: "text", Text: string(r.Body)})

@@ -49,11 +49,11 @@ func (h *Harness) scan(ctx context.Context, b *strings.Builder, id, name, kind, 
 	}
 	path := root + "/AGENTS.md"
 	fmt.Fprintf(b, "\nworker %s, %s %s\nread %s\n", name, kind, root, path)
-	rec, cut := execute(ctx, r, id, "read", args{Path: path})
+	rec, cut := execute(ctx, r, id, "read", args{Path: path}, nil)
 	fmt.Fprintf(b, "%s\n", bytes.TrimRight(finish("read", args{Path: path}, rec, cut).Body, "\n"))
 	interp, code := r.Interps[0], listing(r.Interps[0], root)
 	fmt.Fprintf(b, "run %s: %s\n", interp, code)
-	rec, cut = execute(ctx, r, id, "run", args{Interpreter: interp, Code: code})
+	rec, cut = execute(ctx, r, id, "run", args{Interpreter: interp, Code: code}, nil)
 	fmt.Fprintf(b, "%s\n", bytes.TrimRight(finish("run", args{}, rec, cut).Body, "\n"))
 }
 

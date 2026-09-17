@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
+	"slices"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
@@ -31,6 +31,11 @@ func Gemini(key string) Provider {
 type gemini struct{}
 
 func (gemini) Name() string { return "gemini" }
+
+// geminiMedia is what inlineData takes, named as http.DetectContentType names it.
+var geminiMedia = slices.Concat(images, []string{"application/pdf", "audio/mpeg", "audio/aiff", "video/mp4", "video/webm"})
+
+func (gemini) Accepts(typ string) bool { return slices.Contains(geminiMedia, typ) }
 
 type gemReq struct {
 	SystemInstruction *gemContent  `json:"systemInstruction,omitempty"`
@@ -172,13 +177,13 @@ func gemUser(recs []statefile.Record, names map[string]string) []gemContent {
 		switch r.Kind {
 		case statefile.Result:
 			fr := &gemFunctionResp{ID: r.For, Name: names[r.For], Response: gemOutput{Output: string(r.Body)}}
-			if strings.HasPrefix(r.Type, "image/") {
-				fr.Response.Output = "image attached below"
+			if slices.Contains(geminiMedia, r.Type) {
+				fr.Response.Output = "media attached below"
 				parts = append(parts, gemPart{InlineData: &gemInline{MimeType: r.Type, Data: base64.StdEncoding.EncodeToString(r.Body)}})
 			}
 			responses = append(responses, gemPart{FunctionResponse: fr})
 		case statefile.Message, statefile.System, statefile.Error:
-			if strings.HasPrefix(r.Type, "image/") {
+			if slices.Contains(geminiMedia, r.Type) {
 				parts = append(parts, gemPart{InlineData: &gemInline{MimeType: r.Type, Data: base64.StdEncoding.EncodeToString(r.Body)}})
 			} else {
 				parts = append(parts, gemPart{Text: string(r.Body)})
