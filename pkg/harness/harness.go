@@ -55,14 +55,6 @@ type Create struct {
 	Input   []string           `json:"input,omitempty"`
 }
 
-// input is the session's media list as the model reads it.
-func input(types []string) string {
-	if len(types) == 0 {
-		return "This session lists no input types. The read tool returns every file as text."
-	}
-	return "This session's input types, which the read tool returns as media: " + strings.Join(types, ", ")
-}
-
 func system(source, body string) statefile.Record {
 	return statefile.Record{Header: statefile.Header{Kind: statefile.System, Type: "text/plain", Source: source}, Body: []byte(body)}
 }
@@ -110,9 +102,6 @@ func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
 		return "", err
 	}
 	if err := f.Append(system("harness", System(model))); err != nil {
-		return "", err
-	}
-	if err := f.Append(system("input", input(conf.Input))); err != nil {
 		return "", err
 	}
 	if err := f.Append(system("agents", h.agents(ctx, id, conf))); err != nil {
@@ -247,7 +236,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 	stepID := statefile.NewID()
 	var calls []statefile.Record
 	var appendErr error
-	req := provider.Request{Model: model, Key: id, Tools: Tools(conf.Tools), Context: records}
+	req := provider.Request{Model: model, Key: id, Tools: Tools(conf.Tools, conf.Input), Context: records}
 	hdr, err := p.Step(ctx, req, func(r statefile.Record) {
 		r.Step = stepID
 		if r.ID == "" {

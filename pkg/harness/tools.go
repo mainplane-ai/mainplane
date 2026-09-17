@@ -155,26 +155,24 @@ func ToolSet(model string) string {
 	return "default"
 }
 
-// Tools is the tool set a config record names. Names are checked on Start
-// and Configure.
-func Tools(name string) []provider.Tool { return toolSets[name] }
+// Tools is the tool set a config record names. Every tool takes a worker. The
+// read description names the media types the session's input lists.
+func Tools(name string, input []string) []provider.Tool {
+	read := provider.Tool{Name: "read", Description: "Read a file on a worker as text", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"}},"required":["worker","path"]}`)}
+	if len(input) > 0 {
+		read.Description = "Read a file on a worker. A file of type " + strings.Join(input, ", ") + " is returned as media, any other file as text"
+	}
+	return map[string][]provider.Tool{"default": {run, read, write, edit}, "patch": {run, patch}}[name]
+}
 
 func schema(s string) json.RawMessage { return json.RawMessage(s) }
 
 var (
 	run   = provider.Tool{Name: "run", Description: "Execute code on a worker in the specified interpreter", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"code":{"type":"string"},"interpreter":{"type":"string"}},"required":["worker","code"]}`)}
-	read  = provider.Tool{Name: "read", Description: "Read a file on a worker. A file of a type in the session's input list is returned as media, any other file as text", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"}},"required":["worker","path"]}`)}
 	write = provider.Tool{Name: "write", Description: "Write a file on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"},"content":{"type":"string"}},"required":["worker","path","content"]}`)}
 	edit  = provider.Tool{Name: "edit", Description: "Edit a file with replacement on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"},"old":{"type":"string"},"new":{"type":"string"}},"required":["worker","path","old","new"]}`)}
 	patch = provider.Tool{Name: "patch", Description: "Apply a patch in the apply_patch format on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"input":{"type":"string"}},"required":["worker","input"]}`)}
 )
-
-// toolSets are the named tool lists a config record can name. Every tool takes
-// a worker. The set is fixed for the session's life.
-var toolSets = map[string][]provider.Tool{
-	"default": {run, read, write, edit},
-	"patch":   {run, patch},
-}
 
 type args struct {
 	Worker, Code, Interpreter, Path, Content, Old, New, Input string

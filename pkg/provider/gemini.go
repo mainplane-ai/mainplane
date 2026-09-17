@@ -178,7 +178,7 @@ func gemUser(recs []statefile.Record, names map[string]string) []gemContent {
 		case statefile.Result:
 			fr := &gemFunctionResp{ID: r.For, Name: names[r.For], Response: gemOutput{Output: string(r.Body)}}
 			if slices.Contains(geminiMedia, r.Type) {
-				fr.Response.Output = "image attached below"
+				fr.Response.Output = "media attached below"
 				parts = append(parts, gemPart{InlineData: &gemInline{MimeType: r.Type, Data: base64.StdEncoding.EncodeToString(r.Body)}})
 			}
 			responses = append(responses, gemPart{FunctionResponse: fr})

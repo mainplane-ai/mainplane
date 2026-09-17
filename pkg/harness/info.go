@@ -4,7 +4,6 @@ import (
 	"context"
 	"log"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
@@ -104,7 +103,8 @@ func (h *Harness) List() ([]Info, error) {
 }
 
 // copyLogs writes the session's file to every worker its config lists, at
-// <scratch>/logs/<id>.log, media bodies dropped so rg works on it. A
+// <scratch>/logs/<id>.log, the bodies the envelope takes as media dropped so
+// rg works on it. A
 // worker not connected is skipped; the session's next stop writes again.
 func (h *Harness) copyLogs(ctx context.Context, id string) {
 	chain, err := h.Sessions.Load(id)
@@ -117,9 +117,14 @@ func (h *Harness) copyLogs(ctx context.Context, id string) {
 		log.Printf("session %s: log copy: %v", id, err)
 		return
 	}
+	p, _, err := h.provider(conf.Model)
+	if err != nil {
+		log.Printf("session %s: log copy: %v", id, err)
+		return
+	}
 	var b []byte
 	for _, r := range chain {
-		if !strings.HasPrefix(r.Type, "text/") && r.Type != "application/json" {
+		if p.Envelope.Accepts(r.Type) {
 			r.Body = nil
 		}
 		enc, err := statefile.Encode(r)
