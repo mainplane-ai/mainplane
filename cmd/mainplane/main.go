@@ -48,11 +48,11 @@ func usage() {
   install    <name> <harness host:port>   and again at every boot
 
   every verb below takes the harness url first, as http://host:port
-  new        <url> <json>                 POST /sessions  {"model","context","workers"} or {"from","n"}
+  new        <url>                        POST /sessions, body from stdin: {"model","context","workers"} or {"from","n"}
   message    <url> <id> <text> [file...]  POST /sessions/{id}/records, one record per part
   tail       <url> <id> [after]           GET  /sessions/{id}/records, rendered
   chat       <url> <id>                   tail that follows; every stdin line is a message
-  run        <url> <id>                   POST /sessions/{id}/run
+  retry      <url> <id>                   POST /sessions/{id}/retry, step a failed or idle session from its tip
   stop       <url> <id>                   POST /sessions/{id}/stop
   info       <url> <id>                   GET  /sessions/{id}
   sessions   <url> [status]               GET  /sessions
