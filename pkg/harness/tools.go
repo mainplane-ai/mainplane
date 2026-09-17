@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -35,6 +36,7 @@ Tools:
 - The primary tool is "run" which executes code in the shell of the worker
 - Access to the shell of a machine is complete access. You have been given full control of the workers you are connected to
 - The file operation tools are for direct manipulation of data, not limited by a shell and interpreter
+- The read tool returns a file as media when its type is one the session lists as input, up to 5 MiB. Every other file is returned as text, cut at the limits
 - You may have one connected worker or many. You are driving them all
 - There may be other agents or users concurrently working on a worker. You cannot guarantee exclusive access
 - Different worker machines have different interpreters. For instance linux machines have bash and windows machines have pwsh. Some workers have multiple. The run tool specifies the interpreter, but this argument can be omitted and the first interpreter from the list will be used
@@ -60,7 +62,7 @@ Networking:
 
 Context Management:
 - The input context size to the LLM is reported at every turn. There is a set limit at which point the session will end
-- When a session ends, its .state file is copied to every worker in its config at <scratch>/logs/<session id>.log. The .log file is a byte for byte copy of the .state file, images removed
+- When a session ends, its .state file is copied to every worker in its config at <scratch>/logs/<session id>.log. The .log file is a byte for byte copy of the .state file, media bodies removed
 - A new session may continue a previous session. The user message specifies the path to the previous session's .log file. That file holds the whole previous session and is searchable with rg
 - A .state or .log file is a sequence of records. Each record is one JSON header line, then exactly "len" raw bytes of body, then a newline
 - Every header has: n, kind, id, time, len, type. n counts from 1 with no gaps
@@ -161,7 +163,7 @@ func schema(s string) json.RawMessage { return json.RawMessage(s) }
 
 var (
 	run   = provider.Tool{Name: "run", Description: "Execute code on a worker in the specified interpreter", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"code":{"type":"string"},"interpreter":{"type":"string"}},"required":["worker","code"]}`)}
-	read  = provider.Tool{Name: "read", Description: "Read a file on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"}},"required":["worker","path"]}`)}
+	read  = provider.Tool{Name: "read", Description: "Read a file on a worker. A file of a type in the session's input list is returned as media, any other file as text", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"}},"required":["worker","path"]}`)}
 	write = provider.Tool{Name: "write", Description: "Write a file on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"},"content":{"type":"string"}},"required":["worker","path","content"]}`)}
 	edit  = provider.Tool{Name: "edit", Description: "Edit a file with replacement on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"},"old":{"type":"string"},"new":{"type":"string"}},"required":["worker","path","old","new"]}`)}
 	patch = provider.Tool{Name: "patch", Description: "Apply a patch in the apply_patch format on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"input":{"type":"string"}},"required":["worker","input"]}`)}
@@ -178,10 +180,15 @@ type args struct {
 	Worker, Code, Interpreter, Path, Content, Old, New, Input string
 }
 
+// maxMedia bounds a file read as media. Anthropic's per-image limit, the
+// tightest of the five envelopes.
+const maxMedia = 5 << 20
+
 // execute runs one tool on a worker. A failure is a result the model reads.
 // A run's result also reports the lines the worker's side already dropped from
-// its output; the file holding the whole is in the header.
-func execute(ctx context.Context, w Worker, session, tool string, a args) (statefile.Record, int) {
+// its output; the file holding the whole is in the header. A read of a file
+// whose sniffed type is in input is media; every other file is text.
+func execute(ctx context.Context, w Worker, session, tool string, a args, input []string) (statefile.Record, int) {
 	r := statefile.Record{Header: statefile.Header{Type: "text/plain"}}
 	ok := func(body string) (statefile.Record, int) { r.Body = []byte(body); return r, 0 }
 	fail := func(err error) (statefile.Record, int) { return ok("error: " + err.Error()) }
@@ -198,6 +205,13 @@ func execute(ctx context.Context, w Worker, session, tool string, a args) (state
 		b, err := w.Read(ctx, a.Path)
 		if err != nil {
 			return fail(err)
+		}
+		if t := http.DetectContentType(b); slices.Contains(input, t) {
+			if len(b) > maxMedia {
+				return fail(fmt.Errorf("%s is %d bytes of %s, over the %d byte media limit", a.Path, len(b), t, maxMedia))
+			}
+			r.Type, r.Body = t, b
+			return r, 0
 		}
 		return ok(string(b))
 	case "write":
@@ -257,8 +271,11 @@ func clip(b []byte, tail bool) ([]byte, int) {
 // finish cuts a result over the limits and names where the whole is: a read's
 // own file, or the file the worker spilled a run to. Run keeps its tail,
 // where the error is; the rest keep their head. A non-zero exit is prefixed
-// last, so the cut cannot take it.
+// last, so the cut cannot take it. Media is whole or not at all.
 func finish(tool string, a args, r statefile.Record, dropped int) statefile.Record {
+	if r.Type != "text/plain" {
+		return r
+	}
 	kept, cut := clip(r.Body, tool == "run")
 	if cut += dropped; cut > 0 {
 		if tool == "read" {

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
+	"slices"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
@@ -30,6 +30,8 @@ func bearer(r *http.Request, key string) { r.Header.Set("Authorization", "Bearer
 type openai struct{}
 
 func (openai) Name() string { return "openai" }
+
+func (openai) Accepts(typ string) bool { return slices.Contains(images, typ) }
 
 type respReq struct {
 	Model        string        `json:"model"`
@@ -125,12 +127,12 @@ func respUser(recs []statefile.Record) []any {
 		switch r.Kind {
 		case statefile.Result:
 			out := respOutput{Type: "function_call_output", CallID: r.For, Output: string(r.Body)}
-			if strings.HasPrefix(r.Type, "image/") {
+			if slices.Contains(images, r.Type) {
 				out.Output = []respPart{{Type: "input_image", ImageURL: imageURL(r), Detail: "auto"}}
 			}
 			items = append(items, out)
 		case statefile.Message, statefile.System, statefile.Error:
-			if strings.HasPrefix(r.Type, "image/") {
+			if slices.Contains(images, r.Type) {
 				parts = append(parts, respPart{Type: "input_image", ImageURL: imageURL(r), Detail: "auto"})
 			} else {
 				parts = append(parts, respPart{Type: "input_text", Text: string(r.Body)})

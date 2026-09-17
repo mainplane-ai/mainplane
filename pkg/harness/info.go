@@ -104,7 +104,7 @@ func (h *Harness) List() ([]Info, error) {
 }
 
 // copyLogs writes the session's file to every worker its config lists, at
-// <scratch>/logs/<id>.log, image bodies dropped so rg works on it. A
+// <scratch>/logs/<id>.log, media bodies dropped so rg works on it. A
 // worker not connected is skipped; the session's next stop writes again.
 func (h *Harness) copyLogs(ctx context.Context, id string) {
 	chain, err := h.Sessions.Load(id)
@@ -119,7 +119,7 @@ func (h *Harness) copyLogs(ctx context.Context, id string) {
 	}
 	var b []byte
 	for _, r := range chain {
-		if strings.HasPrefix(r.Type, "image/") {
+		if !strings.HasPrefix(r.Type, "text/") && r.Type != "application/json" {
 			r.Body = nil
 		}
 		enc, err := statefile.Encode(r)

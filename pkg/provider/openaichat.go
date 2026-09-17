@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
@@ -23,6 +24,8 @@ func OpenAIChat(base, key string) Provider {
 type openaiChat struct{}
 
 func (openaiChat) Name() string { return "openai-chat" }
+
+func (openaiChat) Accepts(typ string) bool { return slices.Contains(images, typ) }
 
 type chatReq struct {
 	Model         string            `json:"model"`
@@ -110,13 +113,13 @@ func chatUser(recs []statefile.Record) []chatMsg {
 		switch r.Kind {
 		case statefile.Result:
 			m := chatMsg{Role: "tool", ToolCallID: r.For, Content: string(r.Body)}
-			if strings.HasPrefix(r.Type, "image/") {
+			if slices.Contains(images, r.Type) {
 				m.Content = "(see attached image)"
 				parts = append(parts, chatPart{Type: "image_url", ImageURL: &chatImageURL{URL: imageURL(r)}})
 			}
 			msgs = append(msgs, m)
 		case statefile.Message, statefile.System, statefile.Error:
-			if strings.HasPrefix(r.Type, "image/") {
+			if slices.Contains(images, r.Type) {
 				parts = append(parts, chatPart{Type: "image_url", ImageURL: &chatImageURL{URL: imageURL(r)}})
 			} else {
 				parts = append(parts, chatPart{Type: "text", Text: string(r.Body)})

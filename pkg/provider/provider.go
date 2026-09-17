@@ -54,12 +54,17 @@ func cacheHeader(ttl int, marks ...string) (json.RawMessage, error) {
 // produces; only thinking with its own name is replayed. Compile is
 // deterministic and returns the cache markers it placed, which go on the step
 // record. Stream calls emit once per block as the stream completes it and
-// returns the step header with usage.
+// returns the step header with usage. Accepts is the media types the envelope
+// encodes as media; a record of any other type goes as text.
 type Envelope interface {
 	Name() string
+	Accepts(typ string) bool
 	Compile(req Request) (body []byte, cache json.RawMessage, err error)
 	Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error)
 }
+
+// images are the types every envelope takes as an image block.
+var images = []string{"image/jpeg", "image/png", "image/gif", "image/webp"}
 
 type Provider struct {
 	URL      string // full endpoint. gemini and bedrock take the model in the path, see Endpoint
