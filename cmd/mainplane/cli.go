@@ -31,7 +31,7 @@ const resultLines = 20
 // arity is how many arguments each verb takes after the url, least and most;
 // -1 is any number.
 var arity = map[string][2]int{
-	"new": {1, 1}, "message": {2, -1}, "tail": {1, 2}, "chat": {1, 1}, "run": {1, 1}, "stop": {1, 1},
+	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {1, 1}, "retry": {1, 1}, "stop": {1, 1},
 	"info": {1, 1}, "sessions": {0, 1}, "workers": {0, 0}, "providers": {0, 0},
 }
 
@@ -53,7 +53,7 @@ func cli(verb string, args []string) {
 	switch verb {
 	case "new":
 		var out struct{ ID string }
-		c.call("POST", "/sessions", "application/json", strings.NewReader(args[0]), &out)
+		c.call("POST", "/sessions", "application/json", os.Stdin, &out)
 		fmt.Println(out.ID)
 	case "message":
 		fmt.Println(c.post(args[0], args[1], args[2:]))
@@ -70,9 +70,9 @@ func cli(verb string, args []string) {
 		}
 	case "chat":
 		c.chat(args[0])
-	case "run":
+	case "retry":
 		var out struct{ Status string }
-		c.call("POST", "/sessions/"+args[0]+"/run", "", nil, &out)
+		c.call("POST", "/sessions/"+args[0]+"/retry", "", nil, &out)
 		fmt.Println(out.Status)
 	case "stop":
 		c.call("POST", "/sessions/"+args[0]+"/stop?via="+via, "", nil, nil)

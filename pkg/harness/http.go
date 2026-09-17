@@ -32,7 +32,7 @@ const MaxPost = 8 << 20
 //	POST /sessions/{id}/records       one body, or multipart; ?via= required,      -> {"n"}
 //	                                  who is posting. one message record per
 //	                                  part, each with its Content-Type
-//	POST /sessions/{id}/run           step from the tip, whatever it is            -> {"status"}
+//	POST /sessions/{id}/retry         step from the tip, whatever it is            -> {"status"}
 //	POST /sessions/{id}/stop          ?via= required. cut the step, write it       -> 204; the records
 //	                                  down                                            say what happened
 //	GET  /workers                     -> connected workers' hellos
@@ -126,7 +126,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		}
 		reply(w, map[string]int{"n": n})
 	})
-	handle("POST /sessions/{id}/run", func(w http.ResponseWriter, r *http.Request) {
+	handle("POST /sessions/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if _, err := h.Info(id); err != nil {
 			fail(w, err)
