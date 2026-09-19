@@ -12,14 +12,18 @@ import (
 )
 
 // Pool is the set of workers connected right now, keyed by the name each
-// hello carries. Workers dial in and are known the moment they say hello;
-// a lost connection forgets the worker until it dials again.
+// hello carries. Workers dial in and are known the moment they say hello
+// with a join secret admit accepts; a lost connection forgets the worker
+// until it dials again.
 type Pool struct {
-	mu sync.Mutex
-	m  map[string]*Remote
+	mu    sync.Mutex
+	m     map[string]*Remote
+	admit func(secret string) bool
 }
 
-func NewPool() *Pool { return &Pool{m: map[string]*Remote{}} }
+func NewPool(admit func(secret string) bool) *Pool {
+	return &Pool{m: map[string]*Remote{}, admit: admit}
+}
 
 func (p *Pool) Add(r *Remote) {
 	p.mu.Lock()
@@ -63,13 +67,17 @@ func (p *Pool) Listen(ctx context.Context, addr string) error {
 		if err != nil {
 			return err
 		}
-		go p.admit(conn)
+		go p.serve(conn)
 	}
 }
 
-func (p *Pool) admit(conn net.Conn) {
-	r, err := Connect(conn)
+// serve holds one worker from hello to hangup. A refused hello is told why
+// before the close, so the worker's log says it and not just EOF.
+func (p *Pool) serve(conn net.Conn) {
+	r, err := Connect(conn, p.admit)
 	if err != nil {
+		log.Printf("worker from %s refused: %v", conn.RemoteAddr(), err)
+		_ = worker.Encode(conn, worker.Frame{Header: worker.Header{Kind: worker.Error}, Body: []byte(err.Error())})
 		_ = conn.Close()
 		return
 	}

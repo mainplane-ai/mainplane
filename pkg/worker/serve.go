@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -15,10 +16,12 @@ import (
 	"time"
 )
 
-// Local is what this machine offers: its name, where spilled output lands, and
-// which interpreters it has. The first interpreter is the default.
+// Local is what this machine offers: its name, the join secret that lets it
+// in, where spilled output lands, and which interpreters it has. The first
+// interpreter is the default.
 type Local struct {
 	Name    string
+	Secret  string
 	Scratch string
 	Interps []string
 }
@@ -34,15 +37,20 @@ type server struct {
 
 // Serve answers one harness until the connection ends, then kills every
 // environment. Each request runs in its own goroutine; runs that share an
-// environment queue on it.
+// environment queue on it. The hello carries the secret as its body, so no
+// list of hellos shows it. An error frame with no id is the harness ending
+// the connection on purpose, and its text is the error.
 func Serve(conn net.Conn, l Local) error {
 	s := &server{Local: l, conn: conn, envs: map[string]*env{}, dead: map[string]bool{}}
-	if err := s.send(Frame{Header: Header{Kind: Hello, Name: l.Name, OS: runtime.GOOS, Arch: runtime.GOARCH, Interps: l.Interps, Scratch: l.Scratch}}); err != nil {
+	if err := s.send(Frame{Header: Header{Kind: Hello, Name: l.Name, OS: runtime.GOOS, Arch: runtime.GOARCH, Interps: l.Interps, Scratch: l.Scratch}, Body: []byte(l.Secret)}); err != nil {
 		return err
 	}
 	br := bufio.NewReader(conn)
 	for {
 		f, err := Decode(br)
+		if err == nil && f.Kind == Error && f.ID == "" {
+			err = errors.New(string(f.Body))
+		}
 		if err != nil {
 			s.emu.Lock()
 			for _, e := range s.envs {

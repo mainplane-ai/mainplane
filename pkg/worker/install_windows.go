@@ -12,17 +12,17 @@ import (
 // ends only cmd, so the worker it started is stopped by name. A cmdlet error
 // is not an exit code unless it stops the script.
 const task = `$ErrorActionPreference = 'Stop'
-$a = New-ScheduledTaskAction -Execute cmd -Argument '/c ""%s" mainplaned %s %s >> "%s" 2>&1"'
+$a = New-ScheduledTaskAction -Execute cmd -Argument '/c ""%s" worker %s >> "%s" 2>&1"'
 $t = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 Register-ScheduledTask -TaskName mainplaned -Action $a -Trigger $t -Settings $s -Force | Out-Null
 Stop-ScheduledTask -TaskName mainplaned
-Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%% mainplaned %%' AND ProcessId != $PID" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%% worker mp_%%' AND ProcessId != $PID" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 Start-ScheduledTask -TaskName mainplaned`
 
 // Install makes this machine a worker at every logon: a scheduled task running
 // this binary as the operator. Logs are in ~/.mainplane/mainplaned.log.
-func Install(name, addr string) error {
+func Install(token string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -35,5 +35,5 @@ func Install(name, addr string) error {
 	if err := os.MkdirAll(filepath.Dir(log), 0o755); err != nil {
 		return err
 	}
-	return run("powershell", "-NoProfile", "-Command", fmt.Sprintf(task, exe, name, addr, log))
+	return run("powershell", "-NoProfile", "-Command", fmt.Sprintf(task, exe, token, log))
 }

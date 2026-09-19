@@ -1,17 +1,20 @@
 // mainplane is the device binary: the worker, and the plainest connector.
 //
-//	mainplane mainplaned <name> <harness host:port>    make this machine a worker
-//	mainplane install    <name> <harness host:port>    and again at every boot
-//	mainplane <verb> <url> ...                         one verb per harness route, see cli.go
+//	mainplane worker  <join token>    make this machine a worker, named by its hostname
+//	mainplane install <join token>    and again at every boot
+//	mainplane login   <api key>       remember the harness and the key in ~/.mainplane/login.json
+//	mainplane <verb> ...              one verb per harness route, see cli.go
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"runtime"
 
+	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
@@ -20,44 +23,73 @@ func main() {
 		usage()
 	}
 	switch os.Args[1] {
-	case "mainplaned", "install":
-		if len(os.Args) != 4 {
+	case "worker", "install":
+		if len(os.Args) != 3 {
 			usage()
 		}
-		name, addr := os.Args[2], os.Args[3]
+		addr, secret, err := auth.Parse(auth.Join, os.Args[2])
+		if err != nil {
+			log.Fatal(err)
+		}
 		if os.Args[1] == "install" {
-			if err := worker.Install(name, addr); err != nil {
+			if err := worker.Install(os.Args[2]); err != nil {
 				log.Fatal(err)
 			}
 			return
 		}
-		home, err := os.UserHomeDir()
+		name, err := os.Hostname()
 		if err != nil {
 			log.Fatal(err)
 		}
-		worker.Dial(addr, worker.Local{Name: name, Scratch: filepath.Join(home, ".mainplane"), Interps: worker.Default[runtime.GOOS]})
+		worker.Dial(addr, worker.Local{Name: name, Secret: secret, Scratch: filepath.Join(home(), ".mainplane"), Interps: worker.Default[runtime.GOOS]})
+	case "login":
+		if len(os.Args) != 3 {
+			usage()
+		}
+		url, key, err := auth.Parse(auth.Key, os.Args[2])
+		if err != nil {
+			log.Fatal(err)
+		}
+		b, _ := json.Marshal(client{URL: url, Key: key})
+		if err := os.MkdirAll(filepath.Dir(loginPath()), 0o755); err != nil {
+			log.Fatal(err)
+		}
+		if err := os.WriteFile(loginPath(), b, 0o600); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(url)
 	default:
 		cli(os.Args[1], os.Args[2:])
 	}
 }
 
+func home() string {
+	h, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatal(err)
+	}
+	return h
+}
+
+func loginPath() string { return filepath.Join(home(), ".mainplane", "login.json") }
+
 func usage() {
 	fmt.Fprint(os.Stderr, `usage: mainplane <verb> ...
 
-  mainplaned <name> <harness host:port>   make this machine a worker
-  install    <name> <harness host:port>   and again at every boot
+  worker     <join token>            make this machine a worker, named by its hostname
+  install    <join token>            and again at every boot
+  login      <api key>               remember the harness and the key; every verb below uses them
 
-  every verb below takes the harness url first, as http://host:port
-  new        <url>                        POST /sessions, body from stdin: {"model","context","workers"} or {"from","n"}
-  message    <url> <id> <text> [file...]  POST /sessions/{id}/records, one record per part
-  tail       <url> <id> [after]           GET  /sessions/{id}/records, rendered
-  chat       <url> <id>                   tail that follows; every stdin line is a message
-  retry      <url> <id>                   POST /sessions/{id}/retry, step a failed or idle session from its tip
-  stop       <url> <id>                   POST /sessions/{id}/stop
-  info       <url> <id>                   GET  /sessions/{id}
-  sessions   <url> [status]               GET  /sessions
-  workers    <url>                        GET  /workers
-  providers  <url>                        GET  /providers
+  new                                POST /sessions, body from stdin: {"model","context","workers"} or {"from","n"}
+  message    <id> <text> [file...]   POST /sessions/{id}/records, one record per part
+  tail       <id> [after]            GET  /sessions/{id}/records, rendered
+  chat       <id>                    tail that follows; every stdin line is a message
+  retry      <id>                    POST /sessions/{id}/retry, step a failed or idle session from its tip
+  stop       <id>                    POST /sessions/{id}/stop
+  info       <id>                    GET  /sessions/{id}
+  sessions   [status]                GET  /sessions
+  workers                            GET  /workers
+  providers                          GET  /providers
 `)
 	os.Exit(2)
 }

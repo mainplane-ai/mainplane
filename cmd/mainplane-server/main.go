@@ -1,6 +1,10 @@
-// mainplane-server is the server binary: one subcommand per role.
+// mainplane-server is the server binary: the harness, and the credentials
+// that reach it. A new key or join prints its token once; the table holds
+// only hashes.
 //
-//	mainplane-server harness <config.json>
+//	mainplane-server up   <config.json>
+//	mainplane-server key  <config.json> new <name> | revoke <name> | list
+//	mainplane-server join <config.json> new <name> | revoke <name> | list
 package main
 
 import (
@@ -11,21 +15,62 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/server"
 )
 
 func main() {
-	if len(os.Args) != 3 || os.Args[1] != "harness" {
-		fmt.Fprintln(os.Stderr, "usage: mainplane-server harness <config.json>")
-		os.Exit(2)
+	if len(os.Args) < 3 {
+		usage()
 	}
 	c, err := server.Load(os.Args[2])
+	fatal(err)
+	switch verb, args := os.Args[1], os.Args[3:]; {
+	case verb == "up" && len(args) == 0:
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		fatal(server.Harness(ctx, c))
+	case verb == auth.Key || verb == auth.Join:
+		table(c, verb, args)
+	default:
+		usage()
+	}
+}
+
+func table(c server.Config, kind string, args []string) {
+	store := c.Auth()
+	switch {
+	case len(args) == 2 && args[0] == "new":
+		addr, err := c.Address(kind)
+		fatal(err)
+		secret, err := store.Issue(kind, args[1])
+		fatal(err)
+		fmt.Println(auth.Token(kind, addr, secret))
+	case len(args) == 2 && args[0] == "revoke":
+		fatal(store.Revoke(kind, args[1]))
+	case len(args) == 1 && args[0] == "list":
+		t, err := store.Load()
+		fatal(err)
+		for _, e := range t[kind] {
+			fmt.Println(e.Name)
+		}
+	default:
+		usage()
+	}
+}
+
+func fatal(err error) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err := server.Harness(ctx, c); err != nil {
-		log.Fatal(err)
-	}
+}
+
+func usage() {
+	fmt.Fprint(os.Stderr, `usage: mainplane-server <verb> <config.json> ...
+
+  up                                  run the harness
+  key   new <name> | revoke <name> | list   api keys: what a connector needs to call the harness
+  join  new <name> | revoke <name> | list   join secrets: what a machine needs to become a worker
+`)
+	os.Exit(2)
 }

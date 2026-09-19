@@ -18,7 +18,7 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>%s</string>
-<key>ProgramArguments</key><array><string>%s</string><string>mainplaned</string><string>%s</string><string>%s</string></array>
+<key>ProgramArguments</key><array><string>%s</string><string>worker</string><string>%s</string></array>
 <key>UserName</key><string>%s</string>
 <key>EnvironmentVariables</key><dict><key>HOME</key><string>%s</string></dict>
 <key>RunAtLoad</key><true/>
@@ -30,7 +30,7 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
 
 // Install makes this machine a worker at every boot: a LaunchDaemon running
 // this binary as the operator. Logs are in ~/.mainplane/mainplaned.log.
-func Install(name, addr string) error {
+func Install(token string) error {
 	exe, u, err := operator()
 	if err != nil {
 		return err
@@ -46,7 +46,7 @@ func Install(name, addr string) error {
 	}
 	log := filepath.Join(scratch, "mainplaned.log")
 	_ = run("launchctl", "bootout", "system/"+label)
-	if err := os.WriteFile(plistPath, fmt.Appendf(nil, plist, label, exe, name, addr, u.Username, u.HomeDir, log, log), 0o644); err != nil {
+	if err := os.WriteFile(plistPath, fmt.Appendf(nil, plist, label, exe, token, u.Username, u.HomeDir, log, log), 0o644); err != nil {
 		return err
 	}
 	return run("launchctl", "bootstrap", "system", plistPath)
