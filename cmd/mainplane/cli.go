@@ -28,26 +28,29 @@ const via = "cli"
 // resultLines is how much of a result chat and tail show before the count.
 const resultLines = 20
 
-// arity is how many arguments each verb takes after the url, least and most;
-// -1 is any number.
+// arity is how many arguments each verb takes, least and most; -1 is any
+// number.
 var arity = map[string][2]int{
 	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {1, 1}, "retry": {1, 1}, "stop": {1, 1},
 	"info": {1, 1}, "sessions": {0, 1}, "workers": {0, 0}, "providers": {0, 0},
 }
 
 // cli is the harness API as verbs: one verb, one route, its reply printed.
-// Nothing is remembered between runs, nothing is defaulted, and a reply the
-// harness refuses is printed as it came and exits 1. The command line is
-// checked whole before the harness is asked anything.
+// The harness and the key come from login; nothing else is remembered or
+// defaulted, and a reply the harness refuses is printed as it came and exits
+// 1. The command line is checked whole before the harness is asked anything.
 func cli(verb string, args []string) {
 	a, ok := arity[verb]
-	if !ok || len(args) == 0 || !strings.HasPrefix(args[0], "http://") && !strings.HasPrefix(args[0], "https://") {
+	if !ok || len(args) < a[0] || a[1] >= 0 && len(args) > a[1] {
 		usage()
 	}
-	c := client{strings.TrimSuffix(args[0], "/")}
-	args = args[1:]
-	if len(args) < a[0] || a[1] >= 0 && len(args) > a[1] {
-		usage()
+	b, err := os.ReadFile(loginPath())
+	if err != nil {
+		die(fmt.Errorf("not logged in: mainplane login <api key>"))
+	}
+	var c client
+	if err := json.Unmarshal(b, &c); err != nil {
+		die(err)
 	}
 	c.version()
 	switch verb {
@@ -91,15 +94,20 @@ func cli(verb string, args []string) {
 	}
 }
 
-type client struct{ url string }
+// client is what login wrote: the harness and the api key's secret.
+type client struct {
+	URL string `json:"url"`
+	Key string `json:"key"`
+}
 
 // call does one request. A status outside 2xx is the harness's own words on
 // stderr and exit 1. A JSON reply lands in out when out is given.
 func (c client) call(method, path, ctype string, body io.Reader, out any) *http.Response {
-	req, err := http.NewRequest(method, c.url+path, body)
+	req, err := http.NewRequest(method, c.URL+path, body)
 	if err != nil {
 		die(err)
 	}
+	req.Header.Set("Authorization", "Bearer "+c.Key)
 	if ctype != "" {
 		req.Header.Set("Content-Type", ctype)
 	}

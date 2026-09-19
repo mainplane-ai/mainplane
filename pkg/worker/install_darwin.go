@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 )
 
 const (
@@ -18,7 +17,7 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>%s</string>
-<key>ProgramArguments</key><array><string>%s</string><string>mainplaned</string><string>%s</string><string>%s</string></array>
+<key>ProgramArguments</key><array><string>%s</string><string>worker</string></array>
 <key>UserName</key><string>%s</string>
 <key>EnvironmentVariables</key><dict><key>HOME</key><string>%s</string></dict>
 <key>RunAtLoad</key><true/>
@@ -30,23 +29,14 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
 
 // Install makes this machine a worker at every boot: a LaunchDaemon running
 // this binary as the operator. Logs are in ~/.mainplane/mainplaned.log.
-func Install(name, addr string) error {
-	exe, u, err := operator()
+func Install(token string) error {
+	exe, u, err := operator(token)
 	if err != nil {
 		return err
 	}
-	uid, _ := strconv.Atoi(u.Uid)
-	gid, _ := strconv.Atoi(u.Gid)
-	scratch := filepath.Join(u.HomeDir, ".mainplane")
-	if err := os.MkdirAll(scratch, 0o755); err != nil {
-		return err
-	}
-	if err := os.Lchown(scratch, uid, gid); err != nil {
-		return err
-	}
-	log := filepath.Join(scratch, "mainplaned.log")
+	log := filepath.Join(filepath.Dir(JoinPath(u.HomeDir)), "mainplaned.log")
 	_ = run("launchctl", "bootout", "system/"+label)
-	if err := os.WriteFile(plistPath, fmt.Appendf(nil, plist, label, exe, name, addr, u.Username, u.HomeDir, log, log), 0o644); err != nil {
+	if err := os.WriteFile(plistPath, fmt.Appendf(nil, plist, label, exe, u.Username, u.HomeDir, log, log), 0o644); err != nil {
 		return err
 	}
 	return run("launchctl", "bootstrap", "system", plistPath)

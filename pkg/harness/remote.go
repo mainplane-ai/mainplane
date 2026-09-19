@@ -33,8 +33,9 @@ type Remote struct {
 	done  chan struct{}            // closed when the connection ends
 }
 
-// Connect reads the worker's hello and starts routing its replies.
-func Connect(conn net.Conn) (*Remote, error) {
+// Connect reads the worker's hello, checks the join secret in its body with
+// admit, and starts routing its replies.
+func Connect(conn net.Conn, admit func(secret string) bool) (*Remote, error) {
 	br := bufio.NewReader(conn)
 	hello, err := worker.Decode(br)
 	if err != nil {
@@ -42,6 +43,9 @@ func Connect(conn net.Conn) (*Remote, error) {
 	}
 	if hello.Kind != worker.Hello {
 		return nil, fmt.Errorf("first frame is %q, want hello", hello.Kind)
+	}
+	if !admit(string(hello.Body)) {
+		return nil, errors.New("join secret refused")
 	}
 	r := &Remote{Header: hello.Header, conn: conn, calls: map[string]chan worker.Frame{}, left: map[string]chan struct{}{}, done: make(chan struct{})}
 	go r.recv(br)

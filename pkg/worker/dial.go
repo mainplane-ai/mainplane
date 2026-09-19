@@ -21,16 +21,21 @@ const (
 var Default = map[string][]string{"windows": {"pwsh"}, "linux": {"bash"}, "darwin": {"bash"}}
 
 // Dial makes this machine a worker of the harness at addr: connect, serve
-// until the connection ends, connect again. It never returns.
+// until the connection ends, connect again. It never returns. A connection
+// that ends within the longest wait, as a refused hello does, keeps the
+// backoff; only one that held resets it.
 func Dial(addr string, l Local) {
 	wait := redialMin
 	for {
 		conn, err := net.DialTimeout("tcp", addr, dialTimeout)
 		if err == nil {
 			log.Printf("connected to %s as %s", addr, l.Name)
-			wait = redialMin
+			start := time.Now()
 			err = Serve(conn, l)
 			_ = conn.Close()
+			if time.Since(start) > redialMax {
+				wait = redialMin
+			}
 		}
 		log.Printf("%v, redial in %s", err, wait)
 		time.Sleep(wait)
