@@ -20,6 +20,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -56,6 +57,9 @@ func (s Store) Load() (Table, error) {
 func (s Store) save(t Table) error {
 	b, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
 		return err
 	}
 	return os.WriteFile(s.Path, b, 0o600)
@@ -128,7 +132,7 @@ func Parse(kind, token string) (addr, secret string, err error) {
 	rest, ok := strings.CutPrefix(token, "mp_"+kind+"_")
 	enc, secret, dot := strings.Cut(rest, ".")
 	b, derr := base64.RawURLEncoding.DecodeString(enc)
-	if !ok || !dot || derr != nil {
+	if !ok || !dot || derr != nil || enc == "" || secret == "" {
 		return "", "", fmt.Errorf("not a %s token", kind)
 	}
 	return string(b), secret, nil

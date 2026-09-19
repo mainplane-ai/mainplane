@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -32,6 +33,9 @@ func (c Config) Auth() auth.Store { return auth.Store{Path: filepath.Join(c.Admi
 
 // Address is what a token of kind carries: where its holder reaches this harness.
 func (c Config) Address(kind string) (string, error) {
+	if c.Host == "" {
+		return "", errors.New("config needs host: the name this box is reached by")
+	}
 	_, port, err := net.SplitHostPort(map[string]string{auth.Key: c.HTTP, auth.Join: c.Workers}[kind])
 	if err != nil {
 		return "", err

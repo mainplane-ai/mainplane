@@ -1,7 +1,7 @@
 // mainplane is the device binary: the worker, and the plainest connector.
 //
-//	mainplane worker  <join token>    make this machine a worker, named by its hostname
-//	mainplane install <join token>    and again at every boot
+//	mainplane worker  [join token]    make this machine a worker, named by its hostname
+//	mainplane install <join token>    and again at every boot; the token goes in ~/.mainplane/join
 //	mainplane login   <api key>       remember the harness and the key in ~/.mainplane/login.json
 //	mainplane <verb> ...              one verb per harness route, see cli.go
 package main
@@ -24,15 +24,25 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "worker", "install":
-		if len(os.Args) != 3 {
+		if len(os.Args) > 3 || os.Args[1] == "install" && len(os.Args) != 3 {
 			usage()
 		}
-		addr, secret, err := auth.Parse(auth.Join, os.Args[2])
+		token := ""
+		if len(os.Args) == 3 {
+			token = os.Args[2]
+		} else {
+			b, err := os.ReadFile(worker.JoinPath(home()))
+			if err != nil {
+				log.Fatal("no join token: mainplane worker <join token>, or mainplane install <join token> once")
+			}
+			token = string(b)
+		}
+		addr, secret, err := auth.Parse(auth.Join, token)
 		if err != nil {
 			log.Fatal(err)
 		}
 		if os.Args[1] == "install" {
-			if err := worker.Install(os.Args[2]); err != nil {
+			if err := worker.Install(token); err != nil {
 				log.Fatal(err)
 			}
 			return
@@ -76,8 +86,8 @@ func loginPath() string { return filepath.Join(home(), ".mainplane", "login.json
 func usage() {
 	fmt.Fprint(os.Stderr, `usage: mainplane <verb> ...
 
-  worker     <join token>            make this machine a worker, named by its hostname
-  install    <join token>            and again at every boot
+  worker     [join token]            make this machine a worker, named by its hostname; no token reads the installed one
+  install    <join token>            and again at every boot; the token goes in ~/.mainplane/join
   login      <api key>               remember the harness and the key; every verb below uses them
 
   new                                POST /sessions, body from stdin: {"model","context","workers"} or {"from","n"}
