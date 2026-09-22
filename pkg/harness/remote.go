@@ -20,6 +20,10 @@ import (
 // most a hung command costs before its environment is reset.
 const runTimeout = 10 * time.Minute
 
+// updateTimeout bounds a worker's answer to an update, which it gives after
+// downloading a binary of megabytes on whatever link it has.
+const updateTimeout = 10 * time.Minute
+
 // Remote is a worker on the far end of a connection. Its hello header says
 // what it is. Requests are multiplexed by id; a call waits for its terminal
 // frame, the connection's end, or ctx: the worker's timeout bounds a run, and
@@ -35,8 +39,10 @@ type Remote struct {
 }
 
 // Connect reads the worker's hello, checks the join secret in its body with
-// admit, refuses a worker from another release, and starts routing its
-// replies.
+// admit, and starts routing its replies. A worker from another release is
+// told to update to this one and refused: it comes back as this release, and
+// the error says whether the update began or why it failed. That worker is
+// returned with the error, so the pool can list it.
 func Connect(conn net.Conn, admit func(secret string) bool) (*Remote, error) {
 	br := bufio.NewReader(conn)
 	hello, err := worker.Decode(br)
@@ -49,12 +55,31 @@ func Connect(conn net.Conn, admit func(secret string) bool) (*Remote, error) {
 	if !admit(string(hello.Body)) {
 		return nil, errors.New("join secret refused")
 	}
-	if !version.Match(hello.Version) {
-		return nil, fmt.Errorf("worker is version %s, harness is %s: install the worker from release %s", hello.Version, version.V, version.V)
-	}
 	r := &Remote{Header: hello.Header, conn: conn, calls: map[string]chan worker.Frame{}, left: map[string]chan struct{}{}, done: make(chan struct{})}
+	if !version.Match(hello.Version) {
+		return r, fmt.Errorf("worker is version %s, harness is %s: %w", hello.Version, version.V, update(conn, br))
+	}
 	go r.recv(br)
 	return r, nil
+}
+
+// update tells a worker to become this release and waits for its answer. The
+// worker downloads before it answers, so the wait is the download's.
+func update(conn net.Conn, br *bufio.Reader) error {
+	if err := conn.SetDeadline(time.Now().Add(updateTimeout)); err != nil {
+		return err
+	}
+	if err := worker.Encode(conn, worker.Frame{Header: worker.Header{Kind: worker.Update, Version: version.V}}); err != nil {
+		return err
+	}
+	f, err := worker.Decode(br)
+	if err != nil {
+		return fmt.Errorf("update: %w", err)
+	}
+	if f.Kind != worker.Done {
+		return fmt.Errorf("update failed: %s", f.Body)
+	}
+	return errors.New("updated, restarting")
 }
 
 func (r *Remote) recv(br *bufio.Reader) {

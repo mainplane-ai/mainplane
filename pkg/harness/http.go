@@ -36,7 +36,8 @@ const MaxPost = 8 << 20
 //	POST /sessions/{id}/retry         step from the tip, whatever it is            -> {"status"}
 //	POST /sessions/{id}/stop          ?via= required. cut the step, write it       -> 204; the records
 //	                                  down                                            say what happened
-//	GET  /workers                     -> connected workers' hellos
+//	GET  /workers                     -> connected workers' hellos, and refused
+//	                                     ones with the reason
 //	GET  /providers                   -> names this harness can serve as provider/model
 //	GET  /                            -> {"version"}
 //

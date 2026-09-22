@@ -4,15 +4,22 @@ package worker
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 )
 
 // Bin is the binary the service runs. It and the state directory are root's:
 // code that runs as the operator cannot replace the service or read its token.
 const Bin = "/usr/local/bin/mainplane"
+
+// sudoers are the groups sudo lets act as root on Debian, Fedora, and macOS.
+// Code runs as the operator, so an operator in one can become root, and
+// install says so instead of letting the root service suggest otherwise.
+var sudoers = []string{"sudo", "wheel", "admin"}
 
 // Installed is what install left for the service: the join token and the
 // operator, the user code runs as.
@@ -61,5 +68,17 @@ func setup(token string) error {
 	uid, _ := strconv.Atoi(u.Uid)
 	gid, _ := strconv.Atoi(u.Gid)
 	_ = os.Remove(filepath.Join(scratch, "join"))
-	return os.Lchown(scratch, uid, gid)
+	if err := os.Lchown(scratch, uid, gid); err != nil {
+		return err
+	}
+	ids, err := u.GroupIds()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if g, err := user.LookupGroupId(id); err == nil && slices.Contains(sudoers, g.Name) {
+			fmt.Printf("note: %s is in group %s, so code on this worker can use sudo to act as root\n", name, g.Name)
+		}
+	}
+	return nil
 }
