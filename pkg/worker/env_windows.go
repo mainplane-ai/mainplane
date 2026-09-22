@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"log"
 	"os"
 	"os/exec"
 	"os/user"
@@ -17,4 +18,16 @@ func prepare(cmd *exec.Cmd, _ *user.User) error {
 // Windows has no process groups to signal; taskkill walks the tree.
 func killTree(p *os.Process) {
 	_ = exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(p.Pid)).Run()
+}
+
+// restart starts the new binary with the same arguments on this worker's log,
+// then exits: Windows cannot replace a running process, and the logon task
+// does not start the worker again.
+func restart(exe string) {
+	c := exec.Command(exe, os.Args[1:]...)
+	c.Stdout, c.Stderr = os.Stdout, os.Stderr
+	if err := c.Start(); err != nil {
+		log.Fatalf("start %s: %v", exe, err)
+	}
+	os.Exit(0)
 }

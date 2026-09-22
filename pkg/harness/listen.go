@@ -47,7 +47,7 @@ func (p *Pool) Get(name string) (*Remote, bool) {
 	return r, ok
 }
 
-// List is every connected worker and every refused one not connected since,
+// List is every connected worker and every refused one not connected now,
 // sorted by name.
 func (p *Pool) List() []Listed {
 	p.mu.Lock()
@@ -56,8 +56,10 @@ func (p *Pool) List() []Listed {
 	for _, r := range p.m {
 		out = append(out, Listed{Header: r.Header})
 	}
-	for _, l := range p.refused {
-		out = append(out, l)
+	for name, l := range p.refused {
+		if _, ok := p.m[name]; !ok {
+			out = append(out, l)
+		}
 	}
 	slices.SortFunc(out, func(a, b Listed) int { return strings.Compare(a.Name, b.Name) })
 	return out
@@ -94,9 +96,7 @@ func (p *Pool) serve(conn net.Conn) {
 		if r != nil {
 			who = r.Name + " at " + who
 			p.mu.Lock()
-			if _, ok := p.m[r.Name]; !ok {
-				p.refused[r.Name] = Listed{Header: r.Header, Refused: err.Error()}
-			}
+			p.refused[r.Name] = Listed{Header: r.Header, Refused: err.Error()}
 			p.mu.Unlock()
 		}
 		log.Printf("worker %s refused: %v", who, err)

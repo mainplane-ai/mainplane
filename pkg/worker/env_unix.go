@@ -4,6 +4,7 @@ package worker
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"os/user"
@@ -48,3 +49,9 @@ func prepare(cmd *exec.Cmd, op *user.User) error {
 }
 
 func killTree(p *os.Process) { _ = syscall.Kill(-p.Pid, syscall.SIGKILL) }
+
+// restart becomes the new binary in place, same pid and arguments, so a
+// service and a worker started by hand both come back as the new release.
+func restart(exe string) {
+	log.Fatal(syscall.Exec(exe, os.Args, os.Environ()))
+}

@@ -6,9 +6,9 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -86,7 +86,10 @@ func update(v string) (string, error) {
 	if err := os.Rename(exe, exe+".old"); err != nil {
 		return "", err
 	}
-	return exe, os.Rename(exe+".new", exe)
+	if err := os.Rename(exe+".new", exe); err != nil {
+		return "", errors.Join(err, os.Rename(exe+".old", exe))
+	}
+	return exe, nil
 }
 
 func fetch(path string) ([]byte, error) {
@@ -100,19 +103,4 @@ func fetch(path string) ([]byte, error) {
 		return nil, fmt.Errorf("%s%s: %s", dl, path, resp.Status)
 	}
 	return io.ReadAll(resp.Body)
-}
-
-// restart ends this worker so the new binary serves. systemd and launchd
-// start the service again when it exits; the Windows logon task does not, so
-// there the worker starts its successor on its own log first.
-func restart(exe string) {
-	log.Printf("updated, restarting as %s", exe)
-	if runtime.GOOS == "windows" {
-		c := exec.Command(exe, "worker")
-		c.Stdout, c.Stderr = os.Stdout, os.Stderr
-		if err := c.Start(); err != nil {
-			log.Fatalf("start %s: %v", exe, err)
-		}
-	}
-	os.Exit(0)
 }

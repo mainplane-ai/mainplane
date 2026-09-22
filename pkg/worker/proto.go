@@ -21,7 +21,8 @@ const (
 
 // Kinds. The first five go harness to worker; the rest come back. Hello,
 // update, and the done or error that answers an update are the contract every
-// version keeps: they are how a worker of another release becomes this one.
+// version from v0.1.0 keeps: they are how a worker of another release becomes
+// this one. Workers from before it do not know update and are reinstalled.
 const (
 	Run    = "run"
 	Read   = "read"

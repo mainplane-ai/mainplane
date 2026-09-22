@@ -21,8 +21,8 @@ import (
 const runTimeout = 10 * time.Minute
 
 // updateTimeout bounds a worker's answer to an update, which it gives after
-// downloading a binary of megabytes on whatever link it has.
-const updateTimeout = 10 * time.Minute
+// three downloads of up to five minutes each.
+const updateTimeout = 20 * time.Minute
 
 // Remote is a worker on the far end of a connection. Its hello header says
 // what it is. Requests are multiplexed by id; a call waits for its terminal
