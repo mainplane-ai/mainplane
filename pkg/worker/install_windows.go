@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 )
 
 // Until the Windows service lands the install is the user's own: no admin,
@@ -66,5 +67,7 @@ func Install(token string) error {
 	if err := os.WriteFile(filepath.Join(dir, "join"), []byte(token), 0o600); err != nil {
 		return err
 	}
-	return run("powershell", "-NoProfile", "-Command", fmt.Sprintf(task, bin, filepath.Join(dir, "mainplaned.log")))
+	// the paths sit in a single-quoted string, where a quote is doubled
+	q := strings.NewReplacer("'", "''")
+	return run("powershell", "-NoProfile", "-Command", fmt.Sprintf(task, q.Replace(bin), q.Replace(filepath.Join(dir, "mainplaned.log"))))
 }

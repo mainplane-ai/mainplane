@@ -3,6 +3,7 @@
 package worker
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"os/user"
@@ -25,19 +26,22 @@ func prepare(cmd *exec.Cmd, op *user.User) error {
 	if err != nil {
 		return err
 	}
-	groups := make([]uint32, len(ids))
-	for i, id := range ids {
-		n, _ := strconv.ParseUint(id, 10, 32)
-		groups[i] = uint32(n)
+	// Every id is checked: one read as zero would be root's.
+	nums := make([]uint32, len(ids)+2)
+	for i, id := range append([]string{op.Uid, op.Gid}, ids...) {
+		n, err := strconv.ParseUint(id, 10, 32)
+		if err != nil {
+			return fmt.Errorf("operator %s: %w", op.Username, err)
+		}
+		nums[i] = uint32(n)
 	}
+	groups := nums[2:]
 	// macOS refuses more than 16 groups, and a Mac user is in about as many;
 	// past 16 only its membership daemon answers, which exec cannot ask for.
 	if runtime.GOOS == "darwin" {
 		groups = groups[:min(len(groups), 16)]
 	}
-	uid, _ := strconv.ParseUint(op.Uid, 10, 32)
-	gid, _ := strconv.ParseUint(op.Gid, 10, 32)
-	cmd.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid), Groups: groups}
+	cmd.SysProcAttr.Credential = &syscall.Credential{Uid: nums[0], Gid: nums[1], Groups: groups}
 	cmd.Dir = op.HomeDir
 	cmd.Env = []string{"HOME=" + op.HomeDir, "USER=" + op.Username, "LOGNAME=" + op.Username, "PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}
 	return nil

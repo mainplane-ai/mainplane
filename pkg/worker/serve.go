@@ -142,12 +142,15 @@ func (s *server) run(f Frame) (Frame, error) {
 		alive = false
 	}
 	s.release(key, e, alive)
-	full := sp.close()
+	full, cerr := sp.close()
 	if ctx.Err() != nil {
 		return Frame{}, fmt.Errorf("timed out after %ds, environment was reset", f.Timeout)
 	}
 	if err != nil {
 		return Frame{}, err
+	}
+	if cerr != nil {
+		return Frame{}, cerr
 	}
 	return Frame{Header: Header{Kind: Result, Exit: exit, Full: full}}, nil
 }
@@ -235,10 +238,10 @@ func (s *spill) add(b []byte) error {
 }
 
 // close returns the file's path, or nothing when the output stayed in memory.
-func (s *spill) close() string {
+// A file that could not be finished is an error, not a path to half of it.
+func (s *spill) close() (string, error) {
 	if s.f == nil {
-		return ""
+		return "", nil
 	}
-	_ = s.f.Close()
-	return s.path
+	return s.path, s.f.Close()
 }

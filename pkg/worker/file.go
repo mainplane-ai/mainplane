@@ -37,10 +37,7 @@ func (s *server) read(path string) ([]byte, error) {
 // the operator may not make comes from Close.
 func (s *server) create(path string) (io.WriteCloser, error) {
 	if s.Operator == nil {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return nil, err
-		}
-		return os.Create(path)
+		return createFile(path)
 	}
 	cmd, err := s.file("write", path)
 	if err != nil {
@@ -100,10 +97,7 @@ func File(op, path string) error {
 		_, err = io.Copy(os.Stdout, f)
 		return err
 	case "write":
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return err
-		}
-		f, err := os.Create(path)
+		f, err := createFile(path)
 		if err != nil {
 			return err
 		}
@@ -114,4 +108,13 @@ func File(op, path string) error {
 		return f.Close()
 	}
 	return fmt.Errorf("file: unknown op %q", op)
+}
+
+// createFile makes path's directory and opens path for writing, 0644 as the
+// worker's writes have always been.
+func createFile(path string) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 }
