@@ -26,6 +26,9 @@ func Install(c Config) error {
 		}
 		c.Providers[name] = p
 	}
+	if _, err := providers(c.Providers); err != nil {
+		return err
+	}
 	if !filepath.IsAbs(c.Admin) {
 		c.Admin = filepath.Join(Dir, c.Admin)
 	}
@@ -46,7 +49,8 @@ func Install(c Config) error {
 }
 
 // place copies this binary to bin through a new file and a rename: a running
-// binary can be replaced but not written. Installing from bin leaves it.
+// binary can be replaced but not written. Installing from bin leaves it. The
+// mode is set apart from the write, which the installer's umask would narrow.
 func place() error {
 	exe, err := os.Executable()
 	if err != nil || exe == bin {
@@ -60,6 +64,9 @@ func place() error {
 		return err
 	}
 	if err := os.WriteFile(bin+".new", b, 0o755); err != nil {
+		return err
+	}
+	if err := os.Chmod(bin+".new", 0o755); err != nil {
 		return err
 	}
 	return os.Rename(bin+".new", bin)

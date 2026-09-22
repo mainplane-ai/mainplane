@@ -36,12 +36,16 @@ var (
 
 // prepare stops a running harness and makes Dir, which only SYSTEM and
 // Administrators may read: the config in it holds the provider keys, and
-// ProgramData lets every user read by default.
+// ProgramData lets every user read by default. The reset drops every entry an
+// earlier install or someone else left, so only the two grants remain.
 func prepare() error {
 	if err := run("powershell", "-NoProfile", "-Command", stop); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(Dir, 0o700); err != nil {
+		return err
+	}
+	if err := run("icacls", Dir, "/reset", "/T", "/Q"); err != nil {
 		return err
 	}
 	return run("icacls", Dir, "/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F")
