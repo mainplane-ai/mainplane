@@ -3,6 +3,7 @@
 //	mainplane worker  [join token]    make this machine a worker, named by its hostname
 //	mainplane install <join token>    and again at every boot; the token goes in ~/.mainplane/join
 //	mainplane login   <api key>       remember the harness and the key in ~/.mainplane/login.json
+//	mainplane version                 the release this binary was built from
 //	mainplane <verb> ...              one verb per harness route, see cli.go
 package main
 
@@ -15,6 +16,7 @@ import (
 	"runtime"
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
+	"github.com/mainplane-ai/mainplane/pkg/version"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
@@ -68,6 +70,8 @@ func main() {
 			log.Fatal(err)
 		}
 		fmt.Println(url)
+	case "version":
+		fmt.Println(version.V)
 	default:
 		cli(os.Args[1], os.Args[2:])
 	}
@@ -89,6 +93,7 @@ func usage() {
   worker     [join token]            make this machine a worker, named by its hostname; no token reads the installed one
   install    <join token>            and again at every boot; the token goes in ~/.mainplane/join
   login      <api key>               remember the harness and the key; every verb below uses them
+  version                            the release this binary was built from
 
   new                                POST /sessions, body from stdin: {"model","context","workers"} or {"from","n"}
   message    <id> <text> [file...]   POST /sessions/{id}/records, one record per part

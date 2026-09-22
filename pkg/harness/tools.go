@@ -11,6 +11,7 @@ import (
 
 	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
+	"github.com/mainplane-ai/mainplane/pkg/version"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
@@ -122,7 +123,7 @@ func System(model string) string {
 	if s, ok := systems[model]; ok {
 		return s
 	}
-	return fmt.Sprintf(defaultSystem, Version)
+	return fmt.Sprintf(defaultSystem, version.V)
 }
 
 // Worker is the three primitives every worker has, and Kill. Tools are built

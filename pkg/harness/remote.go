@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
+	"github.com/mainplane-ai/mainplane/pkg/version"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
@@ -34,7 +35,8 @@ type Remote struct {
 }
 
 // Connect reads the worker's hello, checks the join secret in its body with
-// admit, and starts routing its replies.
+// admit, refuses a worker from another release, and starts routing its
+// replies.
 func Connect(conn net.Conn, admit func(secret string) bool) (*Remote, error) {
 	br := bufio.NewReader(conn)
 	hello, err := worker.Decode(br)
@@ -46,6 +48,9 @@ func Connect(conn net.Conn, admit func(secret string) bool) (*Remote, error) {
 	}
 	if !admit(string(hello.Body)) {
 		return nil, errors.New("join secret refused")
+	}
+	if !version.Match(hello.Version) {
+		return nil, fmt.Errorf("worker is version %s, harness is %s: install the worker from release %s", hello.Version, version.V, version.V)
 	}
 	r := &Remote{Header: hello.Header, conn: conn, calls: map[string]chan worker.Frame{}, left: map[string]chan struct{}{}, done: make(chan struct{})}
 	go r.recv(br)

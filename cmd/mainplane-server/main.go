@@ -5,6 +5,7 @@
 //	mainplane-server up   <config.json>
 //	mainplane-server key  <config.json> new <name> | revoke <name> | list
 //	mainplane-server join <config.json> new <name> | revoke <name> | list
+//	mainplane-server version
 package main
 
 import (
@@ -17,9 +18,14 @@ import (
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/server"
+	"github.com/mainplane-ai/mainplane/pkg/version"
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "version" {
+		fmt.Println(version.V)
+		return
+	}
 	if len(os.Args) < 3 {
 		usage()
 	}
@@ -71,6 +77,8 @@ func usage() {
   up                                  run the harness
   key   new <name> | revoke <name> | list   api keys: what a connector needs to call the harness
   join  new <name> | revoke <name> | list   join secrets: what a machine needs to become a worker
+
+  mainplane-server version            the release this binary was built from
 `)
 	os.Exit(2)
 }

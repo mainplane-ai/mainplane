@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
+	"github.com/mainplane-ai/mainplane/pkg/version"
 )
 
 // MaxPost bounds one post: a paragraph and a screenshot, typed or pasted by a
@@ -65,7 +66,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		})
 	}
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		reply(w, map[string]string{"version": Version})
+		reply(w, map[string]string{"version": version.V})
 	})
 	mux.HandleFunc("GET /workers", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, h.Workers.List())

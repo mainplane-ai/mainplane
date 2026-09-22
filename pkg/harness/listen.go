@@ -81,7 +81,7 @@ func (p *Pool) serve(conn net.Conn) {
 		_ = conn.Close()
 		return
 	}
-	log.Printf("worker %s connected: %s %s", r.Name, r.OS, r.Arch)
+	log.Printf("worker %s connected: %s %s %s", r.Name, r.OS, r.Arch, r.Version)
 	p.Add(r)
 	<-r.done
 	p.mu.Lock()

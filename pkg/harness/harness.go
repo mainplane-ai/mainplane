@@ -13,9 +13,8 @@ import (
 
 	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
+	"github.com/mainplane-ai/mainplane/pkg/version"
 )
-
-const Version = "dev"
 
 type Harness struct {
 	Sessions  statefile.Sessions
@@ -260,7 +259,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 		_, err := h.append(s, errorRecord("", err.Error()))
 		return statefile.StatusFailed, err
 	}
-	hdr.Kind, hdr.ID, hdr.Upto, hdr.Harness = statefile.Step, stepID, upto, Version
+	hdr.Kind, hdr.ID, hdr.Upto, hdr.Harness = statefile.Step, stepID, upto, version.V
 	if _, err := h.append(s, statefile.Record{Header: hdr}); err != nil {
 		return "", err
 	}
