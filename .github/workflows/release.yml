@@ -42,13 +42,18 @@ jobs:
           done
           [ "$(dist/mainplane-linux-amd64 version)" = "$TAG" ]
           cd dist && sha256sum * > SHA256SUMS
+      # The token is scoped to the bucket, which R2 honors on its S3 API only.
+      # Its S3 key id is the token id and its secret the token's sha256.
       - name: upload to R2
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
+          id=$(curl -fsS -H "Authorization: Bearer $TOKEN" "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/tokens/verify" | jq -r .result.id)
+          secret=$(printf %s "$TOKEN" | sha256sum | cut -d' ' -f1)
+          echo "::add-mask::$secret"
           for f in dist/*; do
-            npx --yes wrangler@4.136.3 r2 object put "$BUCKET/$TAG/${f#dist/}" --file "$f" --remote
+            curl -fsS --aws-sigv4 aws:amz:auto:s3 --user "$id:$secret" -T "$f" "https://$ACCOUNT.r2.cloudflarestorage.com/$BUCKET/$TAG/${f#dist/}"
           done
       - name: GitHub release
         env:
