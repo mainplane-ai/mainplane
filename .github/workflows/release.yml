@@ -42,19 +42,24 @@ jobs:
           done
           [ "$(dist/mainplane-linux-amd64 version)" = "$TAG" ]
           for s in install.sh install.ps1; do sed "s/@VERSION@/$TAG/g" "install/$s" > "dist/$s"; done
+          cp docs/CHANGELOG.md dist/
           cd dist && sha256sum * > SHA256SUMS
-      # Workers update only to a SHA256SUMS this key signed; the check stops a
+      # Binaries update only to a SHA256SUMS this key signed; the check stops a
       # release whose key is not the one the binaries carry.
       - name: sign SHA256SUMS
         env:
           KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: |
           printf '%s\n' "$KEY" > "$RUNNER_TEMP/key.pem"
-          grep -qF "$(openssl pkey -in "$RUNNER_TEMP/key.pem" -pubout -outform DER | tail -c 32 | base64)" pkg/worker/update.go || { echo "RELEASE_SIGNING_KEY is not the key in pkg/worker/update.go"; exit 1; }
+          grep -qF "$(openssl pkey -in "$RUNNER_TEMP/key.pem" -pubout -outform DER | tail -c 32 | base64)" pkg/release/release.go || { echo "RELEASE_SIGNING_KEY is not the key in pkg/release/release.go"; exit 1; }
           openssl pkeyutl -sign -inkey "$RUNNER_TEMP/key.pem" -rawin -in dist/SHA256SUMS -out dist/SHA256SUMS.sig
           rm "$RUNNER_TEMP/key.pem"
       # The token is scoped to the bucket, which R2 honors on its S3 API only.
       # Its S3 key id is the token id and its secret the token's sha256.
+      # latest names the newest stable release for mainplane-server update. It
+      # goes last, so it never names a release still uploading, and uncached,
+      # since it is the one path whose bytes change. A tag below the current
+      # latest leaves it; the first release finds none.
       - name: upload to R2
         env:
           TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -65,9 +70,14 @@ jobs:
           echo "::add-mask::$secret"
           for f in dist/*; do
             ct=application/octet-stream
-            case $f in *.sh | *.ps1 | */SHA256SUMS) ct="text/plain; charset=utf-8" ;; esac
+            case $f in *.sh | *.ps1 | *.md | */SHA256SUMS) ct="text/plain; charset=utf-8" ;; esac
             curl -fsS --aws-sigv4 aws:amz:auto:s3 --user "$id:$secret" -H "Content-Type: $ct" -T "$f" "https://$ACCOUNT.r2.cloudflarestorage.com/$BUCKET/$TAG/${f#dist/}"
           done
+          cur=$(curl -fsS https://dl.mainplane.ai/latest || true)
+          if [[ $TAG != *-rc.* && $(printf '%s\n' "$cur" "$TAG" | sort -V | tail -1) == "$TAG" ]]; then
+            printf '%s\n' "$TAG" > "$RUNNER_TEMP/latest"
+            curl -fsS --aws-sigv4 aws:amz:auto:s3 --user "$id:$secret" -H "Content-Type: text/plain" -H "Cache-Control: no-store" -T "$RUNNER_TEMP/latest" "https://$ACCOUNT.r2.cloudflarestorage.com/$BUCKET/latest"
+          fi
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

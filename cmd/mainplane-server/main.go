@@ -6,6 +6,7 @@
 //	mainplane-server install <config.json>    and again at every boot, as a service; sudo on Linux and macOS, admin on Windows
 //	mainplane-server key  <config.json> new <name> | revoke <name> | list
 //	mainplane-server join <config.json> new <name> | revoke <name> | list
+//	mainplane-server update [version]         the installed harness becomes release version, the latest stable by default
 //	mainplane-server version
 package main
 
@@ -15,6 +16,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
@@ -25,6 +27,10 @@ import (
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "version" {
 		fmt.Println(version.V)
+		return
+	}
+	if len(os.Args) >= 2 && len(os.Args) <= 3 && os.Args[1] == "update" {
+		fatal(server.Update(strings.Join(os.Args[2:], "")))
 		return
 	}
 	if len(os.Args) < 3 {
@@ -83,6 +89,8 @@ func usage() {
   key   new <name> | revoke <name> | list   api keys: what a connector needs to call the harness
   join  new <name> | revoke <name> | list   join secrets: what a machine needs to become a worker
 
+  mainplane-server update [version]   the installed harness becomes that release, the latest stable by default;
+                                      prints the changelog between, restarts it, and workers follow
   mainplane-server version            the release this binary was built from
 `)
 	os.Exit(2)

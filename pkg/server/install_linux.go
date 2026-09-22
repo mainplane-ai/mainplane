@@ -36,5 +36,7 @@ func start() error {
 	if err := run("systemctl", "enable", "mainplane-server"); err != nil {
 		return err
 	}
-	return run("systemctl", "restart", "mainplane-server")
+	return restart()
 }
+
+func restart() error { return run("systemctl", "restart", "mainplane-server") }
