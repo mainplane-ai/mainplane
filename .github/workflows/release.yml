@@ -41,6 +41,7 @@ jobs:
             done
           done
           [ "$(dist/mainplane-linux-amd64 version)" = "$TAG" ]
+          for s in install.sh install.ps1; do sed "s/@VERSION@/$TAG/g" "install/$s" > "dist/$s"; done
           cd dist && sha256sum * > SHA256SUMS
       # The token is scoped to the bucket, which R2 honors on its S3 API only.
       # Its S3 key id is the token id and its secret the token's sha256.
@@ -53,7 +54,9 @@ jobs:
           secret=$(printf %s "$TOKEN" | sha256sum | cut -d' ' -f1)
           echo "::add-mask::$secret"
           for f in dist/*; do
-            curl -fsS --aws-sigv4 aws:amz:auto:s3 --user "$id:$secret" -T "$f" "https://$ACCOUNT.r2.cloudflarestorage.com/$BUCKET/$TAG/${f#dist/}"
+            ct=application/octet-stream
+            case $f in *.sh | *.ps1 | */SHA256SUMS) ct="text/plain; charset=utf-8" ;; esac
+            curl -fsS --aws-sigv4 aws:amz:auto:s3 --user "$id:$secret" -H "Content-Type: $ct" -T "$f" "https://$ACCOUNT.r2.cloudflarestorage.com/$BUCKET/$TAG/${f#dist/}"
           done
       - name: GitHub release
         env:

@@ -6,8 +6,8 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
+	"os/user"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,10 +44,12 @@ type env struct {
 	mu   sync.Mutex // one run at a time
 }
 
-func start(it interp) (*env, error) {
+func start(it interp, op *user.User) (*env, error) {
 	cmd := exec.Command(it.argv[0], it.argv[1:]...)
-	cmd.Env = append(os.Environ(), "NO_COLOR=1")
-	group(cmd)
+	if err := prepare(cmd, op); err != nil {
+		return nil, err
+	}
+	cmd.Env = append(cmd.Env, "NO_COLOR=1")
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
