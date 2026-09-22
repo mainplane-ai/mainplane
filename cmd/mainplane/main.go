@@ -71,6 +71,9 @@ func main() {
 		}
 		fmt.Println(url)
 	case "version":
+		if len(os.Args) != 2 {
+			usage()
+		}
 		fmt.Println(version.V)
 	default:
 		cli(os.Args[1], os.Args[2:])
