@@ -3,6 +3,7 @@
 // only hashes.
 //
 //	mainplane-server up   <config.json>
+//	mainplane-server install <config.json>    and again at every boot, as a service; sudo on Linux and macOS, admin on Windows
 //	mainplane-server key  <config.json> new <name> | revoke <name> | list
 //	mainplane-server join <config.json> new <name> | revoke <name> | list
 //	mainplane-server version
@@ -36,6 +37,9 @@ func main() {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		fatal(server.Harness(ctx, c))
+	case verb == "install" && len(args) == 0:
+		fatal(server.Install(c))
+		fmt.Printf("harness runs at every boot from %s\n", server.Conf)
 	case verb == auth.Key || verb == auth.Join:
 		table(c, verb, args)
 	default:
@@ -75,6 +79,7 @@ func usage() {
 	fmt.Fprint(os.Stderr, `usage: mainplane-server <verb> <config.json> ...
 
   up                                  run the harness
+  install                             run it at every boot from a root-only copy of the config
   key   new <name> | revoke <name> | list   api keys: what a connector needs to call the harness
   join  new <name> | revoke <name> | list   join secrets: what a machine needs to become a worker
 
