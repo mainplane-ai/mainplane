@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -21,19 +22,46 @@ import (
 // the harness names a version, never a place or bytes, so a harness cannot
 // make a root worker run a binary we did not release. The private half of the
 // key is the RELEASE_SIGNING_KEY secret that release.yml signs SHA256SUMS
-// with. A download gets minutes: a binary is megabytes on any link.
+// with. A download gets minutes: a binary is megabytes on any link. A failed
+// version is not fetched again for ten minutes: the harness asks on every
+// redial, and a broken release would otherwise cost a binary download every
+// five seconds, while a fixed one still arrives within minutes.
 const (
 	dl         = "https://dl.mainplane.ai/"
 	releaseKey = "Epmoycu6ik6l3iJiEtfOAdK+DLFDVXhgdc+uNv6ua/U="
 	dlTimeout  = 5 * time.Minute
+	cooldown   = 10 * time.Minute
 )
 
-// update replaces the running binary with release v's: SHA256SUMS must carry
+// failed is the last update that failed; the worker outlives connections.
+var failed struct {
+	sync.Mutex
+	v   string
+	err error
+	at  time.Time
+}
+
+// update answers with the last failure while v is cooling down, and otherwise
+// tries it.
+func update(v string) (string, error) {
+	failed.Lock()
+	defer failed.Unlock()
+	if failed.v == v && time.Since(failed.at) < cooldown {
+		return "", fmt.Errorf("%w (retry in %s)", failed.err, time.Until(failed.at.Add(cooldown)).Round(time.Second))
+	}
+	exe, err := swap(v)
+	if err != nil {
+		failed.v, failed.err, failed.at = v, err, time.Now()
+	}
+	return exe, err
+}
+
+// swap replaces the running binary with release v's: SHA256SUMS must carry
 // the release key's signature, the binary must match its line in it, and the
 // new binary must say it is v. The old one is kept beside it as .old, since
 // Windows renames a running binary but will not replace it. It returns the
 // path the service runs.
-func update(v string) (string, error) {
+func swap(v string) (string, error) {
 	sums, err := fetch(v + "/SHA256SUMS")
 	if err != nil {
 		return "", err
