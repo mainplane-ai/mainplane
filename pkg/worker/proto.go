@@ -19,18 +19,22 @@ const (
 	MaxLines = 2000
 )
 
-// Kinds. The first four go harness to worker; the rest come back.
+// Kinds. The first five go harness to worker; the rest come back. Hello,
+// update, and the done or error that answers an update are the contract every
+// version from v0.1.0 keeps: they are how a worker of another release becomes
+// this one. Workers from before it do not know update and are reinstalled.
 const (
-	Run   = "run"
-	Read  = "read"
-	Write = "write"
-	Kill  = "kill" // end a session's environments
+	Run    = "run"
+	Read   = "read"
+	Write  = "write"
+	Kill   = "kill"   // end a session's environments
+	Update = "update" // become release Version, then restart
 
 	Hello  = "hello"  // first frame on a connection: what the worker is
 	Output = "output" // run: one chunk, in order
 	Result = "result" // run: exit code, path of the whole output when spilled
 	Bytes  = "bytes"  // read: the file
-	Done   = "done"   // write, kill
+	Done   = "done"   // write, kill, update
 	Error  = "error"  // any request: text the model reads
 )
 
@@ -52,7 +56,7 @@ type Header struct {
 	Arch    string   `json:"arch,omitempty"`    // hello
 	Interps []string `json:"interps,omitempty"` // hello: first is the default
 	Scratch string   `json:"scratch,omitempty"` // hello: where spilled output lands
-	Version string   `json:"version,omitempty"` // hello: the release this worker was built from
+	Version string   `json:"version,omitempty"` // hello: the release this worker was built from; update: the one to become
 }
 
 type Frame struct {

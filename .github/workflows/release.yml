@@ -43,6 +43,16 @@ jobs:
           [ "$(dist/mainplane-linux-amd64 version)" = "$TAG" ]
           for s in install.sh install.ps1; do sed "s/@VERSION@/$TAG/g" "install/$s" > "dist/$s"; done
           cd dist && sha256sum * > SHA256SUMS
+      # Workers update only to a SHA256SUMS this key signed; the check stops a
+      # release whose key is not the one the binaries carry.
+      - name: sign SHA256SUMS
+        env:
+          KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          printf '%s\n' "$KEY" > "$RUNNER_TEMP/key.pem"
+          grep -qF "$(openssl pkey -in "$RUNNER_TEMP/key.pem" -pubout -outform DER | tail -c 32 | base64)" pkg/worker/update.go || { echo "RELEASE_SIGNING_KEY is not the key in pkg/worker/update.go"; exit 1; }
+          openssl pkeyutl -sign -inkey "$RUNNER_TEMP/key.pem" -rawin -in dist/SHA256SUMS -out dist/SHA256SUMS.sig
+          rm "$RUNNER_TEMP/key.pem"
       # The token is scoped to the bucket, which R2 honors on its S3 API only.
       # Its S3 key id is the token id and its secret the token's sha256.
       - name: upload to R2

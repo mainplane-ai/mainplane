@@ -104,6 +104,13 @@ func (s *server) answer(f Frame) (Frame, error) {
 	case Kill:
 		s.kill(f.Session)
 		return Frame{Header: Header{Kind: Done}}, nil
+	case Update:
+		exe, err := update(f.Version)
+		if err != nil {
+			return Frame{}, err
+		}
+		_ = s.send(Frame{Header: Header{ID: f.ID, Kind: Done}})
+		restart(exe)
 	}
 	return Frame{}, fmt.Errorf("unknown request %q", f.Kind)
 }
