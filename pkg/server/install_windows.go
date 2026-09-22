@@ -68,5 +68,5 @@ func start() error {
 }
 
 func restart() error {
-	return run("powershell", "-NoProfile", "-Command", stop+"\nStart-ScheduledTask -TaskName mainplane-server")
+	return run("powershell", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop'\n"+stop+"\nStart-ScheduledTask -TaskName mainplane-server")
 }

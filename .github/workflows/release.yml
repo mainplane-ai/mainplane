@@ -58,7 +58,8 @@ jobs:
       # Its S3 key id is the token id and its secret the token's sha256.
       # latest names the newest stable release for mainplane-server update. It
       # goes last, so it never names a release still uploading, and uncached,
-      # since it is the one path whose bytes change.
+      # since it is the one path whose bytes change. A tag below the current
+      # latest leaves it; the first release finds none.
       - name: upload to R2
         env:
           TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -72,7 +73,8 @@ jobs:
             case $f in *.sh | *.ps1 | *.md | */SHA256SUMS) ct="text/plain; charset=utf-8" ;; esac
             curl -fsS --aws-sigv4 aws:amz:auto:s3 --user "$id:$secret" -H "Content-Type: $ct" -T "$f" "https://$ACCOUNT.r2.cloudflarestorage.com/$BUCKET/$TAG/${f#dist/}"
           done
-          if [[ $TAG != *-rc.* ]]; then
+          cur=$(curl -fsS https://dl.mainplane.ai/latest || true)
+          if [[ $TAG != *-rc.* && $(printf '%s\n' "$cur" "$TAG" | sort -V | tail -1) == "$TAG" ]]; then
             printf '%s\n' "$TAG" > "$RUNNER_TEMP/latest"
             curl -fsS --aws-sigv4 aws:amz:auto:s3 --user "$id:$secret" -H "Content-Type: text/plain" -H "Cache-Control: no-store" -T "$RUNNER_TEMP/latest" "https://$ACCOUNT.r2.cloudflarestorage.com/$BUCKET/latest"
           fi
