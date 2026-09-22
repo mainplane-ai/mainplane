@@ -20,6 +20,7 @@ import (
 
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
+	"github.com/mainplane-ai/mainplane/pkg/version"
 )
 
 // via is what this connector writes on every record it causes.
@@ -139,12 +140,12 @@ func (c client) raw(path string) {
 	fmt.Println(b.String())
 }
 
-// version refuses a harness this binary was not built with.
+// version refuses a harness from another release.
 func (c client) version() {
 	var out struct{ Version string }
 	c.call("GET", "/", "", nil, &out)
-	if out.Version != harness.Version {
-		die(fmt.Errorf("harness is version %s, this mainplane is %s", out.Version, harness.Version))
+	if !version.Match(out.Version) {
+		die(fmt.Errorf("harness is version %s, this mainplane is %s", out.Version, version.V))
 	}
 }
 

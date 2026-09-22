@@ -52,6 +52,7 @@ type Header struct {
 	Arch    string   `json:"arch,omitempty"`    // hello
 	Interps []string `json:"interps,omitempty"` // hello: first is the default
 	Scratch string   `json:"scratch,omitempty"` // hello: where spilled output lands
+	Version string   `json:"version,omitempty"` // hello: the release this worker was built from
 }
 
 type Frame struct {

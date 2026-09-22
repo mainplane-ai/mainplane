@@ -3,17 +3,37 @@ on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: "0 13 * * *"
+  workflow_call:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   ci:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: useblacksmith/setup-go@647ac649bd5b480f2a262e3e3e5f4d150ed452ad # v6.0.1
         with:
           go-version-file: go.mod
-      - uses: golangci/golangci-lint-action@v7
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.2
       - run: |
-          out=$(go run mvdan.cc/gofumpt@latest -l .); echo "$out"; test -z "$out"
+          out=$(go run mvdan.cc/gofumpt@v0.12.0 -l .); echo "$out"; test -z "$out"
       - run: go mod tidy -diff
       - run: go test -race ./...
-      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+  # The vuln DB changes, the diff does not: daily and on main, not per PR push.
+  vuln:
+    if: github.event_name != 'pull_request'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: useblacksmith/setup-go@647ac649bd5b480f2a262e3e3e5f4d150ed452ad # v6.0.1
+        with:
+          go-version-file: go.mod
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
