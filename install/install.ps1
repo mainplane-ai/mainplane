@@ -9,7 +9,7 @@ $d = New-Item -ItemType Directory (Join-Path ([IO.Path]::GetTempPath()) ([guid]:
 $t = Join-Path $d $f
 Invoke-WebRequest "$dl/$f" -OutFile $t -UseBasicParsing
 $want = ((Invoke-WebRequest "$dl/SHA256SUMS" -UseBasicParsing).Content -split "`n" | Where-Object { $_ -match " $([regex]::Escape($f))$" }) -split ' ' | Select-Object -First 1
-if ($want -ne (Get-FileHash $t SHA256).Hash.ToLower()) { throw "$f does not match SHA256SUMS" }
+if ($want -ne (Get-FileHash $t).Hash.ToLower()) { throw "$f does not match SHA256SUMS" }
 & $t install $Token
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 Remove-Item -Recurse $d
