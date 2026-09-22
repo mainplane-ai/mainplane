@@ -6,8 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
-	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -20,12 +21,14 @@ import (
 
 // Local is what this machine offers: its name, the join secret that lets it
 // in, where spilled output lands, and which interpreters it has. The first
-// interpreter is the default.
+// interpreter is the default. Under a root service, Operator is the user code
+// runs and files are touched as; nil is the worker's own user.
 type Local struct {
-	Name    string
-	Secret  string
-	Scratch string
-	Interps []string
+	Name     string
+	Secret   string
+	Scratch  string
+	Interps  []string
+	Operator *user.User
 }
 
 type server struct {
@@ -86,13 +89,18 @@ func (s *server) answer(f Frame) (Frame, error) {
 	case Run:
 		return s.run(f)
 	case Read:
-		b, err := os.ReadFile(f.Path)
+		b, err := s.read(f.Path)
 		return Frame{Header: Header{Kind: Bytes}, Body: b}, err
 	case Write:
-		if err := os.MkdirAll(filepath.Dir(f.Path), 0o755); err != nil {
+		w, err := s.create(f.Path)
+		if err != nil {
 			return Frame{}, err
 		}
-		return Frame{Header: Header{Kind: Done}}, os.WriteFile(f.Path, f.Body, 0o644)
+		_, werr := w.Write(f.Body)
+		if err := w.Close(); err != nil {
+			return Frame{}, err
+		}
+		return Frame{Header: Header{Kind: Done}}, werr
 	case Kill:
 		s.kill(f.Session)
 		return Frame{Header: Header{Kind: Done}}, nil
@@ -113,7 +121,7 @@ func (s *server) run(f Frame) (Frame, error) {
 	if err != nil {
 		return Frame{}, err
 	}
-	sp := &spill{path: filepath.Join(s.Scratch, "output", f.ID)}
+	sp := &spill{path: filepath.Join(s.Scratch, "output", f.ID), create: s.create}
 	emit := func(b []byte) error {
 		if err := sp.add(b); err != nil {
 			return err
@@ -153,7 +161,7 @@ func (s *server) acquire(key, name string) (*env, bool, error) {
 		e, ok := s.envs[key]
 		if !ok {
 			var err error
-			if e, err = start(interps[name]); err != nil {
+			if e, err = start(interps[name], s.Operator); err != nil {
 				s.emu.Unlock()
 				return nil, false, err
 			}
@@ -203,9 +211,10 @@ func (s *server) kill(session string) {
 // all of it to a file the result names. Lines are counted as the harness
 // counts them, so the file exists exactly when the harness cuts.
 type spill struct {
-	path string
-	held []byte
-	f    *os.File
+	path   string
+	create func(string) (io.WriteCloser, error)
+	held   []byte
+	f      io.WriteCloser
 }
 
 func (s *spill) add(b []byte) error {
@@ -215,10 +224,7 @@ func (s *spill) add(b []byte) error {
 		if len(s.held) <= MaxBytes && bytes.Count(bytes.TrimSuffix(s.held, nl), nl) < MaxLines {
 			return nil
 		}
-		if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-			return err
-		}
-		f, err := os.Create(s.path)
+		f, err := s.create(s.path)
 		if err != nil {
 			return err
 		}

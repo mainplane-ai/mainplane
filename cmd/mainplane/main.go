@@ -1,7 +1,7 @@
 // mainplane is the device binary: the worker, and the plainest connector.
 //
 //	mainplane worker  [join token]    make this machine a worker, named by its hostname
-//	mainplane install <join token>    and again at every boot; the token goes in ~/.mainplane/join
+//	mainplane install <join token>    and again at every boot, as a service; sudo on Linux and macOS, code still runs as you
 //	mainplane login   <api key>       remember the harness and the key in ~/.mainplane/login.json
 //	mainplane version                 the release this binary was built from
 //	mainplane <verb> ...              one verb per harness route, see cli.go
@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 
@@ -29,31 +30,15 @@ func main() {
 		if len(os.Args) > 3 || os.Args[1] == "install" && len(os.Args) != 3 {
 			usage()
 		}
-		token := ""
-		if len(os.Args) == 3 {
-			token = os.Args[2]
-		} else {
-			b, err := os.ReadFile(worker.JoinPath(home()))
-			if err != nil {
-				log.Fatal("no join token: mainplane worker <join token>, or mainplane install <join token> once")
-			}
-			token = string(b)
+		work(os.Args[1] == "install", os.Args[2:])
+	case "file": // a root worker's read or write, run as the operator; not for people
+		if len(os.Args) != 4 {
+			usage()
 		}
-		addr, secret, err := auth.Parse(auth.Join, token)
-		if err != nil {
-			log.Fatal(err)
+		if err := worker.File(os.Args[2], os.Args[3]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
 		}
-		if os.Args[1] == "install" {
-			if err := worker.Install(token); err != nil {
-				log.Fatal(err)
-			}
-			return
-		}
-		name, err := os.Hostname()
-		if err != nil {
-			log.Fatal(err)
-		}
-		worker.Dial(addr, worker.Local{Name: name, Secret: secret, Scratch: filepath.Join(home(), ".mainplane"), Interps: worker.Default[runtime.GOOS]})
 	case "login":
 		if len(os.Args) != 3 {
 			usage()
@@ -80,6 +65,42 @@ func main() {
 	}
 }
 
+// work installs the worker, or is the worker: with a token given, as whoever
+// runs it; without, as the service install left, whose scratch is the
+// operator's.
+func work(install bool, args []string) {
+	token, op := "", (*user.User)(nil)
+	if len(args) == 1 {
+		token = args[0]
+	} else {
+		var err error
+		if token, op, err = worker.Installed(); err != nil {
+			log.Fatalf("no join token: mainplane worker <join token>, or sudo mainplane install <join token> once: %v", err)
+		}
+	}
+	addr, secret, err := auth.Parse(auth.Join, token)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if install {
+		if err := worker.Install(token); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	name, err := os.Hostname()
+	if err != nil {
+		log.Fatal(err)
+	}
+	dir := ""
+	if op != nil {
+		dir = op.HomeDir
+	} else {
+		dir = home()
+	}
+	worker.Dial(addr, worker.Local{Name: name, Secret: secret, Scratch: filepath.Join(dir, ".mainplane"), Interps: worker.Default[runtime.GOOS], Operator: op})
+}
+
 func home() string {
 	h, err := os.UserHomeDir()
 	if err != nil {
@@ -94,7 +115,7 @@ func usage() {
 	fmt.Fprint(os.Stderr, `usage: mainplane <verb> ...
 
   worker     [join token]            make this machine a worker, named by its hostname; no token reads the installed one
-  install    <join token>            and again at every boot; the token goes in ~/.mainplane/join
+  install    <join token>            and again at every boot, as a service; sudo on Linux and macOS, code still runs as you
   login      <api key>               remember the harness and the key; every verb below uses them
   version                            the release this binary was built from
 

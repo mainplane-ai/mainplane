@@ -10,32 +10,56 @@ import (
 	"strconv"
 )
 
-// operator is the user who ran install under sudo: the service is root's to
-// write, the worker runs as them, and the token goes in their scratch, theirs
-// to read and no one else's.
-func operator(token string) (exe string, u *user.User, err error) {
-	exe, err = os.Executable()
+// Bin is the binary the service runs. It and the state directory are root's:
+// code that runs as the operator cannot replace the service or read its token.
+const Bin = "/usr/local/bin/mainplane"
+
+// Installed is what install left for the service: the join token and the
+// operator, the user code runs as.
+func Installed() (token string, op *user.User, err error) {
+	b, err := os.ReadFile(filepath.Join(stateDir, "join"))
 	if err != nil {
 		return "", nil, err
 	}
-	name := os.Getenv("SUDO_USER")
-	if name == "" {
-		return "", nil, errors.New("install needs sudo: the service is root's, the worker runs as you")
-	}
-	if u, err = user.Lookup(name); err != nil {
+	name, err := os.ReadFile(filepath.Join(stateDir, "operator"))
+	if err != nil {
 		return "", nil, err
+	}
+	op, err = user.Lookup(string(name))
+	return string(b), op, err
+}
+
+// setup is the install both service managers share. The operator is the user
+// who ran sudo. The binary goes to Bin, the token and the operator's name to
+// the state directory, and the operator's scratch is theirs. A token an older
+// install left in scratch is removed.
+func setup(token string) error {
+	name := os.Getenv("SUDO_USER")
+	if os.Geteuid() != 0 || name == "" {
+		return errors.New("install needs sudo: the service is root's, code runs as you")
+	}
+	u, err := user.Lookup(name)
+	if err != nil {
+		return err
+	}
+	if err := place(Bin); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "join"), []byte(token), 0o600); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "operator"), []byte(name), 0o644); err != nil {
+		return err
+	}
+	scratch := filepath.Join(u.HomeDir, ".mainplane")
+	if err := os.MkdirAll(scratch, 0o755); err != nil {
+		return err
 	}
 	uid, _ := strconv.Atoi(u.Uid)
 	gid, _ := strconv.Atoi(u.Gid)
-	path := JoinPath(u.HomeDir)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", nil, err
-	}
-	if err := os.Lchown(filepath.Dir(path), uid, gid); err != nil {
-		return "", nil, err
-	}
-	if err := os.WriteFile(path, []byte(token), 0o600); err != nil {
-		return "", nil, err
-	}
-	return exe, u, os.Lchown(path, uid, gid)
+	_ = os.Remove(filepath.Join(scratch, "join"))
+	return os.Lchown(scratch, uid, gid)
 }
