@@ -66,3 +66,7 @@ func start() error {
 	fmt.Println("note: the harness stops while this machine sleeps; powercfg /change standby-timeout-ac 0 keeps it awake on power")
 	return nil
 }
+
+func restart() error {
+	return run("powershell", "-NoProfile", "-Command", stop+"\nStart-ScheduledTask -TaskName mainplane-server")
+}

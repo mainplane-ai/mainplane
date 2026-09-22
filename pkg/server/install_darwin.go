@@ -33,3 +33,5 @@ func start() error {
 	}
 	return run("launchctl", "bootstrap", "system", plistPath)
 }
+
+func restart() error { return run("launchctl", "kickstart", "-k", "system/"+label) }
