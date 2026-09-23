@@ -3,7 +3,7 @@
 // only hashes.
 //
 //	mainplane-server up   <config.json>
-//	mainplane-server install <config.json>    and again at every boot, as a service; sudo on Linux and macOS, admin on Windows
+//	mainplane-server install <config.json>    and again at every boot, as a service; asks for sudo or admin itself
 //	mainplane-server key  <config.json> new <name> | revoke <name> | list
 //	mainplane-server join <config.json> new <name> | revoke <name> | list
 //	mainplane-server update [version]         the installed harness becomes release version, the latest stable by default
@@ -20,6 +20,7 @@ import (
 	"syscall"
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
+	"github.com/mainplane-ai/mainplane/pkg/elevate"
 	"github.com/mainplane-ai/mainplane/pkg/server"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 )
@@ -30,11 +31,15 @@ func main() {
 		return
 	}
 	if len(os.Args) >= 2 && len(os.Args) <= 3 && os.Args[1] == "update" {
+		elevate.Root(os.Args[1:]...)
 		fatal(server.Update(strings.Join(os.Args[2:], "")))
 		return
 	}
 	if len(os.Args) < 3 {
 		usage()
+	}
+	if os.Args[1] == "install" {
+		elevate.Root(os.Args[1:]...)
 	}
 	c, err := server.Load(os.Args[2])
 	fatal(err)

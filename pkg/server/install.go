@@ -20,7 +20,7 @@ func Install(c Config) error {
 	for name, p := range c.Providers {
 		for _, s := range []*string{&p.Key, &p.URL, &p.Region} {
 			if *s != "" && os.ExpandEnv(*s) == "" {
-				return fmt.Errorf("provider %s: %s is empty; sudo drops the environment, so use sudo -E or put the value in the config", name, *s)
+				return fmt.Errorf("provider %s: %s is empty; sudo and UAC drop the environment, so use sudo -E, an admin shell with it set, or put the value in the config", name, *s)
 			}
 			*s = os.ExpandEnv(*s)
 		}

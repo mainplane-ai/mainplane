@@ -45,13 +45,9 @@ func cli(verb string, args []string) {
 	if !ok || len(args) < a[0] || a[1] >= 0 && len(args) > a[1] {
 		usage()
 	}
-	b, err := os.ReadFile(loginPath())
+	c, err := login()
 	if err != nil {
 		die(fmt.Errorf("not logged in: mainplane login <api key>"))
-	}
-	var c client
-	if err := json.Unmarshal(b, &c); err != nil {
-		die(err)
 	}
 	c.version()
 	switch verb {
@@ -101,6 +97,15 @@ type client struct {
 	Key string `json:"key"`
 }
 
+func login() (client, error) {
+	var c client
+	b, err := os.ReadFile(loginPath())
+	if err == nil {
+		err = json.Unmarshal(b, &c)
+	}
+	return c, err
+}
+
 // call does one request. A status outside 2xx is the harness's own words on
 // stderr and exit 1. A JSON reply lands in out when out is given.
 func (c client) call(method, path, ctype string, body io.Reader, out any) *http.Response {
@@ -142,11 +147,16 @@ func (c client) raw(path string) {
 
 // version refuses a harness from another release.
 func (c client) version() {
+	if v := c.harness(); !version.Match(v) {
+		die(fmt.Errorf("harness is version %s, this mainplane is %s: run mainplane update", v, version.V))
+	}
+}
+
+// harness is the release the harness runs.
+func (c client) harness() string {
 	var out struct{ Version string }
 	c.call("GET", "/", "", nil, &out)
-	if !version.Match(out.Version) {
-		die(fmt.Errorf("harness is version %s, this mainplane is %s", out.Version, version.V))
-	}
+	return out.Version
 }
 
 // post appends text and files as one turn: a single text/plain body, or one
