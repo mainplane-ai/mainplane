@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -38,9 +39,6 @@ func main() {
 	if len(os.Args) < 3 {
 		usage()
 	}
-	if os.Args[1] == "install" {
-		elevate.Root(os.Args[1:]...)
-	}
 	c, err := server.Load(os.Args[2])
 	fatal(err)
 	switch verb, args := os.Args[1], os.Args[3:]; {
@@ -49,6 +47,10 @@ func main() {
 		defer stop()
 		fatal(server.Harness(ctx, c))
 	case verb == "install" && len(args) == 0:
+		fatal(c.Expand())
+		if !elevate.Is() {
+			os.Exit(install(c))
+		}
 		fatal(server.Install(c))
 		fmt.Printf("harness runs at every boot from %s\n", server.Conf)
 	case verb == auth.Key || verb == auth.Join:
@@ -56,6 +58,18 @@ func main() {
 	default:
 		usage()
 	}
+}
+
+// install hands the expanded config to an elevated install through a file
+// only this user may read, since neither sudo nor UAC carries this shell's
+// environment over.
+func install(c server.Config) int {
+	f, err := os.CreateTemp("", "mainplane-server-*.json")
+	fatal(err)
+	defer func() { _ = os.Remove(f.Name()) }()
+	fatal(json.NewEncoder(f).Encode(c))
+	fatal(f.Close())
+	return elevate.Run("install", f.Name())
 }
 
 func table(c server.Config, kind string, args []string) {

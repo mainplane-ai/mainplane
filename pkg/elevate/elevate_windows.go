@@ -1,9 +1,6 @@
-// Package elevate makes a command that needs root or admin work without the
-// user typing sudo or opening an elevated shell first.
 package elevate
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -18,14 +15,22 @@ import (
 // package does not name.
 const tokenElevation = 20
 
-// Root returns when this process is elevated. Otherwise it runs this binary
-// with args elevated, which shows the UAC prompt, and exits as that does. The
-// elevated process gets a console of its own, so its output comes back
-// through a file and is printed when it ends.
-func Root(args ...string) {
-	if elevated() {
-		return
+// Is says whether this process runs elevated.
+func Is() bool {
+	t, err := syscall.OpenCurrentProcessToken()
+	if err != nil {
+		return false
 	}
+	defer func() { _ = t.Close() }()
+	var e, n uint32
+	return syscall.GetTokenInformation(t, tokenElevation, (*byte)(unsafe.Pointer(&e)), 4, &n) == nil && e != 0
+}
+
+// Run runs this binary with args elevated, which shows the UAC prompt, and
+// returns its exit code. The elevated process gets a console of its own, so
+// its output comes back through a file and is printed when it ends. Args are
+// versions and paths, and no Windows path holds a quote.
+func Run(args ...string) int {
 	exe, err := os.Executable()
 	if err != nil {
 		log.Fatal(err)
@@ -45,22 +50,5 @@ func Root(args ...string) {
 		_, _ = os.Stdout.Write(b)
 		_ = os.Remove(out)
 	}
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		os.Exit(exit.ExitCode())
-	}
-	if err != nil {
-		log.Fatal(err)
-	}
-	os.Exit(0)
-}
-
-func elevated() bool {
-	t, err := syscall.OpenCurrentProcessToken()
-	if err != nil {
-		return false
-	}
-	defer func() { _ = t.Close() }()
-	var e, n uint32
-	return syscall.GetTokenInformation(t, tokenElevation, (*byte)(unsafe.Pointer(&e)), 4, &n) == nil && e != 0
+	return code(err)
 }

@@ -1,30 +1,24 @@
 //go:build !windows
 
-// Package elevate makes a command that needs root or admin work without the
-// user typing sudo or opening an elevated shell first.
 package elevate
 
 import (
 	"log"
 	"os"
 	"os/exec"
-	"syscall"
 )
 
-// Root returns when this process is root. Otherwise it becomes sudo running
-// this binary with args, so the password is asked in this terminal and the
-// exit is sudo's.
-func Root(args ...string) {
-	if os.Geteuid() == 0 {
-		return
-	}
+// Is says whether this process is root.
+func Is() bool { return os.Geteuid() == 0 }
+
+// Run runs this binary with args under sudo, which asks for the password in
+// this terminal, and returns its exit code.
+func Run(args ...string) int {
 	exe, err := os.Executable()
 	if err != nil {
 		log.Fatal(err)
 	}
-	sudo, err := exec.LookPath("sudo")
-	if err != nil {
-		log.Fatal("this needs root, and there is no sudo: ", err)
-	}
-	log.Fatal(syscall.Exec(sudo, append([]string{"sudo", exe}, args...), os.Environ()))
+	cmd := exec.Command("sudo", append([]string{exe}, args...)...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return code(cmd.Run())
 }
