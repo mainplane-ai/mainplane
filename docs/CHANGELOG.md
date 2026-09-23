@@ -15,4 +15,5 @@ The first release: a harness, workers that dial it, and a CLI.
 - Commands that need root or admin ask for it: `mainplane-server install` and `update`, and `mainplane install` on Linux and macOS, run themselves again under sudo, or behind the UAC prompt on Windows. Install expands provider variables in the shell that runs it, before elevating
 - `mainplane login <api key>` and one CLI verb per harness route: `new`, `message`, `tail`, `chat`, `retry`, `stop`, `info`, `sessions`, `workers`, `providers`
 - Every binary carries its release version (`mainplane version`, `mainplane-server version`). A worker from another release updates itself to the harness's, up or down, from a `SHA256SUMS` signed by the release key; `mainplane workers` lists a worker whose update failed, with the reason
+- Windows binaries are Authenticode signed, publisher Alexander Yue
 - Install says when the operator can use sudo: code on the worker runs as the operator, so it can then act as root
