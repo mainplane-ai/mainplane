@@ -13,8 +13,12 @@ jobs:
   release:
     needs: ci
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    # The environment holds the Azure ids and admits v* tags only; Azure trusts
+    # this environment's OIDC subject and nothing else.
+    environment: release-signing
     permissions:
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,7 +47,31 @@ jobs:
           [ "$(dist/mainplane-linux-amd64 version)" = "$TAG" ]
           for s in install.sh install.ps1; do sed "s/@VERSION@/$TAG/g" "install/$s" > "dist/$s"; done
           cp docs/CHANGELOG.md dist/
-          cd dist && sha256sum * > SHA256SUMS
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      # Defender blocks unsigned Go binaries as Sabsik.FL.A!ml. Artifact Signing
+      # certificates live three days, so every signature is timestamped and no
+      # thumbprint is pinned. One jsign call signs all four: each call costs an
+      # extra API request for the chain.
+      - name: Authenticode sign Windows binaries
+        env:
+          JSIGN_SHA256: 7b4a01ba81e9ee866f09a5e45d40c928707eb5286f4e20d4042c67a141ae5e62
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/jsign.deb" https://github.com/ebourg/jsign/releases/download/7.5/jsign_7.5_all.deb
+          echo "$JSIGN_SHA256  $RUNNER_TEMP/jsign.deb" | sha256sum -c
+          sudo apt-get update -qq && sudo apt-get install -y -qq "$RUNNER_TEMP/jsign.deb"
+          TOKEN=$(az account get-access-token --resource https://codesigning.azure.net --query accessToken -o tsv)
+          echo "::add-mask::$TOKEN"
+          export TOKEN
+          jsign --storetype TRUSTEDSIGNING --keystore "${{ vars.ARTIFACT_SIGNING_ENDPOINT }}" --storepass env:TOKEN \
+            --alias "${{ vars.ARTIFACT_SIGNING_ACCOUNT }}/${{ vars.ARTIFACT_SIGNING_PROFILE }}" \
+            --tsaurl http://timestamp.acs.microsoft.com --tsmode RFC3161 dist/*-windows-*.exe
+      # After signing: the sums cover the bytes users run.
+      - name: SHA256SUMS
+        run: cd dist && sha256sum * > SHA256SUMS
       # Binaries update only to a SHA256SUMS this key signed; the check stops a
       # release whose key is not the one the binaries carry.
       - name: sign SHA256SUMS
