@@ -10,16 +10,13 @@ import (
 // Until the Windows service lands the harness is a task at startup running as
 // SYSTEM, which needs no one logged in. Install needs an elevated shell.
 //
-// cmd carries the log redirect, and ending the task ends only cmd, so a
-// running harness is stopped by its command line, `"...mainplane-server.exe"
-// up`; the _ stands for the quote, which a raw string cannot escape. The
-// harness stops before the binary is placed, because Windows cannot replace a
-// running one. A failed harness is started again after a minute, the
-// shortest wait Task Scheduler allows. A cmdlet error is not an exit code
-// unless it stops the script.
+// cmd carries the log redirect. Ending the task ends its whole process tree,
+// the harness under cmd included. The harness stops before the binary is
+// placed, because Windows cannot replace a running one. A failed harness is
+// started again after a minute, the shortest wait Task Scheduler allows. A
+// cmdlet error is not an exit code unless it stops the script.
 const (
-	stop = `Stop-ScheduledTask -TaskName mainplane-server -ErrorAction SilentlyContinue
-Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%mainplane-server.exe_ up%' AND ProcessId != $PID" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`
+	stop = `if (Get-ScheduledTask -TaskName mainplane-server -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName mainplane-server }`
 	task = `$ErrorActionPreference = 'Stop'
 $a = New-ScheduledTaskAction -Execute cmd -Argument '/c ""%s" up "%s" >> "%s" 2>&1"'
 $t = New-ScheduledTaskTrigger -AtStartup
