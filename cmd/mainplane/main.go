@@ -1,8 +1,9 @@
 // mainplane is the device binary: the worker, and the plainest connector.
 //
 //	mainplane worker  [join token]    make this machine a worker, named by its hostname
-//	mainplane install <join token>    and again at every boot, as a service; sudo on Linux and macOS, code still runs as you
+//	mainplane install <join token>    and again at every boot, as a service; asks for sudo on Linux and macOS, code still runs as you
 //	mainplane login   <api key>       remember the harness and the key in ~/.mainplane/login.json
+//	mainplane update  [version]       become that release, by default the logged-in harness's, else the latest stable
 //	mainplane version                 the release this binary was built from
 //	mainplane <verb> ...              one verb per harness route, see cli.go
 package main
@@ -15,8 +16,11 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
+	"github.com/mainplane-ai/mainplane/pkg/elevate"
+	"github.com/mainplane-ai/mainplane/pkg/release"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
@@ -30,7 +34,15 @@ func main() {
 		if len(os.Args) > 3 || os.Args[1] == "install" && len(os.Args) != 3 {
 			usage()
 		}
+		if os.Args[1] == "install" && runtime.GOOS != "windows" {
+			elevate.Root(os.Args[1:]...)
+		}
 		work(os.Args[1] == "install", os.Args[2:])
+	case "update":
+		if len(os.Args) > 3 {
+			usage()
+		}
+		update(strings.Join(os.Args[2:], ""))
 	case "file": // a root worker's read or write, run as the operator; not for people
 		if len(os.Args) != 4 {
 			usage()
@@ -101,6 +113,38 @@ func work(install bool, args []string) {
 	worker.Dial(addr, worker.Local{Name: name, Secret: secret, Scratch: filepath.Join(dir, ".mainplane"), Interps: worker.Default[runtime.GOOS], Operator: op})
 }
 
+// update makes this binary release v: by default the release of the harness
+// it is logged into, or the latest stable one when logged into none. A
+// binary only root may replace, like a Linux or macOS worker's, updates
+// elevated; v goes along, since sudo may give root a home without the login.
+func update(v string) {
+	if v == "" {
+		if c, err := login(); err == nil {
+			v = c.harness()
+		} else if v, err = release.Latest(); err != nil {
+			log.Fatal(err)
+		}
+	}
+	if v == version.V {
+		fmt.Printf("mainplane is %s\n", v)
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if f, err := os.CreateTemp(filepath.Dir(exe), ".update-*"); err != nil {
+		elevate.Root("update", v)
+	} else {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+	}
+	if err := release.Install(exe, "mainplane", v); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("mainplane %s -> %s\n", version.V, v)
+}
+
 func home() string {
 	h, err := os.UserHomeDir()
 	if err != nil {
@@ -115,8 +159,9 @@ func usage() {
 	fmt.Fprint(os.Stderr, `usage: mainplane <verb> ...
 
   worker     [join token]            make this machine a worker, named by its hostname; no token reads the installed one
-  install    <join token>            and again at every boot, as a service; sudo on Linux and macOS, code still runs as you
+  install    <join token>            and again at every boot, as a service; asks for sudo on Linux and macOS, code still runs as you
   login      <api key>               remember the harness and the key; every verb below uses them
+  update     [version]               become that release, by default the logged-in harness's, else the latest stable
   version                            the release this binary was built from
 
   new                                POST /sessions, body from stdin: {"model","context","workers"} or {"from","n"}

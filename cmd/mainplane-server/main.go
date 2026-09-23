@@ -3,7 +3,7 @@
 // only hashes.
 //
 //	mainplane-server up   <config.json>
-//	mainplane-server install <config.json>    and again at every boot, as a service; sudo on Linux and macOS, admin on Windows
+//	mainplane-server install <config.json>    and again at every boot, as a service; asks for sudo or admin itself
 //	mainplane-server key  <config.json> new <name> | revoke <name> | list
 //	mainplane-server join <config.json> new <name> | revoke <name> | list
 //	mainplane-server update [version]         the installed harness becomes release version, the latest stable by default
@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"syscall"
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
+	"github.com/mainplane-ai/mainplane/pkg/elevate"
 	"github.com/mainplane-ai/mainplane/pkg/server"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 )
@@ -30,6 +32,7 @@ func main() {
 		return
 	}
 	if len(os.Args) >= 2 && len(os.Args) <= 3 && os.Args[1] == "update" {
+		elevate.Root(os.Args[1:]...)
 		fatal(server.Update(strings.Join(os.Args[2:], "")))
 		return
 	}
@@ -44,6 +47,10 @@ func main() {
 		defer stop()
 		fatal(server.Harness(ctx, c))
 	case verb == "install" && len(args) == 0:
+		fatal(c.Expand())
+		if !elevate.Is() {
+			os.Exit(install(c))
+		}
 		fatal(server.Install(c))
 		fmt.Printf("harness runs at every boot from %s\n", server.Conf)
 	case verb == auth.Key || verb == auth.Join:
@@ -51,6 +58,18 @@ func main() {
 	default:
 		usage()
 	}
+}
+
+// install hands the expanded config to an elevated install through a file
+// only this user may read, since neither sudo nor UAC carries this shell's
+// environment over.
+func install(c server.Config) int {
+	f, err := os.CreateTemp("", "mainplane-server-*.json")
+	fatal(err)
+	defer func() { _ = os.Remove(f.Name()) }()
+	fatal(json.NewEncoder(f).Encode(c))
+	fatal(f.Close())
+	return elevate.Run("install", f.Name())
 }
 
 func table(c server.Config, kind string, args []string) {

@@ -12,23 +12,26 @@ import (
 // Conf is the config the installed harness runs from.
 var Conf = filepath.Join(Dir, "config.json")
 
-// Install makes this machine run the harness at every boot, from a copy of c
-// at Conf. Provider values are expanded now, because a service has no user
-// environment, so Dir is root's alone: the copy holds the keys. A relative
-// admin moves under Dir.
-func Install(c Config) error {
+// Expand fills provider values in from this process's environment, which a
+// service will not have, and refuses a provider the harness does not know.
+func (c *Config) Expand() error {
 	for name, p := range c.Providers {
 		for _, s := range []*string{&p.Key, &p.URL, &p.Region} {
 			if *s != "" && os.ExpandEnv(*s) == "" {
-				return fmt.Errorf("provider %s: %s is empty; sudo drops the environment, so use sudo -E or put the value in the config", name, *s)
+				return fmt.Errorf("provider %s: %s is empty; set it or put the value in the config. sudo drops the environment, and install asks for root itself", name, *s)
 			}
 			*s = os.ExpandEnv(*s)
 		}
 		c.Providers[name] = p
 	}
-	if _, err := providers(c.Providers); err != nil {
-		return err
-	}
+	_, err := providers(c.Providers)
+	return err
+}
+
+// Install makes this machine run the harness at every boot, from a copy of an
+// expanded c at Conf. Dir is root's alone: the copy holds the keys. A
+// relative admin moves under Dir.
+func Install(c Config) error {
 	if !filepath.IsAbs(c.Admin) {
 		c.Admin = filepath.Join(Dir, c.Admin)
 	}
