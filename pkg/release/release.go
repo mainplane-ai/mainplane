@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	dl      = "https://dl.mainplane.ai/"
+	DL      = "https://dl.mainplane.ai/" // every release's files, install scripts included, under its version
 	key     = "Epmoycu6ik6l3iJiEtfOAdK+DLFDVXhgdc+uNv6ua/U="
 	timeout = 5 * time.Minute
 )
@@ -106,13 +106,13 @@ func Install(path, cmd, v string) error {
 
 func fetch(path string) ([]byte, error) {
 	c := http.Client{Timeout: timeout}
-	resp, err := c.Get(dl + path)
+	resp, err := c.Get(DL + path)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s%s: %s", dl, path, resp.Status)
+		return nil, fmt.Errorf("%s%s: %s", DL, path, resp.Status)
 	}
 	return io.ReadAll(resp.Body)
 }

@@ -22,6 +22,7 @@ import (
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/elevate"
+	"github.com/mainplane-ai/mainplane/pkg/release"
 	"github.com/mainplane-ai/mainplane/pkg/server"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 )
@@ -80,7 +81,11 @@ func table(c server.Config, kind string, args []string) {
 		fatal(err)
 		secret, err := store.Issue(kind, args[1])
 		fatal(err)
-		fmt.Println(auth.Token(kind, addr, secret))
+		token := auth.Token(kind, addr, secret)
+		fmt.Println(token)
+		if kind == auth.Join { // stderr, so stdout stays the token for scripts
+			fmt.Fprintf(os.Stderr, "\nlinux, macos:  curl -fsSL %[1]s%[2]s/install.sh | sudo sh -s -- %[3]s\nwindows:       & ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) %[3]s\n", release.DL, version.V, token)
+		}
 	case len(args) == 2 && args[0] == "revoke":
 		fatal(store.Revoke(kind, args[1]))
 	case len(args) == 1 && args[0] == "list":

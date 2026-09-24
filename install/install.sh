@@ -1,10 +1,11 @@
 #!/bin/sh
-# Makes this Linux or macOS machine a worker. The release stamps its version.
-#   curl -fsSL https://dl.mainplane.ai/@VERSION@/install.sh | sudo sh -s -- <join token>
+# Installs the mainplane CLI; with a join token it also makes this Linux or macOS machine a worker.
+# The release stamps its version.
+#   curl -fsSL https://dl.mainplane.ai/@VERSION@/install.sh | sudo sh -s -- [join token]
 set -eu
 v=@VERSION@
 dl=https://dl.mainplane.ai/$v
-[ $# -eq 1 ] || { echo "usage: curl -fsSL $dl/install.sh | sudo sh -s -- <join token>" >&2; exit 2; }
+[ $# -le 1 ] || { echo "usage: curl -fsSL $dl/install.sh | sudo sh -s -- [join token]" >&2; exit 2; }
 case $(uname -m) in
 x86_64 | amd64) arch=amd64 ;;
 arm64 | aarch64) arch=arm64 ;;
@@ -19,5 +20,12 @@ curl -fsSLO "$dl/SHA256SUMS"
 grep " $f\$" SHA256SUMS > sum
 if command -v sha256sum > /dev/null; then sha256sum -c sum; else shasum -a 256 -c sum; fi
 chmod +x "$f"
-"./$f" install "$1"
+if [ $# -eq 1 ]; then
+  "./$f" install "$1"
+else
+  # modes set here, since root's umask may be narrower than every user running the CLI
+  mkdir -p -m 755 /usr/local/bin
+  chmod 755 "$f"
+  mv "$f" /usr/local/bin/mainplane
+fi
 echo "mainplane $v installed: $(/usr/local/bin/mainplane version)"
