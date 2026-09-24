@@ -4,3 +4,4 @@
 *.out
 .env
 /working_dir/
+*.syso

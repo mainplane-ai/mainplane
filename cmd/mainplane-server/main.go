@@ -11,14 +11,11 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/elevate"
@@ -44,9 +41,7 @@ func main() {
 	fatal(err)
 	switch verb, args := os.Args[1], os.Args[3:]; {
 	case verb == "up" && len(args) == 0:
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-		fatal(server.Harness(ctx, c))
+		fatal(server.Up(c))
 	case verb == "install" && len(args) == 0:
 		fatal(c.Expand())
 		if !elevate.Is() {
