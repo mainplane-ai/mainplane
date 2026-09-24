@@ -17,3 +17,8 @@ tasks:
 
   ci:
     deps: [lint, test, vuln]
+
+  # The release gate, on real machines: task e2e -- <v> <prev> <host:port> <os>=<ssh target>...
+  e2e:
+    cmds:
+      - go run ./e2e {{.CLI_ARGS}}
