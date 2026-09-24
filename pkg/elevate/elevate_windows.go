@@ -1,19 +1,75 @@
 package elevate
 
 import (
-	"fmt"
 	"log"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
+	"strconv"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
-// tokenElevation is TOKEN_INFORMATION_CLASS TokenElevation, which the syscall
-// package does not name.
-const tokenElevation = 20
+const (
+	// tokenElevation is TOKEN_INFORMATION_CLASS TokenElevation, which the
+	// syscall package does not name.
+	tokenElevation = 20
+	// console, then the asking process's id, lead the elevated child's args.
+	// UAC starts it with an environment of its own, so args are the one way
+	// to tell it.
+	console = "--console-of"
+	// ShellExecuteEx: keep the process handle, and return only once started.
+	seeMaskNoCloseProcess = 0x40
+	seeMaskNoAsync        = 0x100
+	swHide                = 0
+)
+
+// x/sys/windows wraps neither ShellExecuteEx nor the console calls.
+var (
+	shellExecuteEx = windows.NewLazySystemDLL("shell32.dll").NewProc("ShellExecuteExW")
+	attachConsole  = windows.NewLazySystemDLL("kernel32.dll").NewProc("AttachConsole")
+	freeConsole    = windows.NewLazySystemDLL("kernel32.dll").NewProc("FreeConsole")
+)
+
+// shellExecuteInfo is SHELLEXECUTEINFOW, whose layout Go's alignment matches.
+type shellExecuteInfo struct {
+	size       uint32
+	mask       uint32
+	hwnd       windows.Handle
+	verb       *uint16
+	file       *uint16
+	parameters *uint16
+	directory  *uint16
+	show       int32
+	instApp    windows.Handle
+	idList     uintptr
+	class      *uint16
+	keyClass   windows.Handle
+	hotKey     uint32
+	icon       windows.Handle
+	process    windows.Handle
+}
+
+// init makes an elevated child write to the console of the process that
+// asked for it, in place of the hidden one UAC gave it. A child that cannot
+// attach still does its work, only unseen.
+func init() {
+	if len(os.Args) < 3 || os.Args[1] != console {
+		return
+	}
+	pid, _ := strconv.Atoi(os.Args[2])
+	os.Args = append(os.Args[:1], os.Args[3:]...)
+	_, _, _ = freeConsole.Call()
+	_, _, _ = attachConsole.Call(uintptr(pid))
+	out, err := os.OpenFile("CONOUT$", os.O_RDWR, 0)
+	if err != nil {
+		return
+	}
+	_ = windows.SetStdHandle(windows.STD_OUTPUT_HANDLE, windows.Handle(out.Fd()))
+	_ = windows.SetStdHandle(windows.STD_ERROR_HANDLE, windows.Handle(out.Fd()))
+	os.Stdout, os.Stderr = out, out
+	log.SetOutput(out)
+}
 
 // Is says whether this process runs elevated.
 func Is() bool {
@@ -27,28 +83,35 @@ func Is() bool {
 }
 
 // Run runs this binary with args elevated, which shows the UAC prompt, and
-// returns its exit code. The elevated process gets a console of its own, so
-// its output comes back through a file and is printed when it ends. Args are
-// versions and paths, and no Windows path holds a quote.
+// returns its exit code. Its output shows in this console. A prompt the user
+// declines is fatal.
 func Run(args ...string) int {
 	exe, err := os.Executable()
 	if err != nil {
 		log.Fatal(err)
 	}
-	out := filepath.Join(os.TempDir(), fmt.Sprintf("mainplane-elevated-%d.log", os.Getpid()))
-	line := `"` + exe + `"`
+	line := console + " " + strconv.Itoa(os.Getpid())
 	for _, a := range args {
-		line += ` "` + a + `"`
+		line += " " + syscall.EscapeArg(a)
 	}
-	// cmd's line sits in a single-quoted string, where a quote is doubled
-	q := strings.NewReplacer("'", "''")
-	ps := fmt.Sprintf(`$p = Start-Process cmd -ArgumentList '/c "%s > "%s" 2>&1"' -Verb RunAs -WindowStyle Hidden -Wait -PassThru; exit $p.ExitCode`, q.Replace(line), q.Replace(out))
-	cmd := exec.Command("powershell", "-NoProfile", "-Command", ps)
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
-	if b, rerr := os.ReadFile(out); rerr == nil {
-		_, _ = os.Stdout.Write(b)
-		_ = os.Remove(out)
+	info := shellExecuteInfo{
+		mask:       seeMaskNoCloseProcess | seeMaskNoAsync,
+		verb:       windows.StringToUTF16Ptr("runas"),
+		file:       windows.StringToUTF16Ptr(exe),
+		parameters: windows.StringToUTF16Ptr(line),
+		show:       swHide,
 	}
-	return code(err)
+	info.size = uint32(unsafe.Sizeof(info))
+	if ok, _, err := shellExecuteEx.Call(uintptr(unsafe.Pointer(&info))); ok == 0 {
+		log.Fatal(err)
+	}
+	defer func() { _ = windows.CloseHandle(info.process) }()
+	if _, err := windows.WaitForSingleObject(info.process, windows.INFINITE); err != nil {
+		log.Fatal(err)
+	}
+	var code uint32
+	if err := windows.GetExitCodeProcess(info.process, &code); err != nil {
+		log.Fatal(err)
+	}
+	return int(code)
 }

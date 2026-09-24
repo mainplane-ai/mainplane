@@ -35,8 +35,15 @@ jobs:
         run: |
           awk -v h="## ${TAG%%-*}" '$0 == h {f = 1; next} /^## / {f = 0} f' docs/CHANGELOG.md > notes.md
           grep -q . notes.md || { echo "docs/CHANGELOG.md has no section '## ${TAG%%-*}'"; exit 1; }
+      # Windows builds link a VERSIONINFO and an asInvoker manifest from the
+      # .syso files: the name and version Explorer and Defender see.
       - name: build
         run: |
+          for b in mainplane mainplane-server; do
+            d="Mainplane CLI and worker"; [ $b = mainplane-server ] && d="Mainplane Server"
+            (cd "cmd/$b" && go run github.com/tc-hib/go-winres@v0.3.3 simply --arch amd64,arm64 --manifest cli --product-name Mainplane \
+              --file-description "$d" --product-version "$TAG" --file-version "$TAG" --original-filename "$b.exe" --copyright "Copyright (c) 2026 Alexander Yue")
+          done
           for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
             os=${t%/*} arch=${t#*/} ext=
             [ "$os" = windows ] && ext=.exe

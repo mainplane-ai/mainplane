@@ -1,33 +1,37 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
+	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/mgr"
 )
 
-// Until the Windows service lands the harness is a task at startup running as
-// SYSTEM, which needs no one logged in. Install needs an elevated shell.
-//
-// cmd carries the log redirect. Ending the task ends its whole process tree,
-// the harness under cmd included. The harness stops before the binary is
-// placed, because Windows cannot replace a running one. A failed harness is
-// started again after a minute, the shortest wait Task Scheduler allows. A
-// cmdlet error is not an exit code unless it stops the script.
+// The harness is a Windows service as LocalSystem, which needs no one logged
+// in. Install needs an elevated shell. The harness stops before the binary is
+// placed, because Windows cannot replace a running one.
 const (
-	stop = `if (Get-ScheduledTask -TaskName mainplane-server -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName mainplane-server }`
-	task = `$ErrorActionPreference = 'Stop'
-$a = New-ScheduledTaskAction -Execute cmd -Argument '/c ""%s" up "%s" >> "%s" 2>&1"'
-$t = New-ScheduledTaskTrigger -AtStartup
-$p = New-ScheduledTaskPrincipal -UserId SYSTEM -LogonType ServiceAccount -RunLevel Highest
-$s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
-Register-ScheduledTask -TaskName mainplane-server -Action $a -Trigger $t -Principal $p -Settings $s -Force | Out-Null
-Start-ScheduledTask -TaskName mainplane-server`
+	name = "mainplane-server"
+	// Dir and all under it: SYSTEM and Administrators full control, nothing
+	// inherited and no one else.
+	sddl = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+	// A harness that fails starts again after 5 s, then every minute; a day
+	// without failures resets the count.
+	firstRestart, laterRestart, resetAfter = 5 * time.Second, time.Minute, 24 * 60 * 60
+	// A stopping harness closes its listeners and returns; longer is a hang.
+	stopWait = 30 * time.Second
 )
 
 // x/sys/windows does not wrap SendMessageTimeout. A broadcast waits on every
@@ -39,43 +43,176 @@ const (
 )
 
 var (
-	Dir = filepath.Join(os.Getenv("ProgramData"), "mainplane-server")
-	bin = filepath.Join(os.Getenv("ProgramFiles"), "mainplane", "mainplane-server.exe")
+	Dir     = filepath.Join(os.Getenv("ProgramData"), "mainplane-server")
+	bin     = filepath.Join(os.Getenv("ProgramFiles"), "mainplane", "mainplane-server.exe")
+	logPath = filepath.Join(Dir, "mainplane-server.log")
 
 	sendMessageTimeout = windows.NewLazySystemDLL("user32.dll").NewProc("SendMessageTimeoutW")
 )
 
+// Up runs the harness until Ctrl+C, or under the service manager until it
+// says stop, with logs and panics in Dir\mainplane-server.log.
+func Up(c Config) error {
+	if ok, err := svc.IsWindowsService(); err != nil || !ok {
+		if err != nil {
+			return err
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return Harness(ctx, c)
+	}
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := windows.SetStdHandle(windows.STD_ERROR_HANDLE, windows.Handle(f.Fd())); err != nil {
+		return err
+	}
+	os.Stdout, os.Stderr = f, f
+	log.SetOutput(f)
+	return svc.Run(name, service{c})
+}
+
+type service struct{ c Config }
+
+// Execute runs the harness for the service manager. A harness that fails
+// exits 1, which the recovery actions restart.
+func (s service) Execute(_ []string, reqs <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Harness(ctx, s.c) }()
+	status <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
+	for {
+		select {
+		case err := <-done:
+			log.Printf("harness: %v", err)
+			cancel()
+			return false, 1
+		case r := <-reqs:
+			//exhaustive:ignore the service accepts stop and shutdown only
+			switch r.Cmd {
+			case svc.Interrogate:
+				status <- r.CurrentStatus
+			case svc.Stop, svc.Shutdown:
+				status <- svc.Status{State: svc.StopPending}
+				cancel()
+				<-done
+				return false, 0
+			}
+		}
+	}
+}
+
 // prepare stops a running harness and makes Dir, which only SYSTEM and
 // Administrators may read: the config in it holds the provider keys, and
-// ProgramData lets every user read by default. The reset drops every entry an
-// earlier install or someone else left, so only the two grants remain.
+// ProgramData lets every user read by default. Setting a protected DACL drops
+// every entry an earlier install or someone else left on Dir, and children
+// inherit it.
 func prepare() error {
-	if err := run("powershell", "-NoProfile", "-Command", stop); err != nil {
+	if err := stop(); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(Dir, 0o700); err != nil {
 		return err
 	}
-	if err := run("icacls", Dir, "/reset", "/T", "/Q"); err != nil {
+	sd, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
 		return err
 	}
-	return run("icacls", Dir, "/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F")
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return err
+	}
+	return windows.SetNamedSecurityInfo(Dir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
 }
 
-// start lets the harness's ports in and runs it at every boot. Logs are in
-// Dir\mainplane-server.log.
+// start lets the harness's ports in and runs it at every boot as the service
+// mainplane-server, which a later install reconfigures.
 func start() error {
-	_ = run("netsh", "advfirewall", "firewall", "delete", "rule", "name=mainplane-server")
-	if err := run("netsh", "advfirewall", "firewall", "add", "rule", "name=mainplane-server", "dir=in", "action=allow", "program="+bin); err != nil {
+	_ = run("netsh", "advfirewall", "firewall", "delete", "rule", "name="+name)
+	if err := run("netsh", "advfirewall", "firewall", "add", "rule", "name="+name, "dir=in", "action=allow", "program="+bin); err != nil {
 		return err
 	}
-	// the paths sit in a single-quoted string, where a quote is doubled
-	q := strings.NewReplacer("'", "''")
-	if err := run("powershell", "-NoProfile", "-Command", fmt.Sprintf(task, q.Replace(bin), q.Replace(Conf), q.Replace(filepath.Join(Dir, "mainplane-server.log")))); err != nil {
+	m, err := mgr.Connect()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = m.Disconnect() }()
+	// no ServiceStartName: LocalSystem on create, unchanged on update
+	c := mgr.Config{
+		ServiceType:    windows.SERVICE_WIN32_OWN_PROCESS,
+		StartType:      mgr.StartAutomatic,
+		ErrorControl:   mgr.ErrorNormal,
+		BinaryPathName: syscall.EscapeArg(bin) + " up " + syscall.EscapeArg(Conf),
+		DisplayName:    "Mainplane Server",
+		Description:    "The Mainplane harness: sessions, workers and the API. Config in " + Conf + ", logs in " + logPath,
+	}
+	s, err := m.OpenService(name)
+	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+		s, err = m.CreateService(name, bin, c, "up", Conf)
+	} else if err == nil {
+		err = s.UpdateConfig(c)
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = s.Close() }()
+	if err := s.SetRecoveryActions([]mgr.RecoveryAction{{Type: mgr.ServiceRestart, Delay: firstRestart}, {Type: mgr.ServiceRestart, Delay: laterRestart}}, resetAfter); err != nil {
+		return err
+	}
+	if err := s.SetRecoveryActionsOnNonCrashFailures(true); err != nil {
+		return err
+	}
+	if err := s.Start(); err != nil {
 		return err
 	}
 	fmt.Println("note: the harness stops while this machine sleeps; powercfg /change standby-timeout-ac 0 keeps it awake on power")
 	return path()
+}
+
+// stop stops the service and waits until it has; none installed is stopped.
+func stop() error {
+	m, err := mgr.Connect()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = m.Disconnect() }()
+	s, err := m.OpenService(name)
+	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = s.Close() }()
+	st, err := s.Control(svc.Stop)
+	if errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
+		return nil
+	}
+	for end := time.Now().Add(stopWait); err == nil && st.State != svc.Stopped; st, err = s.Query() {
+		if time.Now().After(end) {
+			return fmt.Errorf("%s did not stop in %s", name, stopWait)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return err
+}
+
+func restart() error {
+	if err := stop(); err != nil {
+		return err
+	}
+	m, err := mgr.Connect()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = m.Disconnect() }()
+	s, err := m.OpenService(name)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = s.Close() }()
+	return s.Start()
 }
 
 // path puts bin's folder on the machine PATH and tells running programs, so
@@ -103,8 +240,4 @@ func path() error {
 	env, _ := windows.UTF16PtrFromString("Environment")
 	_, _, _ = sendMessageTimeout.Call(hwndBroadcast, wmSettingChange, 0, uintptr(unsafe.Pointer(env)), smtoAbortIfHung, 5000, 0)
 	return nil
-}
-
-func restart() error {
-	return run("powershell", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop'\n"+stop+"\nStart-ScheduledTask -TaskName mainplane-server")
 }
