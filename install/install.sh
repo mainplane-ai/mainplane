@@ -23,7 +23,9 @@ chmod +x "$f"
 if [ $# -eq 1 ]; then
   "./$f" install "$1"
 else
-  mkdir -p /usr/local/bin
+  # modes set here, since root's umask may be narrower than every user running the CLI
+  mkdir -p -m 755 /usr/local/bin
+  chmod 755 "$f"
   mv "$f" /usr/local/bin/mainplane
 fi
 echo "mainplane $v installed: $(/usr/local/bin/mainplane version)"

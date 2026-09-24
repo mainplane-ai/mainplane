@@ -21,7 +21,7 @@ if ($Token) {
 }
 Remove-Item -Recurse $d
 # SetEnvironmentVariable tells running programs, so a shell Explorer starts next finds mainplane.
-$p = [Environment]::GetEnvironmentVariable('Path', 'User')
+$p = [string][Environment]::GetEnvironmentVariable('Path', 'User')
 if (($p -split ';') -notcontains $bin) {
   [Environment]::SetEnvironmentVariable('Path', "$($p.TrimEnd(';'));$bin".TrimStart(';'), 'User')
 }
