@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 // Bin is the binary the service runs. It and the state directory are root's:
@@ -79,6 +81,15 @@ func setup(token string) error {
 		if g, err := user.LookupGroupId(id); err == nil && slices.Contains(sudoers, g.Name) {
 			fmt.Printf("note: %s is in group %s, so code on this worker can use sudo to act as root\n", name, g.Name)
 		}
+	}
+	return nil
+}
+
+// run is one service manager command; its output is the error when it fails.
+func run(name string, args ...string) error {
+	out, err := exec.Command(name, args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, out)
 	}
 	return nil
 }
