@@ -1,0 +1,276 @@
+// e2e is the release gate. It installs release v from dl.mainplane.ai on real
+// machines over ssh and checks each over the worker protocol, then takes them
+// down to release prev and back, and past a release that does not exist. An
+// rc is tagged stable only after it passes.
+//
+//	task e2e -- <v> <prev> <host:port> <os>=<ssh target>...
+//
+// host:port is where the machines reach this one. Linux and macOS targets
+// need passwordless sudo. The Windows target must be an elevated login, with
+// the operator logged in at the console. A machine with mainplane-server
+// installed also has its harness updated to v. The workers stay installed,
+// joined to this run's harness, which ends with it. Each phase is this
+// program again, as a harness at one version: its exit drops every
+// connection, so each worker says hello to the next.
+package main
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/binary"
+	"fmt"
+	"log"
+	"maps"
+	"net"
+	"os"
+	"os/exec"
+	"path"
+	"slices"
+	"strings"
+	"time"
+	"unicode/utf16"
+
+	"github.com/mainplane-ai/mainplane/pkg/auth"
+	"github.com/mainplane-ai/mainplane/pkg/harness"
+	"github.com/mainplane-ai/mainplane/pkg/release"
+	"github.com/mainplane-ai/mainplane/pkg/version"
+)
+
+const (
+	// A phase waits for every worker to download a release and restart;
+	// longer is a failure.
+	phaseWait = 10 * time.Minute
+	// missing is a version no release has, so an update to it fails.
+	missing = "v0.0.0-e2e-missing"
+)
+
+// Scripts for each machine, by whether it is Windows.
+var (
+	install = map[bool]string{
+		false: `curl -fsSL %[1]s%[2]s/install.sh | sudo sh -s -- '%[3]s'`,
+		true:  `& ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) '%[3]s'`,
+	}
+	serverUpdate = map[bool]string{
+		false: `b=/usr/local/bin/mainplane-server
+[ -x $b ] || exit 0
+sudo $b update %[1]s >/dev/null 2>&1
+$b version
+systemctl is-active mainplane-server 2>/dev/null || { sudo launchctl print system/ai.mainplane.server >/dev/null 2>&1 && echo active; }`,
+		true: `$b = "$env:ProgramFiles\mainplane\mainplane-server.exe"
+if (Test-Path $b) { & $b update %[1]s *> $null; & $b version; if ((Get-Service mainplane-server).Status -eq 'Running') { 'active' } }`,
+	}
+)
+
+const (
+	service = `$s = Get-CimInstance Win32_Service -Filter "Name='mainplaned'"
+"$($s.StartName) $($s.State) $($s.StartMode)"
+((Get-Acl "$env:ProgramData\mainplane").Access | ForEach-Object { $_.IdentityReference.Value }) -join ','
+Stop-Process -Id $s.ProcessId -Force
+$t = Get-Date
+do { Start-Sleep -Milliseconds 200; $p = (Get-CimInstance Win32_Service -Filter "Name='mainplaned'").ProcessId } while (($p -eq 0 -or $p -eq $s.ProcessId) -and ((Get-Date) - $t).TotalSeconds -lt 30)
+if ($p -ne 0 -and $p -ne $s.ProcessId) { 'restarted' }`
+	defender = `@(Get-MpThreatDetection | Where-Object InitialDetectionTime -gt ([datetime]::Parse('%s'))).Count`
+)
+
+var failed bool
+
+func check(who, what string, ok bool, detail string) {
+	mark := "PASS"
+	if !ok {
+		mark, failed = "FAIL", true
+	}
+	fmt.Printf("%s  %-8s %-46s %s\n", mark, who, what, strings.ReplaceAll(strings.TrimSpace(detail), "\n", " | "))
+}
+
+func main() {
+	switch {
+	case len(os.Args) >= 7 && os.Args[1] == "phase":
+		phase(os.Args[2], os.Args[3], os.Args[4], strings.Split(os.Args[5], ","), os.Args[6], strings.Join(os.Args[7:], " "))
+	case len(os.Args) >= 5:
+		run(os.Args[1], os.Args[2], os.Args[3], os.Args[4:])
+	default:
+		fmt.Fprintln(os.Stderr, "usage: e2e <v> <prev> <host:port> <os>=<ssh target>...")
+		os.Exit(2)
+	}
+	if failed {
+		fmt.Println("FAIL")
+		os.Exit(1)
+	}
+	fmt.Println("ALL PASS")
+}
+
+func run(v, prev, addr string, targets []string) {
+	ssh := map[string]string{}
+	for _, t := range targets {
+		o, host, _ := strings.Cut(t, "=")
+		ssh[o] = host
+	}
+	oses := slices.Sorted(maps.Keys(ssh))
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		log.Fatal(err)
+	}
+	secret := rand.Text()
+	start := time.Now()
+	for _, o := range oses {
+		out, err := remote(o, ssh[o], fmt.Sprintf(install[o == "windows"], release.DL, v, auth.Token(auth.Join, addr, secret)))
+		check(o, "install "+v, err == nil && strings.Contains(out, v), last(out))
+	}
+	harnessAt := func(ver string, mode ...string) {
+		cmd := exec.Command(exe, append([]string{"phase", ":" + port, secret, ver, strings.Join(oses, ",")}, mode...)...)
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		if cmd.Run() != nil {
+			failed = true
+		}
+	}
+	harnessAt(v, "check")
+	if t, ok := ssh["windows"]; ok {
+		out, _ := remote("windows", t, service)
+		l := strings.Split(strings.TrimSpace(out), "\n")
+		l = append(l, "", "", "")
+		check("windows", "service: LocalSystem, running, automatic", strings.TrimSpace(l[0]) == "LocalSystem Running Auto", l[0])
+		check("windows", "service: state dir SYSTEM and Administrators", strings.TrimSpace(l[1]) == `NT AUTHORITY\SYSTEM,BUILTIN\Administrators`, l[1])
+		check("windows", "service: killed, restarted", strings.TrimSpace(l[2]) == "restarted", l[2])
+	}
+	harnessAt(prev, "connect")
+	harnessAt(v, "connect")
+	harnessAt(missing, "refused", "404")
+	harnessAt(v, "connect")
+	for _, o := range oses {
+		out, err := remote(o, ssh[o], fmt.Sprintf(serverUpdate[o == "windows"], v))
+		if err == nil && strings.TrimSpace(out) == "" {
+			fmt.Printf("SKIP  %-8s no mainplane-server installed\n", o)
+			continue
+		}
+		check(o, "harness updated to "+v+", running", err == nil && strings.Join(strings.Fields(out), " ") == v+" active", out)
+	}
+	if t, ok := ssh["windows"]; ok {
+		out, err := remote("windows", t, fmt.Sprintf(defender, start.Format(time.RFC3339)))
+		check("windows", "Defender: no detection since the run began", err == nil && strings.TrimSpace(out) == "0", out)
+	}
+}
+
+// remote runs script on a machine: sh on Linux and macOS, and Windows
+// PowerShell on Windows, encoded so the ssh server's cmd leaves it alone.
+func remote(goos, target, script string) (string, error) {
+	cmd := exec.Command("ssh", "-o", "BatchMode=yes", target, "sh -s")
+	cmd.Stdin = strings.NewReader(script)
+	if goos == "windows" {
+		u := utf16.Encode([]rune("$ProgressPreference = 'SilentlyContinue'\n" + script))
+		b := make([]byte, 2*len(u))
+		for i, c := range u {
+			binary.LittleEndian.PutUint16(b[2*i:], c)
+		}
+		cmd = exec.Command("ssh", "-o", "BatchMode=yes", target, "powershell -NoProfile -EncodedCommand "+base64.StdEncoding.EncodeToString(b))
+	}
+	cmd.Stderr = os.Stderr
+	out, err := cmd.Output()
+	return strings.ReplaceAll(string(out), "\r", ""), err
+}
+
+func last(s string) string {
+	l := strings.Split(strings.TrimSpace(s), "\n")
+	return l[len(l)-1]
+}
+
+// phase is a harness at version v until one worker for each OS connects, or
+// is refused with text, then checks each in full when mode is check.
+func phase(listen, secret, v string, oses []string, mode, text string) {
+	version.V = v
+	p := harness.NewPool(func(s string) bool { return s == secret })
+	go func() { log.Fatal(p.Listen(context.Background(), listen)) }()
+	fmt.Printf("== harness %s: %s %s\n", v, mode, text)
+	start := time.Now()
+	got := map[string]harness.Listed{}
+	for len(got) < len(oses) {
+		if time.Since(start) > phaseWait {
+			check(strings.Join(oses, ","), "every worker in "+phaseWait.String(), false, fmt.Sprint(p.List()))
+			os.Exit(1)
+		}
+		time.Sleep(time.Second)
+		for _, l := range p.List() {
+			ok := l.Refused == ""
+			if mode == "refused" {
+				ok = strings.Contains(l.Refused, text)
+			}
+			if _, seen := got[l.OS]; ok && !seen && slices.Contains(oses, l.OS) {
+				got[l.OS] = l
+				check(l.OS, map[bool]string{true: "listed refused", false: "connected at " + v}[mode == "refused"], true, fmt.Sprintf("%.0fs %s %s %s", time.Since(start).Seconds(), l.Name, l.Version, l.Refused))
+			}
+		}
+	}
+	if mode == "check" {
+		for _, o := range oses {
+			r, ok := p.Get(got[o].Name)
+			check(o, "still connected", ok, got[o].Name)
+			if ok {
+				checks(r, o)
+			}
+		}
+	}
+	if failed {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+// checks is what a worker must do and refuse over the protocol.
+func checks(r *harness.Remote, goos string) {
+	ctx := context.Background()
+	defer func() { _ = r.Kill(ctx, "e2e") }()
+	sh := func(code string) (string, error) {
+		o, err := r.Run(ctx, "e2e", "", code)
+		if err == nil && o.Exit != 0 {
+			err = fmt.Errorf("exit %d", o.Exit)
+		}
+		return strings.ReplaceAll(string(o.Body), "\r", ""), err
+	}
+	scratch := r.Scratch
+	file := path.Join(strings.ReplaceAll(scratch, `\`, "/"), "e2e", "hello.txt")
+	big := "seq 1 60000"
+	if goos == "windows" {
+		big = "1..60000"
+		out, err := sh("whoami; $HOME; (Get-Location).Path")
+		l := strings.Fields(out)
+		check(goos, "run: home is cwd and scratch's parent", err == nil && len(l) == 3 && l[1] == l[2] && strings.EqualFold(l[1]+`\.mainplane`, scratch), fmt.Sprint(out, err))
+		out, _ = sh("(Get-Process -Id $PID).SessionId")
+		check(goos, "run: in a logon session, not session 0", strings.TrimSpace(out) != "0", out)
+		out, _ = sh("whoami /groups | Select-String 'Mandatory Level' | ForEach-Object { ($_ -split '\\s{2,}')[0] }")
+		check(goos, "run: unelevated", strings.Contains(out, "Medium"), out)
+		out, _ = sh("$p = Start-Process charmap -PassThru; Start-Sleep 3; $p.Refresh(); $p.MainWindowHandle -ne 0; Stop-Process $p")
+		check(goos, "run: a GUI window shows on the desktop", strings.TrimSpace(out) == "True", out)
+		_, err = r.Read(ctx, `C:\ProgramData\mainplane\join`)
+		check(goos, "read the service's join token refused", err != nil, fmt.Sprint(err))
+		err = r.Write(ctx, `C:\Program Files\mainplane\mainplane.exe`, []byte("x"))
+		check(goos, "write the service binary refused", err != nil, fmt.Sprint(err))
+	} else {
+		out, err := sh("id -un; id -u; echo $HOME; pwd")
+		l := strings.Fields(out)
+		check(goos, "run: not root", err == nil && len(l) == 4 && l[1] != "0", out)
+		check(goos, "run: home is cwd and scratch's parent", len(l) == 4 && l[2] == l[3] && path.Dir(scratch) == l[2], out)
+		_, err = r.Read(ctx, map[string]string{"linux": "/var/lib/mainplane/join", "darwin": "/Library/Application Support/mainplane/join"}[goos])
+		check(goos, "read the service's join token refused", err != nil, fmt.Sprint(err))
+		err = r.Write(ctx, "/usr/local/bin/mainplane-e2e", []byte("x"))
+		check(goos, "write /usr/local/bin refused", err != nil, fmt.Sprint(err))
+		out, _ = sh("echo x > /usr/local/bin/mainplane 2>&1; echo $?")
+		check(goos, "run: replace the binary refused", strings.TrimSpace(last(out)) != "0", out)
+	}
+	err := r.Write(ctx, file, []byte("hi from the harness\n"))
+	check(goos, "write to scratch", err == nil, fmt.Sprint(err))
+	b, err := r.Read(ctx, file)
+	check(goos, "read it back", err == nil && string(b) == "hi from the harness\n", fmt.Sprintf("%q %v", b, err))
+	o, err := r.Run(ctx, "e2e", "", big)
+	check(goos, "big output spills to a file", err == nil && o.Full != "", o.Full)
+	b, err = r.Read(ctx, o.Full)
+	check(goos, "spill file readable", err == nil && strings.Count(string(b), "\n") >= 60000, fmt.Sprintf("%d bytes %v", len(b), err))
+	if goos != "windows" {
+		out, _ := sh("stat -c %U " + file + " " + o.Full + " 2>/dev/null || stat -f %Su " + file + " " + o.Full + "; id -un")
+		f := strings.Fields(out)
+		check(goos, "written and spilled files owned by the operator", len(f) == 3 && f[0] == f[2] && f[1] == f[2], out)
+	}
+}
