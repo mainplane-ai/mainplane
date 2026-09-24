@@ -91,10 +91,11 @@ jobs:
           rm "$RUNNER_TEMP/key.pem"
       # The token is scoped to the bucket, which R2 honors on its S3 API only.
       # Its S3 key id is the token id and its secret the token's sha256.
-      # latest names the newest stable release for mainplane-server update. It
-      # goes last, so it never names a release still uploading, and uncached,
-      # since it is the one path whose bytes change. A tag below the current
-      # latest leaves it; the first release finds none.
+      # latest names the newest stable release for mainplane-server update, and
+      # the install scripts at the root are that release's, for mainplane.ai/install.
+      # latest goes last, so it never names a release still uploading. Root
+      # paths are uncached, since their bytes change. A tag below the current
+      # latest leaves them; the first release finds none.
       - name: upload to R2
         env:
           TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -110,6 +111,9 @@ jobs:
           done
           cur=$(curl -fsS https://dl.mainplane.ai/latest || true)
           if [[ $TAG != *-rc.* && $(printf '%s\n' "$cur" "$TAG" | sort -V | tail -1) == "$TAG" ]]; then
+            for f in install.sh install.ps1; do
+              curl -fsS --aws-sigv4 aws:amz:auto:s3 --user "$id:$secret" -H "Content-Type: text/plain; charset=utf-8" -H "Cache-Control: no-store" -T "dist/$f" "https://$ACCOUNT.r2.cloudflarestorage.com/$BUCKET/$f"
+            done
             printf '%s\n' "$TAG" > "$RUNNER_TEMP/latest"
             curl -fsS --aws-sigv4 aws:amz:auto:s3 --user "$id:$secret" -H "Content-Type: text/plain" -H "Cache-Control: no-store" -T "$RUNNER_TEMP/latest" "https://$ACCOUNT.r2.cloudflarestorage.com/$BUCKET/latest"
           fi
