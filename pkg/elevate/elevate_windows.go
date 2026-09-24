@@ -84,7 +84,7 @@ func Is() bool {
 
 // Run runs this binary with args elevated, which shows the UAC prompt, and
 // returns its exit code. Its output shows in this console. A prompt the user
-// declines is fatal.
+// declines is 1, and returns, so the caller's cleanup runs.
 func Run(args ...string) int {
 	exe, err := os.Executable()
 	if err != nil {
@@ -103,15 +103,18 @@ func Run(args ...string) int {
 	}
 	info.size = uint32(unsafe.Sizeof(info))
 	if ok, _, err := shellExecuteEx.Call(uintptr(unsafe.Pointer(&info))); ok == 0 {
-		log.Fatal(err)
+		log.Print(err)
+		return 1
 	}
 	defer func() { _ = windows.CloseHandle(info.process) }()
-	if _, err := windows.WaitForSingleObject(info.process, windows.INFINITE); err != nil {
-		log.Fatal(err)
-	}
 	var code uint32
+	if _, err := windows.WaitForSingleObject(info.process, windows.INFINITE); err != nil {
+		log.Print(err)
+		return 1
+	}
 	if err := windows.GetExitCodeProcess(info.process, &code); err != nil {
-		log.Fatal(err)
+		log.Print(err)
+		return 1
 	}
 	return int(code)
 }

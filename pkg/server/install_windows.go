@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/signal"
@@ -105,9 +106,9 @@ func (s service) Execute(_ []string, reqs <-chan svc.ChangeRequest, status chan<
 
 // prepare stops a running harness and makes Dir, which only SYSTEM and
 // Administrators may read: the config in it holds the provider keys, and
-// ProgramData lets every user read by default. Setting a protected DACL drops
-// every entry an earlier install or someone else left on Dir, and children
-// inherit it.
+// ProgramData lets every user read by default. A protected DACL drops every
+// entry an earlier install or someone else left on Dir, and an empty
+// unprotected one on each child drops its own, so it inherits Dir's alone.
 func prepare() error {
 	if err := stop(); err != nil {
 		return err
@@ -123,7 +124,22 @@ func prepare() error {
 	if err != nil {
 		return err
 	}
-	return windows.SetNamedSecurityInfo(Dir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
+	if err := windows.SetNamedSecurityInfo(Dir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil); err != nil {
+		return err
+	}
+	if sd, err = windows.SecurityDescriptorFromString("D:"); err != nil {
+		return err
+	}
+	empty, _, err := sd.DACL()
+	if err != nil {
+		return err
+	}
+	return filepath.WalkDir(Dir, func(p string, _ fs.DirEntry, err error) error {
+		if err != nil || p == Dir {
+			return err
+		}
+		return windows.SetNamedSecurityInfo(p, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.UNPROTECTED_DACL_SECURITY_INFORMATION, nil, nil, empty, nil)
+	})
 }
 
 // start lets the harness's ports in and runs it at every boot as the service

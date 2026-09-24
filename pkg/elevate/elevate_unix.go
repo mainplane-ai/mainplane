@@ -13,7 +13,8 @@ import (
 func Is() bool { return os.Geteuid() == 0 }
 
 // Run runs this binary with args under sudo, which asks for the password in
-// this terminal, and returns its exit code. A sudo that never ran is fatal.
+// this terminal, and returns its exit code. A sudo that never ran is 1, and
+// returns, so the caller's cleanup runs.
 func Run(args ...string) int {
 	exe, err := os.Executable()
 	if err != nil {
@@ -27,7 +28,8 @@ func Run(args ...string) int {
 		return exit.ExitCode()
 	}
 	if err != nil {
-		log.Fatal(err)
+		log.Print(err)
+		return 1
 	}
 	return 0
 }
