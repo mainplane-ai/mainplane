@@ -43,7 +43,8 @@ func prepare(cmd *exec.Cmd, op *user.User) error {
 	return nil
 }
 
-// token is the operator's from a session they are logged in to. Only
+// token is the operator's from a session they are logged in to, the active
+// one first, where their windows show; else a disconnected one. Only
 // LocalSystem may ask for one.
 func token(op *user.User) (windows.Token, error) {
 	var ss *windows.WTS_SESSION_INFO
@@ -52,15 +53,17 @@ func token(op *user.User) (windows.Token, error) {
 		return 0, err
 	}
 	defer windows.WTSFreeMemory(uintptr(unsafe.Pointer(ss)))
-	for _, s := range unsafe.Slice(ss, n) {
-		var t windows.Token
-		if windows.WTSQueryUserToken(s.SessionID, &t) != nil {
-			continue
+	for _, active := range []bool{true, false} {
+		for _, s := range unsafe.Slice(ss, n) {
+			var t windows.Token
+			if (s.State == windows.WTSActive) != active || windows.WTSQueryUserToken(s.SessionID, &t) != nil {
+				continue
+			}
+			if u, err := t.GetTokenUser(); err == nil && u.User.Sid.String() == op.Uid {
+				return t, nil
+			}
+			_ = t.Close()
 		}
-		if u, err := t.GetTokenUser(); err == nil && u.User.Sid.String() == op.Uid {
-			return t, nil
-		}
-		_ = t.Close()
 	}
 	host, _ := os.Hostname()
 	return 0, fmt.Errorf("operator %s is not logged in on %s", op.Username, host)
