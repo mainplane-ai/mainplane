@@ -50,6 +50,12 @@ func prepare(cmd *exec.Cmd, op *user.User) error {
 
 func killTree(p *os.Process) { _ = syscall.Kill(-p.Pid, syscall.SIGKILL) }
 
+// Work is the worker; the service manager needs nothing of it.
+func Work(addr string, l Local) error {
+	Dial(addr, l)
+	return nil
+}
+
 // restart becomes the new binary in place, same pid and arguments, so a
 // service and a worker started by hand both come back as the new release.
 func restart(exe string) {

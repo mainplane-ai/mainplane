@@ -1,7 +1,7 @@
 // mainplane is the device binary: the worker, and the plainest connector.
 //
 //	mainplane worker  [join token]    make this machine a worker, named by its hostname
-//	mainplane install <join token>    and again at every boot, as a service; asks for sudo on Linux and macOS, code still runs as you
+//	mainplane install <join token>    and again at every boot, as a service; asks for sudo or UAC, code still runs as you
 //	mainplane login   <api key>       remember the harness and the key in ~/.mainplane/login.json
 //	mainplane update  [version]       become that release, by default the logged-in harness's, else the latest stable
 //	mainplane version                 the release this binary was built from
@@ -34,7 +34,7 @@ func main() {
 		if len(os.Args) > 3 || os.Args[1] == "install" && len(os.Args) != 3 {
 			usage()
 		}
-		if os.Args[1] == "install" && runtime.GOOS != "windows" {
+		if os.Args[1] == "install" {
 			elevate.Root(os.Args[1:]...)
 		}
 		work(os.Args[1] == "install", os.Args[2:])
@@ -87,7 +87,7 @@ func work(install bool, args []string) {
 	} else {
 		var err error
 		if token, op, err = worker.Installed(); err != nil {
-			log.Fatalf("no join token: mainplane worker <join token>, or sudo mainplane install <join token> once: %v", err)
+			log.Fatalf("no join token: mainplane worker <join token>, or mainplane install <join token> once: %v", err)
 		}
 	}
 	addr, secret, err := auth.Parse(auth.Join, token)
@@ -110,7 +110,9 @@ func work(install bool, args []string) {
 	} else {
 		dir = home()
 	}
-	worker.Dial(addr, worker.Local{Name: name, Secret: secret, Scratch: filepath.Join(dir, ".mainplane"), Interps: worker.Default[runtime.GOOS], Operator: op})
+	if err := worker.Work(addr, worker.Local{Name: name, Secret: secret, Scratch: filepath.Join(dir, ".mainplane"), Interps: worker.Default[runtime.GOOS], Operator: op}); err != nil {
+		log.Fatal(err)
+	}
 }
 
 // update makes this binary release v: by default the release of the harness
@@ -159,7 +161,7 @@ func usage() {
 	fmt.Fprint(os.Stderr, `usage: mainplane <verb> ...
 
   worker     [join token]            make this machine a worker, named by its hostname; no token reads the installed one
-  install    <join token>            and again at every boot, as a service; asks for sudo on Linux and macOS, code still runs as you
+  install    <join token>            and again at every boot, as a service; asks for sudo or UAC, code still runs as you
   login      <api key>               remember the harness and the key; every verb below uses them
   update     [version]               become that release, by default the logged-in harness's, else the latest stable
   version                            the release this binary was built from
