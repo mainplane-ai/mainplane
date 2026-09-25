@@ -1,7 +1,9 @@
 package worker
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 )
 
@@ -40,4 +42,13 @@ func Install(token string) error {
 		return err
 	}
 	return run("systemctl", "restart", "mainplaned")
+}
+
+// unregister stops the worker and removes its unit; none installed is fine.
+func unregister() error {
+	_ = run("systemctl", "disable", "--now", "mainplaned")
+	if err := os.Remove(unitPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return run("systemctl", "daemon-reload")
 }

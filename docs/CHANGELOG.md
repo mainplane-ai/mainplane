@@ -2,6 +2,12 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.1.1
+
+- `mainplane-server key` and `join` act on the installed harness and ask for root or admin themselves: `mainplane-server join new mac`. They no longer take a config path
+- `mainplane workers` prints one line per worker: name, OS and architecture, interpreters, version, and connected or why it was refused
+- `mainplane uninstall` removes the worker service, the CLI and the join token; `mainplane-server uninstall` removes the harness service, its binary and, on Windows, its firewall rule. Both ask for root or admin themselves. The harness's config, sessions and auth table stay, and so does each operator's `~/.mainplane`. On Windows a running binary moves to the temp folder and is deleted at the next reboot, and a folder left empty comes off PATH
+
 ## v0.1.0
 
 The first release: a harness, workers that dial it, and a CLI.

@@ -1,7 +1,9 @@
 package server
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 )
 
@@ -35,3 +37,12 @@ func start() error {
 }
 
 func restart() error { return run("launchctl", "kickstart", "-k", "system/"+label) }
+
+// unregister stops the harness and removes its plist; none installed is fine.
+func unregister() error {
+	_ = run("launchctl", "bootout", "system/"+label)
+	if err := os.Remove(plistPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}

@@ -1,7 +1,9 @@
 package worker
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 )
 
@@ -35,4 +37,13 @@ func Install(token string) error {
 		return err
 	}
 	return run("launchctl", "bootstrap", "system", plistPath)
+}
+
+// unregister stops the worker and removes its plist; none installed is fine.
+func unregister() error {
+	_ = run("launchctl", "bootout", "system/"+label)
+	if err := os.Remove(plistPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
 }

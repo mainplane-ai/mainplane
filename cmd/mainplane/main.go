@@ -4,6 +4,7 @@
 //	mainplane install <join token>    and again at every boot, as a service; asks for sudo or UAC, code still runs as you
 //	mainplane login   <api key>       remember the harness and the key in ~/.mainplane/login.json
 //	mainplane update  [version]       become that release, by default the logged-in harness's, else the latest stable
+//	mainplane uninstall               remove the worker service and the CLI; ~/.mainplane stays
 //	mainplane version                 the release this binary was built from
 //	mainplane <verb> ...              one verb per harness route, see cli.go
 package main
@@ -43,6 +44,15 @@ func main() {
 			usage()
 		}
 		update(strings.Join(os.Args[2:], ""))
+	case "uninstall":
+		if len(os.Args) != 2 {
+			usage()
+		}
+		elevate.Root(os.Args[1:]...)
+		if err := worker.Uninstall(); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("mainplane uninstalled; ~/.mainplane, the scratch folder with your login, stays")
 	case "file": // a root worker's read or write, run as the operator; not for people
 		if len(os.Args) != 4 {
 			usage()
@@ -164,6 +174,7 @@ func usage() {
   install    <join token>            and again at every boot, as a service; asks for sudo or UAC, code still runs as you
   login      <api key>               remember the harness and the key; every verb below uses them
   update     [version]               become that release, by default the logged-in harness's, else the latest stable
+  uninstall                          remove the worker service and the CLI; asks for sudo or UAC; ~/.mainplane stays
   version                            the release this binary was built from
 
   new                                POST /sessions, body from stdin: {"model","context","workers"} or {"from","n"}
