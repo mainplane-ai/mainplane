@@ -252,7 +252,9 @@ func register() error {
 	return s.Start()
 }
 
-// stop stops the service and waits until it has; none installed is stopped.
+// stop stops the service and waits until its process has ended, which can be
+// a moment after it reports stopped; until then its log is open. None
+// installed is stopped.
 func stop() error {
 	m, err := mgr.Connect()
 	if err != nil {
@@ -267,15 +269,21 @@ func stop() error {
 		return err
 	}
 	defer func() { _ = s.Close() }()
-	st, err := s.Control(svc.Stop)
-	if errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
-		return nil
+	st, err := s.Query()
+	if err != nil || st.State == svc.Stopped {
+		return err
 	}
-	for end := time.Now().Add(stopWait); err == nil && st.State != svc.Stopped; st, err = s.Query() {
-		if time.Now().After(end) {
-			return fmt.Errorf("%s did not stop in %s", name, stopWait)
-		}
-		time.Sleep(200 * time.Millisecond)
+	p, err := windows.OpenProcess(windows.SYNCHRONIZE, false, st.ProcessId)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = windows.CloseHandle(p) }()
+	if _, err := s.Control(svc.Stop); err != nil && !errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
+		return err
+	}
+	ev, err := windows.WaitForSingleObject(p, uint32(stopWait.Milliseconds()))
+	if err == nil && ev != windows.WAIT_OBJECT_0 {
+		return fmt.Errorf("%s did not stop in %s", name, stopWait)
 	}
 	return err
 }
