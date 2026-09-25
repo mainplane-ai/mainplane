@@ -34,5 +34,8 @@ func place(bin string) error {
 	if err := os.Rename(bin, bin+".old"); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	return os.Rename(bin+".new", bin)
+	if err := os.Rename(bin+".new", bin); err != nil {
+		return errors.Join(err, os.Rename(bin+".old", bin))
+	}
+	return nil
 }
