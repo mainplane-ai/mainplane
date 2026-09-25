@@ -5,18 +5,61 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 )
+
+// A started harness listens within a second; one that has not after this
+// failed, and its log says why.
+const startWait = 10 * time.Second
 
 // Conf is the config the installed harness runs from.
 var Conf = filepath.Join(Dir, "config.json")
 
+// envProviders are the providers Default takes from the environment, by the
+// variables each provider's own tools read.
+var envProviders = map[string]Provider{
+	"anthropic": {Key: "$ANTHROPIC_API_KEY"},
+	"openai":    {Key: "$OPENAI_API_KEY"},
+	"gemini":    {Key: "$GEMINI_API_KEY"},
+	"bedrock":   {Key: "$AWS_BEARER_TOKEN_BEDROCK", Region: "$AWS_REGION"},
+}
+
+// Default is the config install writes when given none: workers dial port
+// 7811 and connectors call 8080 at host, sessions live under Dir, and every
+// provider whose key is set in this environment serves.
+func Default(host string) (Config, error) {
+	c := Config{Admin: "admin", Host: host, Workers: ":7811", HTTP: ":8080", Providers: map[string]Provider{}}
+	var vars []string
+	for name, p := range envProviders {
+		if os.ExpandEnv(p.Key) != "" {
+			c.Providers[name] = p
+		}
+		v := strings.TrimPrefix(p.Key, "$")
+		if p.Region != "" {
+			v += " with " + strings.TrimPrefix(p.Region, "$")
+		}
+		vars = append(vars, v)
+	}
+	if len(c.Providers) == 0 {
+		slices.Sort(vars)
+		return c, fmt.Errorf("no provider key is set: set one of %s in this shell and install again. Run install without sudo, which drops the environment; it asks for root itself", strings.Join(vars, ", "))
+	}
+	return c, nil
+}
+
 // Expand fills provider values in from this process's environment, which a
-// service will not have, and refuses a provider the harness does not know.
+// service will not have, refuses a provider the harness does not know, and
+// moves a relative admin under Dir.
 func (c *Config) Expand() error {
+	if !filepath.IsAbs(c.Admin) {
+		c.Admin = filepath.Join(Dir, c.Admin)
+	}
 	for name, p := range c.Providers {
 		for _, s := range []*string{&p.Key, &p.URL, &p.Region} {
 			if *s != "" && os.ExpandEnv(*s) == "" {
@@ -31,12 +74,8 @@ func (c *Config) Expand() error {
 }
 
 // Install makes this machine run the harness at every boot, from a copy of an
-// expanded c at Conf. Dir is root's alone: the copy holds the keys. A
-// relative admin moves under Dir.
+// expanded c at Conf. Dir is root's alone: the copy holds the keys.
 func Install(c Config) error {
-	if !filepath.IsAbs(c.Admin) {
-		c.Admin = filepath.Join(Dir, c.Admin)
-	}
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
@@ -50,7 +89,22 @@ func Install(c Config) error {
 	if err := place(); err != nil {
 		return err
 	}
-	return start()
+	if err := start(); err != nil {
+		return err
+	}
+	_, port, err := net.SplitHostPort(c.HTTP)
+	if err != nil {
+		return err
+	}
+	for end := time.Now().Add(startWait); ; time.Sleep(200 * time.Millisecond) {
+		conn, err := net.Dial("tcp", net.JoinHostPort("localhost", port))
+		if err == nil {
+			return conn.Close()
+		}
+		if time.Now().After(end) {
+			return fmt.Errorf("the harness service started but did not answer on port %s in %s; its log says why", port, startWait)
+		}
+	}
 }
 
 // place copies this binary to bin through a new file and renames. The old one

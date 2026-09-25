@@ -1,18 +1,27 @@
 # Installs the mainplane CLI for the user who runs it, on their PATH; with a join token it installs it
 # for the machine instead and makes this Windows machine a worker for that user, after a UAC prompt.
+# With server it also makes this machine the harness, from the provider keys set in this shell, after a
+# UAC prompt, and logs the CLI in to it. Host is the name workers reach it by, this machine's name by default.
 # The release stamps its version.
-#   & ([scriptblock]::Create((irm https://dl.mainplane.ai/@VERSION@/install.ps1))) [join token]
-param([string]$Token)
+#   & ([scriptblock]::Create((irm https://dl.mainplane.ai/@VERSION@/install.ps1))) [join token | server [host]]
+param([string]$Token, [string]$HostName)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $dl = 'https://dl.mainplane.ai/@VERSION@'
-$f = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'mainplane-windows-arm64.exe' } else { 'mainplane-windows-amd64.exe' }
+$arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
 $d = New-Item -ItemType Directory (Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid()))
-$t = Join-Path $d $f
-Invoke-WebRequest "$dl/$f" -OutFile $t -UseBasicParsing
-$want = ((Invoke-WebRequest "$dl/SHA256SUMS" -UseBasicParsing).Content -split "`n" | Where-Object { $_ -match " $([regex]::Escape($f))$" }) -split ' ' | Select-Object -First 1
-if ($want -ne (Get-FileHash $t).Hash.ToLower()) { throw "$f does not match SHA256SUMS" }
-if ($Token) {
+$sums = (Invoke-WebRequest "$dl/SHA256SUMS" -UseBasicParsing).Content -split "`n"
+# Fetch gets this machine's build of release binary $name into $d, checked against SHA256SUMS.
+function Fetch($name) {
+  $f = "$name-windows-$arch.exe"
+  $t = Join-Path $d $f
+  Invoke-WebRequest "$dl/$f" -OutFile $t -UseBasicParsing
+  $want = ($sums | Where-Object { $_ -match " $([regex]::Escape($f))$" }) -split ' ' | Select-Object -First 1
+  if ($want -ne (Get-FileHash $t).Hash.ToLower()) { throw "$f does not match SHA256SUMS" }
+  $t
+}
+$t = Fetch mainplane
+if ($Token -and $Token -ne 'server') {
   # install places the binary in Program Files and that folder on the machine PATH
   & $t install $Token
   if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -27,6 +36,14 @@ if ($Token) {
     [Environment]::SetEnvironmentVariable('Path', "$($p.TrimEnd(';'));$bin".TrimStart(';'), 'User')
   }
 }
-Remove-Item -Recurse $d
 if (($env:Path -split ';') -notcontains $bin) { $env:Path += ";$bin" }
+if ($Token -eq 'server') {
+  # install places mainplane-server in Program Files, runs it as a service, and logs mainplane in to it
+  $s = Fetch mainplane-server
+  if ($HostName) { & $s install --host $HostName } else { & $s install }
+  if ($LASTEXITCODE) { exit $LASTEXITCODE }
+  # install put that folder on the machine PATH, which this shell read before
+  $env:Path += ";$env:ProgramFiles\mainplane"
+}
+Remove-Item -Recurse $d
 Write-Output "mainplane installed: $(mainplane version)"

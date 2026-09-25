@@ -4,6 +4,9 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 
 ## v0.1.1
 
+- One line makes a machine the harness: `curl -fsSL https://dl.mainplane.ai/install.sh | sh -s -- server [host]`, or on Windows `& ([scriptblock]::Create((irm https://dl.mainplane.ai/install.ps1))) server [host]`. Run it without sudo; it asks for root or admin itself. It installs the CLI and `mainplane-server`, starts the harness with the provider keys set in the shell (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, or `AWS_BEARER_TOKEN_BEDROCK` with `AWS_REGION`), logs the CLI in to it, and prints how to add a worker. Workers dial `host`, the machine's name by default
+- `mainplane-server install` with no config writes the default one: workers on port 7811, connectors on 8080, sessions under the harness's own folder, and every provider whose key is set. `--host <name>` sets the name tokens carry. It issues an api key named after the machine and logs that machine's CLI in; installing again replaces that key. With no provider key set it stops and names the variables it looked for
+- Install waits until the harness answers on its HTTP port, and fails with a pointer to its log when it does not
 - `mainplane-server key` and `join` act on the installed harness and ask for root or admin themselves: `mainplane-server join new mac`. They no longer take a config path
 - `mainplane workers` prints one line per worker: name, OS and architecture, interpreters, version, and connected or why it was refused
 - `mainplane uninstall` removes the worker service, the CLI and the join token; `mainplane-server uninstall` removes the harness service, its binary and, on Windows, its firewall rule. Both ask for root or admin themselves. The harness's config, sessions and auth table stay, and so does each operator's `~/.mainplane`. On Windows a running binary moves to the temp folder and is deleted at the next reboot, and a folder left empty comes off PATH
