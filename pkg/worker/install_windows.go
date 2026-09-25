@@ -20,8 +20,8 @@ import (
 
 // The worker is the Windows service mainplaned as LocalSystem. It runs code
 // only as its operator, the user who installed it, in their logon session.
-// Install needs admin. The worker stops before the binary is placed, because
-// Windows cannot replace a running one.
+// Install needs admin. The worker stops before the binary is placed, so it
+// starts again as the new one.
 const (
 	name = "mainplaned"
 	// stateDir and all under it: SYSTEM and Administrators full control,

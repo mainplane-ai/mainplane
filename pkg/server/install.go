@@ -2,7 +2,9 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,9 +53,10 @@ func Install(c Config) error {
 	return start()
 }
 
-// place copies this binary to bin through a new file and a rename: a running
-// binary can be replaced but not written. Installing from bin leaves it. The
-// mode is set apart from the write, which the installer's umask would narrow.
+// place copies this binary to bin through a new file and renames. The old one
+// moves aside to .old first, since Windows renames a running binary but will
+// not replace it. Installing from bin leaves it. The mode is set apart from
+// the write, which the installer's umask would narrow.
 func place() error {
 	exe, err := os.Executable()
 	if err != nil || exe == bin {
@@ -70,6 +73,9 @@ func place() error {
 		return err
 	}
 	if err := os.Chmod(bin+".new", 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(bin, bin+".old"); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	return os.Rename(bin+".new", bin)
