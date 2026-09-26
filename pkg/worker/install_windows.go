@@ -180,7 +180,7 @@ func Uninstall() error {
 		return err
 	}
 	cli := filepath.Join(cliDir, "mainplane.exe")
-	for _, f := range []string{Bin, Bin + ".old", Bin + ".new", cli, cli + ".old"} {
+	for _, f := range []string{Bin, Bin + ".old", Bin + ".new", cli, cli + ".old", cli + ".new"} {
 		if err := remove(f); err != nil {
 			return err
 		}
