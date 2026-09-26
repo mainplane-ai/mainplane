@@ -45,9 +45,15 @@ func Install(token string) error {
 }
 
 // unregister stops the worker and removes its unit; none installed is fine.
+// A stop that fails is an error, since the worker would run on.
 func unregister() error {
-	_ = run("systemctl", "disable", "--now", "mainplaned")
-	if err := os.Remove(unitPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if _, err := os.Stat(unitPath); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err := run("systemctl", "disable", "--now", "mainplaned"); err != nil {
+		return err
+	}
+	if err := os.Remove(unitPath); err != nil {
 		return err
 	}
 	return run("systemctl", "daemon-reload")

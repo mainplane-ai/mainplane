@@ -27,7 +27,7 @@ func Uninstall() error {
 	if err := unregister(); err != nil {
 		return err
 	}
-	for _, f := range []string{bin, bin + ".old"} {
+	for _, f := range []string{bin, bin + ".old", bin + ".new"} {
 		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}

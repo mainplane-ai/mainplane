@@ -180,7 +180,7 @@ func Uninstall() error {
 		return err
 	}
 	cli := filepath.Join(cliDir, "mainplane.exe")
-	for _, f := range []string{Bin, Bin + ".old", cli, cli + ".old"} {
+	for _, f := range []string{Bin, Bin + ".old", Bin + ".new", cli, cli + ".old"} {
 		if err := remove(f); err != nil {
 			return err
 		}
@@ -188,13 +188,20 @@ func Uninstall() error {
 	if err := os.RemoveAll(stateDir); err != nil {
 		return err
 	}
-	if os.Remove(filepath.Dir(Bin)) == nil {
-		if err := path(registry.LOCAL_MACHINE, machineEnv, filepath.Dir(Bin), false); err != nil {
+	for _, e := range []struct {
+		root     registry.Key
+		sub, dir string
+	}{{registry.LOCAL_MACHINE, machineEnv, filepath.Dir(Bin)}, {registry.CURRENT_USER, "Environment", cliDir}} {
+		err := os.Remove(e.dir)
+		if errors.Is(err, windows.ERROR_DIR_NOT_EMPTY) {
+			continue
+		}
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
-	}
-	if os.Remove(cliDir) == nil {
-		return path(registry.CURRENT_USER, "Environment", cliDir, false)
+		if err := path(e.root, e.sub, e.dir, false); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -275,6 +282,10 @@ func stop() error {
 	}
 	p, err := windows.OpenProcess(windows.SYNCHRONIZE, false, st.ProcessId)
 	if err != nil {
+		// it may have ended between the query and the open
+		if st, qerr := s.Query(); qerr == nil && st.State == svc.Stopped {
+			return nil
+		}
 		return err
 	}
 	defer func() { _ = windows.CloseHandle(p) }()
@@ -302,12 +313,12 @@ func path(root registry.Key, sub, dir string, on bool) error {
 		return err
 	}
 	es := strings.Split(p, ";")
-	i := slices.IndexFunc(es, func(e string) bool { return strings.EqualFold(e, dir) })
+	kept := slices.DeleteFunc(slices.Clone(es), func(e string) bool { return strings.EqualFold(e, dir) })
 	switch {
-	case on && i < 0:
+	case on && len(kept) == len(es):
 		p = strings.TrimSuffix(p, ";") + ";" + dir
-	case !on && i >= 0:
-		p = strings.Join(slices.Delete(es, i, i+1), ";")
+	case !on && len(kept) < len(es):
+		p = strings.Join(kept, ";")
 	default:
 		return nil
 	}

@@ -53,7 +53,7 @@ func main() {
 		}
 		fatal(server.Install(c))
 		fmt.Printf("harness runs at every boot from %s\n", server.Conf)
-	case (verb == auth.Key || verb == auth.Join) && len(args) >= 2:
+	case (verb == auth.Key || verb == auth.Join) && (len(args) == 2 && args[1] == "list" || len(args) == 3 && (args[1] == "new" || args[1] == "revoke")):
 		elevate.Root(args...)
 		c, err := server.Load(server.Conf)
 		if err != nil {
@@ -79,8 +79,8 @@ func install(c server.Config) int {
 
 func table(c server.Config, kind string, args []string) {
 	store := c.Auth()
-	switch {
-	case len(args) == 2 && args[0] == "new":
+	switch args[0] {
+	case "new":
 		addr, err := c.Address(kind)
 		fatal(err)
 		secret, err := store.Issue(kind, args[1])
@@ -90,16 +90,14 @@ func table(c server.Config, kind string, args []string) {
 		if kind == auth.Join { // stderr, so stdout stays the token for scripts
 			fmt.Fprintf(os.Stderr, "\nlinux, macos:  curl -fsSL %[1]s%[2]s/install.sh | sudo sh -s -- %[3]s\nwindows:       & ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) %[3]s\n", release.DL, version.V, token)
 		}
-	case len(args) == 2 && args[0] == "revoke":
+	case "revoke":
 		fatal(store.Revoke(kind, args[1]))
-	case len(args) == 1 && args[0] == "list":
+	case "list":
 		t, err := store.Load()
 		fatal(err)
 		for _, e := range t[kind] {
 			fmt.Println(e.Name)
 		}
-	default:
-		usage()
 	}
 }
 
