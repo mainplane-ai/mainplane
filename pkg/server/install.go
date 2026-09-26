@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -92,17 +93,32 @@ func Install(c Config) error {
 	if err := start(); err != nil {
 		return err
 	}
-	_, port, err := net.SplitHostPort(c.HTTP)
+	return answers(c.HTTP)
+}
+
+// answers waits for the harness to answer at addr as only it does: 401 to a
+// request with no api key. Another program on the port is an error at once.
+func answers(addr string) error {
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return err
 	}
+	if ip := net.ParseIP(host); host == "" || ip != nil && ip.IsUnspecified() {
+		host = "localhost"
+	}
+	url := "http://" + net.JoinHostPort(host, port) + "/"
+	client := http.Client{Timeout: time.Second}
 	for end := time.Now().Add(startWait); ; time.Sleep(200 * time.Millisecond) {
-		conn, err := net.Dial("tcp", net.JoinHostPort("localhost", port))
+		resp, err := client.Get(url)
 		if err == nil {
-			return conn.Close()
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusUnauthorized {
+				return fmt.Errorf("%s answered %s, which the harness never does: another program has port %s", url, resp.Status, port)
+			}
+			return nil
 		}
 		if time.Now().After(end) {
-			return fmt.Errorf("the harness service started but did not answer on port %s in %s; its log says why", port, startWait)
+			return fmt.Errorf("the harness service started but did not answer at %s in %s; its log says why", url, startWait)
 		}
 	}
 }
