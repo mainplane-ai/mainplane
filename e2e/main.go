@@ -7,9 +7,10 @@
 //
 // host:port is where the machines reach this one. Linux and macOS targets
 // need passwordless sudo. The Windows target must be an elevated login, with
-// the operator logged in at the console. A machine with mainplane-server
-// installed also has its harness updated to v. The workers stay installed,
-// joined to this run's harness, which ends with it. Each phase is this
+// the operator logged in at the console. Then each machine becomes a harness
+// in one line, which updates to prev and back, and both are uninstalled: a
+// run ends with every machine clean, and any harness it had is replaced and
+// gone, though its config and sessions stay. Each phase is this
 // program again, as a harness at one version: its exit drops every
 // connection, so each worker says hello to the next.
 package main
@@ -51,14 +52,37 @@ var (
 		false: `curl -fsSL %[1]s%[2]s/install.sh | sudo sh -s -- '%[3]s'`,
 		true:  `& ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) '%[3]s'`,
 	}
+	// The key only has to be set: install checks for one, and no step calls a model.
+	serverInstall = map[bool]string{
+		false: `export ANTHROPIC_API_KEY=e2e-unused
+curl -fsSL %[1]s%[2]s/install.sh | sh -s -- server || exit 1
+/usr/local/bin/mainplane workers && echo workers-ok`,
+		true: `$env:ANTHROPIC_API_KEY = 'e2e-unused'
+& ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) server
+if ($LASTEXITCODE) { exit $LASTEXITCODE }
+mainplane workers
+if (!$LASTEXITCODE) { 'workers-ok' }`,
+	}
 	serverUpdate = map[bool]string{
 		false: `b=/usr/local/bin/mainplane-server
-[ -x $b ] || exit 0
 sudo $b update %[1]s >/dev/null 2>&1
 $b version
 systemctl is-active mainplane-server 2>/dev/null || { sudo launchctl print system/ai.mainplane.server >/dev/null 2>&1 && echo active; }`,
 		true: `$b = "$env:ProgramFiles\mainplane\mainplane-server.exe"
-if (Test-Path $b) { & $b update %[1]s *> $null; & $b version; if ((Get-Service mainplane-server).Status -eq 'Running') { 'active' } }`,
+& $b update %[1]s *> $null; & $b version; if ((Get-Service mainplane-server).Status -eq 'Running') { 'active' }`,
+	}
+	// Each uninstall elevates itself. What is left of either is printed
+	// before clean.
+	uninstall = map[bool]string{
+		false: `/usr/local/bin/mainplane-server uninstall >/dev/null && /usr/local/bin/mainplane uninstall >/dev/null || exit 1
+ls /usr/local/bin | grep mainplane
+ls /etc/systemd/system/mainplane* /Library/LaunchDaemons/ai.mainplane.* 2>/dev/null
+echo clean`,
+		true: `& "$env:ProgramFiles\mainplane\mainplane-server.exe" uninstall *> $null; if ($LASTEXITCODE) { exit 1 }
+& "$env:ProgramFiles\mainplane\mainplane.exe" uninstall *> $null; if ($LASTEXITCODE) { exit 1 }
+Get-Service mainplane* -ErrorAction SilentlyContinue | ForEach-Object Name
+Get-ChildItem "$env:ProgramFiles\mainplane", "$env:LOCALAPPDATA\Programs\mainplane" -ErrorAction SilentlyContinue | ForEach-Object FullName
+'clean'`,
 	}
 )
 
@@ -124,8 +148,10 @@ func run(v, prev, addr string, targets []string) {
 	harnessAt := func(ver string, mode ...string) {
 		cmd := exec.Command(exe, append([]string{"phase", ":" + port, secret, ver, strings.Join(oses, ",")}, mode...)...)
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		// a later phase waits on the same workers, so one failed ends the run
 		if cmd.Run() != nil {
-			failed = true
+			fmt.Println("FAIL")
+			os.Exit(1)
 		}
 	}
 	harnessAt(v, "check")
@@ -142,12 +168,15 @@ func run(v, prev, addr string, targets []string) {
 	harnessAt(missing, "refused", "404")
 	harnessAt(v, "connect")
 	for _, o := range oses {
-		out, err := remote(o, ssh[o], fmt.Sprintf(serverUpdate[o == "windows"], v))
-		if err == nil && strings.TrimSpace(out) == "" {
-			fmt.Printf("SKIP  %-8s no mainplane-server installed\n", o)
-			continue
+		win := o == "windows"
+		out, err := remote(o, ssh[o], fmt.Sprintf(serverInstall[win], release.DL, v))
+		check(o, "harness installed in one line, CLI logged in", err == nil && strings.Contains(out, "mainplane logged in to") && strings.Contains(out, "workers-ok"), last(out))
+		for _, u := range []string{prev, v} {
+			out, err = remote(o, ssh[o], fmt.Sprintf(serverUpdate[win], u))
+			check(o, "harness updated to "+u+", running", err == nil && strings.Join(strings.Fields(out), " ") == u+" active", out)
 		}
-		check(o, "harness updated to "+v+", running", err == nil && strings.Join(strings.Fields(out), " ") == v+" active", out)
+		out, err = remote(o, ssh[o], uninstall[win])
+		check(o, "uninstall: no service or binary left", err == nil && strings.TrimSpace(out) == "clean", out)
 	}
 	if t, ok := ssh["windows"]; ok {
 		out, err := remote("windows", t, fmt.Sprintf(defender, start.Format(time.RFC3339)))
@@ -158,7 +187,7 @@ func run(v, prev, addr string, targets []string) {
 // remote runs script on a machine: sh on Linux and macOS, and Windows
 // PowerShell on Windows, encoded so the ssh server's cmd leaves it alone.
 func remote(goos, target, script string) (string, error) {
-	cmd := exec.Command("ssh", "-o", "BatchMode=yes", target, "sh -s")
+	cmd := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", target, "sh -s")
 	cmd.Stdin = strings.NewReader(script)
 	if goos == "windows" {
 		u := utf16.Encode([]rune("$ProgressPreference = 'SilentlyContinue'\n" + script))
@@ -166,7 +195,7 @@ func remote(goos, target, script string) (string, error) {
 		for i, c := range u {
 			binary.LittleEndian.PutUint16(b[2*i:], c)
 		}
-		cmd = exec.Command("ssh", "-o", "BatchMode=yes", target, "powershell -NoProfile -EncodedCommand "+base64.StdEncoding.EncodeToString(b))
+		cmd = exec.Command("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", target, "powershell -NoProfile -EncodedCommand "+base64.StdEncoding.EncodeToString(b))
 	}
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
