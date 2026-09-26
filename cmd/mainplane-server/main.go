@@ -3,7 +3,7 @@
 // only hashes.
 //
 //	mainplane-server up   <config.json>
-//	mainplane-server install <config.json>    and again at every boot, as a service; asks for sudo or admin itself
+//	mainplane-server install [--host <name>] | <config.json>    and again at every boot, as a service; asks for sudo or admin itself
 //	mainplane-server key  new <name> | revoke <name> | list    on the installed harness, as root
 //	mainplane-server join new <name> | revoke <name> | list
 //	mainplane-server update [version]         the installed harness becomes release version, the latest stable by default
@@ -12,10 +12,12 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
@@ -44,15 +46,23 @@ func main() {
 		c, err := server.Load(args[1])
 		fatal(err)
 		fatal(server.Up(c))
-	case verb == "install" && len(args) == 2:
-		c, err := server.Load(args[1])
-		fatal(err)
-		fatal(c.Expand())
-		if !elevate.Is() {
-			os.Exit(install(c))
+	case verb == "install":
+		h, fresh := config(args[1:])
+		fatal(h.Expand())
+		if elevate.Is() {
+			addr, err := h.Address(auth.Join)
+			fatal(err)
+			fatal(server.Install(h.Config))
+			if h.Key != "" {
+				fatal(h.Auth().Set(auth.Key, hostname(), h.Key))
+			}
+			fmt.Printf("harness runs at every boot from %s; workers dial %s\n", server.Conf, addr)
+		} else if code := install(h); code != 0 {
+			os.Exit(code)
 		}
-		fatal(server.Install(c))
-		fmt.Printf("harness runs at every boot from %s\n", server.Conf)
+		if fresh {
+			login(h)
+		}
 	case (verb == auth.Key || verb == auth.Join) && (len(args) == 2 && args[1] == "list" || len(args) == 3 && (args[1] == "new" || args[1] == "revoke")):
 		elevate.Root(args...)
 		c, err := server.Load(server.Conf)
@@ -65,16 +75,68 @@ func main() {
 	}
 }
 
+// handover is a config and, from an install that made the config itself, the
+// secret of the api key this machine's CLI logs in with.
+type handover struct {
+	server.Config
+	Key string `json:"key,omitempty"`
+}
+
+// config is what install's arguments name: the default config with a fresh
+// key, at this machine's name or --host, or a config file.
+func config(args []string) (h handover, fresh bool) {
+	switch {
+	case len(args) == 0 || len(args) == 2 && args[0] == "--host":
+		host := hostname()
+		if len(args) == 2 {
+			host = args[1]
+		}
+		c, err := server.Default(host)
+		fatal(err)
+		return handover{Config: c, Key: rand.Text()}, true
+	case len(args) == 1:
+		b, err := os.ReadFile(args[0])
+		fatal(err)
+		fatal(json.Unmarshal(b, &h))
+		return h, false
+	}
+	usage()
+	return h, false
+}
+
 // install hands the expanded config to an elevated install through a file
 // only this user may read, since neither sudo nor UAC carries this shell's
 // environment over.
-func install(c server.Config) int {
+func install(h handover) int {
 	f, err := os.CreateTemp("", "mainplane-server-*.json")
 	fatal(err)
 	defer func() { _ = os.Remove(f.Name()) }()
-	fatal(json.NewEncoder(f).Encode(c))
+	fatal(json.NewEncoder(f).Encode(h))
 	fatal(f.Close())
 	return elevate.Run("install", f.Name())
+}
+
+// login logs this machine's CLI in to the harness just installed and says
+// what comes next.
+func login(h handover) {
+	addr, err := h.Address(auth.Key)
+	fatal(err)
+	token := auth.Token(auth.Key, addr, h.Key)
+	if _, err := exec.LookPath("mainplane"); err != nil {
+		fmt.Printf("no mainplane CLI on PATH; log one in with:  mainplane login %s\n", token)
+	} else {
+		fmt.Print("mainplane logged in to ")
+		cmd := exec.Command("mainplane", "login", token)
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		fatal(cmd.Run())
+	}
+	fmt.Println("add a worker:  mainplane-server join new <name>")
+}
+
+func hostname() string {
+	h, err := os.Hostname()
+	fatal(err)
+	return h
 }
 
 func table(c server.Config, kind string, args []string) {
@@ -111,6 +173,8 @@ func usage() {
 	fmt.Fprint(os.Stderr, `usage: mainplane-server <verb> ...
 
   up        <config.json>                 run the harness
+  install   [--host <name>]               run it at every boot, with the provider keys set in this shell; workers
+                                          dial <name>, this machine's by default. Logs this machine's CLI in
   install   <config.json>                 run it at every boot from a root-only copy of the config
   key       new <name> | revoke <name> | list   api keys of the installed harness: what a connector needs to call it
   join      new <name> | revoke <name> | list   join secrets of the installed harness: what a machine needs to become a worker

@@ -79,6 +79,16 @@ func (s Store) Issue(kind, name string) (string, error) {
 	return secret, s.save(t)
 }
 
+// Set makes secret the entry of kind named name, in place of any before it.
+func (s Store) Set(kind, name, secret string) error {
+	t, err := s.Load()
+	if err != nil {
+		return err
+	}
+	t[kind] = append(slices.DeleteFunc(t[kind], func(e Entry) bool { return e.Name == name }), Entry{Name: name, Hash: Hash(secret)})
+	return s.save(t)
+}
+
 func (s Store) Revoke(kind, name string) error {
 	t, err := s.Load()
 	if err != nil {
