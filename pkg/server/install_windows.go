@@ -208,15 +208,19 @@ func Uninstall() error {
 		return err
 	}
 	_ = run("netsh", "advfirewall", "firewall", "delete", "rule", "name="+name)
-	for _, f := range []string{bin, bin + ".old"} {
+	for _, f := range []string{bin, bin + ".old", bin + ".new"} {
 		if err := remove(f); err != nil {
 			return err
 		}
 	}
-	if os.Remove(filepath.Dir(bin)) == nil {
+	switch err := os.Remove(filepath.Dir(bin)); {
+	case err == nil || errors.Is(err, fs.ErrNotExist):
 		return path(false)
+	case errors.Is(err, windows.ERROR_DIR_NOT_EMPTY):
+		return nil
+	default:
+		return err
 	}
-	return nil
 }
 
 // remove deletes f. A running binary, as this one usually is, cannot be
@@ -298,12 +302,12 @@ func path(on bool) error {
 	}
 	dir := filepath.Dir(bin)
 	es := strings.Split(p, ";")
-	i := slices.IndexFunc(es, func(e string) bool { return strings.EqualFold(e, dir) })
+	kept := slices.DeleteFunc(slices.Clone(es), func(e string) bool { return strings.EqualFold(e, dir) })
 	switch {
-	case on && i < 0:
+	case on && len(kept) == len(es):
 		p = strings.TrimSuffix(p, ";") + ";" + dir
-	case !on && i >= 0:
-		p = strings.Join(slices.Delete(es, i, i+1), ";")
+	case !on && len(kept) < len(es):
+		p = strings.Join(kept, ";")
 	default:
 		return nil
 	}

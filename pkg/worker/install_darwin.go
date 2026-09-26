@@ -40,8 +40,13 @@ func Install(token string) error {
 }
 
 // unregister stops the worker and removes its plist; none installed is fine.
+// bootout fails for a daemon not loaded too, so the check is whether it is
+// still loaded after: then it would run on.
 func unregister() error {
-	_ = run("launchctl", "bootout", "system/"+label)
+	err := run("launchctl", "bootout", "system/"+label)
+	if run("launchctl", "print", "system/"+label) == nil {
+		return errors.Join(fmt.Errorf("%s is still loaded", label), err)
+	}
 	if err := os.Remove(plistPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
