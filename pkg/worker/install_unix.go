@@ -5,6 +5,7 @@ package worker
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/user"
@@ -83,6 +84,21 @@ func setup(token string) error {
 		}
 	}
 	return nil
+}
+
+// Uninstall stops the worker and removes its service, Bin, which is also the
+// CLI, and the state directory with the join token. Scratch stays: it is the
+// operator's.
+func Uninstall() error {
+	if err := unregister(); err != nil {
+		return err
+	}
+	for _, f := range []string{Bin, Bin + ".old", Bin + ".new"} {
+		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return os.RemoveAll(stateDir)
 }
 
 // run is one service manager command; its output is the error when it fails.

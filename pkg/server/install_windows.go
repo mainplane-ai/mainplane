@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -183,7 +184,62 @@ func start() error {
 		return err
 	}
 	fmt.Println("note: the harness stops while this machine sleeps; powercfg /change standby-timeout-ac 0 keeps it awake on power")
-	return path()
+	return path(true)
+}
+
+// Uninstall stops and deletes the service and its firewall rule, removes the
+// binary, and takes bin's folder off PATH once nothing else is in it. Dir
+// stays: it holds the sessions.
+func Uninstall() error {
+	if err := stop(); err != nil {
+		return err
+	}
+	m, err := mgr.Connect()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = m.Disconnect() }()
+	s, err := m.OpenService(name)
+	if err == nil {
+		err = s.Delete()
+		_ = s.Close()
+	}
+	if err != nil && !errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+		return err
+	}
+	_ = run("netsh", "advfirewall", "firewall", "delete", "rule", "name="+name)
+	for _, f := range []string{bin, bin + ".old", bin + ".new"} {
+		if err := remove(f); err != nil {
+			return err
+		}
+	}
+	switch err := os.Remove(filepath.Dir(bin)); {
+	case err == nil || errors.Is(err, fs.ErrNotExist):
+		return path(false)
+	case errors.Is(err, windows.ERROR_DIR_NOT_EMPTY):
+		return nil
+	default:
+		return err
+	}
+}
+
+// remove deletes f. A running binary, as this one usually is, cannot be
+// deleted but can be moved: it moves to the temp folder and goes at the next
+// reboot.
+func remove(f string) error {
+	err := os.Remove(f)
+	if err == nil || errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	t := filepath.Join(os.TempDir(), fmt.Sprintf("%s.%d", filepath.Base(f), time.Now().UnixNano()))
+	if err := os.Rename(f, t); err != nil {
+		return err
+	}
+	p, err := windows.UTF16PtrFromString(t)
+	if err != nil {
+		return err
+	}
+	return windows.MoveFileEx(p, nil, windows.MOVEFILE_DELAY_UNTIL_REBOOT)
 }
 
 // stop stops the service and waits until it has; none installed is stopped.
@@ -231,10 +287,10 @@ func restart() error {
 	return s.Start()
 }
 
-// path puts bin's folder on the machine PATH and tells running programs, so
-// a shell Explorer starts next finds mainplane-server. The value stays
-// unexpanded, since other entries may name variables.
-func path() error {
+// path puts bin's folder on the machine PATH, or takes it off, and tells
+// running programs, so a shell Explorer starts next sees the change. The
+// value stays unexpanded, since other entries may name variables.
+func path(on bool) error {
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\Session Manager\Environment`, registry.QUERY_VALUE|registry.SET_VALUE)
 	if err != nil {
 		return err
@@ -245,12 +301,17 @@ func path() error {
 		return err
 	}
 	dir := filepath.Dir(bin)
-	for _, e := range strings.Split(p, ";") {
-		if strings.EqualFold(e, dir) {
-			return nil
-		}
+	es := strings.Split(p, ";")
+	kept := slices.DeleteFunc(slices.Clone(es), func(e string) bool { return strings.EqualFold(e, dir) })
+	switch {
+	case on && len(kept) == len(es):
+		p = strings.TrimSuffix(p, ";") + ";" + dir
+	case !on && len(kept) < len(es):
+		p = strings.Join(kept, ";")
+	default:
+		return nil
 	}
-	if err := k.SetExpandStringValue("Path", strings.TrimSuffix(p, ";")+";"+dir); err != nil {
+	if err := k.SetExpandStringValue("Path", p); err != nil {
 		return err
 	}
 	env, _ := windows.UTF16PtrFromString("Environment")

@@ -3,10 +3,12 @@ package worker
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -31,6 +33,7 @@ const (
 	// ends it on purpose, so every restart waits the same.
 	restartDelay = 2 * time.Second
 	stopWait     = 30 * time.Second
+	machineEnv   = `SYSTEM\CurrentControlSet\Control\Session Manager\Environment`
 )
 
 // x/sys/windows does not wrap SendMessageTimeout. A broadcast waits on every
@@ -46,6 +49,8 @@ var (
 	Bin      = filepath.Join(os.Getenv("ProgramFiles"), "mainplane", "mainplane.exe")
 	stateDir = filepath.Join(os.Getenv("ProgramData"), "mainplane")
 	logPath  = filepath.Join(stateDir, "mainplaned.log")
+	// cliDir is where install.ps1 puts the CLI when it makes no worker.
+	cliDir = filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "mainplane")
 
 	sendMessageTimeout = windows.NewLazySystemDLL("user32.dll").NewProc("SendMessageTimeoutW")
 )
@@ -150,7 +155,74 @@ func Install(token string) error {
 		return err
 	}
 	fmt.Printf("code on this worker runs as %s, only while they are logged in\n", op.Username)
-	return path()
+	return path(registry.LOCAL_MACHINE, machineEnv, filepath.Dir(Bin), true)
+}
+
+// Uninstall stops and deletes the service, removes Bin, the state directory
+// with the join token, and the CLI install.ps1 puts in cliDir, and takes each
+// folder off PATH once nothing else is in it. Scratch stays: it is the
+// operator's.
+func Uninstall() error {
+	if err := stop(); err != nil {
+		return err
+	}
+	m, err := mgr.Connect()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = m.Disconnect() }()
+	s, err := m.OpenService(name)
+	if err == nil {
+		err = s.Delete()
+		_ = s.Close()
+	}
+	if err != nil && !errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+		return err
+	}
+	cli := filepath.Join(cliDir, "mainplane.exe")
+	for _, f := range []string{Bin, Bin + ".old", Bin + ".new", cli, cli + ".old", cli + ".new"} {
+		if err := remove(f); err != nil {
+			return err
+		}
+	}
+	if err := os.RemoveAll(stateDir); err != nil {
+		return err
+	}
+	for _, e := range []struct {
+		root     registry.Key
+		sub, dir string
+	}{{registry.LOCAL_MACHINE, machineEnv, filepath.Dir(Bin)}, {registry.CURRENT_USER, "Environment", cliDir}} {
+		err := os.Remove(e.dir)
+		if errors.Is(err, windows.ERROR_DIR_NOT_EMPTY) {
+			continue
+		}
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		if err := path(e.root, e.sub, e.dir, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// remove deletes f. A running binary, as this one usually is, cannot be
+// deleted but can be moved: it moves to the temp folder and goes at the next
+// reboot.
+func remove(f string) error {
+	err := os.Remove(f)
+	if err == nil || errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	t := filepath.Join(os.TempDir(), fmt.Sprintf("%s.%d", filepath.Base(f), time.Now().UnixNano()))
+	if err := os.Rename(f, t); err != nil {
+		return err
+	}
+	p, err := windows.UTF16PtrFromString(t)
+	if err != nil {
+		return err
+	}
+	return windows.MoveFileEx(p, nil, windows.MOVEFILE_DELAY_UNTIL_REBOOT)
 }
 
 // register runs Bin at every boot as the service mainplaned, which a later
@@ -187,7 +259,9 @@ func register() error {
 	return s.Start()
 }
 
-// stop stops the service and waits until it has; none installed is stopped.
+// stop stops the service and waits until its process has ended, which can be
+// a moment after it reports stopped; until then its log is open. None
+// installed is stopped.
 func stop() error {
 	m, err := mgr.Connect()
 	if err != nil {
@@ -202,24 +276,34 @@ func stop() error {
 		return err
 	}
 	defer func() { _ = s.Close() }()
-	st, err := s.Control(svc.Stop)
-	if errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
-		return nil
+	st, err := s.Query()
+	if err != nil || st.State == svc.Stopped {
+		return err
 	}
-	for end := time.Now().Add(stopWait); err == nil && st.State != svc.Stopped; st, err = s.Query() {
-		if time.Now().After(end) {
-			return fmt.Errorf("%s did not stop in %s", name, stopWait)
+	p, err := windows.OpenProcess(windows.SYNCHRONIZE, false, st.ProcessId)
+	if err != nil {
+		// it may have ended between the query and the open
+		if st, qerr := s.Query(); qerr == nil && st.State == svc.Stopped {
+			return nil
 		}
-		time.Sleep(200 * time.Millisecond)
+		return err
+	}
+	defer func() { _ = windows.CloseHandle(p) }()
+	if _, err := s.Control(svc.Stop); err != nil && !errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
+		return err
+	}
+	ev, err := windows.WaitForSingleObject(p, uint32(stopWait.Milliseconds()))
+	if err == nil && ev != windows.WAIT_OBJECT_0 {
+		return fmt.Errorf("%s did not stop in %s", name, stopWait)
 	}
 	return err
 }
 
-// path puts Bin's folder on the machine PATH and tells running programs, so
-// a shell Explorer starts next finds mainplane. The value stays unexpanded,
-// since other entries may name variables.
-func path() error {
-	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\Session Manager\Environment`, registry.QUERY_VALUE|registry.SET_VALUE)
+// path puts dir on the PATH in the environment key root\sub, or takes it off,
+// and tells running programs, so a shell Explorer starts next sees the
+// change. The value stays unexpanded, since other entries may name variables.
+func path(root registry.Key, sub, dir string, on bool) error {
+	k, err := registry.OpenKey(root, sub, registry.QUERY_VALUE|registry.SET_VALUE)
 	if err != nil {
 		return err
 	}
@@ -228,13 +312,17 @@ func path() error {
 	if err != nil {
 		return err
 	}
-	dir := filepath.Dir(Bin)
-	for _, e := range strings.Split(p, ";") {
-		if strings.EqualFold(e, dir) {
-			return nil
-		}
+	es := strings.Split(p, ";")
+	kept := slices.DeleteFunc(slices.Clone(es), func(e string) bool { return strings.EqualFold(e, dir) })
+	switch {
+	case on && len(kept) == len(es):
+		p = strings.TrimSuffix(p, ";") + ";" + dir
+	case !on && len(kept) < len(es):
+		p = strings.Join(kept, ";")
+	default:
+		return nil
 	}
-	if err := k.SetExpandStringValue("Path", strings.TrimSuffix(p, ";")+";"+dir); err != nil {
+	if err := k.SetExpandStringValue("Path", p); err != nil {
 		return err
 	}
 	env, _ := windows.UTF16PtrFromString("Environment")

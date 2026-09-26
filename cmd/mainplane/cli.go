@@ -85,7 +85,15 @@ func cli(verb string, args []string) {
 			fmt.Printf("%s  %-11s  %-40s  n=%-5d prompt=%d/%d  %s\n", i.ID, i.Status, i.Config.Model, i.N, i.Prompt, i.Config.Context, i.Updated.Local().Format(time.DateTime))
 		}
 	case "workers":
-		c.raw("/workers")
+		var ws []harness.Listed
+		c.call("GET", "/workers", "", nil, &ws)
+		for _, w := range ws {
+			state := "connected"
+			if w.Refused != "" {
+				state = "refused: " + w.Refused
+			}
+			fmt.Printf("%-28s  %-13s  %-10s  %-16s  %s\n", w.Name, w.OS+"/"+w.Arch, strings.Join(w.Interps, ","), w.Version, state)
+		}
 	case "providers":
 		c.raw("/providers")
 	}

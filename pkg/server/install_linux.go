@@ -1,7 +1,9 @@
 package server
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 )
 
@@ -40,3 +42,18 @@ func start() error {
 }
 
 func restart() error { return run("systemctl", "restart", "mainplane-server") }
+
+// unregister stops the harness and removes its unit; none installed is fine.
+// A stop that fails is an error, since the harness would run on.
+func unregister() error {
+	if _, err := os.Stat(unitPath); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err := run("systemctl", "disable", "--now", "mainplane-server"); err != nil {
+		return err
+	}
+	if err := os.Remove(unitPath); err != nil {
+		return err
+	}
+	return run("systemctl", "daemon-reload")
+}

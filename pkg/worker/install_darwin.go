@@ -1,7 +1,9 @@
 package worker
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 )
 
@@ -35,4 +37,18 @@ func Install(token string) error {
 		return err
 	}
 	return run("launchctl", "bootstrap", "system", plistPath)
+}
+
+// unregister stops the worker and removes its plist; none installed is fine.
+// bootout fails for a daemon not loaded too, so the check is whether it is
+// still loaded after: then it would run on.
+func unregister() error {
+	err := run("launchctl", "bootout", "system/"+label)
+	if run("launchctl", "print", "system/"+label) == nil {
+		return errors.Join(fmt.Errorf("%s is still loaded", label), err)
+	}
+	if err := os.Remove(plistPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
 }
