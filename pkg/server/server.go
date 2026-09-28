@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -54,18 +53,6 @@ func (c Config) Auth() auth.Store { return auth.Store{Path: filepath.Join(c.Admi
 // Key is the harness key every token carries, made on first use.
 func (c Config) Key() (ed25519.PrivateKey, error) {
 	return pointer.Key(filepath.Join(c.Admin, "harness.key"))
-}
-
-func (c Config) urlFile() string { return filepath.Join(c.Admin, "url") }
-
-// URL is where this harness is reached. The running harness writes it once
-// the pointer has it, so a worker can find it.
-func (c Config) URL() (string, error) {
-	b, err := os.ReadFile(c.urlFile())
-	if errors.Is(err, fs.ErrNotExist) {
-		return "", errors.New("the harness has no URL yet: it is not running, or its tunnel has not started")
-	}
-	return string(b), err
 }
 
 type Provider struct {
@@ -126,9 +113,6 @@ func Harness(ctx context.Context, c Config) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(c.urlFile()); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
-	}
 	store := c.Auth()
 	t, err := store.Load()
 	if err != nil {
@@ -151,7 +135,7 @@ func Harness(ctx context.Context, c Config) error {
 	var at atomic.Value
 	at.Store("")
 	urls := make(chan string, 1)
-	go publish(ctx, k, c.urlFile(), urls)
+	go publish(ctx, k, urls)
 	mux := http.NewServeMux()
 	mux.Handle("/worker", pool)
 	mux.Handle("/id", pointer.ID(k, func() string { return at.Load().(string) }))
@@ -190,8 +174,8 @@ func Harness(ctx context.Context, c Config) error {
 }
 
 // publish puts each URL from urls on the pointer, again daily so the record
-// does not expire, and a minute after a failure. file follows each success.
-func publish(ctx context.Context, k ed25519.PrivateKey, file string, urls <-chan string) {
+// does not expire, and a minute after a failure.
+func publish(ctx context.Context, k ed25519.PrivateKey, urls <-chan string) {
 	url, wait := "", republish
 	for {
 		select {
@@ -204,10 +188,6 @@ func publish(ctx context.Context, k ed25519.PrivateKey, file string, urls <-chan
 		if err := pointer.Publish(ctx, k, url); err != nil {
 			log.Printf("harness: %v; again in %s", err, publishRetry)
 			wait = publishRetry
-			continue
-		}
-		if err := os.WriteFile(file, []byte(url), 0o644); err != nil {
-			log.Printf("harness: %v", err)
 		}
 	}
 }

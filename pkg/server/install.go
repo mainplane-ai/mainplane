@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/mainplane-ai/mainplane/pkg/pointer"
 )
 
 // A started harness listens within a second; one that has not after this
@@ -119,31 +122,23 @@ func SetTunnel(t *Tunnel) (string, error) {
 	if err := os.WriteFile(Conf, b, 0o600); err != nil {
 		return "", err
 	}
-	// so reached waits for the restarted harness's URL, not the old one's
-	if err := os.Remove(c.urlFile()); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return "", err
-	}
 	if err := restart(); err != nil {
 		return "", err
 	}
 	return reached(c)
 }
 
-// reached waits for the URL the harness writes when its tunnel starts to
-// answer as the harness does, through Cloudflare, and returns it.
+// reached waits for the pointer to name a URL where the harness proves its
+// key, through Cloudflare, as a worker finds it, and returns that URL.
 func reached(c Config) (string, error) {
-	client := http.Client{Timeout: 5 * time.Second}
+	k, err := c.Key()
+	if err != nil {
+		return "", err
+	}
 	for end := time.Now().Add(tunnelWait); ; time.Sleep(time.Second) {
-		url, err := c.URL()
+		url, err := pointer.Find(context.Background(), pointer.Encode(k), "")
 		if err == nil {
-			var resp *http.Response
-			if resp, err = client.Get(url + "/"); err == nil {
-				_ = resp.Body.Close()
-				if resp.StatusCode == http.StatusUnauthorized {
-					return url, nil
-				}
-				err = fmt.Errorf("%s answered %s", url, resp.Status)
-			}
+			return url, nil
 		}
 		if time.Now().After(end) {
 			return "", fmt.Errorf("the harness did not answer through its tunnel in %s: %w; its log says why", tunnelWait, err)
