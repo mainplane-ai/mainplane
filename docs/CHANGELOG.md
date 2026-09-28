@@ -2,6 +2,16 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.2.0
+
+The harness needs no network setup: a Cloudflare tunnel is its only way in. Tokens, configs and workers from v0.1.x do not carry over. Uninstall the v0.1.x harness with its own `mainplane-server uninstall`, which on Windows also removes its port 7811 firewall rule, then install the harness and every worker again.
+
+- `mainplane-server install` opens a Cloudflare quick tunnel: a temporary `https://*.trycloudflare.com` URL, no account, domain or inbound port. The harness listens on loopback only, and runs cloudflared, pinned and checked against its sha256, as a child. `host` and `--host` are gone
+- Workers dial a WebSocket at `/worker` on the harness's one port; port 7811 and its Windows firewall rule are gone
+- Tokens carry the harness key, not an address. Workers and the CLI find the harness through `pointer.mainplane.ai`, and the harness proves its key before a secret goes to it. A harness that moves keeps its tokens: workers and the CLI follow
+- `mainplane-server tunnel <url> <cloudflared token>` moves the harness to a tunnel you made in Cloudflare, on your own domain; `mainplane-server tunnel quick` goes back. See `docs/self-hosting.md`, which also says what Cloudflare can read
+- 30 refused api keys or join secrets a minute get a 429 that says when to try again
+
 ## v0.1.1
 
 - One line makes a machine the harness: `curl -fsSL https://mainplane.ai/install | sh -s -- server [host]`, or on Windows `& ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) server [host]`. Run it without sudo; it asks for root or admin itself. It installs the CLI and `mainplane-server`, starts the harness with the provider keys set in the shell (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, or `AWS_BEARER_TOKEN_BEDROCK` with `AWS_REGION`), logs the CLI in to it, and prints how to add a worker. Workers dial `host`, the machine's name by default
