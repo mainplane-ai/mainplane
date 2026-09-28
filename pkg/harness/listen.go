@@ -4,9 +4,12 @@ import (
 	"context"
 	"log"
 	"net"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/coder/websocket"
 
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
@@ -65,34 +68,26 @@ func (p *Pool) List() []Listed {
 	return out
 }
 
-// Listen accepts workers on addr until ctx ends. A worker that dials again
-// under a name still held replaces the old entry: the old connection is dead
-// or dying, and the new one is the worker as it is now.
-func (p *Pool) Listen(ctx context.Context, addr string) error {
-	ln, err := net.Listen("tcp", addr)
+// ServeHTTP takes a worker's WebSocket at /worker and holds it as the
+// worker's one connection, frames in binary messages. It sits outside api key
+// auth: the join secret in the hello is the worker's credential. A worker
+// that dials again under a name still held replaces the old entry: the old
+// connection is dead or dying, and the new one is the worker as it is now.
+func (p *Pool) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	c, err := websocket.Accept(w, req, nil)
 	if err != nil {
-		return err
+		return
 	}
-	go func() {
-		<-ctx.Done()
-		_ = ln.Close()
-	}()
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			return err
-		}
-		go p.serve(conn)
-	}
+	c.SetReadLimit(-1) // a frame is a whole file read or write; its size is the worker protocol's business
+	p.serve(websocket.NetConn(context.Background(), c, websocket.MessageBinary), req.RemoteAddr)
 }
 
 // serve holds one worker from hello to hangup. A refused hello is told why
 // before the close, so the worker's log says it and not just EOF. A refused
 // worker that passed admit is listed with the reason until it connects.
-func (p *Pool) serve(conn net.Conn) {
+func (p *Pool) serve(conn net.Conn, who string) {
 	r, err := Connect(conn, p.admit)
 	if err != nil {
-		who := conn.RemoteAddr().String()
 		if r != nil {
 			who = r.Name + " at " + who
 			p.mu.Lock()
