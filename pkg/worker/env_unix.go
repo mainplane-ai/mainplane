@@ -63,13 +63,14 @@ func Work(key string, l Local) error {
 	if l.Operator != nil {
 		dir = filepath.Join(stateDir, "mesh")
 	}
+	// A stop while the mesh comes up waits for it, so Close still runs.
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
 	m, err := mesh.Up(dir, key, l.Secret, l.Name)
 	if err != nil {
 		return err
 	}
 	go Dial(key, l)
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
 	log.Printf("%v: leaving the mesh", <-stop)
 	m.Close()
 	return nil
