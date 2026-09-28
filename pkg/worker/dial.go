@@ -39,23 +39,23 @@ var Default = map[string][]string{"windows": {"pwsh"}, "linux": {"bash"}, "darwi
 func Dial(key string, l Local) {
 	wait, url, asked := redialMin, "", time.Time{}
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
 		err := errors.New("no harness URL: the pointer is asked again within a minute")
 		if url != "" {
-			err = pointer.Prove(ctx, key, url)
+			err = pointer.Prove(context.Background(), key, url)
 		}
 		if err != nil && time.Since(asked) > lookupWait {
 			asked = time.Now()
 			var u string
-			if u, err = pointer.Find(ctx, key, ""); err == nil {
+			if u, err = pointer.Find(context.Background(), key, ""); err == nil {
 				url = u
 			}
 		}
 		var c *websocket.Conn
 		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
 			c, _, err = websocket.Dial(ctx, url+"/worker", nil)
+			cancel()
 		}
-		cancel()
 		if err == nil {
 			c.SetReadLimit(-1) // a frame is a whole file read or write; its size is the worker protocol's business
 			conn := websocket.NetConn(context.Background(), c, websocket.MessageBinary)
