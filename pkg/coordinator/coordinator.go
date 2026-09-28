@@ -499,5 +499,10 @@ func (c *Coordinator) save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(c.file, b, 0o600)
+	// A node's endpoints change often, so a crash mid-write must leave the
+	// last registry whole.
+	if err := os.WriteFile(c.file+".tmp", b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(c.file+".tmp", c.file)
 }
