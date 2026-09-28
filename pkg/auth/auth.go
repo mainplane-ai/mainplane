@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -36,8 +35,7 @@ const (
 
 // An address has this many refusals a window. That is more than a worker
 // with a stale token makes, redialing every 5s, so it never locks out the
-// other workers behind the same NAT. It is far too few to guess a
-// 26-character secret.
+// other workers behind the same NAT.
 const (
 	refusals = 30
 	window   = time.Minute
@@ -152,49 +150,35 @@ func (s Store) Bearer(l *Limit, next http.Handler) http.Handler {
 }
 
 // Limit counts refused credentials of both kinds by address, and turns an
-// address away for the rest of a window once it has too many: a secret is 26
-// random characters, but nothing should get to guess at it freely.
+// address away for the rest of a window once it has too many. The window is
+// one for every address, so an address may come back early. It keeps down
+// noise and log spam; a 26-character secret needs no limit against guessing.
 type Limit struct {
 	mu    sync.Mutex
-	m     map[string]strikes
-	swept time.Time // when m last dropped the addresses whose windows had passed
-}
-
-// strikes are an address's refusals in the window that began at start.
-type strikes struct {
-	n     int
+	m     map[string]int // refusals by address since start
 	start time.Time
 }
 
 // Wait is why addr is turned away now, or nil.
 func (l *Limit) Wait(addr string) error {
 	l.mu.Lock()
-	s := l.m[addr]
+	n, w := l.m[addr], window-time.Since(l.start)
 	l.mu.Unlock()
-	if w := window - time.Since(s.start); s.n >= refusals && w > 0 {
+	if n >= refusals && w > 0 {
 		return fmt.Errorf("too many refused credentials from %s: try again in %s", addr, (w + time.Second - 1).Truncate(time.Second))
 	}
 	return nil
 }
 
-// Refused counts a refused credential from addr. Once a window, it forgets
-// every address whose window has passed.
+// Refused counts a refused credential from addr, in a new window once the
+// last has passed.
 func (l *Limit) Refused(addr string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if time.Since(l.swept) > window {
-		l.swept = time.Now()
-		maps.DeleteFunc(l.m, func(_ string, s strikes) bool { return time.Since(s.start) > window })
+	if time.Since(l.start) > window {
+		l.start, l.m = time.Now(), map[string]int{}
 	}
-	if l.m == nil {
-		l.m = map[string]strikes{}
-	}
-	s := l.m[addr]
-	if time.Since(s.start) > window {
-		s = strikes{start: time.Now()}
-	}
-	s.n++
-	l.m[addr] = s
+	l.m[addr]++
 }
 
 // Addr is who sent r: the client address cloudflared puts in
