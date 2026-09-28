@@ -95,15 +95,14 @@ func Uninstall() error {
 	if err := unregister(); err != nil {
 		return err
 	}
-	if err := mesh.Clean(); err != nil {
-		return err
-	}
+	// A hosts file that cannot be written must not keep the token and keys.
+	cerr := mesh.Clean()
 	for _, f := range []string{Bin, Bin + ".old", Bin + ".new"} {
 		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 	}
-	return os.RemoveAll(stateDir)
+	return errors.Join(os.RemoveAll(stateDir), cerr)
 }
 
 // run is one service manager command; its output is the error when it fails.
