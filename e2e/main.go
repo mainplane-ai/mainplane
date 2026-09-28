@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
@@ -36,6 +37,7 @@ import (
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
+	"github.com/mainplane-ai/mainplane/pkg/pointer"
 	"github.com/mainplane-ai/mainplane/pkg/release"
 	"github.com/mainplane-ai/mainplane/pkg/tunnel"
 	"github.com/mainplane-ai/mainplane/pkg/version"
@@ -112,8 +114,8 @@ func check(who, what string, ok bool, detail string) {
 
 func main() {
 	switch {
-	case len(os.Args) >= 7 && os.Args[1] == "phase":
-		phase(os.Args[2], os.Args[3], os.Args[4], strings.Split(os.Args[5], ","), os.Args[6], strings.Join(os.Args[7:], " "))
+	case len(os.Args) >= 8 && os.Args[1] == "phase":
+		phase(os.Args[2], os.Args[3], os.Args[4], os.Args[5], strings.Split(os.Args[6], ","), os.Args[7], strings.Join(os.Args[8:], " "))
 	case len(os.Args) >= 5:
 		run(os.Args[1], os.Args[2], os.Args[3], os.Args[4:])
 	default:
@@ -138,17 +140,12 @@ func run(v, prev, port string, targets []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	// the tunnel outlives every phase, so the URL the tokens carry holds; its
-	// cloudflared is stopped before any exit, or it outlives the run. Its dir
-	// is this user's own: fetch runs a cloudflared it finds there.
-	cache, err := os.UserCacheDir()
-	if err != nil {
-		log.Fatal(err)
-	}
+	// the tunnel outlives every phase, so the URL on the pointer holds; its
+	// cloudflared is stopped before any exit, or it outlives the run.
 	ctx, cancel := context.WithCancel(context.Background())
 	urls, done := make(chan string, 1), make(chan error, 1)
 	go func() {
-		done <- tunnel.Quick(ctx, filepath.Join(cache, "mainplane-e2e"), "http://127.0.0.1:"+port, func(url string) {
+		done <- tunnel.Quick(ctx, dir(), "http://127.0.0.1:"+port, func(url string) {
 			select {
 			case urls <- url:
 			default:
@@ -167,14 +164,19 @@ func run(v, prev, port string, targets []string) {
 		log.Fatal(err)
 	}
 	fmt.Printf("== tunnel %s\n", url)
+	k := key()
+	if err := pointer.Publish(ctx, k, url); err != nil {
+		stop()
+		log.Fatal(err)
+	}
 	secret := rand.Text()
 	start := time.Now()
 	for _, o := range oses {
-		out, err := remote(o, ssh[o], fmt.Sprintf(install[o == "windows"], release.DL, v, auth.Token(auth.Join, url, secret)))
+		out, err := remote(o, ssh[o], fmt.Sprintf(install[o == "windows"], release.DL, v, auth.Token(auth.Join, pointer.Encode(k), secret)))
 		check(o, "install "+v, err == nil && strings.Contains(out, v), last(out))
 	}
 	harnessAt := func(ver string, mode ...string) {
-		cmd := exec.Command(exe, append([]string{"phase", "127.0.0.1:" + port, secret, ver, strings.Join(oses, ",")}, mode...)...)
+		cmd := exec.Command(exe, append([]string{"phase", "127.0.0.1:" + port, url, secret, ver, strings.Join(oses, ",")}, mode...)...)
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		// a later phase waits on the same workers, so one failed ends the run
 		if cmd.Run() != nil {
@@ -236,12 +238,35 @@ func last(s string) string {
 	return l[len(l)-1]
 }
 
-// phase is a harness at version v until one worker for each OS connects, or
-// is refused with text, then checks each in full when mode is check.
-func phase(listen, secret, v string, oses []string, mode, text string) {
+// dir is this user's own, so no one else can plant the cloudflared fetch
+// runs from it, or read the harness key.
+func dir() string {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		log.Fatal(err)
+	}
+	return filepath.Join(cache, "mainplane-e2e")
+}
+
+// key is the run's harness key, the same in every phase.
+func key() ed25519.PrivateKey {
+	k, err := pointer.Key(filepath.Join(dir(), "harness.key"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	return k
+}
+
+// phase is a harness at version v, reached at url, until one worker for each
+// OS connects, or is refused with text, then checks each in full when mode
+// is check.
+func phase(listen, url, secret, v string, oses []string, mode, text string) {
 	version.V = v
 	p := harness.NewPool(func(s string) bool { return s == secret })
-	go func() { log.Fatal(http.ListenAndServe(listen, p)) }()
+	mux := http.NewServeMux()
+	mux.Handle("/worker", p)
+	mux.Handle("/id", pointer.ID(key(), func() string { return url }))
+	go func() { log.Fatal(http.ListenAndServe(listen, mux)) }()
 	fmt.Printf("== harness %s: %s %s\n", v, mode, text)
 	start := time.Now()
 	got := map[string]harness.Listed{}

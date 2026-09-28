@@ -23,6 +23,7 @@ import (
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/elevate"
+	"github.com/mainplane-ai/mainplane/pkg/pointer"
 	"github.com/mainplane-ai/mainplane/pkg/release"
 	"github.com/mainplane-ai/mainplane/pkg/server"
 	"github.com/mainplane-ai/mainplane/pkg/version"
@@ -56,9 +57,11 @@ func main() {
 			if h.Key != "" {
 				fatal(h.Auth().Set(auth.Key, hostname(), h.Key))
 			}
-			fmt.Printf("harness runs at every boot from %s at %s\nthat URL is a quick tunnel's: temporary, it changes when Cloudflare drops the tunnel\n", server.Conf, url)
-			h.At = url
-			if h.Key != "" && !fresh { // an unelevated install handed over; hand the URL back
+			fmt.Printf("harness runs at every boot from %s at %s\nthat URL is a quick tunnel's: temporary, it changes when Cloudflare drops the tunnel; workers follow it\n", server.Conf, url)
+			k, err := h.Config.Key()
+			fatal(err)
+			h.Harness = pointer.Encode(k)
+			if h.Key != "" && !fresh { // an unelevated install handed over; hand the harness key back
 				b, err := json.Marshal(h)
 				fatal(err)
 				fatal(os.WriteFile(args[1], b, 0o600))
@@ -85,12 +88,12 @@ func main() {
 }
 
 // handover is a config and, from an install that made the config itself, the
-// secret of the api key this machine's CLI logs in with, and then the URL
-// the elevated install reached the harness at.
+// secret of the api key this machine's CLI logs in with, and then the
+// harness key the elevated install read.
 type handover struct {
 	server.Config
-	Key string `json:"key,omitempty"`
-	At  string `json:"at,omitempty"`
+	Key     string `json:"key,omitempty"`
+	Harness string `json:"harness,omitempty"`
 }
 
 // config is what install's arguments name: the default config with a fresh
@@ -113,7 +116,7 @@ func config(args []string) (h handover, fresh bool) {
 
 // install hands the expanded config to an elevated install through a file
 // only this user may read, since neither sudo nor UAC carries this shell's
-// environment over, and reads the file back for the URL it writes there. The
+// environment over, and reads the file back for the harness key it writes there. The
 // file is in a directory of its own: Linux refuses root a write to another
 // user's file in /tmp.
 func install(h handover) (handover, int) {
@@ -134,7 +137,7 @@ func install(h handover) (handover, int) {
 // login logs this machine's CLI in to the harness just installed and says
 // what comes next.
 func login(h handover) {
-	token := auth.Token(auth.Key, h.At, h.Key)
+	token := auth.Token(auth.Key, h.Harness, h.Key)
 	if _, err := exec.LookPath("mainplane"); err != nil {
 		fmt.Printf("no mainplane CLI on PATH; log one in with:  mainplane login %s\n", token)
 	} else {
@@ -156,11 +159,11 @@ func table(c server.Config, kind string, args []string) {
 	store := c.Auth()
 	switch args[0] {
 	case "new":
-		addr, err := c.URL()
+		k, err := c.Key()
 		fatal(err)
 		secret, err := store.Issue(kind, args[1])
 		fatal(err)
-		token := auth.Token(kind, addr, secret)
+		token := auth.Token(kind, pointer.Encode(k), secret)
 		fmt.Println(token)
 		if kind == auth.Join { // stderr, so stdout stays the token for scripts
 			fmt.Fprintf(os.Stderr, "\nlinux, macos:  curl -fsSL %[1]s%[2]s/install.sh | sudo sh -s -- %[3]s\nwindows:       & ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) %[3]s\n", release.DL, version.V, token)

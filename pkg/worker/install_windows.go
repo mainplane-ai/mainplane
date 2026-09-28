@@ -73,12 +73,12 @@ func Installed() (token string, op *user.User, err error) {
 // Work is the worker: under the service manager until it says stop, with
 // logs in logPath, else Dial. Environments end with the service, since their
 // stdin closes.
-func Work(addr string, l Local) error {
+func Work(key string, l Local) error {
 	if ok, err := svc.IsWindowsService(); err != nil || !ok {
 		if err != nil {
 			return err
 		}
-		Dial(addr, l)
+		Dial(key, l)
 	}
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -89,16 +89,16 @@ func Work(addr string, l Local) error {
 	}
 	os.Stdout, os.Stderr = f, f
 	log.SetOutput(f)
-	return svc.Run(name, service{addr, l})
+	return svc.Run(name, service{key, l})
 }
 
 type service struct {
-	addr string
-	l    Local
+	key string
+	l   Local
 }
 
 func (s service) Execute(_ []string, reqs <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
-	go Dial(s.addr, s.l)
+	go Dial(s.key, s.l)
 	status <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
 	for r := range reqs {
 		//exhaustive:ignore the service accepts stop and shutdown only

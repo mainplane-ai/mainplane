@@ -2,7 +2,7 @@
 //
 //	mainplane worker  [join token]    make this machine a worker, named by its hostname
 //	mainplane install <join token>    and again at every boot, as a service; asks for sudo or UAC, code still runs as you
-//	mainplane login   <api key>       remember the harness and the key in ~/.mainplane/login.json
+//	mainplane login   <api key>       find the harness, and remember it and the key in ~/.mainplane/login.json
 //	mainplane update  [version]       become that release, by default the logged-in harness's, else the latest stable
 //	mainplane uninstall               remove the worker service and the CLI; ~/.mainplane stays
 //	mainplane version                 the release this binary was built from
@@ -10,7 +10,7 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -21,6 +21,7 @@ import (
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/elevate"
+	"github.com/mainplane-ai/mainplane/pkg/pointer"
 	"github.com/mainplane-ai/mainplane/pkg/release"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
@@ -65,15 +66,16 @@ func main() {
 		if len(os.Args) != 3 {
 			usage()
 		}
-		url, key, err := auth.Parse(auth.Key, os.Args[2])
+		harness, key, err := auth.Parse(auth.Key, os.Args[2])
 		if err != nil {
 			log.Fatal(err)
 		}
-		b, _ := json.Marshal(client{URL: url, Key: key})
-		if err := os.MkdirAll(filepath.Dir(loginPath()), 0o755); err != nil {
+		url, err := pointer.Find(context.Background(), harness, "")
+		if err != nil {
 			log.Fatal(err)
 		}
-		if err := os.WriteFile(loginPath(), b, 0o600); err != nil {
+		c := client{URL: url, Key: key, Harness: harness}
+		if err := c.save(); err != nil {
 			log.Fatal(err)
 		}
 		fmt.Println(url)
@@ -100,7 +102,7 @@ func work(install bool, args []string) {
 			log.Fatalf("no join token: mainplane worker <join token>, or mainplane install <join token> once: %v", err)
 		}
 	}
-	addr, secret, err := auth.Parse(auth.Join, token)
+	key, secret, err := auth.Parse(auth.Join, token)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -120,7 +122,7 @@ func work(install bool, args []string) {
 	} else {
 		dir = home()
 	}
-	if err := worker.Work(addr, worker.Local{Name: name, Secret: secret, Scratch: filepath.Join(dir, ".mainplane"), Interps: worker.Default[runtime.GOOS], Operator: op}); err != nil {
+	if err := worker.Work(key, worker.Local{Name: name, Secret: secret, Scratch: filepath.Join(dir, ".mainplane"), Interps: worker.Default[runtime.GOOS], Operator: op}); err != nil {
 		log.Fatal(err)
 	}
 }
