@@ -136,7 +136,17 @@ func Harness(ctx context.Context, c Config) error {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	pool := harness.NewPool(func(secret string) bool { return store.Check(auth.Join, secret) })
+	limit := &auth.Limit{}
+	pool := harness.NewPool(func(secret, addr string) error {
+		if err := limit.Wait(addr); err != nil {
+			return err
+		}
+		if !store.Check(auth.Join, secret) {
+			limit.Refused(addr)
+			return errors.New("join secret refused")
+		}
+		return nil
+	})
 	h := &harness.Harness{Sessions: statefile.Sessions{Dir: c.Admin}, Providers: ps, Workers: pool}
 	var at atomic.Value
 	at.Store("")
@@ -145,7 +155,7 @@ func Harness(ctx context.Context, c Config) error {
 	mux := http.NewServeMux()
 	mux.Handle("/worker", pool)
 	mux.Handle("/id", pointer.ID(k, func() string { return at.Load().(string) }))
-	mux.Handle("/", store.Bearer(harness.Handler(ctx, h)))
+	mux.Handle("/", store.Bearer(limit, harness.Handler(ctx, h)))
 	srv := &http.Server{Addr: c.HTTP, Handler: mux}
 	go func() {
 		<-ctx.Done()
