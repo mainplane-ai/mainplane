@@ -3,9 +3,10 @@
 // down to release prev and back, and past a release that does not exist. An
 // rc is tagged stable only after it passes.
 //
-//	task e2e -- <v> <prev> <host:port> <os>=<ssh target>...
+//	task e2e -- <v> <prev> <port> <os>=<ssh target>...
 //
-// host:port is where the machines reach this one; its port takes their WebSockets. Linux and macOS targets
+// The machines reach this one through a quick tunnel the run opens to port on
+// loopback, as they reach an installed harness. Linux and macOS targets
 // need passwordless sudo. The Windows target must be an elevated login, with
 // the operator logged in at the console. Then each machine becomes a harness
 // in one line, which updates to prev and back, and both are uninstalled: a
@@ -23,11 +24,11 @@ import (
 	"fmt"
 	"log"
 	"maps"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -36,6 +37,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/release"
+	"github.com/mainplane-ai/mainplane/pkg/tunnel"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 )
 
@@ -115,7 +117,7 @@ func main() {
 	case len(os.Args) >= 5:
 		run(os.Args[1], os.Args[2], os.Args[3], os.Args[4:])
 	default:
-		fmt.Fprintln(os.Stderr, "usage: e2e <v> <prev> <host:port> <os>=<ssh target>...")
+		fmt.Fprintln(os.Stderr, "usage: e2e <v> <prev> <port> <os>=<ssh target>...")
 		os.Exit(2)
 	}
 	if failed {
@@ -125,32 +127,53 @@ func main() {
 	fmt.Println("ALL PASS")
 }
 
-func run(v, prev, addr string, targets []string) {
+func run(v, prev, port string, targets []string) {
 	ssh := map[string]string{}
 	for _, t := range targets {
 		o, host, _ := strings.Cut(t, "=")
 		ssh[o] = host
 	}
 	oses := slices.Sorted(maps.Keys(ssh))
-	_, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		log.Fatal(err)
-	}
 	exe, err := os.Executable()
 	if err != nil {
 		log.Fatal(err)
 	}
+	// the tunnel outlives every phase, so the URL the tokens carry holds; its
+	// cloudflared is stopped before any exit, or it outlives the run
+	ctx, cancel := context.WithCancel(context.Background())
+	urls, done := make(chan string, 1), make(chan error, 1)
+	go func() {
+		done <- tunnel.Quick(ctx, filepath.Join(os.TempDir(), "mainplane-e2e"), "http://127.0.0.1:"+port, func(url string) {
+			select {
+			case urls <- url:
+			default:
+			}
+		})
+	}()
+	stop := func() {
+		cancel()
+		<-done
+	}
+	defer stop()
+	var url string
+	select {
+	case url = <-urls:
+	case err := <-done:
+		log.Fatal(err)
+	}
+	fmt.Printf("== tunnel %s\n", url)
 	secret := rand.Text()
 	start := time.Now()
 	for _, o := range oses {
-		out, err := remote(o, ssh[o], fmt.Sprintf(install[o == "windows"], release.DL, v, auth.Token(auth.Join, "http://"+addr, secret)))
+		out, err := remote(o, ssh[o], fmt.Sprintf(install[o == "windows"], release.DL, v, auth.Token(auth.Join, url, secret)))
 		check(o, "install "+v, err == nil && strings.Contains(out, v), last(out))
 	}
 	harnessAt := func(ver string, mode ...string) {
-		cmd := exec.Command(exe, append([]string{"phase", ":" + port, secret, ver, strings.Join(oses, ",")}, mode...)...)
+		cmd := exec.Command(exe, append([]string{"phase", "127.0.0.1:" + port, secret, ver, strings.Join(oses, ",")}, mode...)...)
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		// a later phase waits on the same workers, so one failed ends the run
 		if cmd.Run() != nil {
+			stop()
 			fmt.Println("FAIL")
 			os.Exit(1)
 		}

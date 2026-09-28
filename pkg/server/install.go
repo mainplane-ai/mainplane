@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -16,8 +15,12 @@ import (
 )
 
 // A started harness listens within a second; one that has not after this
-// failed, and its log says why.
-const startWait = 10 * time.Second
+// failed, and its log says why. Its tunnel takes longer: the first start
+// downloads cloudflared, about 50 MB.
+const (
+	startWait  = 10 * time.Second
+	tunnelWait = 3 * time.Minute
+)
 
 // Conf is the config the installed harness runs from.
 var Conf = filepath.Join(Dir, "config.json")
@@ -31,11 +34,11 @@ var envProviders = map[string]Provider{
 	"bedrock":   {Key: "$AWS_BEARER_TOKEN_BEDROCK", Region: "$AWS_REGION"},
 }
 
-// Default is the config install writes when given none: workers and
-// connectors reach port 8080 at host, sessions live under Dir, and every
-// provider whose key is set in this environment serves.
-func Default(host string) (Config, error) {
-	c := Config{Admin: "admin", Host: host, HTTP: ":8080", Providers: map[string]Provider{}}
+// Default is the config install writes when given none: the tunnel carries
+// workers and connectors to port 8080 on loopback, sessions live under Dir,
+// and every provider whose key is set in this environment serves.
+func Default() (Config, error) {
+	c := Config{Admin: "admin", HTTP: "127.0.0.1:8080", Providers: map[string]Provider{}}
 	var vars []string
 	for name, p := range envProviders {
 		if os.ExpandEnv(p.Key) != "" {
@@ -75,25 +78,51 @@ func (c *Config) Expand() error {
 }
 
 // Install makes this machine run the harness at every boot, from a copy of an
-// expanded c at Conf. Dir is root's alone: the copy holds the keys.
-func Install(c Config) error {
+// expanded c at Conf, and returns its URL once it answers there. Dir is
+// root's alone: the copy holds the keys.
+func Install(c Config) (string, error) {
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := prepare(); err != nil {
-		return err
+		return "", err
 	}
 	if err := os.WriteFile(Conf, b, 0o600); err != nil {
-		return err
+		return "", err
 	}
 	if err := place(); err != nil {
-		return err
+		return "", err
 	}
 	if err := start(); err != nil {
-		return err
+		return "", err
 	}
-	return answers(c.HTTP)
+	if err := answers(c.HTTP); err != nil {
+		return "", err
+	}
+	return reached(c)
+}
+
+// reached waits for the URL the harness writes when its tunnel starts to
+// answer as the harness does, through Cloudflare, and returns it.
+func reached(c Config) (string, error) {
+	client := http.Client{Timeout: 5 * time.Second}
+	for end := time.Now().Add(tunnelWait); ; time.Sleep(time.Second) {
+		url, err := c.URL()
+		if err == nil {
+			var resp *http.Response
+			if resp, err = client.Get(url + "/"); err == nil {
+				_ = resp.Body.Close()
+				if resp.StatusCode == http.StatusUnauthorized {
+					return url, nil
+				}
+				err = fmt.Errorf("%s answered %s", url, resp.Status)
+			}
+		}
+		if time.Now().After(end) {
+			return "", fmt.Errorf("the harness did not answer through its tunnel in %s: %w; its log says why", tunnelWait, err)
+		}
+	}
 }
 
 // answers waits for the harness to answer at addr as only it does: 401 to a
@@ -150,15 +179,6 @@ func place() error {
 	}
 	if err := os.Rename(bin+".new", bin); err != nil {
 		return errors.Join(err, os.Rename(bin+".old", bin))
-	}
-	return nil
-}
-
-// run is one service manager command; its output is the error when it fails.
-func run(name string, args ...string) error {
-	out, err := exec.Command(name, args...).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, out)
 	}
 	return nil
 }

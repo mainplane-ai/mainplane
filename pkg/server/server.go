@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,29 +17,29 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
+	"github.com/mainplane-ai/mainplane/pkg/tunnel"
 )
 
 // Config is the self-hosted config file. Provider values are expanded from
 // the environment, so a key can be "$ANTHROPIC_API_KEY".
 type Config struct {
-	Admin     string              `json:"admin"` // directory holding sessions and the auth table
-	Host      string              `json:"host"`  // the name this box is reached by; tokens carry it
-	HTTP      string              `json:"http"`  // address connectors call and workers dial
+	Admin     string              `json:"admin"` // directory holding sessions, the auth table and the tunnel
+	HTTP      string              `json:"http"`  // loopback address the tunnel carries connectors and workers to
 	Providers map[string]Provider `json:"providers"`
 }
 
 func (c Config) Auth() auth.Store { return auth.Store{Path: filepath.Join(c.Admin, "auth.json")} }
 
-// URL is what every token carries: where its holder reaches this harness.
+func (c Config) urlFile() string { return filepath.Join(c.Admin, "url") }
+
+// URL is what every token carries: where its holder reaches this harness. The
+// running harness writes it when its tunnel starts.
 func (c Config) URL() (string, error) {
-	if c.Host == "" {
-		return "", errors.New("config needs host: the name this box is reached by")
+	b, err := os.ReadFile(c.urlFile())
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", errors.New("the harness has no URL yet: it is not running, or its tunnel has not started")
 	}
-	_, port, err := net.SplitHostPort(c.HTTP)
-	if err != nil {
-		return "", err
-	}
-	return "http://" + net.JoinHostPort(c.Host, port), nil
+	return string(b), err
 }
 
 type Provider struct {
@@ -79,10 +79,10 @@ func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
 	return out, nil
 }
 
-// Harness runs the harness role on one port until ctx ends or the listener
-// fails: workers open a WebSocket at /worker with a join secret, connectors
-// call every other route with an api key, every session that was open on
-// start resumes.
+// Harness runs the harness role on one loopback port, behind a quick tunnel,
+// until ctx ends or the listener or the tunnel fails: workers open a
+// WebSocket at /worker with a join secret, connectors call every other route
+// with an api key, every session that was open on start resumes.
 func Harness(ctx context.Context, c Config) error {
 	ps, err := providers(c.Providers)
 	if err != nil {
@@ -112,7 +112,17 @@ func Harness(ctx context.Context, c Config) error {
 		return err
 	}
 	log.Printf("harness: http and workers on %s, sessions in %s, %d api keys, %d join secrets", c.HTTP, c.Admin, len(t[auth.Key]), len(t[auth.Join]))
-	if err := srv.ListenAndServe(); ctx.Err() == nil {
+	errs := make(chan error, 2)
+	go func() { errs <- srv.ListenAndServe() }()
+	go func() {
+		errs <- tunnel.Quick(ctx, c.Admin, "http://"+c.HTTP, func(url string) {
+			log.Printf("harness: reached at %s, a quick tunnel: the URL is temporary", url)
+			if err := os.WriteFile(c.urlFile(), []byte(url), 0o644); err != nil {
+				log.Printf("harness: %v", err)
+			}
+		})
+	}()
+	if err := <-errs; ctx.Err() == nil {
 		return err
 	}
 	return nil

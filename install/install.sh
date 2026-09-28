@@ -1,18 +1,18 @@
 #!/bin/sh
 # Installs the mainplane CLI; with a join token it also makes this Linux or macOS machine a worker.
 # With server it makes this machine the harness instead, from the provider keys set in this shell, and
-# logs the CLI in to it. Run it without sudo so those keys reach it; it asks for sudo itself. Host is
-# the name workers reach it by, this machine's name by default. The release stamps its version.
+# logs the CLI in to it. Run it without sudo so those keys reach it; it asks for sudo itself. The
+# release stamps its version.
 #   curl -fsSL https://dl.mainplane.ai/@VERSION@/install.sh | sudo sh -s -- [join token]
-#   curl -fsSL https://dl.mainplane.ai/@VERSION@/install.sh | sh -s -- server [host]
+#   curl -fsSL https://dl.mainplane.ai/@VERSION@/install.sh | sh -s -- server
 set -eu
 v=@VERSION@
 dl=https://dl.mainplane.ai/$v
-case $#:${1:-} in
-0:* | 1:* | 2:server) ;;
+case $# in
+0 | 1) ;;
 *)
   echo "usage: curl -fsSL $dl/install.sh | sudo sh -s -- [join token]" >&2
-  echo "       curl -fsSL $dl/install.sh | sh -s -- server [host]" >&2
+  echo "       curl -fsSL $dl/install.sh | sh -s -- server" >&2
   exit 2
   ;;
 esac
@@ -42,7 +42,7 @@ if [ "${1:-}" = server ]; then
   sudo install -m 755 mainplane /usr/local/bin/mainplane
   # install places mainplane-server, runs it as a service, and logs mainplane in to it, which it finds on
   # PATH; a shell without a profile, as over ssh, may not have /usr/local/bin there
-  PATH=/usr/local/bin:$PATH ./mainplane-server install ${2:+--host "$2"}
+  PATH=/usr/local/bin:$PATH ./mainplane-server install
 elif [ $# -eq 1 ]; then
   ./mainplane install "$1"
 else
