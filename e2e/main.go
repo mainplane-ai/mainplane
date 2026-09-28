@@ -271,7 +271,7 @@ func phase(listen, url, secret, v string, oses []string, mode, text string) {
 	})
 	mux := http.NewServeMux()
 	mux.Handle("/worker", p)
-	mux.Handle("/id", pointer.ID(key(), func() string { return url }))
+	mux.Handle("/id", pointer.ID(key(), func() string { return url }, ""))
 	go func() { log.Fatal(http.ListenAndServe(listen, mux)) }()
 	fmt.Printf("== harness %s: %s %s\n", v, mode, text)
 	start := time.Now()
