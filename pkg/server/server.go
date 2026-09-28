@@ -20,6 +20,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
 	"github.com/mainplane-ai/mainplane/pkg/provider"
+	"github.com/mainplane-ai/mainplane/pkg/relay"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/tunnel"
 )
@@ -95,9 +96,9 @@ func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
 // Harness runs the harness role on one loopback port, behind the user's own
 // tunnel or a quick one, until ctx ends or the listener or the tunnel fails: workers open a
 // WebSocket at /worker with a join secret, /id proves the harness key to
-// anyone before they send one, connectors call every other route with an api
-// key, every session that was open on start resumes. The pointer follows the
-// tunnel's URL.
+// anyone before they send one, /derp relays between nodes, connectors call
+// every other route with an api key, every session that was open on start
+// resumes. The pointer follows the tunnel's URL.
 func Harness(ctx context.Context, c Config) error {
 	if host, _, _ := net.SplitHostPort(c.HTTP); !net.ParseIP(host).IsLoopback() {
 		return fmt.Errorf("http %q: the harness listens on loopback only, such as 127.0.0.1:8080; the tunnel is the one way in", c.HTTP)
@@ -139,11 +140,14 @@ func Harness(ctx context.Context, c Config) error {
 	mux := http.NewServeMux()
 	mux.Handle("/worker", pool)
 	mux.Handle("/id", pointer.ID(k, func() string { return at.Load().(string) }))
+	derp := relay.New()
+	relay.Handle(mux, derp)
 	mux.Handle("/", store.Bearer(limit, harness.Handler(ctx, h)))
 	srv := &http.Server{Addr: c.HTTP, Handler: mux}
 	go func() {
 		<-ctx.Done()
 		_ = srv.Close()
+		_ = derp.Close()
 	}()
 	if err := h.Resume(ctx); err != nil {
 		return err
