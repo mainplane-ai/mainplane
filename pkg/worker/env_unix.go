@@ -51,8 +51,8 @@ func prepare(cmd *exec.Cmd, op *user.User) error {
 func killTree(p *os.Process) { _ = syscall.Kill(-p.Pid, syscall.SIGKILL) }
 
 // Work is the worker; the service manager needs nothing of it.
-func Work(addr string, l Local) error {
-	Dial(addr, l)
+func Work(key string, l Local) error {
+	Dial(key, l)
 	return nil
 }
 

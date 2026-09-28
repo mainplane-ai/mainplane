@@ -2,10 +2,13 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/mainplane-ai/mainplane/pkg/pointer"
 )
 
 // Redial waits grow from a blink, so a harness restart costs no visible time,
@@ -15,26 +18,43 @@ import (
 // a first connect over a relayed path can take seconds.
 // A ping every 30s keeps the connection from reading as idle to the tunnel,
 // which closes one silent for 100s. A pong that takes as long is a dead
-// harness.
+// harness. A worker asks the pointer at most once a minute: a harness that is
+// down would otherwise draw a lookup from every worker at every redial.
 const (
 	redialMin   = 200 * time.Millisecond
 	redialMax   = 5 * time.Second
 	dialTimeout = 30 * time.Second
 	ping        = 30 * time.Second
+	lookupWait  = time.Minute
 )
 
 // Default is the interpreter each OS ships with. The first is the default.
 var Default = map[string][]string{"windows": {"pwsh"}, "linux": {"bash"}, "darwin": {"bash"}}
 
-// Dial makes this machine a worker of the harness at url: open a WebSocket
-// at url/worker, serve until it ends, open again. It never returns. A
+// Dial makes this machine a worker of the harness with key: prove the harness
+// at the last URL it had, or find it through the pointer, open a WebSocket at
+// url/worker, serve until it ends, open again. It never returns. A
 // connection that ends within the longest wait, as a refused hello does,
 // keeps the backoff; only one that held resets it.
-func Dial(url string, l Local) {
-	wait := redialMin
+func Dial(key string, l Local) {
+	wait, url, asked := redialMin, "", time.Time{}
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
-		c, _, err := websocket.Dial(ctx, url+"/worker", nil)
+		err := errors.New("no harness URL: the pointer is asked again within a minute")
+		if url != "" {
+			err = pointer.Prove(ctx, key, url)
+		}
+		if err != nil && time.Since(asked) > lookupWait {
+			asked = time.Now()
+			var u string
+			if u, err = pointer.Find(ctx, key, ""); err == nil {
+				url = u
+			}
+		}
+		var c *websocket.Conn
+		if err == nil {
+			c, _, err = websocket.Dial(ctx, url+"/worker", nil)
+		}
 		cancel()
 		if err == nil {
 			c.SetReadLimit(-1) // a frame is a whole file read or write; its size is the worker protocol's business

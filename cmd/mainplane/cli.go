@@ -3,10 +3,12 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -19,6 +21,7 @@ import (
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/harness"
+	"github.com/mainplane-ai/mainplane/pkg/pointer"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 )
@@ -46,8 +49,11 @@ func cli(verb string, args []string) {
 		usage()
 	}
 	c, err := login()
-	if err != nil {
+	if errors.Is(err, fs.ErrNotExist) {
 		die(fmt.Errorf("not logged in: mainplane login <api key>"))
+	}
+	if err != nil {
+		die(err)
 	}
 	c.version()
 	switch verb {
@@ -99,19 +105,42 @@ func cli(verb string, args []string) {
 	}
 }
 
-// client is what login wrote: the harness and the api key's secret.
+// client is what login wrote: the harness's key, the URL it was last found
+// at, and the api key's secret.
 type client struct {
-	URL string `json:"url"`
-	Key string `json:"key"`
+	URL     string `json:"url"`
+	Key     string `json:"key"`
+	Harness string `json:"harness"`
 }
 
+// login is what login wrote, with the harness proved at its URL, or found
+// again through the pointer and saved.
 func login() (client, error) {
 	var c client
 	b, err := os.ReadFile(loginPath())
-	if err == nil {
-		err = json.Unmarshal(b, &c)
+	if err != nil {
+		return c, err
 	}
-	return c, err
+	if err := json.Unmarshal(b, &c); err != nil {
+		return c, err
+	}
+	url, err := pointer.Find(context.Background(), c.Harness, c.URL)
+	if err != nil || url == c.URL {
+		return c, err
+	}
+	c.URL = url
+	return c, c.save()
+}
+
+func (c client) save() error {
+	b, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(loginPath()), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(loginPath(), b, 0o600)
 }
 
 // call does one request. A status outside 2xx is the harness's own words on

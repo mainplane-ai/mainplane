@@ -2,16 +2,16 @@
 // connector call every HTTP route. A join secret lets a machine dial in as a
 // worker; it can add a worker and nothing else. Both kinds live hashed in one
 // table on the admin drive. What a person pastes is a token: the kind, the
-// address its holder needs, and the secret itself.
+// key of the harness its holder finds through the pointer, and the secret
+// itself.
 //
-//	mp_<kind>_<base64url addr>.<secret>
+//	mp_<kind>_<harness key>.<secret>
 package auth
 
 import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -133,17 +133,16 @@ func Hash(secret string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func Token(kind, addr, secret string) string {
-	return "mp_" + kind + "_" + base64.RawURLEncoding.EncodeToString([]byte(addr)) + "." + secret
+func Token(kind, key, secret string) string {
+	return "mp_" + kind + "_" + key + "." + secret
 }
 
-// Parse is a token's address and secret, refused when it is not of kind.
-func Parse(kind, token string) (addr, secret string, err error) {
+// Parse is a token's harness key and secret, refused when it is not of kind.
+func Parse(kind, token string) (key, secret string, err error) {
 	rest, ok := strings.CutPrefix(token, "mp_"+kind+"_")
-	enc, secret, dot := strings.Cut(rest, ".")
-	b, derr := base64.RawURLEncoding.DecodeString(enc)
-	if !ok || !dot || derr != nil || enc == "" || secret == "" {
+	key, secret, dot := strings.Cut(rest, ".")
+	if !ok || !dot || key == "" || secret == "" {
 		return "", "", fmt.Errorf("not a %s token", kind)
 	}
-	return string(b), secret, nil
+	return key, secret, nil
 }
