@@ -4,7 +4,8 @@
 // the harness at the URL proves the key before any secret goes there.
 //
 //	PUT pointer.mainplane.ai/<key>  {url, seq, sig}  sig over "<key> <url> <seq>"
-//	GET <url>/id?nonce=<n>          {url, sig}       sig over "id <url> <n>"
+//	GET <url>/id?nonce=<n>          {url, sig,       sig over "id <url> <n>"
+//	                                 noise}          noise over "noise <coordinator's Noise key>"
 package pointer
 
 import (
@@ -30,9 +31,10 @@ const api = "https://pointer.mainplane.ai/"
 var client = http.Client{Timeout: 10 * time.Second}
 
 type record struct {
-	URL string `json:"url"`
-	Seq int64  `json:"seq,omitempty"` // a proof has none
-	Sig string `json:"sig"`
+	URL   string `json:"url"`
+	Seq   int64  `json:"seq,omitempty"` // a proof has none
+	Sig   string `json:"sig"`
+	Noise string `json:"noise,omitempty"` // only a proof has one
 }
 
 // Key is the harness key kept in file, made there the first time. Only its
@@ -90,6 +92,11 @@ func recordMsg(key, url string, seq int64) string { return fmt.Sprintf("%s %s %d
 // from ever reading as a record, which starts with the key.
 func idMsg(url, nonce string) string { return "id " + url + " " + nonce }
 
+// noiseMsg is what a harness signs to vouch for its coordinator's Noise key.
+// It needs no nonce or URL: only the holder of the Noise key's private half
+// can finish a Noise handshake, so a replayed signature gains nothing.
+func noiseMsg(noise string) string { return "noise " + noise }
+
 // Publish puts url on the pointer as the URL of k's harness. seq is the time,
 // so the harness keeps no counter.
 func Publish(ctx context.Context, k ed25519.PrivateKey, url string) error {
@@ -137,26 +144,46 @@ func Find(ctx context.Context, key, cached string) (string, error) {
 // the URL it knows itself by, which must be url: a host that relays another
 // harness's answer fails.
 func Prove(ctx context.Context, key, url string) error {
-	nonce := rand.Text()
-	var r record
-	if err := get(ctx, url+"/id?nonce="+nonce, &r); err != nil {
+	_, err := prove(ctx, key, url)
+	return err
+}
+
+// ProveNoise is nil when the harness at url holds key and vouches for noise
+// as its coordinator's Noise key.
+func ProveNoise(ctx context.Context, key, url, noise string) error {
+	r, err := prove(ctx, key, url)
+	if err != nil {
 		return err
 	}
-	if r.URL != url {
-		return fmt.Errorf("%s says it is %s", url, r.URL)
-	}
-	if err := verify(key, idMsg(url, nonce), r.Sig); err != nil {
-		return fmt.Errorf("%s: %w", url, err)
+	if err := verify(key, noiseMsg(noise), r.Noise); err != nil {
+		return fmt.Errorf("%s: Noise key %s: %w", url, noise, err)
 	}
 	return nil
 }
 
-// ID answers a proof for the harness with k, now reached at url().
-func ID(k ed25519.PrivateKey, url func() string) http.Handler {
+func prove(ctx context.Context, key, url string) (record, error) {
+	nonce := rand.Text()
+	var r record
+	if err := get(ctx, url+"/id?nonce="+nonce, &r); err != nil {
+		return r, err
+	}
+	if r.URL != url {
+		return r, fmt.Errorf("%s says it is %s", url, r.URL)
+	}
+	if err := verify(key, idMsg(url, nonce), r.Sig); err != nil {
+		return r, fmt.Errorf("%s: %w", url, err)
+	}
+	return r, nil
+}
+
+// ID answers a proof for the harness with k, now reached at url(), whose
+// coordinator has the Noise key noise.
+func ID(k ed25519.PrivateKey, url func() string, noise string) http.Handler {
+	ns := sign(k, noiseMsg(noise))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u := url()
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(record{URL: u, Sig: sign(k, idMsg(u, r.URL.Query().Get("nonce")))})
+		_ = json.NewEncoder(w).Encode(record{URL: u, Sig: sign(k, idMsg(u, r.URL.Query().Get("nonce"))), Noise: ns})
 	})
 }
 
