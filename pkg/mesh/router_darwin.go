@@ -16,8 +16,8 @@ func add(tun string, a netip.Prefix) error {
 	return run("route", "-q", "-n", "add", "-inet6", project(a), "-iface", tun)
 }
 
-// Clean has nothing to remove: all a worker adds goes with its TUN.
-func Clean() {}
+// dropRule has nothing to drop: the route goes with the TUN.
+func dropRule() {}
 
 func del(tun string, a netip.Prefix) error {
 	if err := run("route", "-q", "-n", "delete", "-inet6", project(a), "-iface", tun); err != nil {

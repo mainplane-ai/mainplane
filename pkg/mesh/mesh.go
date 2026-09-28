@@ -50,7 +50,9 @@ const (
 
 // Mesh is this worker's node.
 type Mesh struct {
-	lb *ipnlocal.LocalBackend
+	lb      *ipnlocal.LocalBackend
+	unwatch context.CancelFunc
+	watched chan struct{}
 }
 
 // Up brings the node up with its state in dir: the TUN, then the engine.
@@ -110,13 +112,38 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 	}
 	lb.SetVarRoot(dir)
 	log.Printf("mesh: %s up, port %d", tun, port)
+	ctx, unwatch := context.WithCancel(context.Background())
+	m := &Mesh{lb: lb, unwatch: unwatch, watched: make(chan struct{})}
+	go func() {
+		defer close(m.watched)
+		// Any change may be to a name: the block is made again from the
+		// whole map and written when it differs.
+		lb.WatchNotifications(ctx, ipn.NotifyInitialNetMap|ipn.NotifyPeerChanges, nil, func(*ipn.Notify) bool {
+			if err := hosts(block(lb.NetMapWithPeers())); err != nil {
+				log.Printf("mesh: hosts: %v", err)
+			}
+			return true
+		})
+	}()
 	go follow(lb, sys.HealthTracker.Get(), harness, secret, name)
-	return &Mesh{lb: lb}, nil
+	return m, nil
 }
 
-// Close leaves the mesh: the router takes its address, route and rule away
-// and the TUN goes.
-func (m *Mesh) Close() { m.lb.Shutdown() }
+// Close leaves the mesh: the hosts block goes, the router takes its address,
+// route and rule away, and the TUN goes.
+func (m *Mesh) Close() error {
+	m.unwatch()
+	<-m.watched
+	m.lb.Shutdown()
+	return hosts("")
+}
+
+// Clean removes what a killed worker left: the hosts block, and on Linux
+// the rule. Uninstall runs it after the worker stops.
+func Clean() error {
+	dropRule()
+	return hosts("")
+}
 
 // osRouter is the router tailscale's engine drives in place of its own,
 // which on Linux takes table 52, a packet mark and iptables chains that

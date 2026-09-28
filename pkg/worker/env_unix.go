@@ -57,7 +57,7 @@ func killTree(p *os.Process) { _ = syscall.Kill(-p.Pid, syscall.SIGKILL) }
 // Work is the worker: on the mesh, with its state in the state directory
 // under a service and in scratch when run by hand, and dialing the harness,
 // until the service manager stops it. Then it leaves the mesh, so no
-// address, route or rule stays behind.
+// address, route, rule or hosts block stays behind.
 func Work(key string, l Local) error {
 	dir := filepath.Join(l.Scratch, "mesh")
 	if l.Operator != nil {
@@ -72,8 +72,7 @@ func Work(key string, l Local) error {
 	}
 	go Dial(key, l)
 	log.Printf("%v: leaving the mesh", <-stop)
-	m.Close()
-	return nil
+	return m.Close()
 }
 
 // restart becomes the new binary in place, same pid and arguments, so a

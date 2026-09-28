@@ -53,6 +53,11 @@ const (
 	// The protocol needs a user and a relay region; a project has one of each.
 	user   = tailcfg.UserID(1)
 	region = 900
+
+	// A self-hosted harness has one project, and nothing names it yet.
+	// Workers read it from the map's Domain for their long names,
+	// <worker>--<project>.mainplane.net.
+	project = "home"
 )
 
 type node struct {
@@ -334,6 +339,7 @@ func (c *Coordinator) delta(n *node, sent map[tailcfg.NodeID]uint64, host *strin
 	r := &tailcfg.MapResponse{}
 	if full {
 		r.Node = tail(n)
+		r.Domain = project
 		r.PacketFilter = tailcfg.FilterAllowAll
 		r.UserProfiles = []tailcfg.UserProfile{{ID: user, LoginName: "mainplane", DisplayName: "mainplane"}}
 	}

@@ -95,7 +95,9 @@ func Uninstall() error {
 	if err := unregister(); err != nil {
 		return err
 	}
-	mesh.Clean()
+	if err := mesh.Clean(); err != nil {
+		return err
+	}
 	for _, f := range []string{Bin, Bin + ".old", Bin + ".new"} {
 		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
