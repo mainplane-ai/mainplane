@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -167,7 +168,11 @@ func tunnel(args []string) {
 	var t *server.Tunnel
 	switch {
 	case len(args) == 2 && args[1] == "quick":
-	case len(args) == 3 && strings.HasPrefix(args[1], "https://"):
+	case len(args) == 3:
+		u, err := neturl.Parse(args[1])
+		if err != nil || u.Scheme != "https" || u.Host == "" {
+			log.Fatalf("%s: the URL is https://<the name Cloudflare routes to the tunnel>", args[1])
+		}
 		t = &server.Tunnel{URL: strings.TrimSuffix(args[1], "/"), Token: args[2]}
 	default:
 		usage()
@@ -175,7 +180,7 @@ func tunnel(args []string) {
 	elevate.Root(args...)
 	url, err := server.SetTunnel(t)
 	fatal(err)
-	fmt.Printf("harness reached at %s; workers follow within a minute\n", url)
+	fmt.Printf("harness reached at %s; workers follow in about a minute\n", url)
 }
 
 func hostname() string {

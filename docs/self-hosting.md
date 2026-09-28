@@ -19,8 +19,8 @@ domain, a name like `https://four-random-words.trycloudflare.com`.
 
 - The URL holds across harness restarts while Cloudflare keeps the tunnel,
   about 10 minutes after its last connection. After a longer outage the
-  harness gets a new URL and publishes it. Workers find it within a minute of
-  the new tunnel starting.
+  harness gets a new URL and publishes it. Workers usually find it about a
+  minute after the new tunnel starts.
 - Cloudflare offers quick tunnels for testing and development, with no SLA.
 - A quick tunnel carries at most 200 requests at once. Each worker holds one
   open, and so does each `mainplane chat`. For more, use your own domain.
@@ -38,10 +38,10 @@ domain, a name like `https://four-random-words.trycloudflare.com`.
    mainplane-server tunnel https://harness.example.com <token>
    ```
 
-The harness restarts on the new URL and publishes it. Workers and the CLI follow
-within a minute, with no new tokens. The token is stored in the harness config,
-which only root can read. `mainplane-server tunnel quick` goes back to a quick
-tunnel.
+The harness restarts on the new URL and publishes it. Workers and the CLI
+follow, usually in about a minute, with no new tokens. The token is stored in
+the harness config, which only root can read. `mainplane-server tunnel quick`
+goes back to a quick tunnel.
 
 ## What Cloudflare can read
 
