@@ -82,7 +82,7 @@ func Quick(ctx context.Context, dir, origin string, up func(url string)) error {
 		if err != nil {
 			return err
 		}
-		ok, err := named(c.Hostname, fresh)
+		ok, err := named(ctx, c.Hostname, fresh)
 		if err != nil {
 			return err
 		}
@@ -109,26 +109,39 @@ func Quick(ctx context.Context, dir, origin string, up func(url string)) error {
 // named is whether host resolves: at once for a saved tunnel's name, which
 // goes when Cloudflare drops the tunnel, and within nameWait for a fresh one.
 // It asks Cloudflare's resolver over HTTPS, so this machine's resolver never
-// caches a miss for a name about to exist.
-func named(host string, fresh bool) (bool, error) {
-	for end := time.Now().Add(nameWait); ; time.Sleep(time.Second) {
-		req, err := http.NewRequest(http.MethodGet, dohAPI+host, nil)
+// caches a miss for a name about to exist. A lookup that fails, as SERVFAIL
+// does, is an error, not a missing name.
+func named(ctx context.Context, host string, fresh bool) (bool, error) {
+	client := http.Client{Timeout: 10 * time.Second}
+	for end := time.Now().Add(nameWait); ; {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, dohAPI+host, nil)
 		if err != nil {
 			return false, err
 		}
 		req.Header.Set("Accept", "application/dns-json")
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			return false, err
 		}
-		var r struct{ Answer []json.RawMessage }
+		var r struct {
+			Status int // an RCODE: 0 NOERROR, 3 NXDOMAIN
+			Answer []json.RawMessage
+		}
 		err = json.NewDecoder(resp.Body).Decode(&r)
 		_ = resp.Body.Close()
 		if err != nil {
-			return false, fmt.Errorf("%s: %s: %w", dohAPI, resp.Status, err)
+			return false, fmt.Errorf("%s%s: %s: %w", dohAPI, host, resp.Status, err)
+		}
+		if r.Status != 0 && r.Status != 3 {
+			return false, fmt.Errorf("%s%s: rcode %d", dohAPI, host, r.Status)
 		}
 		if len(r.Answer) > 0 || !fresh || time.Now().After(end) {
 			return len(r.Answer) > 0, nil
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(time.Second):
 		}
 	}
 }

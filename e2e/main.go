@@ -139,11 +139,16 @@ func run(v, prev, port string, targets []string) {
 		log.Fatal(err)
 	}
 	// the tunnel outlives every phase, so the URL the tokens carry holds; its
-	// cloudflared is stopped before any exit, or it outlives the run
+	// cloudflared is stopped before any exit, or it outlives the run. Its dir
+	// is this user's own: fetch runs a cloudflared it finds there.
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		log.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	urls, done := make(chan string, 1), make(chan error, 1)
 	go func() {
-		done <- tunnel.Quick(ctx, filepath.Join(os.TempDir(), "mainplane-e2e"), "http://127.0.0.1:"+port, func(url string) {
+		done <- tunnel.Quick(ctx, filepath.Join(cache, "mainplane-e2e"), "http://127.0.0.1:"+port, func(url string) {
 			select {
 			case urls <- url:
 			default:

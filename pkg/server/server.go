@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -84,6 +85,9 @@ func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
 // WebSocket at /worker with a join secret, connectors call every other route
 // with an api key, every session that was open on start resumes.
 func Harness(ctx context.Context, c Config) error {
+	if host, _, _ := net.SplitHostPort(c.HTTP); !net.ParseIP(host).IsLoopback() {
+		return fmt.Errorf("http %q: the harness listens on loopback only, such as 127.0.0.1:8080; the tunnel is the one way in", c.HTTP)
+	}
 	ps, err := providers(c.Providers)
 	if err != nil {
 		return err
