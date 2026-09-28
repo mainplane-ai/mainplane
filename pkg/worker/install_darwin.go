@@ -5,7 +5,12 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"time"
 )
+
+// launchd removes a daemon a few milliseconds after bootout returns; seconds
+// later it is stuck.
+const unloadWait = 5 * time.Second
 
 const (
 	stateDir  = "/Library/Application Support/mainplane"
@@ -32,7 +37,9 @@ func Install(token string) error {
 	if err := setup(token); err != nil {
 		return err
 	}
-	_ = run("launchctl", "bootout", "system/"+label)
+	if err := bootout(); err != nil {
+		return err
+	}
 	if err := os.WriteFile(plistPath, fmt.Appendf(nil, plist, label, Bin, logPath, logPath), 0o644); err != nil {
 		return err
 	}
@@ -40,15 +47,26 @@ func Install(token string) error {
 }
 
 // unregister stops the worker and removes its plist; none installed is fine.
-// bootout fails for a daemon not loaded too, so the check is whether it is
-// still loaded after: then it would run on.
 func unregister() error {
-	err := run("launchctl", "bootout", "system/"+label)
-	if run("launchctl", "print", "system/"+label) == nil {
-		return errors.Join(fmt.Errorf("%s is still loaded", label), err)
+	if err := bootout(); err != nil {
+		return err
 	}
 	if err := os.Remove(plistPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
+	}
+	return nil
+}
+
+// bootout stops the worker and unloads it; none loaded is fine. bootout
+// fails for a daemon not loaded too, and returns before launchd removes one
+// that was, so the check is whether it is still loaded within unloadWait:
+// then it would run on.
+func bootout() error {
+	err := run("launchctl", "bootout", "system/"+label)
+	for end := time.Now().Add(unloadWait); run("launchctl", "print", "system/"+label) == nil; time.Sleep(100 * time.Millisecond) {
+		if time.Now().After(end) {
+			return errors.Join(fmt.Errorf("%s is still loaded", label), err)
+		}
 	}
 	return nil
 }
