@@ -66,14 +66,8 @@ type credentials struct {
 // credentials, so a restart comes back at the same URL while Cloudflare keeps
 // the tunnel, about 10 minutes after its last connection.
 func Quick(ctx context.Context, dir, origin string, up func(url string)) error {
-	bin, err := fetch(dir)
+	run, err := prepare(ctx, dir, origin)
 	if err != nil {
-		return err
-	}
-	// cloudflared also reads a config at its default paths, where a user's
-	// own tunnel may route every host elsewhere. Its own file keeps that out.
-	conf := filepath.Join(dir, "cloudflared.yml")
-	if err := os.WriteFile(conf, []byte("no-autoupdate: true\n"), 0o644); err != nil {
 		return err
 	}
 	file := filepath.Join(dir, "tunnel.json")
@@ -88,21 +82,66 @@ func Quick(ctx context.Context, dir, origin string, up func(url string)) error {
 		}
 		if ok {
 			up("https://" + c.Hostname)
-			cmd := exec.CommandContext(ctx, bin, "tunnel", "--config", conf, "--loglevel", "warn", "--url", origin, "run", "--credentials-file", file, c.TunnelID)
-			cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
-			err = fmt.Errorf("cloudflared: %w", cmd.Run())
+			err = run(nil, "--credentials-file", file, c.TunnelID)
 		} else {
 			err = errors.Join(fmt.Errorf("%s does not resolve: Cloudflare dropped the tunnel", c.Hostname), os.Remove(file))
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if err := pause(ctx, err); err != nil {
+			return err
 		}
-		log.Printf("tunnel: %v; again in %s", err, restartWait)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(restartWait):
+	}
+}
+
+// Own runs the user's own tunnel, by the token Cloudflare gave for it, until
+// ctx ends, and calls up with url each time cloudflared starts. The user
+// routes url to the tunnel and the tunnel to origin in Cloudflare.
+func Own(ctx context.Context, dir, url, token, origin string, up func(url string)) error {
+	run, err := prepare(ctx, dir, origin)
+	if err != nil {
+		return err
+	}
+	for {
+		up(url)
+		// in the environment, since any local user can read a command line
+		if err := pause(ctx, run([]string{"TUNNEL_TOKEN=" + token})); err != nil {
+			return err
 		}
+	}
+}
+
+// prepare fetches cloudflared into dir and returns how to run it to origin
+// until ctx ends, with env added and args after run.
+func prepare(ctx context.Context, dir, origin string) (func(env []string, args ...string) error, error) {
+	bin, err := fetch(dir)
+	if err != nil {
+		return nil, err
+	}
+	// cloudflared also reads a config at its default paths, where a user's
+	// own tunnel may route every host elsewhere. Its own file keeps that out.
+	conf := filepath.Join(dir, "cloudflared.yml")
+	if err := os.WriteFile(conf, []byte("no-autoupdate: true\n"), 0o644); err != nil {
+		return nil, err
+	}
+	return func(env []string, args ...string) error {
+		cmd := exec.CommandContext(ctx, bin, append([]string{"tunnel", "--config", conf, "--loglevel", "warn", "--url", origin, "run"}, args...)...)
+		cmd.Env = append(os.Environ(), env...)
+		cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+		return fmt.Errorf("cloudflared: %w", cmd.Run())
+	}, nil
+}
+
+// pause logs why cloudflared stopped and waits restartWait, unless ctx ends
+// first; then it is ctx's error.
+func pause(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	log.Printf("tunnel: %v; again in %s", err, restartWait)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(restartWait):
+		return nil
 	}
 }
 

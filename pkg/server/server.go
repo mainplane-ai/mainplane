@@ -36,9 +36,17 @@ const (
 // Config is the self-hosted config file. Provider values are expanded from
 // the environment, so a key can be "$ANTHROPIC_API_KEY".
 type Config struct {
-	Admin     string              `json:"admin"` // directory holding sessions, the auth table and the tunnel
-	HTTP      string              `json:"http"`  // loopback address the tunnel carries connectors and workers to
+	Admin     string              `json:"admin"`            // directory holding sessions, the auth table and the tunnel
+	HTTP      string              `json:"http"`             // loopback address the tunnel carries connectors and workers to
+	Tunnel    *Tunnel             `json:"tunnel,omitempty"` // the user's own; none is a quick tunnel
 	Providers map[string]Provider `json:"providers"`
+}
+
+// Tunnel is a tunnel the user made in Cloudflare, which routes URL to it and
+// it to HTTP.
+type Tunnel struct {
+	URL   string `json:"url"`
+	Token string `json:"token"` // the tunnel's, as Cloudflare shows it
 }
 
 func (c Config) Auth() auth.Store { return auth.Store{Path: filepath.Join(c.Admin, "auth.json")} }
@@ -97,8 +105,8 @@ func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
 	return out, nil
 }
 
-// Harness runs the harness role on one loopback port, behind a quick tunnel,
-// until ctx ends or the listener or the tunnel fails: workers open a
+// Harness runs the harness role on one loopback port, behind the user's own
+// tunnel or a quick one, until ctx ends or the listener or the tunnel fails: workers open a
 // WebSocket at /worker with a join secret, /id proves the harness key to
 // anyone before they send one, connectors call every other route with an api
 // key, every session that was open on start resumes. The pointer follows the
@@ -149,16 +157,21 @@ func Harness(ctx context.Context, c Config) error {
 	log.Printf("harness: http and workers on %s, sessions in %s, %d api keys, %d join secrets", c.HTTP, c.Admin, len(t[auth.Key]), len(t[auth.Join]))
 	errs := make(chan error, 2)
 	go func() { errs <- srv.ListenAndServe() }()
+	up := func(url string) {
+		log.Printf("harness: reached at %s", url)
+		at.Store(url)
+		select {
+		case <-urls:
+		default:
+		}
+		urls <- url
+	}
 	go func() {
-		errs <- tunnel.Quick(ctx, c.Admin, "http://"+c.HTTP, func(url string) {
-			log.Printf("harness: reached at %s, a quick tunnel: the URL is temporary", url)
-			at.Store(url)
-			select {
-			case <-urls:
-			default:
-			}
-			urls <- url
-		})
+		if c.Tunnel != nil {
+			errs <- tunnel.Own(ctx, c.Admin, c.Tunnel.URL, c.Tunnel.Token, "http://"+c.HTTP, up)
+		} else {
+			errs <- tunnel.Quick(ctx, c.Admin, "http://"+c.HTTP, up)
+		}
 	}()
 	if err := <-errs; ctx.Err() == nil {
 		return err

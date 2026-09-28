@@ -103,6 +103,32 @@ func Install(c Config) (string, error) {
 	return reached(c)
 }
 
+// SetTunnel makes the installed harness reached through t, or through a quick
+// tunnel when t is nil, restarts it, and returns its URL once it answers
+// there. Workers follow through the pointer.
+func SetTunnel(t *Tunnel) (string, error) {
+	c, err := Load(Conf)
+	if err != nil {
+		return "", fmt.Errorf("no installed harness: %w", err)
+	}
+	c.Tunnel = t
+	b, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(Conf, b, 0o600); err != nil {
+		return "", err
+	}
+	// so reached waits for the restarted harness's URL, not the old one's
+	if err := os.Remove(c.urlFile()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", err
+	}
+	if err := restart(); err != nil {
+		return "", err
+	}
+	return reached(c)
+}
+
 // reached waits for the URL the harness writes when its tunnel starts to
 // answer as the harness does, through Cloudflare, and returns it.
 func reached(c Config) (string, error) {

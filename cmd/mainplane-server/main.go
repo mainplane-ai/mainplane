@@ -4,6 +4,7 @@
 //
 //	mainplane-server up   <config.json>
 //	mainplane-server install [config.json]    and again at every boot, as a service, behind a quick tunnel; asks for sudo or admin itself
+//	mainplane-server tunnel <url> <cloudflared token> | quick   the installed harness moves to the user's own tunnel, or back
 //	mainplane-server key  new <name> | revoke <name> | list    on the installed harness, as root
 //	mainplane-server join new <name> | revoke <name> | list
 //	mainplane-server update [version]         the installed harness becomes release version, the latest stable by default
@@ -57,7 +58,7 @@ func main() {
 			if h.Key != "" {
 				fatal(h.Auth().Set(auth.Key, hostname(), h.Key))
 			}
-			fmt.Printf("harness runs at every boot from %s at %s\nthat URL is a quick tunnel's: temporary, it changes when Cloudflare drops the tunnel; workers follow it\n", server.Conf, url)
+			installed(h.Config, url)
 			k, err := h.Config.Key()
 			fatal(err)
 			h.Harness = pointer.Encode(k)
@@ -75,6 +76,8 @@ func main() {
 		if fresh {
 			login(h)
 		}
+	case verb == "tunnel":
+		tunnel(args)
 	case (verb == auth.Key || verb == auth.Join) && (len(args) == 2 && args[1] == "list" || len(args) == 3 && (args[1] == "new" || args[1] == "revoke")):
 		elevate.Root(args...)
 		c, err := server.Load(server.Conf)
@@ -149,6 +152,32 @@ func login(h handover) {
 	fmt.Println("add a worker:  mainplane-server join new <name>")
 }
 
+// installed says where the harness runs from and is reached, and what a quick
+// tunnel's URL means.
+func installed(c server.Config, url string) {
+	fmt.Printf("harness runs at every boot from %s at %s\n", server.Conf, url)
+	if c.Tunnel == nil {
+		fmt.Println("that URL is a quick tunnel's: temporary, it changes when Cloudflare drops the tunnel; workers follow it.\nset your own:  mainplane-server tunnel <url> <cloudflared token>")
+	}
+}
+
+// tunnel moves the installed harness to the user's own tunnel, or back to a
+// quick one.
+func tunnel(args []string) {
+	var t *server.Tunnel
+	switch {
+	case len(args) == 2 && args[1] == "quick":
+	case len(args) == 3 && strings.HasPrefix(args[1], "https://"):
+		t = &server.Tunnel{URL: strings.TrimSuffix(args[1], "/"), Token: args[2]}
+	default:
+		usage()
+	}
+	elevate.Root(args...)
+	url, err := server.SetTunnel(t)
+	fatal(err)
+	fmt.Printf("harness reached at %s; workers follow within a minute\n", url)
+}
+
 func hostname() string {
 	h, err := os.Hostname()
 	fatal(err)
@@ -192,6 +221,9 @@ func usage() {
   install                                 run it at every boot, with the provider keys set in this shell, behind a
                                           quick tunnel: a temporary URL, no domain needed. Logs this machine's CLI in
   install   <config.json>                 run it at every boot from a root-only copy of the config
+  tunnel    <url> <cloudflared token>     reach the installed harness at url, through a tunnel you made in Cloudflare
+                                          that routes url to http://localhost:8080; workers follow
+  tunnel    quick                         back to a quick tunnel
   key       new <name> | revoke <name> | list   api keys of the installed harness: what a connector needs to call it
   join      new <name> | revoke <name> | list   join secrets of the installed harness: what a machine needs to become a worker
   update    [version]                     the installed harness becomes that release, the latest stable by default;
@@ -199,7 +231,7 @@ func usage() {
   uninstall                               remove the service and the binary; the config, sessions and auth table stay
   version                                 the release this binary was built from
 
-key, join, update and uninstall ask for sudo or admin themselves.
+key, join, tunnel, update and uninstall ask for sudo or admin themselves.
 `)
 	os.Exit(2)
 }
