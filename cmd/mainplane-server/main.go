@@ -50,7 +50,7 @@ func main() {
 		h, fresh := config(args[1:])
 		fatal(h.Expand())
 		if elevate.Is() {
-			addr, err := h.Address(auth.Join)
+			addr, err := h.URL()
 			fatal(err)
 			fatal(server.Install(h.Config))
 			if h.Key != "" {
@@ -119,7 +119,7 @@ func install(h handover) int {
 // login logs this machine's CLI in to the harness just installed and says
 // what comes next.
 func login(h handover) {
-	addr, err := h.Address(auth.Key)
+	addr, err := h.URL()
 	fatal(err)
 	token := auth.Token(auth.Key, addr, h.Key)
 	if _, err := exec.LookPath("mainplane"); err != nil {
@@ -143,7 +143,7 @@ func table(c server.Config, kind string, args []string) {
 	store := c.Auth()
 	switch args[0] {
 	case "new":
-		addr, err := c.Address(kind)
+		addr, err := c.URL()
 		fatal(err)
 		secret, err := store.Issue(kind, args[1])
 		fatal(err)

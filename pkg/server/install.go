@@ -31,11 +31,11 @@ var envProviders = map[string]Provider{
 	"bedrock":   {Key: "$AWS_BEARER_TOKEN_BEDROCK", Region: "$AWS_REGION"},
 }
 
-// Default is the config install writes when given none: workers dial port
-// 7811 and connectors call 8080 at host, sessions live under Dir, and every
+// Default is the config install writes when given none: workers and
+// connectors reach port 8080 at host, sessions live under Dir, and every
 // provider whose key is set in this environment serves.
 func Default(host string) (Config, error) {
-	c := Config{Admin: "admin", Host: host, Workers: ":7811", HTTP: ":8080", Providers: map[string]Provider{}}
+	c := Config{Admin: "admin", Host: host, HTTP: ":8080", Providers: map[string]Provider{}}
 	var vars []string
 	for name, p := range envProviders {
 		if os.ExpandEnv(p.Key) != "" {

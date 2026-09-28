@@ -22,29 +22,24 @@ import (
 // Config is the self-hosted config file. Provider values are expanded from
 // the environment, so a key can be "$ANTHROPIC_API_KEY".
 type Config struct {
-	Admin     string              `json:"admin"`   // directory holding sessions and the auth table
-	Host      string              `json:"host"`    // the name this box is reached by; tokens carry it
-	Workers   string              `json:"workers"` // address workers dial
-	HTTP      string              `json:"http"`    // address connectors call
+	Admin     string              `json:"admin"` // directory holding sessions and the auth table
+	Host      string              `json:"host"`  // the name this box is reached by; tokens carry it
+	HTTP      string              `json:"http"`  // address connectors call and workers dial
 	Providers map[string]Provider `json:"providers"`
 }
 
 func (c Config) Auth() auth.Store { return auth.Store{Path: filepath.Join(c.Admin, "auth.json")} }
 
-// Address is what a token of kind carries: where its holder reaches this harness.
-func (c Config) Address(kind string) (string, error) {
+// URL is what every token carries: where its holder reaches this harness.
+func (c Config) URL() (string, error) {
 	if c.Host == "" {
 		return "", errors.New("config needs host: the name this box is reached by")
 	}
-	_, port, err := net.SplitHostPort(map[string]string{auth.Key: c.HTTP, auth.Join: c.Workers}[kind])
+	_, port, err := net.SplitHostPort(c.HTTP)
 	if err != nil {
 		return "", err
 	}
-	addr := net.JoinHostPort(c.Host, port)
-	if kind == auth.Key {
-		return "http://" + addr, nil
-	}
-	return addr, nil
+	return "http://" + net.JoinHostPort(c.Host, port), nil
 }
 
 type Provider struct {
@@ -84,10 +79,10 @@ func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
 	return out, nil
 }
 
-// Harness runs the harness role until ctx ends or one listener fails: workers
-// dial in with a join secret, connectors call over HTTP with an api key,
-// every session that was open on start resumes. Whichever ends first ends
-// the other.
+// Harness runs the harness role on one port until ctx ends or the listener
+// fails: workers open a WebSocket at /worker with a join secret, connectors
+// call every other route with an api key, every session that was open on
+// start resumes.
 func Harness(ctx context.Context, c Config) error {
 	ps, err := providers(c.Providers)
 	if err != nil {
@@ -105,9 +100,10 @@ func Harness(ctx context.Context, c Config) error {
 	defer cancel()
 	pool := harness.NewPool(func(secret string) bool { return store.Check(auth.Join, secret) })
 	h := &harness.Harness{Sessions: statefile.Sessions{Dir: c.Admin}, Providers: ps, Workers: pool}
-	srv := &http.Server{Addr: c.HTTP, Handler: store.Bearer(harness.Handler(ctx, h))}
-	errs := make(chan error, 2)
-	go func() { errs <- h.Workers.Listen(ctx, c.Workers) }()
+	mux := http.NewServeMux()
+	mux.Handle("/worker", pool)
+	mux.Handle("/", store.Bearer(harness.Handler(ctx, h)))
+	srv := &http.Server{Addr: c.HTTP, Handler: mux}
 	go func() {
 		<-ctx.Done()
 		_ = srv.Close()
@@ -115,9 +111,8 @@ func Harness(ctx context.Context, c Config) error {
 	if err := h.Resume(ctx); err != nil {
 		return err
 	}
-	log.Printf("harness: workers on %s, http on %s, sessions in %s, %d api keys, %d join secrets", c.Workers, c.HTTP, c.Admin, len(t[auth.Key]), len(t[auth.Join]))
-	go func() { errs <- srv.ListenAndServe() }()
-	if err := <-errs; ctx.Err() == nil {
+	log.Printf("harness: http and workers on %s, sessions in %s, %d api keys, %d join secrets", c.HTTP, c.Admin, len(t[auth.Key]), len(t[auth.Join]))
+	if err := srv.ListenAndServe(); ctx.Err() == nil {
 		return err
 	}
 	return nil

@@ -5,7 +5,7 @@
 //
 //	task e2e -- <v> <prev> <host:port> <os>=<ssh target>...
 //
-// host:port is where the machines reach this one. Linux and macOS targets
+// host:port is where the machines reach this one; its port takes their WebSockets. Linux and macOS targets
 // need passwordless sudo. The Windows target must be an elevated login, with
 // the operator logged in at the console. Then each machine becomes a harness
 // in one line, which updates to prev and back, and both are uninstalled: a
@@ -24,6 +24,7 @@ import (
 	"log"
 	"maps"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -142,7 +143,7 @@ func run(v, prev, addr string, targets []string) {
 	secret := rand.Text()
 	start := time.Now()
 	for _, o := range oses {
-		out, err := remote(o, ssh[o], fmt.Sprintf(install[o == "windows"], release.DL, v, auth.Token(auth.Join, addr, secret)))
+		out, err := remote(o, ssh[o], fmt.Sprintf(install[o == "windows"], release.DL, v, auth.Token(auth.Join, "http://"+addr, secret)))
 		check(o, "install "+v, err == nil && strings.Contains(out, v), last(out))
 	}
 	harnessAt := func(ver string, mode ...string) {
@@ -212,7 +213,7 @@ func last(s string) string {
 func phase(listen, secret, v string, oses []string, mode, text string) {
 	version.V = v
 	p := harness.NewPool(func(s string) bool { return s == secret })
-	go func() { log.Fatal(p.Listen(context.Background(), listen)) }()
+	go func() { log.Fatal(http.ListenAndServe(listen, p)) }()
 	fmt.Printf("== harness %s: %s %s\n", v, mode, text)
 	start := time.Now()
 	got := map[string]harness.Listed{}
