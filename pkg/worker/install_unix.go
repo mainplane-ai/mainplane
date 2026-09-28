@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/mainplane-ai/mainplane/pkg/mesh"
 )
 
 // Bin is the binary the service runs. It and the state directory are root's:
@@ -86,13 +88,14 @@ func setup(token string) error {
 	return nil
 }
 
-// Uninstall stops the worker and removes its service, Bin, which is also the
-// CLI, and the state directory with the join token. Scratch stays: it is the
-// operator's.
+// Uninstall stops the worker and removes its service, what a killed worker
+// left of the mesh, Bin, which is also the CLI, and the state directory with
+// the join token and the mesh keys. Scratch stays: it is the operator's.
 func Uninstall() error {
 	if err := unregister(); err != nil {
 		return err
 	}
+	mesh.Clean()
 	for _, f := range []string{Bin, Bin + ".old", Bin + ".new"} {
 		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err

@@ -7,10 +7,14 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"os/user"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"syscall"
+
+	"github.com/mainplane-ai/mainplane/pkg/mesh"
 )
 
 // prepare puts cmd in its own process group, so killTree reaches every process
@@ -50,9 +54,25 @@ func prepare(cmd *exec.Cmd, op *user.User) error {
 
 func killTree(p *os.Process) { _ = syscall.Kill(-p.Pid, syscall.SIGKILL) }
 
-// Work is the worker; the service manager needs nothing of it.
+// Work is the worker: on the mesh, with its state in the state directory
+// under a service and in scratch when run by hand, and dialing the harness,
+// until the service manager stops it. Then it leaves the mesh, so no
+// address, route or rule stays behind.
 func Work(key string, l Local) error {
-	Dial(key, l)
+	dir := filepath.Join(l.Scratch, "mesh")
+	if l.Operator != nil {
+		dir = filepath.Join(stateDir, "mesh")
+	}
+	// A stop while the mesh comes up waits for it, so Close still runs.
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
+	m, err := mesh.Up(dir, key, l.Secret, l.Name)
+	if err != nil {
+		return err
+	}
+	go Dial(key, l)
+	log.Printf("%v: leaving the mesh", <-stop)
+	m.Close()
 	return nil
 }
 
