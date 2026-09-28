@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -154,8 +155,9 @@ func (s Store) Bearer(l *Limit, next http.Handler) http.Handler {
 // address away for the rest of a window once it has too many: a secret is 26
 // random characters, but nothing should get to guess at it freely.
 type Limit struct {
-	mu sync.Mutex
-	m  map[string]strikes
+	mu    sync.Mutex
+	m     map[string]strikes
+	swept time.Time // when m last dropped the addresses whose windows had passed
 }
 
 // strikes are an address's refusals in the window that began at start.
@@ -175,22 +177,21 @@ func (l *Limit) Wait(addr string) error {
 	return nil
 }
 
-// Refused counts a refused credential from addr, and forgets every address
-// whose window has passed.
+// Refused counts a refused credential from addr. Once a window, it forgets
+// every address whose window has passed.
 func (l *Limit) Refused(addr string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if time.Since(l.swept) > window {
+		l.swept = time.Now()
+		maps.DeleteFunc(l.m, func(_ string, s strikes) bool { return time.Since(s.start) > window })
+	}
 	if l.m == nil {
 		l.m = map[string]strikes{}
 	}
-	for a, s := range l.m {
-		if time.Since(s.start) > window {
-			delete(l.m, a)
-		}
-	}
-	s, ok := l.m[addr]
-	if !ok {
-		s.start = time.Now()
+	s := l.m[addr]
+	if time.Since(s.start) > window {
+		s = strikes{start: time.Now()}
 	}
 	s.n++
 	l.m[addr] = s
