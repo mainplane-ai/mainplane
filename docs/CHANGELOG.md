@@ -4,7 +4,7 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 
 ## v0.2.0
 
-The harness needs no network setup: a Cloudflare tunnel is its only way in. Tokens, configs and workers from v0.1.x do not carry over; reinstall the harness and every worker.
+The harness needs no network setup: a Cloudflare tunnel is its only way in. Tokens, configs and workers from v0.1.x do not carry over. Uninstall the v0.1.x harness with its own `mainplane-server uninstall`, which on Windows also removes its port 7811 firewall rule, then install the harness and every worker again.
 
 - `mainplane-server install` opens a Cloudflare quick tunnel: a temporary `https://*.trycloudflare.com` URL, no account, domain or inbound port. The harness listens on loopback only, and runs cloudflared, pinned and checked against its sha256, as a child. `host` and `--host` are gone
 - Workers dial a WebSocket at `/worker` on the harness's one port; port 7811 and its Windows firewall rule are gone
