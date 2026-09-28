@@ -19,7 +19,7 @@ func (r *osRouter) Up() error { return run("ip", "link", "set", "dev", r.tun, "u
 // A rule a killed worker left goes first; its route and address went with
 // its TUN.
 func add(tun string, a netip.Prefix) error {
-	Clean()
+	dropRule()
 	p := project(a)
 	for _, args := range [][]string{
 		{"-6", "addr", "replace", a.String(), "dev", tun, "nodad"},
@@ -34,16 +34,16 @@ func add(tun string, a netip.Prefix) error {
 }
 
 func del(tun string, a netip.Prefix) error {
-	Clean()
+	dropRule()
 	if err := run("ip", "-6", "route", "flush", "table", table); err != nil {
 		return err
 	}
 	return run("ip", "-6", "addr", "del", a.String(), "dev", tun)
 }
 
-// Clean removes every rule to our table, which outlives a worker that was
-// killed. Uninstall runs it after the worker stops.
-func Clean() {
+// dropRule removes every rule to our table, which outlives a worker that
+// was killed.
+func dropRule() {
 	for run("ip", "-6", "rule", "del", "table", table) == nil {
 	}
 }
