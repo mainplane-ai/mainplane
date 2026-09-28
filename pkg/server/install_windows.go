@@ -143,13 +143,9 @@ func prepare() error {
 	})
 }
 
-// start lets the harness's ports in and runs it at every boot as the service
-// mainplane-server, which a later install reconfigures.
+// start runs the harness at every boot as the service mainplane-server, which
+// a later install reconfigures.
 func start() error {
-	_ = run("netsh", "advfirewall", "firewall", "delete", "rule", "name="+name)
-	if err := run("netsh", "advfirewall", "firewall", "add", "rule", "name="+name, "dir=in", "action=allow", "program="+bin); err != nil {
-		return err
-	}
 	m, err := mgr.Connect()
 	if err != nil {
 		return err
@@ -187,9 +183,9 @@ func start() error {
 	return path(true)
 }
 
-// Uninstall stops and deletes the service and its firewall rule, removes the
-// binary, and takes bin's folder off PATH once nothing else is in it. Dir
-// stays: it holds the sessions.
+// Uninstall stops and deletes the service, removes the binary, and takes
+// bin's folder off PATH once nothing else is in it. Dir stays: it holds the
+// sessions.
 func Uninstall() error {
 	if err := stop(); err != nil {
 		return err
@@ -207,7 +203,6 @@ func Uninstall() error {
 	if err != nil && !errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return err
 	}
-	_ = run("netsh", "advfirewall", "firewall", "delete", "rule", "name="+name)
 	for _, f := range []string{bin, bin + ".old", bin + ".new"} {
 		if err := remove(f); err != nil {
 			return err

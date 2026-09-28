@@ -1,10 +1,9 @@
 # Installs the mainplane CLI for the user who runs it, on their PATH; with a join token it installs it
 # for the machine instead and makes this Windows machine a worker for that user, after a UAC prompt.
 # With server it also makes this machine the harness, from the provider keys set in this shell, after a
-# UAC prompt, and logs the CLI in to it. Host is the name workers reach it by, this machine's name by default.
-# The release stamps its version.
-#   & ([scriptblock]::Create((irm https://dl.mainplane.ai/@VERSION@/install.ps1))) [join token | server [host]]
-param([string]$Token, [string]$HostName)
+# UAC prompt, and logs the CLI in to it. The release stamps its version.
+#   & ([scriptblock]::Create((irm https://dl.mainplane.ai/@VERSION@/install.ps1))) [join token | server]
+param([string]$Token)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $dl = 'https://dl.mainplane.ai/@VERSION@'
@@ -40,7 +39,7 @@ if (($env:Path -split ';') -notcontains $bin) { $env:Path += ";$bin" }
 if ($Token -eq 'server') {
   # install places mainplane-server in Program Files, runs it as a service, and logs mainplane in to it
   $s = Fetch mainplane-server
-  if ($HostName) { & $s install --host $HostName } else { & $s install }
+  & $s install
   if ($LASTEXITCODE) { exit $LASTEXITCODE }
   # install put that folder on the machine PATH, which this shell read before
   $env:Path += ";$env:ProgramFiles\mainplane"

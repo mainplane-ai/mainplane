@@ -5,9 +5,12 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
@@ -42,4 +45,13 @@ func prepare() error {
 		return err
 	}
 	return os.Chmod(Dir, 0o700)
+}
+
+// run is one service manager command; its output is the error when it fails.
+func run(name string, args ...string) error {
+	out, err := exec.Command(name, args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, out)
+	}
+	return nil
 }
