@@ -11,6 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
@@ -22,7 +23,7 @@ type Pool struct {
 	mu      sync.Mutex
 	m       map[string]*Remote
 	refused map[string]Listed // admitted workers the last connection of which was refused
-	admit   func(secret string) bool
+	admit   func(secret, addr string) error
 }
 
 // Listed is a worker as GET /workers shows it: its hello, and why its last
@@ -32,7 +33,7 @@ type Listed struct {
 	Refused string `json:"refused,omitempty"`
 }
 
-func NewPool(admit func(secret string) bool) *Pool {
+func NewPool(admit func(secret, addr string) error) *Pool {
 	return &Pool{m: map[string]*Remote{}, refused: map[string]Listed{}, admit: admit}
 }
 
@@ -79,14 +80,14 @@ func (p *Pool) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	c.SetReadLimit(-1) // a frame is a whole file read or write; its size is the worker protocol's business
-	p.serve(websocket.NetConn(context.Background(), c, websocket.MessageBinary), req.RemoteAddr)
+	p.serve(websocket.NetConn(context.Background(), c, websocket.MessageBinary), auth.Addr(req))
 }
 
 // serve holds one worker from hello to hangup. A refused hello is told why
 // before the close, so the worker's log says it and not just EOF. A refused
 // worker that passed admit is listed with the reason until it connects.
 func (p *Pool) serve(conn net.Conn, who string) {
-	r, err := Connect(conn, p.admit)
+	r, err := Connect(conn, func(secret string) error { return p.admit(secret, who) })
 	if err != nil {
 		if r != nil {
 			who = r.Name + " at " + who

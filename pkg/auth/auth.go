@@ -18,16 +18,28 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 )
 
 const (
 	Key  = "key"  // a connector's credential: every HTTP route
 	Join = "join" // a worker's credential: the dial in
+)
+
+// An address has this many refusals a window. That is more than a worker
+// with a stale token makes, redialing every 5s, so it never locks out the
+// other workers behind the same NAT. It is far too few to guess a
+// 26-character secret.
+const (
+	refusals = 30
+	window   = time.Minute
 )
 
 type Entry struct {
@@ -116,16 +128,83 @@ func (s Store) Check(kind, secret string) bool {
 	return ok
 }
 
-// Bearer refuses a request whose Authorization: Bearer is not a live api key.
-func (s Store) Bearer(next http.Handler) http.Handler {
+// Bearer refuses a request whose Authorization: Bearer is not a live api key,
+// and one from an address l turns away. A request with no key is refused but
+// not counted: it guesses nothing.
+func (s Store) Bearer(l *Limit, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		a := Addr(r)
+		if err := l.Wait(a); err != nil {
+			http.Error(w, err.Error(), http.StatusTooManyRequests)
+			return
+		}
 		secret, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if !ok || !s.Check(Key, secret) {
+			if ok {
+				l.Refused(a)
+			}
 			http.Error(w, "api key refused", http.StatusUnauthorized)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// Limit counts refused credentials of both kinds by address, and turns an
+// address away for the rest of a window once it has too many: a secret is 26
+// random characters, but nothing should get to guess at it freely.
+type Limit struct {
+	mu sync.Mutex
+	m  map[string]strikes
+}
+
+// strikes are an address's refusals in the window that began at start.
+type strikes struct {
+	n     int
+	start time.Time
+}
+
+// Wait is why addr is turned away now, or nil.
+func (l *Limit) Wait(addr string) error {
+	l.mu.Lock()
+	s := l.m[addr]
+	l.mu.Unlock()
+	if w := window - time.Since(s.start); s.n >= refusals && w > 0 {
+		return fmt.Errorf("too many refused credentials from %s: try again in %s", addr, (w + time.Second - 1).Truncate(time.Second))
+	}
+	return nil
+}
+
+// Refused counts a refused credential from addr, and forgets every address
+// whose window has passed.
+func (l *Limit) Refused(addr string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.m == nil {
+		l.m = map[string]strikes{}
+	}
+	for a, s := range l.m {
+		if time.Since(s.start) > window {
+			delete(l.m, a)
+		}
+	}
+	s, ok := l.m[addr]
+	if !ok {
+		s.start = time.Now()
+	}
+	s.n++
+	l.m[addr] = s
+}
+
+// Addr is who sent r: the client address cloudflared puts in
+// CF-Connecting-IP, else the peer. The harness listens on loopback only, so
+// every peer is cloudflared or this machine, and the header can be trusted.
+func Addr(r *http.Request) string {
+	if a := r.Header.Get("CF-Connecting-IP"); a != "" {
+		return a
+	}
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	return host
 }
 
 func Hash(secret string) string {

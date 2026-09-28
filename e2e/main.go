@@ -22,6 +22,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log"
 	"maps"
@@ -262,7 +263,12 @@ func key() ed25519.PrivateKey {
 // is check.
 func phase(listen, url, secret, v string, oses []string, mode, text string) {
 	version.V = v
-	p := harness.NewPool(func(s string) bool { return s == secret })
+	p := harness.NewPool(func(s, _ string) error {
+		if s != secret {
+			return errors.New("join secret refused")
+		}
+		return nil
+	})
 	mux := http.NewServeMux()
 	mux.Handle("/worker", p)
 	mux.Handle("/id", pointer.ID(key(), func() string { return url }))
