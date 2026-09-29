@@ -52,9 +52,10 @@ func hosts(blk string) error {
 		return err
 	}
 	s := string(old)
-	if i := strings.Index(s, begin+"\n"); i >= 0 {
-		if j := strings.Index(s[i:], end+"\n"); j >= 0 {
-			s = s[:i] + s[i+j+len(end)+1:]
+	// An editor may have saved the block with CRLF, as Windows hosts files are.
+	if i := strings.Index(s, begin); i >= 0 {
+		if j := strings.Index(s[i:], end); j >= 0 {
+			s = s[:i] + strings.TrimPrefix(strings.TrimPrefix(s[i+j+len(end):], "\r"), "\n")
 		}
 	}
 	if blk != "" && s != "" && !strings.HasSuffix(s, "\n") {
