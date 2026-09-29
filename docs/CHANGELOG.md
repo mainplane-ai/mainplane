@@ -7,6 +7,7 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 - The harness install prints a join token named `default`, good for any number of machines, and the lines that install a worker with it on Linux, macOS and Windows. Each install makes a new one; the one before joins no more machines. The name in `mainplane-server join new <name>` is the secret's, for revoke; a worker is named by its hostname
 - Installs print less: no checksum lines, a spinner while the harness and its tunnel start, then a wordmark, the version, and what to do next
 - Sessions: `context` in a create body and in the config record is `context_limit`, and `prompt` in session info is `context_used`. A session made before reads a limit of 0 and fails at its next step: start a new one
+- Sessions: `params` in a create body sets vendor fields on every request, as a JSON merge patch in the vendor's own names: `{"output_config":{"effort":"high"}}` for Anthropic, `{"reasoning":{"effort":"high"}}` for OpenAI, `{"provider":{"order":["deepinfra"]}}` for OpenRouter, `{"thinking":null}` to drop a field. The vendor judges them. A field the harness builds from the session, such as `messages` or `tools`, fails the create. A copy keeps the params
 - `mainplane status` starts with the harness the CLI is logged in to: its version and URL. The worker's own row says `harness unresponsive` where it said `map poll down`
 - `mainplane workers` shows a worker's version only when it is not the harness's
 - Windows: the UAC prompt names Mainplane Worker

@@ -28,11 +28,13 @@ type Tool struct {
 	Schema      json.RawMessage // JSON Schema for the arguments object
 }
 
+// Params are the session's vendor fields, see encode.
 type Request struct {
 	Model   string
 	Key     string // session id, the routing key for prefix caches
 	Tools   []Tool
 	Context []statefile.Record // statefile.Build output
+	Params  map[string]json.RawMessage
 }
 
 // Cache is the step record's cache header. Marks are the ids of the records
@@ -55,10 +57,12 @@ func cacheHeader(ttl int, marks ...string) (json.RawMessage, error) {
 // deterministic and returns the cache markers it placed, which go on the step
 // record. Stream calls emit once per block as the stream completes it and
 // returns the step header with usage. Accepts is the media types the envelope
-// encodes as media; a record of any other type goes as text.
+// encodes as media; a record of any other type goes as text. Owns is the body
+// fields Compile builds from the session, which params may not set.
 type Envelope interface {
 	Name() string
 	Accepts(typ string) bool
+	Owns(field string) bool
 	Compile(req Request) (body []byte, cache json.RawMessage, err error)
 	Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error)
 }
@@ -211,6 +215,42 @@ func marshal(v any) ([]byte, error) {
 		return nil, err
 	}
 	return bytes.TrimRight(b.Bytes(), "\n"), nil
+}
+
+// encode marshals a request body and applies params to it as a JSON merge
+// patch (RFC 7396) in the vendor's own field names: an object merges into the
+// object it names, null deletes, anything else replaces. The harness does not
+// know every vendor's fields, so the vendor judges them and its 400 is the
+// error. The harness refuses at create only the fields the envelope Owns.
+func encode(body any, params map[string]json.RawMessage) ([]byte, error) {
+	b, err := marshal(body)
+	if err != nil || len(params) == 0 {
+		return b, err
+	}
+	return merge(b, params)
+}
+
+func merge(target json.RawMessage, patch map[string]json.RawMessage) (json.RawMessage, error) {
+	var t map[string]json.RawMessage
+	if json.Unmarshal(target, &t) != nil || t == nil {
+		t = map[string]json.RawMessage{} // RFC 7396: a target that is not an object becomes one
+	}
+	for k, v := range patch {
+		var sub map[string]json.RawMessage
+		switch {
+		case string(v) == "null":
+			delete(t, k)
+		case json.Unmarshal(v, &sub) == nil:
+			m, err := merge(t[k], sub)
+			if err != nil {
+				return nil, err
+			}
+			t[k] = m
+		default:
+			t[k] = v
+		}
+	}
+	return marshal(t)
 }
 
 // Split separates the leading system records, which are the system prompt,

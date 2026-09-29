@@ -48,12 +48,13 @@ func (h *Harness) provider(model string) (provider.Provider, string, error) {
 // whitelist, and a worker named before it dials in is a worker the session
 // waits for.
 type Create struct {
-	From         string             `json:"from,omitempty"`
-	N            int                `json:"n,omitempty"`
-	Model        string             `json:"model,omitempty"`
-	ContextLimit int                `json:"context_limit,omitempty"`
-	Workers      []statefile.Worker `json:"workers,omitempty"`
-	Input        []string           `json:"input,omitempty"`
+	From         string                     `json:"from,omitempty"`
+	N            int                        `json:"n,omitempty"`
+	Model        string                     `json:"model,omitempty"`
+	ContextLimit int                        `json:"context_limit,omitempty"`
+	Workers      []statefile.Worker         `json:"workers,omitempty"`
+	Input        []string                   `json:"input,omitempty"`
+	Params       map[string]json.RawMessage `json:"params,omitempty"`
 }
 
 func system(source, body string) statefile.Record {
@@ -66,7 +67,7 @@ func system(source, body string) statefile.Record {
 func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
 	id := statefile.NewID()
 	if c.From != "" {
-		if c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Input != nil {
+		if c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Input != nil || c.Params != nil {
 			return "", fmt.Errorf("a copy takes no config")
 		}
 		if err := h.cut(c.From, c.N); err != nil {
@@ -90,7 +91,12 @@ func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
 			return "", fmt.Errorf("%s does not take %s as input", p.Envelope.Name(), t)
 		}
 	}
-	conf := statefile.Conf{Model: c.Model, Tools: ToolSet(model), Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input}
+	for k := range c.Params {
+		if p.Envelope.Owns(k) {
+			return "", fmt.Errorf("%s builds %s from the session, a param cannot set it", p.Envelope.Name(), k)
+		}
+	}
+	conf := statefile.Conf{Model: c.Model, Tools: ToolSet(model), Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params}
 	if conf.Workers == nil {
 		conf.Workers = []statefile.Worker{}
 	}
@@ -237,7 +243,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 	stepID := statefile.NewID()
 	var calls []statefile.Record
 	var appendErr error
-	req := provider.Request{Model: model, Key: id, Tools: Tools(conf.Tools, conf.Input), Context: records}
+	req := provider.Request{Model: model, Key: id, Tools: Tools(conf.Tools, conf.Input), Context: records, Params: conf.Params}
 	hdr, err := p.Step(ctx, req, func(r statefile.Record) {
 		r.Step = stepID
 		if r.ID == "" {
