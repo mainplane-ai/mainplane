@@ -48,6 +48,8 @@ const (
 	// a PR that changes both lines.
 	wintunZip = "https://www.wintun.net/builds/wintun-0.14.1.zip"
 	wintunSum = "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51"
+	// The zip is 0.7 MB; a download that stalls fails the install instead.
+	fetchWait = time.Minute
 )
 
 // x/sys/windows does not wrap SendMessageTimeout. A broadcast waits on every
@@ -157,13 +159,18 @@ func Install(token string) error {
 	if err != nil {
 		return err
 	}
+	// wintun.dll first: a failed download leaves the running worker as it was.
+	dll, err := wintun()
+	if err != nil {
+		return err
+	}
 	if err := stop(); err != nil {
 		return err
 	}
 	if err := place(Bin); err != nil {
 		return err
 	}
-	if err := fetchWintun(); err != nil {
+	if err := os.WriteFile(wintunDLL, dll, 0o644); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
@@ -268,37 +275,33 @@ func remove(f string) error {
 	return windows.MoveFileEx(p, nil, windows.MOVEFILE_DELAY_UNTIL_REBOOT)
 }
 
-// fetchWintun puts this machine's wintun.dll from wintunZip in wintunDLL.
-func fetchWintun() error {
-	resp, err := http.Get(wintunZip)
+// wintun is this machine's wintun.dll from wintunZip.
+func wintun() ([]byte, error) {
+	resp, err := (&http.Client{Timeout: fetchWait}).Get(wintunZip)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("GET %s: %s", wintunZip, resp.Status)
+		return nil, fmt.Errorf("GET %s: %s", wintunZip, resp.Status)
 	}
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if fmt.Sprintf("%x", sha256.Sum256(b)) != wintunSum {
-		return fmt.Errorf("%s does not match its sha256", wintunZip)
+		return nil, fmt.Errorf("%s does not match its sha256", wintunZip)
 	}
 	z, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	f, err := z.Open("wintun/bin/" + runtime.GOARCH + "/wintun.dll")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	dll, err := io.ReadAll(f)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(wintunDLL, dll, 0o644)
+	return io.ReadAll(f)
 }
 
 // register runs Bin at every boot as the service mainplaned, which a later

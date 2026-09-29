@@ -42,6 +42,12 @@ func (r *osRouter) Up() error { return nil }
 // The address and route go with the adapter when a worker is killed; the
 // firewall rule stays until the next start or uninstall.
 func add(_ string, a netip.Prefix) error {
+	// The rule first, so a netsh that fails leaves no address behind.
+	dropRule()
+	if err := run("netsh", "advfirewall", "firewall", "add", "rule", "name="+rule, "dir=in", "action=allow", "protocol=any",
+		"localip="+a.Addr().String(), "remoteip="+project(a).String()); err != nil {
+		return err
+	}
 	luid, err := winipcfg.LUIDFromGUID(&guid)
 	if err != nil {
 		return err
@@ -81,12 +87,7 @@ func add(_ string, a netip.Prefix) error {
 	if err := luid.AddIPAddress(a); err != nil {
 		return err
 	}
-	if err := luid.AddRoute(project(a), netip.IPv6Unspecified(), 0); err != nil {
-		return err
-	}
-	dropRule()
-	return run("netsh", "advfirewall", "firewall", "add", "rule", "name="+rule, "dir=in", "action=allow", "protocol=any",
-		"localip="+a.Addr().String(), "remoteip="+project(a).String())
+	return luid.AddRoute(project(a), netip.IPv6Unspecified(), 0)
 }
 
 // dropRule removes the firewall rule, which outlives a worker that was killed.
