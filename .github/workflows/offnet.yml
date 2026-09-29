@@ -1,0 +1,41 @@
+name: offnet
+# A worker off the tailnet and the LAN: a GitHub runner installs a release,
+# joins a harness's mesh with an ephemeral join token, and must reach the
+# harness there and see nothing else. Make a token for one run, revoke it after:
+#   sudo mainplane-server join new offnet ephemeral
+#   gh workflow run offnet -f version=<v> -f token=<token>
+#   sudo mainplane-server join revoke offnet
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: release to install
+        required: true
+      token:
+        description: ephemeral join token, masked
+        required: true
+permissions:
+  contents: read
+jobs:
+  offnet:
+    # A GitHub-hosted VM has the TUN and systemd a worker needs.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      V: ${{ inputs.version }}
+    steps:
+      # The token is read from the event file, so no script or log line holds it.
+      - run: echo "::add-mask::$(jq -r .inputs.token "$GITHUB_EVENT_PATH")"
+      - run: curl -fsSL "https://dl.mainplane.ai/$V/install.sh" | sudo sh -s -- "$(jq -r .inputs.token "$GITHUB_EVENT_PATH")"
+      - name: sees only the harness, and reaches it on the mesh
+        run: |
+          for i in $(seq 60); do
+            s=$(mainplane status || true)
+            echo "$s" | grep -Eq '^harness +fd7c:\S+ +(direct|relay)' && break
+            sleep 2
+          done
+          echo "$s"
+          echo "$s" | grep -q 'map poll up'
+          echo "$s" | grep -Eq '^harness +fd7c:\S+ +(direct|relay)'
+          [ "$(echo "$s" | sed 1,2d | grep -c .)" = 1 ]
+          sudo journalctl -u mainplaned --no-pager | grep 'connected to the harness at \[fd7c:'
