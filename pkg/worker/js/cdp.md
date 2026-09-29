@@ -58,8 +58,10 @@ The client fails these at once, since the thing waited for can never come:
 
 ## Timeouts
 
-- A send timeout or waitFor timeout error lists the events that arrived on that connection or target meanwhile, and names an open JavaScript dialog.
-- A JavaScript alert, confirm, prompt, or beforeunload dialog pauses the page's JavaScript. `Runtime.evaluate` on it answers after `Page.handleJavaScriptDialog`. `Page.javascriptDialogOpening` arrives only with `Page.enable`.
+- A send timeout or waitFor timeout error lists the events that arrived on that connection or target meanwhile, and names an open JavaScript dialog that `Page.javascriptDialogOpening` reported.
+- A JavaScript alert, confirm, or prompt dialog pauses the page's JavaScript. `Runtime.evaluate` on it answers after the dialog closes.
+- A dialog that opens while a session on the page has `Page.enable` on sends `Page.javascriptDialogOpening`, and `Page.handleJavaScriptDialog` closes it.
+- A dialog that opens while no session on the page has `Page.enable` on is invisible to CDP: `Page.handleJavaScriptDialog` fails with "No dialog is showing", and `Page.enable`, `Runtime.evaluate`, and `Page.captureScreenshot` get no answer until it closes. `Page.navigate`, `Page.reload`, and `Target.closeTarget` still work and close it.
 - Chrome may still answer after a send timed out. The answer is in the log with `"late":true`.
 
 ## Log
@@ -71,19 +73,22 @@ The client fails these at once, since the thing waited for can never come:
 ## Where a wsUrl comes from
 
 - A browser launched with `--remote-debugging-port=<port>` and a `--user-data-dir` writes `DevToolsActivePort` there: the port on line 1, the browser's WebSocket path on line 2. `http://127.0.0.1:<port>/json/version` returns `webSocketDebuggerUrl`. Port 0 picks a free port.
-- Chrome ignores `--remote-debugging-port` when the user data dir is its default one.
-- A browser already running for a user data dir takes a second launch for that dir as a new window, and ignores the second launch's flags.
-- A user's own Chrome turns remote debugging on at `chrome://inspect/#remote-debugging`. It then writes `DevToolsActivePort` in its default user data dir and serves no `/json` endpoints. Its socket opens only after the user clicks Allow in Chrome's prompt, so `connect` waits for the click up to its timeout.
-- A browser that did not exit cleanly leaves its `DevToolsActivePort`. `mtime` is when it was written.
+- Chrome ignores `--remote-debugging-port` when the user data dir is its default one, given or not, and prints "DevTools remote debugging requires a non-default data directory" on stderr.
+- A browser already running for a user data dir opens the URLs of a second headed launch for that dir, and ignores that launch's flags. A second headless launch for that dir exits with an error.
+- A user's own Chrome turns remote debugging on at `chrome://inspect/#remote-debugging`. It then writes `DevToolsActivePort` in its default user data dir, on port 9222 when that is free, and serves no `/json` endpoints. Edge and Brave with the same setting do the same in theirs.
+- There, each new WebSocket opens only after the user clicks Allow in a prompt for it. `connect` waits for the click up to its timeout, and fails at once on Cancel. A connection kept on `globalThis` asks once.
+- `DevToolsActivePort` stays after the browser exits, cleanly or not. `mtime` is when it was written. `connect` to a browser that exited fails at once, with "Failed to connect", or "Expected 101 status code" when another browser now has the port.
 - One user data dir is one browser process and one endpoint. Its profiles (`Default`, `Profile 1`, ...) share it. `Target.getTargets` lists the targets of every profile, each with its profile's `browserContextId`. `Target.getBrowserContexts` names the default one. `Target.createTarget` with a `browserContextId` works only for the default context and for contexts made with `Target.createBrowserContext`. `Local State` in the user data dir lists profile names and accounts, not context ids.
-- A hosted browser provider's API returns a wsUrl.
+- A hosted browser provider's API returns a CDP URL. A `ws://` or `wss://` one is a wsUrl. For an `http(s)://` one, `<url>/json/version` returns `webSocketDebuggerUrl`.
 
 ## Files
 
 - A wsUrl on 127.0.0.1 is a browser on this worker. Its downloads and uploads are files on this worker, which bash, pwsh, and js see.
-- A remote wsUrl is a browser on another machine. Its files are there. Bytes cross only over CDP, for example `Network.getResponseBody`, `Fetch.takeResponseBodyAsStream` with `IO.read`, or `Runtime.evaluate`.
-- `Browser.setDownloadBehavior` `{behavior: "allow", downloadPath, eventsEnabled: true}` on the connection sets where downloads go. `Browser.downloadWillBegin` and `Browser.downloadProgress` (`state: "completed"`) follow on the connection.
-- `DOM.setFileInputFiles` `{files: [path], backendNodeId}` sets a file input from a path on the browser's machine.
+- A remote wsUrl is a browser on another machine. Its files are there. Bytes cross only over CDP, for example `Network.getResponseBody`, `Fetch.getResponseBody`, `Fetch.takeResponseBodyAsStream` with `IO.read`, or `Runtime.evaluate`.
+- `Browser.setDownloadBehavior` `{behavior: "allow", downloadPath, eventsEnabled: true}` on the connection sets where downloads go. `Browser.downloadWillBegin` and `Browser.downloadProgress` follow on the connection. The last progress has `state: "completed"` and `filePath`, where the file is. A hosted provider may put it in a folder of its own.
+- `Page.navigate` to a URL that downloads answers `{isDownload: true, errorText: "net::ERR_ABORTED"}`.
+- `DOM.setFileInputFiles` `{files: [path], backendNodeId}` sets a file input from a path on the browser's machine. A path that is not there still succeeds: the input holds an empty file of that name, which fails to read.
+- After `Fetch.takeResponseBodyAsStream`, `Fetch.continueRequest` fails. `Fetch.fulfillRequest` or `Fetch.failRequest` ends the request.
 
 ## Screenshots
 

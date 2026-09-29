@@ -302,7 +302,7 @@ export function findBrowsers() {
     linux: [
       path.join(cfg, "google-chrome"), path.join(cfg, "google-chrome-beta"), path.join(cfg, "google-chrome-unstable"),
       path.join(cfg, "chromium"), path.join(cfg, "microsoft-edge"), path.join(cfg, "BraveSoftware", "Brave-Browser"),
-      path.join(cfg, "vivaldi"), path.join(cfg, "opera"),
+      path.join(cfg, "vivaldi"), path.join(cfg, "opera"), path.join(home, "snap", "chromium", "common", "chromium"),
     ],
   }[process.platform] ?? []
   const own = path.join(here, "..", "browsers")
