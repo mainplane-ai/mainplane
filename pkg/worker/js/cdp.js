@@ -83,7 +83,7 @@ export class Connection {
   #fd
   #next = 1
   #pending = new Map() // id -> {sessionId, method, params, seen, resolve, reject, timer}
-  #late = new Map() // id -> pending entry of a send that timed out
+  #late = new Map() // id -> {sessionId, gate} of a send that timed out
   #listeners = new Set() // {sessionId, method, fn, end}
   #gates = new Map() // sessionId ?? "" -> Set of gates on
   #detached = new Map() // sessionId -> why
@@ -108,10 +108,10 @@ export class Connection {
     this.#write({ t: Date.now(), dir: "out", ...msg })
     this.#ws.send(JSON.stringify(msg))
     return new Promise((resolve, reject) => {
-      const p = { sessionId, method, params, seen: [], resolve, reject }
+      const p = { sessionId, method, gate: switched(method, params), seen: [], resolve, reject }
       p.timer = setTimeout(() => {
         this.#pending.delete(id)
-        this.#late.set(id, p)
+        this.#late.set(id, { sessionId, gate: p.gate })
         reject(new Error(`${method} (id ${id}) got no answer in ${timeoutMs} ms. ${this.#story(sessionId, p.seen)}An answer that comes later is in ${this.log} with "late":true.`))
       }, timeoutMs)
       this.#pending.set(id, p)
@@ -182,20 +182,19 @@ export class Connection {
     const late = this.#late.get(m.id)
     this.#write({ t: Date.now(), dir: "in", ...(late && { late: true }), ...m })
     if (m.id !== undefined) {
-      // A late answer still switches a gate; its promise is already rejected.
       const p = this.#pending.get(m.id) ?? late
-      if (!p) return
       this.#pending.delete(m.id)
       this.#late.delete(m.id)
+      if (!p) return
       clearTimeout(p.timer)
-      if (m.error) return p.reject(new CdpError(p.method, m.error))
-      const s = switched(p.method, p.params)
-      if (s) {
+      // A late answer still switches a gate; its promise was rejected at the timeout.
+      if (!m.error && p.gate) {
         const key = p.sessionId ?? ""
         if (!this.#gates.has(key)) this.#gates.set(key, new Set())
-        s[1] ? this.#gates.get(key).add(s[0]) : this.#gates.get(key).delete(s[0])
+        p.gate[1] ? this.#gates.get(key).add(p.gate[0]) : this.#gates.get(key).delete(p.gate[0])
       }
-      return p.resolve(m.result)
+      if (p === late) return
+      return m.error ? p.reject(new CdpError(p.method, m.error)) : p.resolve(m.result)
     }
     const sid = m.sessionId
     if (m.method === "Page.javascriptDialogOpening") this.#dialogs.set(sid, m.params)
@@ -227,6 +226,7 @@ export class Connection {
 
   #close(why) {
     this.#closed = `connection ${this.url} ${why}`
+    this.#late.clear()
     this.#end(undefined, this.#closed)
     fs.closeSync(this.#fd)
   }
