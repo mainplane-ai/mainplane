@@ -20,7 +20,7 @@ func (r *osRouter) Up() error { return run("ip", "link", "set", "dev", r.tun, "u
 // its TUN.
 func add(tun string, a netip.Prefix) error {
 	dropRule()
-	p := project(a)
+	p := project(a).String()
 	for _, args := range [][]string{
 		{"-6", "addr", "replace", a.String(), "dev", tun, "nodad"},
 		{"-6", "route", "replace", p, "dev", tun, "table", table},

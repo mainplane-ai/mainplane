@@ -13,14 +13,14 @@ func add(tun string, a netip.Prefix) error {
 	if err := run("ifconfig", tun, "inet6", a.String(), a.Addr().String()); err != nil {
 		return err
 	}
-	return run("route", "-q", "-n", "add", "-inet6", project(a), "-iface", tun)
+	return run("route", "-q", "-n", "add", "-inet6", project(a).String(), "-iface", tun)
 }
 
 // dropRule has nothing to drop: the route goes with the TUN.
 func dropRule() {}
 
 func del(tun string, a netip.Prefix) error {
-	if err := run("route", "-q", "-n", "delete", "-inet6", project(a), "-iface", tun); err != nil {
+	if err := run("route", "-q", "-n", "delete", "-inet6", project(a).String(), "-iface", tun); err != nil {
 		return err
 	}
 	return run("ifconfig", tun, "inet6", a.String(), "-alias")

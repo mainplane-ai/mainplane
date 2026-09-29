@@ -1,13 +1,20 @@
 package worker
 
 import (
+	"archive/zip"
+	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
@@ -18,6 +25,8 @@ import (
 	"golang.org/x/sys/windows/registry"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
+
+	"github.com/mainplane-ai/mainplane/pkg/mesh"
 )
 
 // The worker is the Windows service mainplaned as LocalSystem. It runs code
@@ -34,6 +43,13 @@ const (
 	restartDelay = 2 * time.Second
 	stopWait     = 30 * time.Second
 	machineEnv   = `SYSTEM\CurrentControlSet\Control\Session Manager\Environment`
+	// The mesh's adapter is wintun's, the WireGuard project's signed driver,
+	// the release Tailscale ships too, so one driver serves both. A bump is
+	// a PR that changes both lines.
+	wintunZip = "https://www.wintun.net/builds/wintun-0.14.1.zip"
+	wintunSum = "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51"
+	// The zip is 0.7 MB; a download that stalls fails the install instead.
+	fetchWait = time.Minute
 )
 
 // x/sys/windows does not wrap SendMessageTimeout. A broadcast waits on every
@@ -49,6 +65,8 @@ var (
 	Bin      = filepath.Join(os.Getenv("ProgramFiles"), "mainplane", "mainplane.exe")
 	stateDir = filepath.Join(os.Getenv("ProgramData"), "mainplane")
 	logPath  = filepath.Join(stateDir, "mainplaned.log")
+	// wintun loads wintun.dll from the folder of the exe or System32 only.
+	wintunDLL = filepath.Join(filepath.Dir(Bin), "wintun.dll")
 	// cliDir is where install.ps1 puts the CLI when it makes no worker.
 	cliDir = filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "mainplane")
 
@@ -70,15 +88,25 @@ func Installed() (token string, op *user.User, err error) {
 	return string(b), op, err
 }
 
-// Work is the worker: under the service manager until it says stop, with
-// logs in logPath, else Dial. Environments end with the service, since their
-// stdin closes.
+// Work is the worker: on the mesh and dialing the harness, under the service
+// manager until it says stop, with logs in logPath, else until Ctrl-C or its
+// console closes. Then it leaves the mesh. Environments end with the
+// service, since their stdin closes.
 func Work(key string, l Local) error {
-	if ok, err := svc.IsWindowsService(); err != nil || !ok {
+	ok, err := svc.IsWindowsService()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		stop := make(chan os.Signal, 1)
+		signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+		m, err := mesh.Up(filepath.Join(l.Scratch, "mesh"), key, l.Secret, l.Name)
 		if err != nil {
 			return err
 		}
-		Dial(key, l)
+		go Dial(key, l)
+		log.Printf("%v: leaving the mesh", <-stop)
+		return m.Close()
 	}
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -97,7 +125,14 @@ type service struct {
 	l   Local
 }
 
+// Execute is the worker on the mesh until stop, which leaves the mesh. A
+// mesh that fails to come up ends the process, and the service manager
+// starts it again.
 func (s service) Execute(_ []string, reqs <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
+	m, err := mesh.Up(filepath.Join(stateDir, "mesh"), s.key, s.l.Secret, s.l.Name)
+	if err != nil {
+		log.Fatalf("mesh: %v", err)
+	}
 	go Dial(s.key, s.l)
 	status <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
 	for r := range reqs {
@@ -106,6 +141,10 @@ func (s service) Execute(_ []string, reqs <-chan svc.ChangeRequest, status chan<
 		case svc.Interrogate:
 			status <- r.CurrentStatus
 		case svc.Stop, svc.Shutdown:
+			status <- svc.Status{State: svc.StopPending}
+			if err := m.Close(); err != nil {
+				log.Printf("leaving the mesh: %v", err)
+			}
 			return false, 0
 		}
 	}
@@ -120,10 +159,18 @@ func Install(token string) error {
 	if err != nil {
 		return err
 	}
+	// wintun.dll first: a failed download leaves the running worker as it was.
+	dll, err := wintun()
+	if err != nil {
+		return err
+	}
 	if err := stop(); err != nil {
 		return err
 	}
 	if err := place(Bin); err != nil {
+		return err
+	}
+	if err := os.WriteFile(wintunDLL, dll, 0o644); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
@@ -158,8 +205,9 @@ func Install(token string) error {
 	return path(registry.LOCAL_MACHINE, machineEnv, filepath.Dir(Bin), true)
 }
 
-// Uninstall stops and deletes the service, removes Bin, the state directory
-// with the join token, and the CLI install.ps1 puts in cliDir, and takes each
+// Uninstall stops and deletes the service, removes what a killed worker left
+// of the mesh, Bin and wintun.dll, the state directory with the join token
+// and the mesh keys, and the CLI install.ps1 puts in cliDir, and takes each
 // folder off PATH once nothing else is in it. Scratch stays: it is the
 // operator's.
 func Uninstall() error {
@@ -179,8 +227,10 @@ func Uninstall() error {
 	if err != nil && !errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return err
 	}
+	// A hosts file that cannot be written must not keep the token and keys.
+	cerr := mesh.Clean()
 	cli := filepath.Join(cliDir, "mainplane.exe")
-	for _, f := range []string{Bin, Bin + ".old", Bin + ".new", cli, cli + ".old", cli + ".new"} {
+	for _, f := range []string{Bin, Bin + ".old", Bin + ".new", wintunDLL, cli, cli + ".old", cli + ".new"} {
 		if err := remove(f); err != nil {
 			return err
 		}
@@ -203,7 +253,7 @@ func Uninstall() error {
 			return err
 		}
 	}
-	return nil
+	return cerr
 }
 
 // remove deletes f. A running binary, as this one usually is, cannot be
@@ -223,6 +273,35 @@ func remove(f string) error {
 		return err
 	}
 	return windows.MoveFileEx(p, nil, windows.MOVEFILE_DELAY_UNTIL_REBOOT)
+}
+
+// wintun is this machine's wintun.dll from wintunZip.
+func wintun() ([]byte, error) {
+	resp, err := (&http.Client{Timeout: fetchWait}).Get(wintunZip)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GET %s: %s", wintunZip, resp.Status)
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if fmt.Sprintf("%x", sha256.Sum256(b)) != wintunSum {
+		return nil, fmt.Errorf("%s does not match its sha256", wintunZip)
+	}
+	z, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
+	if err != nil {
+		return nil, err
+	}
+	f, err := z.Open("wintun/bin/" + runtime.GOARCH + "/wintun.dll")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	return io.ReadAll(f)
 }
 
 // register runs Bin at every boot as the service mainplaned, which a later

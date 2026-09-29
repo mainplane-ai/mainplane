@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
+	"time"
 
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/netmap"
@@ -18,7 +20,16 @@ const (
 	end   = "# mainplane end"
 	// Every long name is one label under it: one wildcard covers them all.
 	domain = "mainplane.net"
+	// A rename Windows refuses for a moment is tried again for up to a
+	// second; Tailscale's own hosts writer retries for the same reason.
+	renameTries = 20
+	renameWait  = 50 * time.Millisecond
 )
+
+// blockLines finds the block from its begin line to its end line. Tailscale
+// on Windows writes every line of the hosts file outside its own section
+// again with CRLF, the block's too.
+var blockLines = regexp.MustCompile("(?ms)^" + begin + "\r?\n.*?^" + end + "\r?(?:\n|\\z)")
 
 func hostsPath() string {
 	if runtime.GOOS == "windows" {
@@ -51,12 +62,7 @@ func hosts(blk string) error {
 	if err != nil {
 		return err
 	}
-	s := string(old)
-	if i := strings.Index(s, begin+"\n"); i >= 0 {
-		if j := strings.Index(s[i:], end+"\n"); j >= 0 {
-			s = s[:i] + s[i+j+len(end)+1:]
-		}
-	}
+	s := blockLines.ReplaceAllString(string(old), "")
 	if blk != "" && s != "" && !strings.HasSuffix(s, "\n") {
 		s += "\n"
 	}
@@ -65,6 +71,14 @@ func hosts(blk string) error {
 	}
 	if err := os.WriteFile(f+".mainplane", []byte(s), 0o644); err != nil {
 		return err
+	}
+	// Windows refuses the rename while another process has the file open,
+	// as its DNS client and antivirus do for a moment after each change.
+	for range renameTries - 1 {
+		if os.Rename(f+".mainplane", f) == nil {
+			return nil
+		}
+		time.Sleep(renameWait)
 	}
 	return os.Rename(f+".mainplane", f)
 }

@@ -1,5 +1,3 @@
-//go:build linux || darwin
-
 // Package mesh puts this worker on its project's Mainplane Network:
 // tailscale's engine (wireguard-go, magicsock, the DERP client) on a TUN of
 // its own, with its own state, UDP port, and router, so it runs beside a
@@ -139,7 +137,7 @@ func (m *Mesh) Close() error {
 }
 
 // Clean removes what a killed worker left: the hosts block, and on Linux
-// the rule. Uninstall runs it after the worker stops.
+// and Windows the rule. Uninstall runs it after the worker stops.
 func Clean() error {
 	dropRule()
 	return hosts("")
@@ -186,7 +184,7 @@ func (r *osRouter) Set(c *router.Config) error {
 func (r *osRouter) Close() error { return r.Set(nil) }
 
 // project is the /48 of address a.
-func project(a netip.Prefix) string { return netip.PrefixFrom(a.Addr(), 48).Masked().String() }
+func project(a netip.Prefix) netip.Prefix { return netip.PrefixFrom(a.Addr(), 48).Masked() }
 
 func run(name string, args ...string) error {
 	out, err := exec.Command(name, args...).CombinedOutput()
