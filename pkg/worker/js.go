@@ -23,11 +23,11 @@ import (
 // The js interpreter is Bun running run.js, with cdp.js, a CDP client, and
 // cdp.md, what it does, beside it in <scratch>/js. Every worker has it.
 const (
-	// Bun is pinned, so a snippet behaves the same on every worker. A bump is
+	// BunVersion is pinned, so a snippet behaves the same on every worker. A bump is
 	// a PR that changes the version and every sum below, from the release's
 	// SHASUMS256.txt.
-	bunVersion = "1.4.2"
-	bunURL     = "https://github.com/oven-sh/bun/releases/download/bun-v" + bunVersion + "/"
+	BunVersion = "1.4.2"
+	bunURL     = "https://github.com/oven-sh/bun/releases/download/bun-v" + BunVersion + "/"
 	// The zip is under 40 MB; a download that stalls fails instead of holding
 	// the first js run.
 	bunWait = 5 * time.Minute
@@ -50,9 +50,12 @@ var bunBuilds = map[string][2]string{
 //go:embed js
 var jsFiles embed.FS
 
-// jsMu keeps two readies of the folder apart: the one at start and a first
-// js run's.
-var jsMu sync.Mutex
+// jsReady is whether this process readied the js folder. One at start and a
+// first js run's wait for each other.
+var jsReady struct {
+	sync.Mutex
+	done bool
+}
 
 func jsDir(scratch string) string { return filepath.Join(scratch, "js") }
 
@@ -63,18 +66,17 @@ func bunPath(dir string) string {
 	return filepath.Join(dir, "bun")
 }
 
-// interp is how to start the interpreter name. js is readied first when its
-// Bun is not there yet, as when the operator was not logged in at start.
+// interp is how to start the interpreter name. js is readied first unless
+// this process did so, as it does at start unless the operator was not
+// logged in.
 func (s *server) interp(name string) (interp, error) {
 	if name != "js" {
 		return interps[name], nil
 	}
-	dir := jsDir(s.Scratch)
-	if _, err := os.Stat(bunPath(dir)); err != nil {
-		if err := readyJS(s.Local); err != nil {
-			return interp{}, err
-		}
+	if err := readyJS(s.Local); err != nil {
+		return interp{}, err
 	}
+	dir := jsDir(s.Scratch)
 	return interp{[]string{bunPath(dir), filepath.Join(dir, "run.js")}, jsDone}, nil
 }
 
@@ -90,11 +92,16 @@ func startJS(l Local) {
 // folder they control could be sent anywhere by a link. A root worker runs
 // its own binary as them, `mainplane js <dir>`.
 func readyJS(l Local) error {
-	jsMu.Lock()
-	defer jsMu.Unlock()
+	jsReady.Lock()
+	defer jsReady.Unlock()
+	if jsReady.done {
+		return nil
+	}
 	dir := jsDir(l.Scratch)
 	if l.Operator == nil {
-		return JS(dir)
+		err := JS(dir)
+		jsReady.done = err == nil
+		return err
 	}
 	exe, err := os.Executable()
 	if err != nil {
@@ -107,11 +114,12 @@ func readyJS(l Local) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("js: %w: %s", err, bytes.TrimSpace(out))
 	}
+	jsReady.done = true
 	return nil
 }
 
 // JS makes dir the js interpreter's: the embedded files written over, and
-// Bun fetched when the one there is not bunVersion.
+// Bun fetched when the one there is not BunVersion.
 func JS(dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -130,7 +138,7 @@ func JS(dir string) error {
 		}
 	}
 	bun := bunPath(dir)
-	if out, err := exec.Command(bun, "--version").Output(); err == nil && strings.TrimSpace(string(out)) == bunVersion {
+	if out, err := exec.Command(bun, "--version").Output(); err == nil && strings.TrimSpace(string(out)) == BunVersion {
 		return nil
 	}
 	b, err := fetchBun()

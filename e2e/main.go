@@ -398,7 +398,7 @@ func checks(r *harness.Remote, goos string) {
 	}
 	check(goos, "js: listed", slices.Contains(r.Interps, "js"), strings.Join(r.Interps, " "))
 	out, err := js("globalThis.n = 41; return process.versions.bun")
-	check(goos, "js: runs Bun", err == nil && out != "", fmt.Sprint(out, err))
+	check(goos, "js: runs the pinned Bun", err == nil && out == worker.BunVersion, fmt.Sprint(out, err))
 	out, err = js("return n + 1")
 	check(goos, "js: globalThis lasts between runs", err == nil && out == "42", fmt.Sprint(out, err))
 	out, err = js(fmt.Sprintf("const cdp = await import(%q); return typeof cdp.connect", scratch+"/js/cdp.js"))

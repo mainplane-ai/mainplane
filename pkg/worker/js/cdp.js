@@ -83,7 +83,7 @@ export class Connection {
   #fd
   #next = 1
   #pending = new Map() // id -> {sessionId, method, params, seen, resolve, reject, timer}
-  #late = new Set() // ids whose send timed out
+  #late = new Map() // id -> pending entry of a send that timed out
   #listeners = new Set() // {sessionId, method, fn, end}
   #gates = new Map() // sessionId ?? "" -> Set of gates on
   #detached = new Map() // sessionId -> why
@@ -111,7 +111,7 @@ export class Connection {
       const p = { sessionId, method, params, seen: [], resolve, reject }
       p.timer = setTimeout(() => {
         this.#pending.delete(id)
-        this.#late.add(id)
+        this.#late.set(id, p)
         reject(new Error(`${method} (id ${id}) got no answer in ${timeoutMs} ms. ${this.#story(sessionId, p.seen)}An answer that comes later is in ${this.log} with "late":true.`))
       }, timeoutMs)
       this.#pending.set(id, p)
@@ -179,12 +179,14 @@ export class Connection {
   }
 
   #receive(m) {
-    const late = m.id !== undefined && this.#late.delete(m.id)
-    this.#write({ t: Date.now(), dir: "in", ...(late && { late }), ...m })
+    const late = this.#late.get(m.id)
+    this.#write({ t: Date.now(), dir: "in", ...(late && { late: true }), ...m })
     if (m.id !== undefined) {
-      const p = this.#pending.get(m.id)
+      // A late answer still switches a gate; its promise is already rejected.
+      const p = this.#pending.get(m.id) ?? late
       if (!p) return
       this.#pending.delete(m.id)
+      this.#late.delete(m.id)
       clearTimeout(p.timer)
       if (m.error) return p.reject(new CdpError(p.method, m.error))
       const s = switched(p.method, p.params)
@@ -307,8 +309,12 @@ export function findBrowsers() {
   if (fs.existsSync(own)) dirs.push(...fs.readdirSync(own).map((d) => path.join(own, d)))
   return dirs.flatMap((userDataDir) => {
     const f = path.join(userDataDir, "DevToolsActivePort")
-    if (!fs.existsSync(f)) return []
-    const [port, p] = fs.readFileSync(f, "utf8").trim().split("\n")
-    return [{ userDataDir, wsUrl: `ws://127.0.0.1:${port}${p}`, mtime: fs.statSync(f).mtime.toISOString() }]
+    // A browser may remove the file between any two reads.
+    try {
+      const [port, p] = fs.readFileSync(f, "utf8").trim().split("\n")
+      return [{ userDataDir, wsUrl: `ws://127.0.0.1:${port}${p}`, mtime: fs.statSync(f).mtime.toISOString() }]
+    } catch {
+      return []
+    }
   })
 }
