@@ -20,6 +20,7 @@ type Harness struct {
 	Sessions  statefile.Sessions
 	Providers map[string]provider.Provider
 	Workers   *Pool
+	Remove    func(name string) error // the coordinator's: the worker leaves the mesh for good
 
 	mu sync.Mutex
 	s  map[string]*session

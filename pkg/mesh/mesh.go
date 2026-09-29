@@ -9,11 +9,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"tailscale.com/control/controlclient"
@@ -25,6 +27,7 @@ import (
 	"tailscale.com/ipn/store"
 	"tailscale.com/net/tsdial"
 	"tailscale.com/net/tstun"
+	"tailscale.com/safesocket"
 	"tailscale.com/tsd"
 	"tailscale.com/types/key"
 	"tailscale.com/types/logid"
@@ -49,8 +52,13 @@ const (
 // Mesh is this worker's node.
 type Mesh struct {
 	lb      *ipnlocal.LocalBackend
+	health  *health.Tracker
 	unwatch context.CancelFunc
 	watched chan struct{}
+	left    sync.Once
+	err     error // leaving's
+	removed chan struct{}
+	sock    net.Listener // mainplane status asks here
 }
 
 // Up brings the node up with its state in dir: the TUN, then the engine.
@@ -111,20 +119,51 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 	lb.SetVarRoot(dir)
 	log.Printf("mesh: %s up, port %d", tun, port)
 	ctx, unwatch := context.WithCancel(context.Background())
-	m := &Mesh{lb: lb, unwatch: unwatch, watched: make(chan struct{})}
+	m := &Mesh{lb: lb, health: sys.HealthTracker.Get(), unwatch: unwatch, watched: make(chan struct{}), removed: make(chan struct{})}
 	go func() {
 		defer close(m.watched)
 		// Any change may be to a name: the block is made again from the
-		// whole map and written when it differs.
-		lb.WatchNotifications(ctx, ipn.NotifyInitialNetMap|ipn.NotifyPeerChanges, nil, func(*ipn.Notify) bool {
+		// whole map and written when it differs. The coordinator marks a
+		// removed node as no longer authorized, and nothing else does.
+		removed := false
+		lb.WatchNotifications(ctx, ipn.NotifyInitialNetMap|ipn.NotifyPeerChanges, nil, func(n *ipn.Notify) bool {
+			if removed = n.State != nil && *n.State == ipn.NeedsMachineAuth; removed {
+				return false
+			}
 			if err := hosts(block(lb.NetMapWithPeers())); err != nil {
 				log.Printf("mesh: hosts: %v", err)
 			}
 			return true
 		})
+		if removed {
+			log.Printf("mesh: the harness removed this worker; leaving the mesh. To join again: mainplane uninstall, then install with a join token")
+			unwatch()
+			if err := m.leave(); err != nil {
+				log.Printf("mesh: %v", err)
+			}
+			close(m.removed)
+		}
 	}()
-	go follow(lb, sys.HealthTracker.Get(), harness, secret, name)
+	go follow(ctx, lb, m.health, harness, secret, name)
+	// A second worker on the machine finds the socket taken and goes without.
+	if m.sock, err = safesocket.Listen(socket); err != nil {
+		log.Printf("mesh: status socket: %v", err)
+	} else {
+		go m.serve()
+	}
 	return m, nil
+}
+
+// Removed is closed once the harness has removed this worker and it has
+// left the mesh.
+func (m *Mesh) Removed() <-chan struct{} { return m.removed }
+
+// Self is this node's address in the last map.
+func (m *Mesh) Self() netip.Addr {
+	if nm := m.lb.NetMapWithPeers(); nm != nil && nm.GetAddresses().Len() > 0 {
+		return nm.GetAddresses().At(0).Addr()
+	}
+	return netip.Addr{}
 }
 
 // Peer is the address of the peer named name in the last map, which stays
@@ -140,13 +179,24 @@ func (m *Mesh) Peer(name string) (netip.Addr, bool) {
 	return netip.Addr{}, false
 }
 
-// Close leaves the mesh: the hosts block goes, the router takes its address,
-// route and rule away, and the TUN goes.
+// Close leaves the mesh: the status socket, the hosts block go, the router
+// takes its address, route and rule away, and the TUN goes.
 func (m *Mesh) Close() error {
+	if m.sock != nil {
+		_ = m.sock.Close()
+	}
 	m.unwatch()
 	<-m.watched
-	m.lb.Shutdown()
-	return hosts("")
+	return m.leave()
+}
+
+// leave shuts the node down, once, and removes the hosts block.
+func (m *Mesh) leave() error {
+	m.left.Do(func() {
+		m.lb.Shutdown()
+		m.err = hosts("")
+	})
+	return m.err
 }
 
 // Clean removes what a killed worker left: the hosts block, and on Linux
@@ -208,26 +258,33 @@ func run(name string, args ...string) error {
 }
 
 // follow starts the control client at the harness's URL, and again at each
-// URL it moves to. Nothing in tailscale follows a coordinator that moves.
-func follow(lb *ipnlocal.LocalBackend, h *health.Tracker, harness, secret, name string) {
+// URL it moves to, until ctx ends. Nothing in tailscale follows a
+// coordinator that moves. A harness that still proves its URL while the map
+// poll is down has likely lost this node, as when its registry was lost, and
+// answers every poll with 404: the client starts again, which registers,
+// with the join secret when the keys are unknown.
+func follow(ctx context.Context, lb *ipnlocal.LocalBackend, h *health.Tracker, harness, secret, name string) {
 	url, asked := "", time.Time{}
-	for ; ; time.Sleep(check) {
-		if h.GetInPollNetMap() || url != "" && pointer.Prove(context.Background(), harness, url) == nil || time.Since(asked) < lookupWait {
+	for ; ctx.Err() == nil; time.Sleep(check) {
+		if h.GetInPollNetMap() {
 			continue
 		}
-		asked = time.Now()
-		u, err := pointer.Find(context.Background(), harness, "")
-		if err != nil {
-			log.Printf("mesh: %v, the pointer is asked again within a minute", err)
-			continue
-		}
-		if u == url {
-			continue
+		u := url
+		if u == "" || pointer.Prove(ctx, harness, u) != nil {
+			if time.Since(asked) < lookupWait {
+				continue
+			}
+			asked = time.Now()
+			var err error
+			if u, err = pointer.Find(ctx, harness, ""); err != nil {
+				log.Printf("mesh: %v, the pointer is asked again within a minute", err)
+				continue
+			}
 		}
 		p := ipn.NewPrefs()
 		p.ControlURL, p.Hostname, p.WantRunning = u, name, true
 		p.AutoUpdate.Check = false
-		err = lb.Start(ipn.Options{UpdatePrefs: p, AuthKey: secret})
+		err := lb.Start(ipn.Options{UpdatePrefs: p, AuthKey: secret})
 		// A node with no keys yet registers with the secret, as tsnet does.
 		if err == nil && lb.State() == ipn.NeedsLogin {
 			err = lb.StartLoginInteractive(context.Background())

@@ -5,6 +5,7 @@
 //	mainplane login   <api key>       find the harness, and remember it and the key in ~/.mainplane/login.json
 //	mainplane update  [version]       become that release, by default the logged-in harness's, else the latest stable
 //	mainplane uninstall               remove the worker service and the CLI; ~/.mainplane stays
+//	mainplane status                  this worker on the mesh, from the worker's local socket
 //	mainplane version                 the release this binary was built from
 //	mainplane <verb> ...              one verb per harness route, see cli.go
 package main
@@ -21,6 +22,7 @@ import (
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/elevate"
+	"github.com/mainplane-ai/mainplane/pkg/mesh"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
 	"github.com/mainplane-ai/mainplane/pkg/release"
 	"github.com/mainplane-ai/mainplane/pkg/version"
@@ -30,6 +32,10 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		usage()
+	}
+	if len(os.Args) > 2 && os.Args[1] == "worker" && os.Args[2] == "remove" {
+		cli("worker remove", os.Args[3:])
+		return
 	}
 	switch os.Args[1] {
 	case "worker", "install":
@@ -73,6 +79,8 @@ func main() {
 			log.Fatal(err)
 		}
 		fmt.Println(url)
+	case "status":
+		status(os.Args[2:])
 	case "version":
 		if len(os.Args) != 2 {
 			usage()
@@ -172,6 +180,19 @@ func update(v string) {
 	fmt.Printf("mainplane %s -> %s\n", version.V, v)
 }
 
+// status prints what the worker on this machine says of its node on the
+// mesh; it needs no login and no root.
+func status(args []string) {
+	if len(args) != 0 {
+		usage()
+	}
+	s, err := mesh.Status()
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Print(s)
+}
+
 func home() string {
 	h, err := os.UserHomeDir()
 	if err != nil {
@@ -190,6 +211,8 @@ func usage() {
   login      <api key>               remember the harness and the key; every verb below uses them
   update     [version]               become that release, by default the logged-in harness's, else the latest stable
   uninstall                          remove the worker service and the CLI; asks for sudo or UAC; ~/.mainplane stays
+  status                             this worker on the mesh: its name and address, its harness, and each peer's
+                                     address and path, direct or through the relay
   version                            the release this binary was built from
 
   new                                POST /sessions, body from stdin: {"model","context","workers"} or {"from","n"}
@@ -201,6 +224,8 @@ func usage() {
   info       <id>                    GET  /sessions/{id}
   sessions   [status]                GET  /sessions
   workers                            GET  /workers
+  worker     remove <name>           DELETE /workers/{name}: it leaves the mesh for good; revoke its join secret too
+                                     to keep that secret from joining machines again
   providers                          GET  /providers
 `)
 	os.Exit(2)

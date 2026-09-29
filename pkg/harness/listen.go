@@ -12,9 +12,10 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
-// Pool is the set of workers connected right now, keyed by the name each
-// hello carries. Workers dial in over the mesh and are known the moment they
-// say hello; a lost connection forgets the worker until it dials again.
+// Pool is the set of workers connected right now, keyed by the name the
+// coordinator gave each one's node. Workers dial in over the mesh and are
+// known the moment they say hello; a lost connection forgets the worker until
+// it dials again.
 type Pool struct {
 	mu      sync.Mutex
 	m       map[string]*Remote
@@ -37,6 +38,16 @@ func (p *Pool) Add(r *Remote) {
 	p.m[r.Name] = r
 	delete(p.refused, r.Name)
 	p.mu.Unlock()
+}
+
+// Drop hangs up on the worker named name, when it is connected.
+func (p *Pool) Drop(name string) {
+	p.mu.Lock()
+	r, ok := p.m[name]
+	p.mu.Unlock()
+	if ok {
+		_ = r.conn.Close()
+	}
 }
 
 func (p *Pool) Get(name string) (*Remote, bool) {
@@ -67,9 +78,10 @@ func (p *Pool) List() []Listed {
 // Serve holds every worker that dials l, the harness's own node on the mesh,
 // until l closes. WireGuard admits only nodes the coordinator gave keys to,
 // and the source address is checked against node, the coordinator's
-// registry, so no secret rides the connection. A worker that dials again
-// under a name still held replaces the old entry: the old connection is dead
-// or dying, and the new one is the worker as it is now.
+// registry, which also names the worker, so no secret rides the connection
+// and no worker can take another's name. A worker that dials again under a
+// name still held replaces the old entry: the old connection is dead or
+// dying, and the new one is the worker as it is now.
 func (p *Pool) Serve(l net.Listener, node func(netip.Addr) (string, bool)) error {
 	for {
 		c, err := l.Accept()
@@ -85,16 +97,20 @@ func (p *Pool) Serve(l net.Listener, node func(netip.Addr) (string, bool)) error
 // worker that passed admit is listed with the reason until it connects. The
 // source is read after the hello: netstack knows it once the handshake ends.
 func (p *Pool) serve(conn net.Conn, node func(netip.Addr) (string, bool)) {
-	who := ""
+	who, name := "", ""
 	r, err := Connect(conn, func() error {
 		a, err := netip.ParseAddrPort(conn.RemoteAddr().String())
 		who = a.Addr().String()
-		if name, ok := node(a.Addr()); err == nil && ok {
-			who = name + " " + who
-			return nil
+		n, ok := node(a.Addr())
+		if err != nil || !ok {
+			return errors.New("not a node of this mesh")
 		}
-		return errors.New("not a node of this mesh")
+		name = n
+		return nil
 	})
+	if r != nil {
+		r.Name = name
+	}
 	if err != nil {
 		if r != nil {
 			who = r.Name + " at " + who

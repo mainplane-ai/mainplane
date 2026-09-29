@@ -46,7 +46,7 @@ type server struct {
 // the connection on purpose, and its text is the error.
 func Serve(conn net.Conn, l Local) error {
 	s := &server{Local: l, conn: conn, envs: map[string]*env{}, dead: map[string]bool{}}
-	if err := s.send(Frame{Header: Header{Kind: Hello, Name: l.Name, OS: runtime.GOOS, Arch: runtime.GOARCH, Interps: l.Interps, Scratch: l.Scratch, Version: version.V}}); err != nil {
+	if err := s.send(Frame{Header: Header{Kind: Hello, OS: runtime.GOOS, Arch: runtime.GOARCH, Interps: l.Interps, Scratch: l.Scratch, Version: version.V}}); err != nil {
 		return err
 	}
 	br := bufio.NewReader(conn)
