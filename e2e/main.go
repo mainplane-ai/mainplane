@@ -276,11 +276,11 @@ func phase(listen, url, secret, v string, oses []string, mode, text string) {
 	}
 	log.SetOutput(f)
 	die := log.New(os.Stderr, "", log.LstdFlags) // the gate sees why a phase ended
-	coord, err := coordinator.New(dir(), func(s, _ string) error {
+	coord, err := coordinator.New(dir(), func(s, _ string) (bool, error) {
 		if s != secret {
-			return errors.New("join secret refused")
+			return false, errors.New("join secret refused")
 		}
-		return nil
+		return false, nil
 	})
 	if err != nil {
 		die.Fatal(err)

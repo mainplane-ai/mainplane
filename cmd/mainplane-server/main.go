@@ -6,7 +6,7 @@
 //	mainplane-server install [config.json]    and again at every boot, as a service, behind a quick tunnel; asks for sudo or admin itself
 //	mainplane-server tunnel <url> <cloudflared token> | quick   the installed harness moves to the user's own tunnel, or back
 //	mainplane-server key  new <name> | revoke <name> | list    on the installed harness, as root
-//	mainplane-server join new <name> | revoke <name> | list
+//	mainplane-server join new <name> [ephemeral] | revoke <name> | list
 //	mainplane-server update [version]         the installed harness becomes release version, the latest stable by default
 //	mainplane-server uninstall                the service and binary go; sessions and the auth table stay
 //	mainplane-server version
@@ -79,7 +79,8 @@ func main() {
 		}
 	case verb == "tunnel":
 		tunnel(args)
-	case (verb == auth.Key || verb == auth.Join) && (len(args) == 2 && args[1] == "list" || len(args) == 3 && (args[1] == "new" || args[1] == "revoke")):
+	case (verb == auth.Key || verb == auth.Join) && (len(args) == 2 && args[1] == "list" || len(args) == 3 && (args[1] == "new" || args[1] == "revoke")),
+		verb == auth.Join && len(args) == 4 && args[1] == "new" && args[3] == "ephemeral":
 		elevate.Root(args...)
 		c, err := server.Load(server.Conf)
 		if err != nil {
@@ -195,7 +196,7 @@ func table(c server.Config, kind string, args []string) {
 	case "new":
 		k, err := c.Key()
 		fatal(err)
-		secret, err := store.Issue(kind, args[1])
+		secret, err := store.Issue(kind, args[1], len(args) == 3)
 		fatal(err)
 		token := auth.Token(kind, pointer.Encode(k), secret)
 		fmt.Println(token)
@@ -208,7 +209,7 @@ func table(c server.Config, kind string, args []string) {
 		t, err := store.Load()
 		fatal(err)
 		for _, e := range t[kind] {
-			fmt.Println(e.Name)
+			fmt.Println(e.Name + map[bool]string{true: " ephemeral"}[e.Ephemeral])
 		}
 	}
 }
@@ -230,7 +231,11 @@ func usage() {
                                           that routes url to http://localhost:8080; workers follow
   tunnel    quick                         back to a quick tunnel
   key       new <name> | revoke <name> | list   api keys of the installed harness: what a connector needs to call it
-  join      new <name> | revoke <name> | list   join secrets of the installed harness: what a machine needs to become a worker
+  join      new <name> [ephemeral] | revoke <name> | list
+                                          join secrets of the installed harness: what a machine needs to become a worker.
+                                          An ephemeral one's workers see only the harness and leave the mesh 3 minutes
+                                          after they go quiet. Revoking refuses new joins; its workers stay until
+                                          mainplane worker remove <name>
   update    [version]                     the installed harness becomes that release, the latest stable by default;
                                           prints the changelog between, restarts it, and workers follow
   uninstall                               remove the service and the binary; the config, sessions and auth table stay

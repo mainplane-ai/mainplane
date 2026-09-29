@@ -31,6 +31,10 @@ func main() {
 	if len(os.Args) < 2 {
 		usage()
 	}
+	if len(os.Args) > 2 && os.Args[1] == "worker" && os.Args[2] == "remove" {
+		cli("worker remove", os.Args[3:])
+		return
+	}
 	switch os.Args[1] {
 	case "worker", "install":
 		if len(os.Args) > 3 || os.Args[1] == "install" && len(os.Args) != 3 {
@@ -188,6 +192,8 @@ func usage() {
   info       <id>                    GET  /sessions/{id}
   sessions   [status]                GET  /sessions
   workers                            GET  /workers
+  worker     remove <name>           DELETE /workers/{name}: it leaves the mesh for good; revoke its join secret too
+                                     to keep that secret from joining machines again
   providers                          GET  /providers
 `)
 	os.Exit(2)

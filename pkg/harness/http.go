@@ -22,9 +22,9 @@ import (
 // person. A file goes to a worker, not into the state file.
 const MaxPost = 8 << 20
 
-// Handler is the harness's HTTP surface: seven verbs on a session and three
-// reads of the environment. Records go out in the state file's own bytes,
-// one after another.
+// Handler is the harness's HTTP surface: seven verbs on a session, three
+// reads of the environment, and removing a worker. Records go out in the
+// state file's own bytes, one after another.
 //
 //	GET  /sessions                    ?status= ?limit= ?after=<id>                 -> [Info], newest updated first
 //	POST /sessions                    Create body                                  -> {"id"}
@@ -38,6 +38,8 @@ const MaxPost = 8 << 20
 //	                                  down                                            say what happened
 //	GET  /workers                     -> connected workers' hellos, and refused
 //	                                     ones with the reason
+//	DELETE /workers/{name}            the worker leaves the mesh for good; its     -> 204
+//	                                  join secret still joins new machines
 //	GET  /providers                   -> names this harness can serve as provider/model
 //	GET  /                            -> {"version"}
 //
@@ -71,6 +73,14 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 	})
 	mux.HandleFunc("GET /workers", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, h.Workers.List())
+	})
+	mux.HandleFunc("DELETE /workers/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if err := h.Remove(r.PathValue("name")); err != nil {
+			fail(w, err)
+			return
+		}
+		h.Workers.Drop(r.PathValue("name"))
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /providers", func(w http.ResponseWriter, r *http.Request) {
 		names := make([]string, 0, len(h.Providers))

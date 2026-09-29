@@ -42,8 +42,9 @@ const (
 )
 
 type Entry struct {
-	Name string `json:"name"`
-	Hash string `json:"hash"`
+	Name      string `json:"name"`
+	Hash      string `json:"hash"`
+	Ephemeral bool   `json:"ephemeral,omitempty"` // join: its workers leave the mesh when they go quiet
 }
 
 // Table is the live entries by kind. A revoked entry is gone, not marked.
@@ -77,7 +78,7 @@ func (s Store) save(t Table) error {
 }
 
 // Issue adds an entry and returns its secret: the one time it is in the clear.
-func (s Store) Issue(kind, name string) (string, error) {
+func (s Store) Issue(kind, name string, ephemeral bool) (string, error) {
 	t, err := s.Load()
 	if err != nil {
 		return "", err
@@ -86,7 +87,7 @@ func (s Store) Issue(kind, name string) (string, error) {
 		return "", fmt.Errorf("%s %q exists", kind, name)
 	}
 	secret := rand.Text()
-	t[kind] = append(t[kind], Entry{Name: name, Hash: Hash(secret)})
+	t[kind] = append(t[kind], Entry{Name: name, Hash: Hash(secret), Ephemeral: ephemeral})
 	return secret, s.save(t)
 }
 
@@ -115,16 +116,24 @@ func (s Store) Revoke(kind, name string) error {
 
 // Check is whether secret is a live entry of kind.
 func (s Store) Check(kind, secret string) bool {
+	_, ok := s.Find(kind, secret)
+	return ok
+}
+
+// Find is the live entry of kind that secret is, if it is one.
+func (s Store) Find(kind, secret string) (Entry, bool) {
 	t, err := s.Load()
 	if err != nil {
 		log.Printf("auth: %v", err)
-		return false
+		return Entry{}, false
 	}
-	h, ok := []byte(Hash(secret)), false
+	h, found, ok := []byte(Hash(secret)), Entry{}, false
 	for _, e := range t[kind] {
-		ok = ok || subtle.ConstantTimeCompare(h, []byte(e.Hash)) == 1
+		if subtle.ConstantTimeCompare(h, []byte(e.Hash)) == 1 {
+			found, ok = e, true
+		}
 	}
-	return ok
+	return found, ok
 }
 
 // Bearer refuses a request whose Authorization: Bearer is not a live api key,
