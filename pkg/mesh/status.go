@@ -1,16 +1,13 @@
 package mesh
 
 import (
-	"context"
 	"fmt"
 	"io"
-	"log"
+	"net"
+	"os"
 	"runtime"
 	"strings"
 	"text/tabwriter"
-	"time"
-
-	"tailscale.com/safesocket"
 )
 
 // socket is where the worker answers mainplane status: a unix socket any
@@ -25,9 +22,13 @@ func init() {
 
 // Status is what the worker on this machine says of its node.
 func Status() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	c, err := safesocket.ConnectContext(ctx, socket)
+	var c io.ReadCloser
+	var err error
+	if runtime.GOOS == "windows" {
+		c, err = os.Open(socket) // a named pipe opens as a file
+	} else {
+		c, err = net.Dial("unix", socket)
+	}
 	if err != nil {
 		return "", fmt.Errorf("no worker runs on this machine: %w", err)
 	}
@@ -36,17 +37,10 @@ func Status() (string, error) {
 	return string(b), err
 }
 
-// serve answers every connection to the socket with the status, for as
-// long as the process runs. A second worker on the machine finds the socket
-// taken and goes without.
+// serve answers every connection to the socket with the status until Close.
 func (m *Mesh) serve() {
-	l, err := safesocket.Listen(socket)
-	if err != nil {
-		log.Printf("mesh: status socket: %v", err)
-		return
-	}
 	for {
-		c, err := l.Accept()
+		c, err := m.sock.Accept()
 		if err != nil {
 			return
 		}
@@ -57,7 +51,8 @@ func (m *Mesh) serve() {
 
 // status is this node's name and address, its coordinator, and each peer's
 // name, address, and path: direct to an endpoint, or through a relay
-// region, which is slower, not broken.
+// region, which is slower, not broken. A peer with no direct path and no
+// traffic of late is idle: the path is found when traffic starts.
 func (m *Mesh) status() string {
 	select {
 	case <-m.removed:
@@ -82,6 +77,8 @@ func (m *Mesh) status() string {
 			switch {
 			case ps.CurAddr != "":
 				path = "direct " + ps.CurAddr
+			case !ps.Active:
+				path = "idle"
 			case ps.Relay != "":
 				path = "relay " + ps.Relay
 			}

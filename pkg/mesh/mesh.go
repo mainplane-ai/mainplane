@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -26,6 +27,7 @@ import (
 	"tailscale.com/ipn/store"
 	"tailscale.com/net/tsdial"
 	"tailscale.com/net/tstun"
+	"tailscale.com/safesocket"
 	"tailscale.com/tsd"
 	"tailscale.com/types/key"
 	"tailscale.com/types/logid"
@@ -56,6 +58,7 @@ type Mesh struct {
 	left    sync.Once
 	err     error // leaving's
 	removed chan struct{}
+	sock    net.Listener // mainplane status asks here
 }
 
 // Up brings the node up with its state in dir: the TUN, then the engine.
@@ -142,7 +145,12 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 		}
 	}()
 	go follow(ctx, lb, m.health, harness, secret, name)
-	go m.serve()
+	// A second worker on the machine finds the socket taken and goes without.
+	if m.sock, err = safesocket.Listen(socket); err != nil {
+		log.Printf("mesh: status socket: %v", err)
+	} else {
+		go m.serve()
+	}
 	return m, nil
 }
 
@@ -171,9 +179,12 @@ func (m *Mesh) Peer(name string) (netip.Addr, bool) {
 	return netip.Addr{}, false
 }
 
-// Close leaves the mesh: the hosts block goes, the router takes its address,
-// route and rule away, and the TUN goes.
+// Close leaves the mesh: the status socket, the hosts block go, the router
+// takes its address, route and rule away, and the TUN goes.
 func (m *Mesh) Close() error {
+	if m.sock != nil {
+		_ = m.sock.Close()
+	}
 	m.unwatch()
 	<-m.watched
 	return m.leave()
