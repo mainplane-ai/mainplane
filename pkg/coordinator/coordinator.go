@@ -255,8 +255,9 @@ func (c *Coordinator) Remove(name string) error {
 	return c.save()
 }
 
-// expire deletes ephemeral node n once it has been idle with no poll. The
-// caller holds mu, or is alone.
+// expire deletes ephemeral node n once it has been idle with no poll, unless
+// it was removed, which keeps its keys refused. The caller holds mu, or is
+// alone.
 func (c *Coordinator) expire(n *node) {
 	if !n.Ephemeral {
 		return
@@ -265,7 +266,7 @@ func (c *Coordinator) expire(n *node) {
 	time.AfterFunc(idle, func() {
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		if n.streams > 0 || time.Since(n.quiet) < idle || !slices.Contains(c.st.Nodes, n) {
+		if n.Removed || n.streams > 0 || time.Since(n.quiet) < idle || !slices.Contains(c.st.Nodes, n) {
 			return
 		}
 		c.st.Nodes = slices.DeleteFunc(c.st.Nodes, func(p *node) bool { return p == n })
@@ -368,7 +369,7 @@ func (c *Coordinator) register(machine key.MachinePublic, addr string, req tailc
 		log.Printf("coordinator: %s joined as %s from %s, ephemeral %v", n.Name, address(n.ID), addr, n.Ephemeral)
 	}
 	return tailcfg.RegisterResponse{
-		MachineAuthorized: true,
+		MachineAuthorized: !n.Removed,
 		User:              tailcfg.User{ID: user, DisplayName: "mainplane"},
 		Login:             tailcfg.Login{ID: tailcfg.LoginID(user), LoginName: "mainplane", DisplayName: "mainplane"},
 	}
