@@ -1,6 +1,6 @@
 // Package auth is the two credentials a harness checks. An api key lets a
-// connector call every HTTP route. A join secret lets a machine dial in as a
-// worker; it can add a worker and nothing else. Both kinds live hashed in one
+// connector call every HTTP route. A join secret lets a machine join the mesh
+// as a worker; it can add a worker and nothing else. Both kinds live hashed in one
 // table on the admin drive. What a person pastes is a token: the kind, the
 // key of the harness its holder finds through the pointer, and the secret
 // itself.
@@ -30,7 +30,7 @@ import (
 
 const (
 	Key  = "key"  // a connector's credential: every HTTP route
-	Join = "join" // a worker's credential: the dial in
+	Join = "join" // a worker's credential: joining the mesh
 )
 
 // An address has this many refusals a window. That is more than a worker

@@ -40,8 +40,8 @@ const (
 	port = 41642
 
 	// A worker whose map poll is down proves the harness this often, and
-	// asks the pointer at most once a minute, as the /worker dial does: a
-	// harness that is down would otherwise draw a lookup from every worker.
+	// asks the pointer at most once a minute: a harness that is down would
+	// otherwise draw a lookup from every worker.
 	check      = 20 * time.Second
 	lookupWait = time.Minute
 )
@@ -125,6 +125,19 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 	}()
 	go follow(lb, sys.HealthTracker.Get(), harness, secret, name)
 	return m, nil
+}
+
+// Peer is the address of the peer named name in the last map, which stays
+// while the coordinator is out of reach.
+func (m *Mesh) Peer(name string) (netip.Addr, bool) {
+	if nm := m.lb.NetMapWithPeers(); nm != nil {
+		for _, p := range nm.Peers {
+			if p.Name() == name && p.Addresses().Len() > 0 {
+				return p.Addresses().At(0).Addr(), true
+			}
+		}
+	}
+	return netip.Addr{}, false
 }
 
 // Close leaves the mesh: the hosts block goes, the router takes its address,

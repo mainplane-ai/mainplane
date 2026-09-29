@@ -104,7 +104,7 @@ func Work(key string, l Local) error {
 		if err != nil {
 			return err
 		}
-		go Dial(key, l)
+		go Dial(m, l)
 		log.Printf("%v: leaving the mesh", <-stop)
 		return m.Close()
 	}
@@ -133,7 +133,7 @@ func (s service) Execute(_ []string, reqs <-chan svc.ChangeRequest, status chan<
 	if err != nil {
 		log.Fatalf("mesh: %v", err)
 	}
-	go Dial(s.key, s.l)
+	go Dial(m, s.l)
 	status <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
 	for r := range reqs {
 		//exhaustive:ignore the service accepts stop and shutdown only

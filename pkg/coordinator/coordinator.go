@@ -1,8 +1,10 @@
 // Package coordinator is the harness's side of the Tailscale coordination
 // protocol: ts2021, Noise inside a WebSocket at /ts2021, the one upgrade the
 // tunnel passes. A worker registers with its join secret and gets an address
-// in the project's /48 and a name. Then it long-polls a map of every other
-// node and of the relay. The nodes are in nodes.json in the admin dir.
+// in the project's /48 and a name. The harness's own node registers the same
+// way, on loopback, with a secret only this process holds. Then each node
+// long-polls a map of every other node and of the relay. The nodes are in
+// nodes.json in the admin dir.
 //
 // The protocol handling is copied from headscale's hscontrol (see LICENSE)
 // and trimmed to register, map, keepalive and deltas: no database, CLI, OIDC,
@@ -10,6 +12,9 @@
 package coordinator
 
 import (
+	"context"
+	crand "crypto/rand"
+	"crypto/subtle"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -17,6 +22,7 @@ import (
 	"io/fs"
 	"log"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -29,9 +35,12 @@ import (
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
+	"github.com/mainplane-ai/mainplane/pkg/worker"
 	"golang.org/x/net/http2"
 	"tailscale.com/control/controlhttp/controlhttpserver"
+	"tailscale.com/envknob"
 	"tailscale.com/tailcfg"
+	"tailscale.com/tsnet"
 	"tailscale.com/types/key"
 	"tailscale.com/util/zstdframe"
 )
@@ -88,6 +97,7 @@ type Coordinator struct {
 	key  key.MachinePrivate
 	file string
 	join func(secret, addr string) error
+	self string // the harness's own node registers with it; never on disk
 
 	mu    sync.Mutex
 	st    state
@@ -103,7 +113,7 @@ func New(dir string, join func(secret, addr string) error) (*Coordinator, error)
 	if err != nil {
 		return nil, err
 	}
-	c := &Coordinator{key: k, file: filepath.Join(dir, "nodes.json"), join: join, st: state{Next: 1}, wakes: map[chan struct{}]bool{}}
+	c := &Coordinator{key: k, file: filepath.Join(dir, "nodes.json"), join: join, self: crand.Text(), st: state{Next: 1}, wakes: map[chan struct{}]bool{}}
 	b, err := os.ReadFile(c.file)
 	if errors.Is(err, fs.ErrNotExist) {
 		return c, nil
@@ -146,11 +156,58 @@ func (c *Coordinator) Relay(u string) {
 	c.wake()
 }
 
+// Listen puts the harness on its own mesh as a node in userspace, no TUN and
+// no root, with its keys in dir so its address holds across restarts. It
+// registers at control, this coordinator on loopback, so it needs neither the
+// tunnel nor a proof, with the secret only this process holds, and is named
+// worker.Harness. The listener takes port on the node's address, which only
+// nodes the coordinator gave keys to can reach. It all closes when ctx ends.
+func (c *Coordinator) Listen(ctx context.Context, dir, control string, port int) (net.Listener, error) {
+	// The node reaches the relay through the tunnel as every node does, and
+	// Cloudflare answers 400 to the native upgrade.
+	envknob.Setenv("TS_DEBUG_DERP_WS_CLIENT", "1")
+	// A worker's keepalive holds its connection; these end one whose worker
+	// vanished in about a minute, not in netstack's two hours.
+	envknob.Setenv("TS_NETSTACK_KEEPALIVE_IDLE", "15s")
+	envknob.Setenv("TS_NETSTACK_KEEPALIVE_INTERVAL", "5s")
+	logf := func(format string, a ...any) {
+		if !strings.Contains(format, "[v") { // tailscale's verbose levels
+			log.Printf("mesh: "+format, a...)
+		}
+	}
+	s := &tsnet.Server{Dir: dir, Hostname: worker.Harness, ControlURL: control, AuthKey: c.self, Logf: logf, UserLogf: logf}
+	st, err := s.Up(ctx)
+	go func() {
+		<-ctx.Done()
+		_ = s.Close()
+	}()
+	if err != nil {
+		return nil, err
+	}
+	l, err := s.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("coordinator: the harness is %v on the mesh, port %d", st.TailscaleIPs, port)
+	return l, nil
+}
+
 // Known is whether k is a registered node's. The relay admits no other.
 func (c *Coordinator) Known(k key.NodePublic) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.byKey(k) != nil
+}
+
+// Node is the name of the registered node at address a.
+func (c *Coordinator) Node(a netip.Addr) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	i := slices.IndexFunc(c.st.Nodes, func(n *node) bool { return address(n.ID) == a })
+	if i < 0 {
+		return "", false
+	}
+	return c.st.Nodes[i].Name, true
 }
 
 // Handle serves the Noise key at /key and the protocol at /ts2021 on mux.
@@ -216,12 +273,21 @@ func (c *Coordinator) register(machine key.MachinePublic, addr string, req tailc
 		if req.Auth != nil {
 			secret = req.Auth.AuthKey
 		}
-		if err := c.join(secret, addr); err != nil {
-			return tailcfg.RegisterResponse{Error: err.Error()}
+		self := subtle.ConstantTimeCompare([]byte(secret), []byte(c.self)) == 1
+		if !self {
+			if err := c.join(secret, addr); err != nil {
+				return tailcfg.RegisterResponse{Error: err.Error()}
+			}
 		}
 		// A machine that registers a new node key keeps its address and name.
 		if n = c.byMachine(machine); n == nil {
-			n = &node{ID: c.st.Next, Name: c.name(req.Hostinfo), Machine: machine}
+			name := c.name(req.Hostinfo)
+			if self {
+				// A harness whose node lost its keys replaces its old node.
+				name = worker.Harness
+				c.st.Nodes = slices.DeleteFunc(c.st.Nodes, func(p *node) bool { return p.Name == name })
+			}
+			n = &node{ID: c.st.Next, Name: name, Machine: machine}
 			c.st.Next++
 			c.st.Nodes = append(c.st.Nodes, n)
 		}
@@ -429,7 +495,8 @@ func write(w http.ResponseWriter, compress string, r *tailcfg.MapResponse) error
 
 // name is the hostname's first label in lower case letters, digits and
 // single dashes, made unique with -2, -3. No name has "--", the separator of
-// long names, and none is "xn", because a label starting "xn--" is punycode.
+// long names, none is "xn", because a label starting "xn--" is punycode, and
+// none is the harness's.
 func (c *Coordinator) name(hi *tailcfg.Hostinfo) string {
 	var h string
 	if hi != nil {
@@ -449,7 +516,7 @@ func (c *Coordinator) name(hi *tailcfg.Hostinfo) string {
 		base = "worker"
 	}
 	name := base
-	for i := 2; name == "xn" || slices.ContainsFunc(c.st.Nodes, func(p *node) bool { return p.Name == name }); i++ {
+	for i := 2; name == "xn" || name == worker.Harness || slices.ContainsFunc(c.st.Nodes, func(p *node) bool { return p.Name == name }); i++ {
 		name = fmt.Sprintf("%s-%d", base, i)
 	}
 	return name

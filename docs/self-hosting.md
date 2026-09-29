@@ -46,9 +46,11 @@ goes back to a quick tunnel.
 ## What Cloudflare can read
 
 TLS ends at Cloudflare, in both modes. Cloudflare can read all traffic between
-workers, connectors, and the harness: api keys, join secrets, prompts, command
-output, and files. If this is not acceptable, do not self-host through a
-Cloudflare tunnel.
+connectors and the harness: api keys, prompts, command output, and files. It
+cannot read the mesh: a join secret goes to the coordinator inside Noise, to a
+key the harness key vouches for, and workers reach the harness inside
+WireGuard, relayed through the tunnel or direct. If this is not acceptable, do
+not self-host through a Cloudflare tunnel.
 
 The pointer stores only the harness key, the current URL, and a signature. It
 cannot redirect workers: a record needs the harness key's signature, and a
