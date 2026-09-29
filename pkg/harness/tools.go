@@ -60,6 +60,10 @@ Workers:
 
 Networking:
 - The Mainplane client on all workers contains networking code that connects all workers to a shared mesh
+- Reach another worker by its name, never its address: the short name, or the long name <name>--<project>.mainplane.net. On Windows use the long name
+- The mesh is IPv6 only. A server another worker should reach must listen on ::, not 0.0.0.0, or the other worker gets "connection refused"
+- A worker you cannot reach by name is not in this worker's map. That is the access rule, not a network fault
+- mainplane status on a worker shows each peer's path, direct or relay. A relayed path is slower, not broken
 
 Context Management:
 - The input context size to the LLM is reported at every turn. There is a set limit at which point the session will end

@@ -50,6 +50,7 @@ const (
 // Mesh is this worker's node.
 type Mesh struct {
 	lb      *ipnlocal.LocalBackend
+	health  *health.Tracker
 	unwatch context.CancelFunc
 	watched chan struct{}
 	left    sync.Once
@@ -115,7 +116,7 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 	lb.SetVarRoot(dir)
 	log.Printf("mesh: %s up, port %d", tun, port)
 	ctx, unwatch := context.WithCancel(context.Background())
-	m := &Mesh{lb: lb, unwatch: unwatch, watched: make(chan struct{}), removed: make(chan struct{})}
+	m := &Mesh{lb: lb, health: sys.HealthTracker.Get(), unwatch: unwatch, watched: make(chan struct{}), removed: make(chan struct{})}
 	go func() {
 		defer close(m.watched)
 		// Any change may be to a name: the block is made again from the
@@ -140,7 +141,8 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 			close(m.removed)
 		}
 	}()
-	go follow(ctx, lb, sys.HealthTracker.Get(), harness, secret, name)
+	go follow(ctx, lb, m.health, harness, secret, name)
+	go m.serve()
 	return m, nil
 }
 

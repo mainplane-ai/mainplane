@@ -2,6 +2,19 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.3.0
+
+Workers join a WireGuard mesh that the harness coordinates, and reach the harness over it. A v0.2.0 worker dials `/worker`, which is gone, so it cannot reach a v0.3.0 harness and cannot update itself: on each worker, `mainplane uninstall`, then install again with its join token. Tokens and the harness config carry over. See `docs/self-hosting.md`, "The mesh".
+
+- Every worker gets an interface of its own (`mainplane0`, `Mainplane` on Windows, `utunN` on macOS), an address in `fd7c:9a2e:4b10::/48`, UDP port 41642, and a hosts block with `<name>` and `<name>--home.mainplane.net` for each peer. It runs beside Tailscale. The harness runs the coordinator and the relay behind its tunnel, and joins the mesh itself, in userspace, as `harness`
+- The worker's control connection goes to `harness` port 7000 inside the mesh. The `/worker` WebSocket is gone. Workers need root (they did already as a service)
+- Workers talk direct when their NATs allow, else through the relay in the harness, over the tunnel. `mainplane status` on a worker shows its name and address, its harness, and each peer's address and path: direct or relay
+- Worker names are mesh names now: the hostname's first label in lower case, made unique (`alexanders-mac-mini`, `box-2`). Session configs must use them
+- Your own workers see each other and the harness. `mainplane-server join new <name> ephemeral` makes a join secret whose workers see only the harness and leave the mesh 3 minutes after they go quiet
+- `mainplane worker remove <name>` takes a worker off the mesh in seconds; it takes down its interface and hosts block. `join revoke` still only refuses new joins
+- On Windows, `mainplane install` downloads `wintun.dll` 0.14.1 from wintun.net, checked against its sha256
+- The `mainplane` binary grows from about 7 MB to about 18 MB, and `mainplane-server` from about 8 MB to about 23 MB: both carry Tailscale's network engine, from the fork `github.com/mainplane-ai/tailscale`
+
 ## v0.2.0
 
 The harness needs no network setup: a Cloudflare tunnel is its only way in. Tokens, configs and workers from v0.1.x do not carry over. Uninstall the v0.1.x harness with its own `mainplane-server uninstall`, which on Windows also removes its port 7811 firewall rule, then install the harness and every worker again.
