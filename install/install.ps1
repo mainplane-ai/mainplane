@@ -34,6 +34,7 @@ if ($Token -and $Token -ne 'server') {
   if (($p -split ';') -notcontains $bin) {
     [Environment]::SetEnvironmentVariable('Path', "$($p.TrimEnd(';'));$bin".TrimStart(';'), 'User')
   }
+  if (!$Token) { Write-Output 'mainplane @VERSION@ installed' }
 }
 if (($env:Path -split ';') -notcontains $bin) { $env:Path += ";$bin" }
 if ($Token -eq 'server') {
@@ -45,4 +46,3 @@ if ($Token -eq 'server') {
   $env:Path += ";$env:ProgramFiles\mainplane"
 }
 Remove-Item -Recurse $d
-Write-Output "mainplane installed: $(mainplane version)"

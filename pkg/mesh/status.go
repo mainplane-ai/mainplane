@@ -49,10 +49,11 @@ func (m *Mesh) serve() {
 	}
 }
 
-// status is this node's name and address, its coordinator, and each peer's
-// name, address, and path: direct to an endpoint, or through a relay
-// region, which is slower, not broken. A peer with no direct path and no
-// traffic of late is idle: the path is found when traffic starts.
+// status is this node's name and address, whether its harness answers the
+// map poll, and each peer's name, address, and path: direct to an endpoint,
+// or through a relay region, which is slower, not broken. A peer with no
+// direct path and no traffic of late is idle: the path is found when traffic
+// starts.
 func (m *Mesh) status() string {
 	select {
 	case <-m.removed:
@@ -61,16 +62,16 @@ func (m *Mesh) status() string {
 	}
 	nm := m.lb.NetMapWithPeers()
 	if nm == nil {
-		return fmt.Sprintf("no map yet from the coordinator at %s\n", m.lb.Prefs().ControlURL())
+		return fmt.Sprintf("no map yet from the harness at %s\n", m.lb.Prefs().ControlURL())
 	}
-	poll := "map poll down"
-	if m.health.GetInPollNetMap() {
-		poll = "map poll up"
+	self := "this machine"
+	if !m.health.GetInPollNetMap() {
+		self += ", harness unresponsive"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s  %s  coordinator %s, %s\n\n", nm.SelfNode.Name(), m.Self(), m.lb.Prefs().ControlURL(), poll)
 	st := m.lb.Status()
 	w := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", nm.SelfNode.Name(), m.Self(), self)
 	for _, p := range nm.Peers {
 		path := "no path yet"
 		if ps := st.Peer[p.Key()]; ps != nil {

@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
+	"github.com/mainplane-ai/mainplane/pkg/version"
 )
 
 // Bin is the binary the service runs. It and the state directory are root's:
@@ -73,7 +74,16 @@ func setup(token string) error {
 	uid, _ := strconv.Atoi(u.Uid)
 	gid, _ := strconv.Atoi(u.Gid)
 	_ = os.Remove(filepath.Join(scratch, "join"))
-	if err := os.Lchown(scratch, uid, gid); err != nil {
+	return os.Lchown(scratch, uid, gid)
+}
+
+// done says the install is done, and whether the operator, so code on this
+// worker, can use sudo.
+func done() error {
+	fmt.Print(version.Installed())
+	name := os.Getenv("SUDO_USER")
+	u, err := user.Lookup(name)
+	if err != nil {
 		return err
 	}
 	ids, err := u.GroupIds()
@@ -82,7 +92,8 @@ func setup(token string) error {
 	}
 	for _, id := range ids {
 		if g, err := user.LookupGroupId(id); err == nil && slices.Contains(sudoers, g.Name) {
-			fmt.Printf("note: %s is in group %s, so code on this worker can use sudo to act as root\n", name, g.Name)
+			fmt.Printf("note: user %s is admin on this machine, this worker can use sudo\n", name)
+			return nil
 		}
 	}
 	return nil

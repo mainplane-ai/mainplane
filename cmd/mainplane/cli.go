@@ -56,7 +56,7 @@ func cli(verb string, args []string) {
 	if err != nil {
 		die(err)
 	}
-	c.version()
+	hv := c.version()
 	switch verb {
 	case "new":
 		var out struct{ ID string }
@@ -89,7 +89,7 @@ func cli(verb string, args []string) {
 		var infos []harness.Info
 		c.call("GET", "/sessions?status="+strings.Join(args, ""), "", nil, &infos)
 		for _, i := range infos {
-			fmt.Printf("%s  %-11s  %-40s  n=%-5d prompt=%d/%d  %s\n", i.ID, i.Status, i.Config.Model, i.N, i.Prompt, i.Config.Context, i.Updated.Local().Format(time.DateTime))
+			fmt.Printf("%s  %-11s  %-40s  n=%-5d context=%d/%d  %s\n", i.ID, i.Status, i.Config.Model, i.N, i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime))
 		}
 	case "workers":
 		var ws []harness.Listed
@@ -99,7 +99,10 @@ func cli(verb string, args []string) {
 			if w.Refused != "" {
 				state = "refused: " + w.Refused
 			}
-			fmt.Printf("%-28s  %-13s  %-10s  %-16s  %s\n", w.Name, w.OS+"/"+w.Arch, strings.Join(w.Interps, ","), w.Version, state)
+			if w.Version != hv { // a worker follows its harness; say so only when it has not
+				state += " at " + w.Version
+			}
+			fmt.Printf("%-28s  %-13s  %-10s  %s\n", w.Name, w.OS+"/"+w.Arch, strings.Join(w.Interps, ","), state)
 		}
 	case "worker remove":
 		c.call("DELETE", "/workers/"+url.PathEscape(args[0]), "", nil, nil)
@@ -185,11 +188,13 @@ func (c client) raw(path string) {
 	fmt.Println(b.String())
 }
 
-// version refuses a harness from another release.
-func (c client) version() {
-	if v := c.harness(); !version.Match(v) {
+// version refuses a harness from another release, and returns the one it runs.
+func (c client) version() string {
+	v := c.harness()
+	if !version.Match(v) {
 		die(fmt.Errorf("harness is version %s, this mainplane is %s: run mainplane update", v, version.V))
 	}
+	return v
 }
 
 // harness is the release the harness runs.

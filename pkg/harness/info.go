@@ -10,17 +10,17 @@ import (
 )
 
 // Info is what GET /sessions/{id} and each entry of GET /sessions say about a
-// session: everything the tip states, no cost and no title. Prompt is the
-// last step's prompt in tokens, against Config.Context.
+// session: everything the tip states, no cost and no title. ContextUsed is
+// the last step's prompt in tokens, against Config.ContextLimit.
 type Info struct {
-	ID      string           `json:"id"`
-	Status  statefile.Status `json:"status"`
-	Config  statefile.Conf   `json:"config"`
-	Created time.Time        `json:"created"`
-	Updated time.Time        `json:"updated"`
-	N       int              `json:"n"`
-	Prompt  int              `json:"prompt"`
-	Usage   statefile.Usage  `json:"usage"`
+	ID          string           `json:"id"`
+	Status      statefile.Status `json:"status"`
+	Config      statefile.Conf   `json:"config"`
+	Created     time.Time        `json:"created"`
+	Updated     time.Time        `json:"updated"`
+	N           int              `json:"n"`
+	ContextUsed int              `json:"context_used"`
+	Usage       statefile.Usage  `json:"usage"`
 }
 
 // Info reads one session's file.
@@ -34,7 +34,7 @@ func (h *Harness) Info(id string) (Info, error) {
 		return Info{}, err
 	}
 	tip := chain[len(chain)-1]
-	info := Info{ID: id, Status: h.status(id, chain), Config: conf, Created: chain[0].Time, Updated: tip.Time, N: tip.N, Prompt: statefile.Prompt(chain)}
+	info := Info{ID: id, Status: h.status(id, chain), Config: conf, Created: chain[0].Time, Updated: tip.Time, N: tip.N, ContextUsed: statefile.ContextUsed(chain)}
 	for _, r := range chain {
 		if r.Kind == statefile.Step && r.Usage != nil {
 			info.Usage.Input += r.Usage.Input
