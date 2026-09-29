@@ -275,6 +275,7 @@ func phase(listen, url, secret, v string, oses []string, mode, text string) {
 		log.Fatal(err)
 	}
 	log.SetOutput(f)
+	die := log.New(os.Stderr, "", log.LstdFlags) // the gate sees why a phase ended
 	coord, err := coordinator.New(dir(), func(s, _ string) error {
 		if s != secret {
 			return errors.New("join secret refused")
@@ -282,7 +283,7 @@ func phase(listen, url, secret, v string, oses []string, mode, text string) {
 		return nil
 	})
 	if err != nil {
-		log.Fatal(err)
+		die.Fatal(err)
 	}
 	coord.Relay(url)
 	derp := relay.New()
@@ -293,16 +294,16 @@ func phase(listen, url, secret, v string, oses []string, mode, text string) {
 	relay.Handle(mux, derp)
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
-		log.Fatal(err)
+		die.Fatal(err)
 	}
-	go func() { log.Fatal(http.Serve(ln, mux)) }()
+	go func() { die.Fatal(http.Serve(ln, mux)) }()
 	p := harness.NewPool()
 	go func() {
 		l, err := coord.Listen(context.Background(), filepath.Join(dir(), "mesh"), "http://"+listen, worker.Port)
 		if err == nil {
 			err = p.Serve(l, coord.Node)
 		}
-		log.Fatal(err)
+		die.Fatal(err)
 	}()
 	fmt.Printf("== harness %s: %s %s\n", v, mode, text)
 	start := time.Now()
