@@ -223,7 +223,7 @@ func usage() {
                                      and each peer's address and path, direct or through the relay
   version                            the release this binary was built from
 
-  new                                POST /sessions, body from stdin: {"model","context_limit","workers"} or {"from","n"}
+  new                                POST /sessions, body from stdin: {"model","context_limit","workers","params"} or {"from","n"}
   message    <id> <text> [file...]   POST /sessions/{id}/records, one record per part
   tail       <id> [after]            GET  /sessions/{id}/records, rendered
   chat       <id>                    tail that follows; every stdin line is a message

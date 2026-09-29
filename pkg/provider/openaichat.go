@@ -100,7 +100,7 @@ func (openaiChat) Compile(req Request) ([]byte, json.RawMessage, error) {
 		}
 		body.Messages = append(body.Messages, m)
 	}
-	b, err := marshal(body) // no cache header: third-party caches are their own business
+	b, err := encode(body, req.Params, "model", "stream", "stream_options", "messages", "tools") // no cache header: third-party caches are their own business
 	return b, nil, err
 }
 

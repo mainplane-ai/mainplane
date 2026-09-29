@@ -77,12 +77,15 @@ type Record struct {
 // life. Model is one provider/model string. ContextLimit is the token limit
 // past which the harness refuses to step. Input is the media types read hands
 // to the model as media; text is always text, and any other file is read as text.
+// Params are fields for the model's vendor, set on every request as its
+// envelope decides.
 type Conf struct {
-	Model        string   `json:"model"`
-	Tools        string   `json:"tools"`
-	Workers      []Worker `json:"workers"`
-	ContextLimit int      `json:"context_limit"`
-	Input        []string `json:"input,omitempty"`
+	Model        string                     `json:"model"`
+	Tools        string                     `json:"tools"`
+	Workers      []Worker                   `json:"workers"`
+	ContextLimit int                        `json:"context_limit"`
+	Input        []string                   `json:"input,omitempty"`
+	Params       map[string]json.RawMessage `json:"params,omitempty"`
 }
 
 // Worker is one worker the session may use and the drives it has. A drive is

@@ -127,7 +127,7 @@ func (e anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	b, err := marshal(body)
+	b, err := encode(body, req.Params, "model", "stream", "system", "tools", "messages")
 	return b, cache, err
 }
 

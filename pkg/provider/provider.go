@@ -15,6 +15,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	neturl "net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,11 +29,13 @@ type Tool struct {
 	Schema      json.RawMessage // JSON Schema for the arguments object
 }
 
+// Params are the session's vendor fields, see encode.
 type Request struct {
 	Model   string
 	Key     string // session id, the routing key for prefix caches
 	Tools   []Tool
 	Context []statefile.Record // statefile.Build output
+	Params  map[string]json.RawMessage
 }
 
 // Cache is the step record's cache header. Marks are the ids of the records
@@ -211,6 +214,47 @@ func marshal(v any) ([]byte, error) {
 		return nil, err
 	}
 	return bytes.TrimRight(b.Bytes(), "\n"), nil
+}
+
+// encode marshals a request body and applies params to it as a JSON merge
+// patch (RFC 7396) in the vendor's own field names: an object merges into the
+// object it names, null deletes, anything else replaces. The harness does not
+// know every vendor's fields, so the vendor judges them and its 400 is the
+// error. The envelope refuses only the fields it builds from the session.
+func encode(body any, params map[string]json.RawMessage, owned ...string) ([]byte, error) {
+	b, err := marshal(body)
+	if err != nil || len(params) == 0 {
+		return b, err
+	}
+	for k := range params {
+		if slices.Contains(owned, k) {
+			return nil, fmt.Errorf("param %q is built by the harness", k)
+		}
+	}
+	return merge(b, params)
+}
+
+func merge(target json.RawMessage, patch map[string]json.RawMessage) (json.RawMessage, error) {
+	var t map[string]json.RawMessage
+	if json.Unmarshal(target, &t) != nil || t == nil {
+		t = map[string]json.RawMessage{} // RFC 7396: a target that is not an object becomes one
+	}
+	for k, v := range patch {
+		var sub map[string]json.RawMessage
+		switch {
+		case string(v) == "null":
+			delete(t, k)
+		case json.Unmarshal(v, &sub) == nil:
+			m, err := merge(t[k], sub)
+			if err != nil {
+				return nil, err
+			}
+			t[k] = m
+		default:
+			t[k] = v
+		}
+	}
+	return marshal(t)
 }
 
 // Split separates the leading system records, which are the system prompt,

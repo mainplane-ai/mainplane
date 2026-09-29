@@ -178,7 +178,7 @@ func (e bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	b, err := marshal(body)
+	b, err := encode(body, req.Params, "system", "messages", "toolConfig")
 	return b, cache, err
 }
 

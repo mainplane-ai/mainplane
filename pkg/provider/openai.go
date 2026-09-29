@@ -112,7 +112,7 @@ func (e openai) Compile(req Request) ([]byte, json.RawMessage, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	b, err := marshal(body)
+	b, err := encode(body, req.Params, "model", "store", "prompt_cache_key", "stream", "include", "instructions", "tools", "input")
 	return b, cache, err
 }
 
