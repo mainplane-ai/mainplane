@@ -37,6 +37,10 @@ var geminiMedia = slices.Concat(images, []string{"application/pdf", "audio/mpeg"
 
 func (gemini) Accepts(typ string) bool { return slices.Contains(geminiMedia, typ) }
 
+func (gemini) Owns(field string) bool {
+	return slices.Contains([]string{"systemInstruction", "contents", "tools"}, field)
+}
+
 type gemReq struct {
 	SystemInstruction *gemContent  `json:"systemInstruction,omitempty"`
 	Contents          []gemContent `json:"contents"`
@@ -140,7 +144,7 @@ func (e gemini) Compile(req Request) ([]byte, json.RawMessage, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	b, err := encode(body, req.Params, "systemInstruction", "contents", "tools")
+	b, err := encode(body, req.Params)
 	return b, cache, err
 }
 

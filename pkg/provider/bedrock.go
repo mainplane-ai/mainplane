@@ -43,6 +43,10 @@ func (bedrock) Name() string { return "bedrock" }
 
 func (bedrock) Accepts(typ string) bool { return slices.Contains(images, typ) }
 
+func (bedrock) Owns(field string) bool {
+	return slices.Contains([]string{"system", "messages", "toolConfig"}, field)
+}
+
 type bedReq struct {
 	System                       []bedBlock     `json:"system,omitempty"`
 	Messages                     []bedMsg       `json:"messages"`
@@ -178,7 +182,7 @@ func (e bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	b, err := encode(body, req.Params, "system", "messages", "toolConfig")
+	b, err := encode(body, req.Params)
 	return b, cache, err
 }
 

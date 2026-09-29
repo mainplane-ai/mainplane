@@ -91,9 +91,10 @@ func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
 			return "", fmt.Errorf("%s does not take %s as input", p.Envelope.Name(), t)
 		}
 	}
-	// a param the envelope refuses fails the create, not the first step
-	if _, _, err := p.Envelope.Compile(provider.Request{Model: model, Params: c.Params}); err != nil {
-		return "", err
+	for k := range c.Params {
+		if p.Envelope.Owns(k) {
+			return "", fmt.Errorf("%s builds %s from the session, a param cannot set it", p.Envelope.Name(), k)
+		}
 	}
 	conf := statefile.Conf{Model: c.Model, Tools: ToolSet(model), Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params}
 	if conf.Workers == nil {

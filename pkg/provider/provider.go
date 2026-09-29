@@ -15,7 +15,6 @@ import (
 	"math/rand/v2"
 	"net/http"
 	neturl "net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -58,10 +57,12 @@ func cacheHeader(ttl int, marks ...string) (json.RawMessage, error) {
 // deterministic and returns the cache markers it placed, which go on the step
 // record. Stream calls emit once per block as the stream completes it and
 // returns the step header with usage. Accepts is the media types the envelope
-// encodes as media; a record of any other type goes as text.
+// encodes as media; a record of any other type goes as text. Owns is the body
+// fields Compile builds from the session, which params may not set.
 type Envelope interface {
 	Name() string
 	Accepts(typ string) bool
+	Owns(field string) bool
 	Compile(req Request) (body []byte, cache json.RawMessage, err error)
 	Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error)
 }
@@ -220,16 +221,11 @@ func marshal(v any) ([]byte, error) {
 // patch (RFC 7396) in the vendor's own field names: an object merges into the
 // object it names, null deletes, anything else replaces. The harness does not
 // know every vendor's fields, so the vendor judges them and its 400 is the
-// error. The envelope refuses only the fields it builds from the session.
-func encode(body any, params map[string]json.RawMessage, owned ...string) ([]byte, error) {
+// error. The harness refuses at create only the fields the envelope Owns.
+func encode(body any, params map[string]json.RawMessage) ([]byte, error) {
 	b, err := marshal(body)
 	if err != nil || len(params) == 0 {
 		return b, err
-	}
-	for k := range params {
-		if slices.Contains(owned, k) {
-			return nil, fmt.Errorf("param %q is built by the harness", k)
-		}
 	}
 	return merge(b, params)
 }

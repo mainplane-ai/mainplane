@@ -38,6 +38,10 @@ func (anthropic) Name() string { return "anthropic" }
 
 func (anthropic) Accepts(typ string) bool { return slices.Contains(images, typ) }
 
+func (anthropic) Owns(field string) bool {
+	return slices.Contains([]string{"model", "stream", "system", "tools", "messages"}, field)
+}
+
 type anthReq struct {
 	Model     string       `json:"model"`
 	MaxTokens int          `json:"max_tokens"`
@@ -127,7 +131,7 @@ func (e anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	b, err := encode(body, req.Params, "model", "stream", "system", "tools", "messages")
+	b, err := encode(body, req.Params)
 	return b, cache, err
 }
 

@@ -33,6 +33,10 @@ func (openai) Name() string { return "openai" }
 
 func (openai) Accepts(typ string) bool { return slices.Contains(images, typ) }
 
+func (openai) Owns(field string) bool {
+	return slices.Contains([]string{"model", "store", "prompt_cache_key", "stream", "include", "instructions", "tools", "input"}, field)
+}
+
 type respReq struct {
 	Model        string        `json:"model"`
 	Store        bool          `json:"store"`
@@ -112,7 +116,7 @@ func (e openai) Compile(req Request) ([]byte, json.RawMessage, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	b, err := encode(body, req.Params, "model", "store", "prompt_cache_key", "stream", "include", "instructions", "tools", "input")
+	b, err := encode(body, req.Params)
 	return b, cache, err
 }
 

@@ -27,6 +27,10 @@ func (openaiChat) Name() string { return "openai-chat" }
 
 func (openaiChat) Accepts(typ string) bool { return slices.Contains(images, typ) }
 
+func (openaiChat) Owns(field string) bool {
+	return slices.Contains([]string{"model", "stream", "stream_options", "messages", "tools"}, field)
+}
+
 type chatReq struct {
 	Model         string            `json:"model"`
 	Stream        bool              `json:"stream"`
@@ -100,7 +104,7 @@ func (openaiChat) Compile(req Request) ([]byte, json.RawMessage, error) {
 		}
 		body.Messages = append(body.Messages, m)
 	}
-	b, err := encode(body, req.Params, "model", "stream", "stream_options", "messages", "tools") // no cache header: third-party caches are their own business
+	b, err := encode(body, req.Params) // no cache header: third-party caches are their own business
 	return b, nil, err
 }
 
