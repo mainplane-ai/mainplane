@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
@@ -39,25 +37,16 @@ var envProviders = map[string]Provider{
 
 // Default is the config install writes when given none: the tunnel carries
 // workers and connectors to port 8080 on loopback, sessions live under Dir,
-// and every provider whose key is set in this environment serves.
-func Default() (Config, error) {
+// and every provider whose key is set in this environment serves. With none
+// set, keys go in the config after install.
+func Default() Config {
 	c := Config{Admin: "admin", HTTP: "127.0.0.1:8080", Providers: map[string]Provider{}}
-	var vars []string
 	for name, p := range envProviders {
 		if os.ExpandEnv(p.Key) != "" {
 			c.Providers[name] = p
 		}
-		v := strings.TrimPrefix(p.Key, "$")
-		if p.Region != "" {
-			v += " with " + strings.TrimPrefix(p.Region, "$")
-		}
-		vars = append(vars, v)
 	}
-	if len(c.Providers) == 0 {
-		slices.Sort(vars)
-		return c, fmt.Errorf("no provider key is set: set one of %s in this shell and install again. Run install without sudo, which drops the environment; it asks for root itself", strings.Join(vars, ", "))
-	}
-	return c, nil
+	return c
 }
 
 // Expand fills provider values in from this process's environment, which a

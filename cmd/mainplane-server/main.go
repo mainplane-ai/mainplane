@@ -50,9 +50,7 @@ func main() {
 		fatal(server.Uninstall())
 		fmt.Printf("harness uninstalled; its config, sessions and auth table stay in %s\n", server.Dir)
 	case verb == "up" && len(args) == 2:
-		c, err := server.Load(args[1])
-		fatal(err)
-		fatal(server.Up(c))
+		fatal(server.Up(args[1]))
 	case verb == "install":
 		h, fresh := config(args[1:])
 		fatal(h.Expand())
@@ -126,9 +124,7 @@ type handover struct {
 func config(args []string) (h handover, fresh bool) {
 	switch {
 	case len(args) == 0:
-		c, err := server.Default()
-		fatal(err)
-		return handover{Config: c, Key: rand.Text()}, true
+		return handover{Config: server.Default(), Key: rand.Text()}, true
 	case len(args) == 1:
 		b, err := os.ReadFile(args[0])
 		fatal(err)
@@ -178,7 +174,12 @@ func done(h handover) {
 	if tunnel.QuickURL(h.URL) {
 		fmt.Printf("%s\nuse your own URL:  mainplane-server tunnel <url> <cloudflared token>\n", tunnel.QuickWarning)
 	}
-	fmt.Printf("edit the config:   %s\n\nconnect a worker; one token works for any number of machines:\n%s", server.Conf, installLines(h.Join))
+	if len(h.Providers) == 0 {
+		fmt.Printf("add api keys to the config: %s, as \"providers\": {\"anthropic\": {\"key\": \"sk-ant-...\"}}\n", server.Conf)
+	} else {
+		fmt.Printf("edit the config:   %s\n", server.Conf)
+	}
+	fmt.Printf("\nconnect a worker; one token works for any number of machines:\n%snote: a worker on this machine whose user is admin can read the config, api keys included\n", installLines(h.Join))
 }
 
 // installLines are the lines that make a machine a worker with a join token.
@@ -270,8 +271,9 @@ func usage() {
 	fmt.Fprint(os.Stderr, `usage: mainplane-server <verb> ...
 
   up        <config.json>                 run the harness
-  install                                 run it at every boot, with the provider keys set in this shell, behind a
-                                          quick tunnel: a temporary URL, no domain needed. Logs this machine's CLI in
+  install                                 run it at every boot, with the provider keys set in this shell, if any, behind a
+                                          quick tunnel: a temporary URL, no domain needed. Logs this machine's CLI in.
+                                          Providers and links in the config apply when it is saved
   install   <config.json>                 run it at every boot from a root-only copy of the config
                                           Either install prints a new join token named default, for any number of
                                           machines; the default token before it joins no more
@@ -282,8 +284,8 @@ func usage() {
   join      new <name> [ephemeral] | revoke <name> | list
                                           join secrets of the installed harness: what a machine needs to become a worker.
                                           The name is the secret's, for revoke; a worker is named by its hostname.
-                                          An ephemeral one's workers see only the harness and leave the mesh 3 minutes
-                                          after they go quiet. Revoking refuses new joins; its workers stay until
+                                          An ephemeral one's workers leave the mesh 3 minutes after they go quiet.
+                                          Revoking refuses new joins; its workers stay until
                                           mainplane worker remove <worker>
   update    [version]                     the installed harness becomes that release, the latest stable by default;
                                           prints the changelog between, restarts it, and workers follow

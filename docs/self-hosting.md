@@ -26,6 +26,20 @@ domain, a name like `https://four-random-words.trycloudflare.com`.
   open (its map poll and its relay connection), and each `mainplane chat`
   one, so about 95 workers fit. For more, use your own domain.
 
+## The config
+
+`mainplane-server install` writes the config (`/var/lib/mainplane-server/config.json`
+on Linux) with the provider keys set in the shell, or none. Add keys there:
+
+```
+"providers": {"anthropic": {"key": "sk-ant-..."}}
+```
+
+The harness applies providers and links within seconds of a save; any other
+change applies at its next start. Only root can read the config. A worker on
+the harness's machine runs code as its operator, so an operator who is admin
+can read it, api keys included.
+
 ## Your own domain
 
 1. In the Cloudflare dashboard, open Zero Trust, Networks, Tunnels, and create
@@ -63,12 +77,16 @@ in userspace, as the node `harness`, and workers reach it at port 7000 there.
 Nothing listens on that port outside the mesh.
 
 - Who sees whom: the harness sees every worker and every worker sees the
-  harness. Workers joined with a normal join secret, your own machines, see
-  each other. Workers joined with an ephemeral one
-  (`mainplane-server join new <name> ephemeral`), for fleets, see only the
-  harness. A peer outside a worker's map is not in its hosts block, and
-  WireGuard drops its packets at both ends.
-- An ephemeral worker leaves the mesh 3 minutes after it goes quiet.
+  harness. Two workers see each other only when a link in the harness config
+  names them: `"links": [["alexanders-mac-mini", "linuxbox"]]`. A peer
+  outside a worker's map is not in its hosts block, and WireGuard drops its
+  packets at both ends. A worker that runs untrusted work reaches none of your
+  other machines unless you link it.
+- A worker joined with an ephemeral secret
+  (`mainplane-server join new <name> ephemeral`), for fleets, leaves the mesh
+  3 minutes after it goes quiet.
+- The CLI on a worker reaches its harness over the mesh, not through the
+  tunnel, when the worker follows the harness the CLI is logged in to.
 - `mainplane worker remove <name>` takes a worker off the mesh within seconds:
   its peers lose it and its name, and the worker takes down its interface and
   hosts block. Its keys stay refused. To make it a worker again, run

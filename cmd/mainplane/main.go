@@ -182,11 +182,17 @@ func status(args []string) {
 	}
 	c, err := login()
 	v := ""
+	if err == nil && c.mesh != "" { // calls go over the mesh; the URL shown must still be current
+		err = c.find()
+	}
 	if err == nil {
 		v, err = c.harness()
 	}
 	if err == nil {
 		fmt.Printf("mainplane-server version: %s\nmainplane-server url: %s\n", v, c.URL)
+		if c.mesh != "" {
+			fmt.Printf("mainplane-server on the mesh: %s\n", c.mesh)
+		}
 		if tunnel.QuickURL(c.URL) {
 			fmt.Println(tunnel.QuickWarning)
 		}

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"io/fs"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/textproto"
 	"net/url"
@@ -22,9 +24,11 @@ import (
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/harness"
+	"github.com/mainplane-ai/mainplane/pkg/mesh"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/version"
+	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 // via is what this connector writes on every record it causes.
@@ -112,14 +116,17 @@ func cli(verb string, args []string) {
 }
 
 // client is what login wrote: the harness's key, the URL it was last found
-// at, and the api key's secret.
+// at, and the api key's secret. On a worker of that harness, calls go to its
+// node on the mesh, at mesh.
 type client struct {
 	URL     string `json:"url"`
 	Key     string `json:"key"`
 	Harness string `json:"harness"`
+	mesh    string
 }
 
-// login is what login wrote, with the harness proved at its URL, or found
+// login is what login wrote, with the harness on the mesh when the worker on
+// this machine follows the same harness key, else proved at its URL, or found
 // again through the pointer and saved.
 func login() (client, error) {
 	var c client
@@ -130,12 +137,22 @@ func login() (client, error) {
 	if err := json.Unmarshal(b, &c); err != nil {
 		return c, err
 	}
+	if k, a, err := mesh.Harness(worker.Harness); err == nil && k == c.Harness {
+		c.mesh = "http://" + net.JoinHostPort(a.String(), strconv.Itoa(worker.APIPort))
+		return c, nil
+	}
+	return c, c.find()
+}
+
+// find proves the harness at its URL, or finds it again through the pointer
+// and saves it.
+func (c *client) find() error {
 	url, err := pointer.Find(context.Background(), c.Harness, c.URL)
 	if err != nil || url == c.URL {
-		return c, err
+		return err
 	}
 	c.URL = url
-	return c, c.save()
+	return c.save()
 }
 
 func (c client) save() error {
@@ -168,7 +185,7 @@ func (c client) call(method, path, ctype string, body io.Reader, out any) *http.
 // do does one request; a status outside 2xx is an error in the harness's own
 // words.
 func (c client) do(method, path, ctype string, body io.Reader) (*http.Response, error) {
-	req, err := http.NewRequest(method, c.URL+path, body)
+	req, err := http.NewRequest(method, cmp.Or(c.mesh, c.URL)+path, body)
 	if err != nil {
 		return nil, err
 	}
