@@ -219,7 +219,8 @@ func (c client) harness() (string, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	var out struct{ Version string }
-	return out.Version, json.NewDecoder(resp.Body).Decode(&out)
+	err = json.NewDecoder(resp.Body).Decode(&out)
+	return out.Version, err
 }
 
 // post appends text and files as one turn: a single text/plain body, or one
