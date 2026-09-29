@@ -12,8 +12,9 @@ import (
 )
 
 // max_tokens is required by the Messages API. 16384 fits every current Claude
-// model. No thinking field: Opus 4.8 and later think adaptively by default and
-// reject the enabled type with a budget.
+// model. Thinking is adaptive: Opus 4.7 and later reject the enabled type with
+// a budget, and Opus 4.8 does not think when the field is left out. The 4.5
+// models, which predate adaptive, reject it.
 const (
 	anthMaxTokens = 16384
 	anthCacheTTL  = 300 // ephemeral, refreshed on every hit
@@ -38,12 +39,17 @@ func (anthropic) Name() string { return "anthropic" }
 func (anthropic) Accepts(typ string) bool { return slices.Contains(images, typ) }
 
 type anthReq struct {
-	Model     string      `json:"model"`
-	MaxTokens int         `json:"max_tokens"`
-	Stream    bool        `json:"stream"`
-	System    []anthBlock `json:"system,omitempty"`
-	Tools     []anthTool  `json:"tools,omitempty"`
-	Messages  []anthMsg   `json:"messages"`
+	Model     string       `json:"model"`
+	MaxTokens int          `json:"max_tokens"`
+	Stream    bool         `json:"stream"`
+	System    []anthBlock  `json:"system,omitempty"`
+	Thinking  anthThinking `json:"thinking"`
+	Tools     []anthTool   `json:"tools,omitempty"`
+	Messages  []anthMsg    `json:"messages"`
+}
+
+type anthThinking struct {
+	Type string `json:"type"`
 }
 
 type anthTool struct {
@@ -89,6 +95,7 @@ func (e anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
 		Model:     req.Model,
 		MaxTokens: anthMaxTokens,
 		Stream:    true,
+		Thinking:  anthThinking{Type: "adaptive"},
 		Messages:  []anthMsg{},
 	}
 	var marks []string
