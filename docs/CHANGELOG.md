@@ -4,6 +4,14 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 
 ## v0.4.0
 
+Workers no longer see each other by default: each sees only the harness. To let two reach each other, name them in the harness config: `"links": [["alexanders-mac-mini", "linuxbox"]]`.
+
+- Links and provider keys in the harness config apply within seconds of a save; the rest of the config at the next start
+- The harness installs with no provider key set; it says where to add one
+- The harness install notes that a worker on its machine, run by an admin, can read the config and its keys
+- A new worker asks the pointer again after 5s, then 10s, up to a minute, where it waited a minute: a worker installed right after its harness joins in seconds
+- The CLI on a worker calls its harness over the mesh, off the tunnel, when the worker follows the harness it is logged in to. The harness serves the API on its mesh node at port 8080
+- `mainplane status` on a worker whose harness does not answer says so, with its URL, and what to do if the harness was uninstalled or installed again
 - The harness install prints a join token named `default`, good for any number of machines, and the lines that install a worker with it on Linux, macOS and Windows. Each install makes a new one; the one before joins no more machines. The name in `mainplane-server join new <name>` is the secret's, for revoke; a worker is named by its hostname
 - Installs print less: no checksum lines, a spinner while the harness and its tunnel start, then a wordmark, the version, and what to do next
 - Sessions: `context` in a create body and in the config record is `context_limit`, and `prompt` in session info is `context_used`. A session made before reads a limit of 0 and fails at its next step: start a new one

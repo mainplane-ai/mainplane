@@ -104,14 +104,14 @@ func (m *Mesh) status() string {
 		return "removed from the mesh by its harness\n"
 	default:
 	}
-	nm := m.lb.NetMapWithPeers()
-	if nm == nil {
-		return fmt.Sprintf("no map yet from the harness at %s\n", m.lb.Prefs().ControlURL())
-	}
 	self, hint := "this machine", ""
 	if !m.health.GetInPollNetMap() {
 		self += ", harness unresponsive"
-		hint = fmt.Sprintf("\nthe harness at %s does not answer. If it was uninstalled or installed again, run mainplane uninstall here, then its new install line\n", m.lb.Prefs().ControlURL())
+		hint = fmt.Sprintf("the harness at %s does not answer. If it was uninstalled or installed again, run mainplane uninstall here, then its new install line\n", m.lb.Prefs().ControlURL())
+	}
+	nm := m.lb.NetMapWithPeers()
+	if nm == nil {
+		return "no map yet from the harness\n" + hint
 	}
 	var b strings.Builder
 	st := m.lb.Status()
@@ -135,5 +135,8 @@ func (m *Mesh) status() string {
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", p.Name(), p.Addresses().At(0).Addr(), path)
 	}
 	_ = w.Flush()
-	return b.String() + hint
+	if hint != "" {
+		b.WriteString("\n" + hint)
+	}
+	return b.String()
 }
