@@ -70,7 +70,7 @@ func Work(key string, l Local) error {
 	if err != nil {
 		return err
 	}
-	go Dial(key, l)
+	go Dial(m, l)
 	log.Printf("%v: leaving the mesh", <-stop)
 	return m.Close()
 }

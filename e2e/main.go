@@ -6,7 +6,8 @@
 //	task e2e -- <v> <prev> <port> <os>=<ssh target>...
 //
 // The machines reach this one through a quick tunnel the run opens to port on
-// loopback, as they reach an installed harness. Linux and macOS targets
+// loopback, as they reach an installed harness, and dial the harness on its
+// mesh, so prev must be a release whose workers do. Linux and macOS targets
 // need passwordless sudo. The Windows target must be an elevated login, with
 // the operator logged in at the console. Then each machine becomes a harness
 // in one line, which updates to prev and back, and both are uninstalled: a
@@ -26,6 +27,7 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -37,11 +39,14 @@ import (
 	"unicode/utf16"
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
+	"github.com/mainplane-ai/mainplane/pkg/coordinator"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
+	"github.com/mainplane-ai/mainplane/pkg/relay"
 	"github.com/mainplane-ai/mainplane/pkg/release"
 	"github.com/mainplane-ai/mainplane/pkg/tunnel"
 	"github.com/mainplane-ai/mainplane/pkg/version"
+	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 const (
@@ -260,19 +265,45 @@ func key() ed25519.PrivateKey {
 
 // phase is a harness at version v, reached at url, until one worker for each
 // OS connects, or is refused with text, then checks each in full when mode
-// is check.
+// is check. As the real one, it coordinates and relays the mesh, and its own
+// node there, with its keys in dir, takes the workers. Its log, the mesh's
+// mostly, goes to harness.log in dir.
 func phase(listen, url, secret, v string, oses []string, mode, text string) {
 	version.V = v
-	p := harness.NewPool(func(s, _ string) error {
+	f, err := os.OpenFile(filepath.Join(dir(), "harness.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.SetOutput(f)
+	coord, err := coordinator.New(dir(), func(s, _ string) error {
 		if s != secret {
 			return errors.New("join secret refused")
 		}
 		return nil
 	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	coord.Relay(url)
+	derp := relay.New()
+	derp.SetVerifyClientFunc(coord.Known)
 	mux := http.NewServeMux()
-	mux.Handle("/worker", p)
-	mux.Handle("/id", pointer.ID(key(), func() string { return url }, ""))
-	go func() { log.Fatal(http.ListenAndServe(listen, mux)) }()
+	mux.Handle("/id", pointer.ID(key(), func() string { return url }, coord.Public().String()))
+	coord.Handle(mux)
+	relay.Handle(mux, derp)
+	ln, err := net.Listen("tcp", listen)
+	if err != nil {
+		log.Fatal(err)
+	}
+	go func() { log.Fatal(http.Serve(ln, mux)) }()
+	p := harness.NewPool()
+	go func() {
+		l, err := coord.Listen(context.Background(), filepath.Join(dir(), "mesh"), "http://"+listen, worker.Port)
+		if err == nil {
+			err = p.Serve(l, coord.Node)
+		}
+		log.Fatal(err)
+	}()
 	fmt.Printf("== harness %s: %s %s\n", v, mode, text)
 	start := time.Now()
 	got := map[string]harness.Listed{}

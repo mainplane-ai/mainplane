@@ -20,9 +20,9 @@ import (
 )
 
 // Local is what this machine offers: its name, the join secret that lets it
-// in, where spilled output lands, and which interpreters it has. The first
-// interpreter is the default. Under a root service, Operator is the user code
-// runs and files are touched as; nil is the worker's own user.
+// join the mesh, where spilled output lands, and which interpreters it has.
+// The first interpreter is the default. Under a root service, Operator is the
+// user code runs and files are touched as; nil is the worker's own user.
 type Local struct {
 	Name     string
 	Secret   string
@@ -42,12 +42,11 @@ type server struct {
 
 // Serve answers one harness until the connection ends, then kills every
 // environment. Each request runs in its own goroutine; runs that share an
-// environment queue on it. The hello carries the secret as its body, so no
-// list of hellos shows it. An error frame with no id is the harness ending
+// environment queue on it. An error frame with no id is the harness ending
 // the connection on purpose, and its text is the error.
 func Serve(conn net.Conn, l Local) error {
 	s := &server{Local: l, conn: conn, envs: map[string]*env{}, dead: map[string]bool{}}
-	if err := s.send(Frame{Header: Header{Kind: Hello, Name: l.Name, OS: runtime.GOOS, Arch: runtime.GOARCH, Interps: l.Interps, Scratch: l.Scratch, Version: version.V}, Body: []byte(l.Secret)}); err != nil {
+	if err := s.send(Frame{Header: Header{Kind: Hello, Name: l.Name, OS: runtime.GOOS, Arch: runtime.GOARCH, Interps: l.Interps, Scratch: l.Scratch, Version: version.V}}); err != nil {
 		return err
 	}
 	br := bufio.NewReader(conn)

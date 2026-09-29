@@ -19,6 +19,14 @@ const (
 	MaxLines = 2000
 )
 
+// A worker dials the mesh node the coordinator names Harness, at Port, the
+// port the design names. The port is open on the mesh only, and the name is
+// one the coordinator gives no worker.
+const (
+	Harness = "harness"
+	Port    = 7000
+)
+
 // Kinds. The first five go harness to worker; the rest come back. Hello,
 // update, and the done or error that answers an update are the contract every
 // version from v0.1.0 keeps: they are how a worker of another release becomes

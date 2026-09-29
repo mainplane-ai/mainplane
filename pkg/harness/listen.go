@@ -1,29 +1,24 @@
 package harness
 
 import (
-	"context"
+	"errors"
 	"log"
 	"net"
-	"net/http"
+	"net/netip"
 	"slices"
 	"strings"
 	"sync"
 
-	"github.com/coder/websocket"
-
-	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 // Pool is the set of workers connected right now, keyed by the name each
-// hello carries. Workers dial in and are known the moment they say hello
-// with a join secret admit accepts; a lost connection forgets the worker
-// until it dials again.
+// hello carries. Workers dial in over the mesh and are known the moment they
+// say hello; a lost connection forgets the worker until it dials again.
 type Pool struct {
 	mu      sync.Mutex
 	m       map[string]*Remote
 	refused map[string]Listed // admitted workers the last connection of which was refused
-	admit   func(secret, addr string) error
 }
 
 // Listed is a worker as GET /workers shows it: its hello, and why its last
@@ -33,8 +28,8 @@ type Listed struct {
 	Refused string `json:"refused,omitempty"`
 }
 
-func NewPool(admit func(secret, addr string) error) *Pool {
-	return &Pool{m: map[string]*Remote{}, refused: map[string]Listed{}, admit: admit}
+func NewPool() *Pool {
+	return &Pool{m: map[string]*Remote{}, refused: map[string]Listed{}}
 }
 
 func (p *Pool) Add(r *Remote) {
@@ -69,25 +64,37 @@ func (p *Pool) List() []Listed {
 	return out
 }
 
-// ServeHTTP takes a worker's WebSocket at /worker and holds it as the
-// worker's one connection, frames in binary messages. It sits outside api key
-// auth: the join secret in the hello is the worker's credential. A worker
-// that dials again under a name still held replaces the old entry: the old
-// connection is dead or dying, and the new one is the worker as it is now.
-func (p *Pool) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	c, err := websocket.Accept(w, req, nil)
-	if err != nil {
-		return
+// Serve holds every worker that dials l, the harness's own node on the mesh,
+// until l closes. WireGuard admits only nodes the coordinator gave keys to,
+// and the source address is checked against node, the coordinator's
+// registry, so no secret rides the connection. A worker that dials again
+// under a name still held replaces the old entry: the old connection is dead
+// or dying, and the new one is the worker as it is now.
+func (p *Pool) Serve(l net.Listener, node func(netip.Addr) (string, bool)) error {
+	for {
+		c, err := l.Accept()
+		if err != nil {
+			return err
+		}
+		go p.serve(c, node)
 	}
-	c.SetReadLimit(-1) // a frame is a whole file read or write; its size is the worker protocol's business
-	p.serve(websocket.NetConn(context.Background(), c, websocket.MessageBinary), auth.Addr(req))
 }
 
 // serve holds one worker from hello to hangup. A refused hello is told why
 // before the close, so the worker's log says it and not just EOF. A refused
-// worker that passed admit is listed with the reason until it connects.
-func (p *Pool) serve(conn net.Conn, who string) {
-	r, err := Connect(conn, func(secret string) error { return p.admit(secret, who) })
+// worker that passed admit is listed with the reason until it connects. The
+// source is read after the hello: netstack knows it once the handshake ends.
+func (p *Pool) serve(conn net.Conn, node func(netip.Addr) (string, bool)) {
+	who := ""
+	r, err := Connect(conn, func() error {
+		a, err := netip.ParseAddrPort(conn.RemoteAddr().String())
+		who = a.Addr().String()
+		if name, ok := node(a.Addr()); err == nil && ok {
+			who = name + " " + who
+			return nil
+		}
+		return errors.New("not a node of this mesh")
+	})
 	if err != nil {
 		if r != nil {
 			who = r.Name + " at " + who
@@ -100,7 +107,7 @@ func (p *Pool) serve(conn net.Conn, who string) {
 		_ = conn.Close()
 		return
 	}
-	log.Printf("worker %s connected: %s %s %s", r.Name, r.OS, r.Arch, r.Version)
+	log.Printf("worker %s connected from %s: %s %s %s", r.Name, who, r.OS, r.Arch, r.Version)
 	p.Add(r)
 	<-r.done
 	p.mu.Lock()

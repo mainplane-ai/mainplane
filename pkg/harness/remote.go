@@ -38,12 +38,12 @@ type Remote struct {
 	done  chan struct{}            // closed when the connection ends
 }
 
-// Connect reads the worker's hello, checks the join secret in its body with
-// admit, whose error is why it is refused, and starts routing its replies. A worker from another release is
+// Connect reads the worker's hello, checks the connection with admit, whose
+// error is why it is refused, and starts routing its replies. A worker from another release is
 // told to update to this one and refused: it comes back as this release, and
 // the error says whether the update began or why it failed. That worker is
 // returned with the error, so the pool can list it.
-func Connect(conn net.Conn, admit func(secret string) error) (*Remote, error) {
+func Connect(conn net.Conn, admit func() error) (*Remote, error) {
 	br := bufio.NewReader(conn)
 	hello, err := worker.Decode(br)
 	if err != nil {
@@ -52,7 +52,7 @@ func Connect(conn net.Conn, admit func(secret string) error) (*Remote, error) {
 	if hello.Kind != worker.Hello {
 		return nil, fmt.Errorf("first frame is %q, want hello", hello.Kind)
 	}
-	if err := admit(string(hello.Body)); err != nil {
+	if err := admit(); err != nil {
 		return nil, err
 	}
 	r := &Remote{Header: hello.Header, conn: conn, calls: map[string]chan worker.Frame{}, left: map[string]chan struct{}{}, done: make(chan struct{})}

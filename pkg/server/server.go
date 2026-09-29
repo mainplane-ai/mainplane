@@ -24,6 +24,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/relay"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/tunnel"
+	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 // The pointer drops a record 30 days after its last publish; a daily one
@@ -95,12 +96,12 @@ func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
 }
 
 // Harness runs the harness role on one loopback port, behind the user's own
-// tunnel or a quick one, until ctx ends or the listener or the tunnel fails: workers open a
-// WebSocket at /worker with a join secret, /id proves the harness key to
-// anyone before they send one, /ts2021 coordinates the mesh, /derp relays
-// between its nodes, connectors call every other route with an api key,
-// every session that was open on start resumes. The pointer and the relay
-// map follow the tunnel's URL.
+// tunnel or a quick one, until ctx ends or the listener, the mesh node or the
+// tunnel fails: /id proves the harness key to anyone before they send a
+// secret, /ts2021 coordinates the mesh, /derp relays between its nodes,
+// connectors call every other route with an api key, every session that was
+// open on start resumes. The harness joins its own mesh, and workers dial it
+// there. The pointer and the relay map follow the tunnel's URL.
 func Harness(ctx context.Context, c Config) error {
 	if host, _, _ := net.SplitHostPort(c.HTTP); !net.ParseIP(host).IsLoopback() {
 		return fmt.Errorf("http %q: the harness listens on loopback only, such as 127.0.0.1:8080; the tunnel is the one way in", c.HTTP)
@@ -134,7 +135,7 @@ func Harness(ctx context.Context, c Config) error {
 		}
 		return nil
 	}
-	pool := harness.NewPool(join)
+	pool := harness.NewPool()
 	coord, err := coordinator.New(c.Admin, join)
 	if err != nil {
 		return err
@@ -145,7 +146,6 @@ func Harness(ctx context.Context, c Config) error {
 	urls := make(chan string, 1)
 	go publish(ctx, k, urls)
 	mux := http.NewServeMux()
-	mux.Handle("/worker", pool)
 	mux.Handle("/id", pointer.ID(k, func() string { return at.Load().(string) }, coord.Public().String()))
 	coord.Handle(mux)
 	derp := relay.New()
@@ -161,9 +161,20 @@ func Harness(ctx context.Context, c Config) error {
 	if err := h.Resume(ctx); err != nil {
 		return err
 	}
-	log.Printf("harness: http and workers on %s, sessions in %s, %d api keys, %d join secrets", c.HTTP, c.Admin, len(t[auth.Key]), len(t[auth.Join]))
-	errs := make(chan error, 2)
-	go func() { errs <- srv.ListenAndServe() }()
+	ln, err := net.Listen("tcp", c.HTTP)
+	if err != nil {
+		return err
+	}
+	log.Printf("harness: http on %s, sessions in %s, %d api keys, %d join secrets", c.HTTP, c.Admin, len(t[auth.Key]), len(t[auth.Join]))
+	errs := make(chan error, 3)
+	go func() { errs <- srv.Serve(ln) }()
+	go func() {
+		l, err := coord.Listen(ctx, filepath.Join(c.Admin, "mesh"), "http://"+c.HTTP, worker.Port)
+		if err == nil {
+			err = pool.Serve(l, coord.Node)
+		}
+		errs <- err
+	}()
 	up := func(url string) {
 		log.Printf("harness: reached at %s", url)
 		at.Store(url)
