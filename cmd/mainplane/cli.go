@@ -13,6 +13,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -36,7 +37,7 @@ const resultLines = 20
 // number.
 var arity = map[string][2]int{
 	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {1, 1}, "retry": {1, 1}, "stop": {1, 1},
-	"info": {1, 1}, "sessions": {0, 1}, "workers": {0, 0}, "providers": {0, 0},
+	"info": {1, 1}, "sessions": {0, 1}, "workers": {0, 0}, "worker remove": {1, 1}, "providers": {0, 0},
 }
 
 // cli is the harness API as verbs: one verb, one route, its reply printed.
@@ -100,6 +101,8 @@ func cli(verb string, args []string) {
 			}
 			fmt.Printf("%-28s  %-13s  %-10s  %-16s  %s\n", w.Name, w.OS+"/"+w.Arch, strings.Join(w.Interps, ","), w.Version, state)
 		}
+	case "worker remove":
+		c.call("DELETE", "/workers/"+url.PathEscape(args[0]), "", nil, nil)
 	case "providers":
 		c.raw("/providers")
 	}

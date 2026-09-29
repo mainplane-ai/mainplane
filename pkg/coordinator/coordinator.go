@@ -3,12 +3,12 @@
 // tunnel passes. A worker registers with its join secret and gets an address
 // in the project's /48 and a name. The harness's own node registers the same
 // way, on loopback, with a secret only this process holds. Then each node
-// long-polls a map of every other node and of the relay. The nodes are in
-// nodes.json in the admin dir.
+// long-polls a map of the nodes it may reach and of the relay. The nodes are
+// in nodes.json in the admin dir.
 //
 // The protocol handling is copied from headscale's hscontrol (see LICENSE)
-// and trimmed to register, map, keepalive and deltas: no database, CLI, OIDC,
-// policy, DNS, routes, SSH or Taildrop.
+// and trimmed to register, map, keepalive, deltas and ephemeral expiry: no
+// database, CLI, OIDC, policy language, DNS, routes, SSH or Taildrop.
 package coordinator
 
 import (
@@ -67,6 +67,18 @@ const (
 	// Workers read it from the map's Domain for their long names,
 	// <worker>--<project>.mainplane.net.
 	project = "home"
+
+	// An ephemeral node goes this long after its last map poll ends. It is
+	// over twice the longest gap a live worker has between polls, a harness
+	// moving to a new quick URL (80s measured), and short enough that a fleet
+	// that finished is gone within minutes.
+	idle = 3 * time.Minute
+
+	// With no frame from a node for this long, the coordinator pings it, and
+	// a node that does not answer in 15s is gone. Only a closed connection
+	// ends a poll otherwise, and the tunnel keeps its side of a dead
+	// worker's open.
+	pingIdle = time.Minute
 )
 
 type node struct {
@@ -74,6 +86,11 @@ type node struct {
 	Name    string            `json:"name"`
 	Machine key.MachinePublic `json:"machine"`
 	Key     key.NodePublic    `json:"key"`
+
+	// An ephemeral node goes idle after its last poll. A removed one stays,
+	// so its keys cannot join again, but no node sees it and it sees none.
+	Ephemeral bool `json:"ephemeral,omitempty"`
+	Removed   bool `json:"removed,omitempty"`
 
 	// From map requests. They are kept, as headscale does, because a node
 	// that reconnects after a restart sends only what changed, and peers
@@ -83,8 +100,9 @@ type node struct {
 	Hostinfo  *tailcfg.Hostinfo `json:"hostinfo"`
 
 	capVer  tailcfg.CapabilityVersion
-	streams int    // open map polls
-	ver     uint64 // bumped on each change a peer must see
+	streams int       // open map polls
+	quiet   time.Time // when the last poll ended
+	ver     uint64    // bumped on each change a peer must see
 }
 
 type state struct {
@@ -96,7 +114,7 @@ type state struct {
 type Coordinator struct {
 	key  key.MachinePrivate
 	file string
-	join func(secret, addr string) error
+	join func(secret, addr string) (ephemeral bool, err error)
 	self string // the harness's own node registers with it; never on disk
 
 	mu    sync.Mutex
@@ -107,8 +125,10 @@ type Coordinator struct {
 }
 
 // New loads the Noise key and the nodes from dir, made there the first time.
-// join checks a join secret sent from addr.
-func New(dir string, join func(secret, addr string) error) (*Coordinator, error) {
+// join checks a join secret sent from addr and says whether it makes
+// ephemeral nodes. Each ephemeral node loaded has idle from now to poll
+// again.
+func New(dir string, join func(secret, addr string) (bool, error)) (*Coordinator, error) {
 	k, err := noiseKey(filepath.Join(dir, "noise.key"))
 	if err != nil {
 		return nil, err
@@ -121,7 +141,13 @@ func New(dir string, join func(secret, addr string) error) (*Coordinator, error)
 	if err != nil {
 		return nil, err
 	}
-	return c, json.Unmarshal(b, &c.st)
+	if err := json.Unmarshal(b, &c.st); err != nil {
+		return nil, err
+	}
+	for _, n := range c.st.Nodes {
+		c.expire(n)
+	}
+	return c, nil
 }
 
 // noiseKey is the coordinator's machine key kept in file. Whoever has it can
@@ -196,18 +222,59 @@ func (c *Coordinator) Listen(ctx context.Context, dir, control string, port int)
 func (c *Coordinator) Known(k key.NodePublic) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.byKey(k) != nil
+	n := c.byKey(k)
+	return n != nil && !n.Removed
 }
 
 // Node is the name of the registered node at address a.
 func (c *Coordinator) Node(a netip.Addr) (string, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	i := slices.IndexFunc(c.st.Nodes, func(n *node) bool { return address(n.ID) == a })
+	i := slices.IndexFunc(c.st.Nodes, func(n *node) bool { return address(n.ID) == a && !n.Removed })
 	if i < 0 {
 		return "", false
 	}
 	return c.st.Nodes[i].Name, true
+}
+
+// Remove takes the worker named name off the mesh for good. Its poll ends
+// and peers drop it at once. Its next poll finds it no longer authorized,
+// which its worker takes as the word to leave. Its keys stay refused; the
+// same machine joins again only with new keys, as a new install makes.
+func (c *Coordinator) Remove(name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	i := slices.IndexFunc(c.st.Nodes, func(n *node) bool { return n.Name == name && !n.Removed })
+	if i < 0 || name == worker.Harness {
+		return fmt.Errorf("no worker %q on the mesh", name)
+	}
+	n := c.st.Nodes[i]
+	n.Removed = true
+	c.changed(n)
+	log.Printf("coordinator: %s removed", n.Name)
+	return c.save()
+}
+
+// expire deletes ephemeral node n once it has been idle with no poll. The
+// caller holds mu, or is alone.
+func (c *Coordinator) expire(n *node) {
+	if !n.Ephemeral {
+		return
+	}
+	n.quiet = time.Now()
+	time.AfterFunc(idle, func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if n.streams > 0 || time.Since(n.quiet) < idle || !slices.Contains(c.st.Nodes, n) {
+			return
+		}
+		c.st.Nodes = slices.DeleteFunc(c.st.Nodes, func(p *node) bool { return p == n })
+		c.wake()
+		if err := c.save(); err != nil {
+			log.Printf("coordinator: %v", err)
+		}
+		log.Printf("coordinator: %s expired, no map poll for %s", n.Name, idle)
+	})
 }
 
 // Handle serves the Noise key at /key and the protocol at /ts2021 on mux.
@@ -243,7 +310,7 @@ func (c *Coordinator) upgrade(w http.ResponseWriter, r *http.Request) {
 	mux.HandleFunc("POST /machine/map", func(w http.ResponseWriter, r *http.Request) {
 		c.serveMap(w, r, machine)
 	})
-	var h2 http2.Server
+	h2 := http2.Server{ReadIdleTimeout: pingIdle}
 	h2.ServeConn(conn, &http2.ServeConnOpts{Context: r.Context(), BaseConfig: &http.Server{Handler: http.MaxBytesHandler(mux, bodyLimit)}})
 }
 
@@ -273,9 +340,10 @@ func (c *Coordinator) register(machine key.MachinePublic, addr string, req tailc
 		if req.Auth != nil {
 			secret = req.Auth.AuthKey
 		}
-		self := subtle.ConstantTimeCompare([]byte(secret), []byte(c.self)) == 1
+		self, ephemeral := subtle.ConstantTimeCompare([]byte(secret), []byte(c.self)) == 1, false
 		if !self {
-			if err := c.join(secret, addr); err != nil {
+			var err error
+			if ephemeral, err = c.join(secret, addr); err != nil {
 				return tailcfg.RegisterResponse{Error: err.Error()}
 			}
 		}
@@ -287,16 +355,17 @@ func (c *Coordinator) register(machine key.MachinePublic, addr string, req tailc
 				name = worker.Harness
 				c.st.Nodes = slices.DeleteFunc(c.st.Nodes, func(p *node) bool { return p.Name == name })
 			}
-			n = &node{ID: c.st.Next, Name: name, Machine: machine}
+			n = &node{ID: c.st.Next, Name: name, Machine: machine, Ephemeral: ephemeral}
 			c.st.Next++
 			c.st.Nodes = append(c.st.Nodes, n)
+			c.expire(n)
 		}
 		n.Key, n.Hostinfo = req.NodeKey, req.Hostinfo
 		c.changed(n)
 		if err := c.save(); err != nil {
 			return tailcfg.RegisterResponse{Error: err.Error()}
 		}
-		log.Printf("coordinator: %s joined as %s from %s", n.Name, address(n.ID), addr)
+		log.Printf("coordinator: %s joined as %s from %s, ephemeral %v", n.Name, address(n.ID), addr, n.Ephemeral)
 	}
 	return tailcfg.RegisterResponse{
 		MachineAuthorized: true,
@@ -334,7 +403,9 @@ func (c *Coordinator) serveMap(w http.ResponseWriter, r *http.Request, machine k
 	defer func() {
 		c.mu.Lock()
 		delete(c.wakes, wake)
-		n.streams--
+		if n.streams--; n.streams == 0 {
+			c.expire(n)
+		}
 		c.changed(n)
 		c.mu.Unlock()
 	}()
@@ -395,11 +466,12 @@ func (c *Coordinator) update(n *node, req tailcfg.MapRequest) {
 	}
 }
 
-// delta is what n has not seen: every peer whose version differs from sent,
-// peers gone since, and the relay map when the host moved from host. It is
-// nil when there is nothing, and not ok once n itself is gone.
+// delta is what n has not seen: every peer it sees whose version differs
+// from sent, peers gone from its sight since, and the relay map when the host
+// moved from host. It is nil when there is nothing, and not ok once n itself
+// is gone, or removed since the full map, which told it so.
 func (c *Coordinator) delta(n *node, sent map[tailcfg.NodeID]uint64, host *string, full bool) (*tailcfg.MapResponse, bool) {
-	if !slices.Contains(c.st.Nodes, n) {
+	if !slices.Contains(c.st.Nodes, n) || n.Removed && !full {
 		return nil, false
 	}
 	r := &tailcfg.MapResponse{}
@@ -415,8 +487,11 @@ func (c *Coordinator) delta(n *node, sent map[tailcfg.NodeID]uint64, host *strin
 	}
 	live := map[tailcfg.NodeID]bool{}
 	for _, p := range c.st.Nodes {
+		if p == n || !sees(n, p) {
+			continue
+		}
 		live[p.ID] = true
-		if v, ok := sent[p.ID]; p == n || ok && v == p.ver {
+		if v, ok := sent[p.ID]; ok && v == p.ver {
 			continue
 		}
 		sent[p.ID] = p.ver
@@ -438,7 +513,24 @@ func (c *Coordinator) delta(n *node, sent map[tailcfg.NodeID]uint64, host *strin
 	return r, true
 }
 
-// tail is headscale's TailNode, trimmed: one address, no routes, no caps.
+// sees is whether a and b are in each other's map, which is the whole access
+// rule: WireGuard takes packets only from peers in the map, at both ends. The
+// harness sees every node and every node sees it, as will the file server
+// once there is one. Persistent workers, a user's own machines, see each
+// other. An ephemeral worker, one of a fleet, sees only those. A removed node
+// sees none and is seen by none.
+func sees(a, b *node) bool {
+	switch {
+	case a.Removed || b.Removed:
+		return false
+	case a.Name == worker.Harness || b.Name == worker.Harness:
+		return true
+	}
+	return !a.Ephemeral && !b.Ephemeral
+}
+
+// tail is headscale's TailNode, trimmed: one address, no routes, no caps. A
+// removed node is no longer authorized.
 func tail(n *node) *tailcfg.Node {
 	a := netip.PrefixFrom(address(n.ID), 128)
 	online := n.streams > 0
@@ -456,7 +548,7 @@ func tail(n *node) *tailcfg.Node {
 		HomeDERP:          home(n.Hostinfo),
 		Hostinfo:          n.Hostinfo.View(),
 		Cap:               n.capVer,
-		MachineAuthorized: true,
+		MachineAuthorized: !n.Removed,
 		Online:            &online,
 	}
 }
@@ -516,7 +608,7 @@ func (c *Coordinator) name(hi *tailcfg.Hostinfo) string {
 		base = "worker"
 	}
 	name := base
-	for i := 2; name == "xn" || name == worker.Harness || slices.ContainsFunc(c.st.Nodes, func(p *node) bool { return p.Name == name }); i++ {
+	for i := 2; name == "xn" || name == worker.Harness || slices.ContainsFunc(c.st.Nodes, func(p *node) bool { return p.Name == name && !p.Removed }); i++ {
 		name = fmt.Sprintf("%s-%d", base, i)
 	}
 	return name

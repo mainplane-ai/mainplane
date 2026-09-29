@@ -125,22 +125,23 @@ func Harness(ctx context.Context, c Config) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	limit := &auth.Limit{}
-	join := func(secret, addr string) error {
+	join := func(secret, addr string) (bool, error) {
 		if err := limit.Wait(addr); err != nil {
-			return err
+			return false, err
 		}
-		if !store.Check(auth.Join, secret) {
+		e, ok := store.Find(auth.Join, secret)
+		if !ok {
 			limit.Refused(addr)
-			return errors.New("join secret refused")
+			return false, errors.New("join secret refused")
 		}
-		return nil
+		return e.Ephemeral, nil
 	}
 	pool := harness.NewPool()
 	coord, err := coordinator.New(c.Admin, join)
 	if err != nil {
 		return err
 	}
-	h := &harness.Harness{Sessions: statefile.Sessions{Dir: c.Admin}, Providers: ps, Workers: pool}
+	h := &harness.Harness{Sessions: statefile.Sessions{Dir: c.Admin}, Providers: ps, Workers: pool, Remove: coord.Remove}
 	var at atomic.Value
 	at.Store("")
 	urls := make(chan string, 1)
