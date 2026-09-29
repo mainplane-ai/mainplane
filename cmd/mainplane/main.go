@@ -144,9 +144,13 @@ func work(install bool, args []string) {
 // elevated; v goes along, since sudo may give root a home without the login.
 func update(v string) {
 	if v == "" {
-		if c, err := login(); err == nil {
-			v = c.harness()
-		} else if v, err = release.Latest(); err != nil {
+		c, err := login()
+		if err == nil {
+			v, err = c.harness()
+		} else {
+			v, err = release.Latest()
+		}
+		if err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -176,14 +180,19 @@ func status(args []string) {
 	if len(args) != 0 {
 		usage()
 	}
-	if c, err := login(); err == nil {
-		fmt.Printf("mainplane-server version: %s\nmainplane-server url: %s\n", c.harness(), c.URL)
+	c, err := login()
+	v := ""
+	if err == nil {
+		v, err = c.harness()
+	}
+	if err == nil {
+		fmt.Printf("mainplane-server version: %s\nmainplane-server url: %s\n", v, c.URL)
 		if tunnel.QuickURL(c.URL) {
 			fmt.Println(tunnel.QuickWarning)
 		}
 		fmt.Println()
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		fmt.Printf("mainplane-server unresponsive: %v\n\n", err)
+		fmt.Printf("mainplane-server: %v\n\n", err)
 	}
 	s, err := mesh.Status()
 	if err != nil {

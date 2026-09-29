@@ -152,21 +152,9 @@ func (c client) save() error {
 // call does one request. A status outside 2xx is the harness's own words on
 // stderr and exit 1. A JSON reply lands in out when out is given.
 func (c client) call(method, path, ctype string, body io.Reader, out any) *http.Response {
-	req, err := http.NewRequest(method, c.URL+path, body)
+	resp, err := c.do(method, path, ctype, body)
 	if err != nil {
 		die(err)
-	}
-	req.Header.Set("Authorization", "Bearer "+c.Key)
-	if ctype != "" {
-		req.Header.Set("Content-Type", ctype)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		die(err)
-	}
-	if resp.StatusCode/100 != 2 {
-		b, _ := io.ReadAll(resp.Body)
-		die(fmt.Errorf("%s %s: %d %s", method, path, resp.StatusCode, strings.TrimSpace(string(b))))
 	}
 	if out != nil {
 		defer func() { _ = resp.Body.Close() }()
@@ -175,6 +163,29 @@ func (c client) call(method, path, ctype string, body io.Reader, out any) *http.
 		}
 	}
 	return resp
+}
+
+// do does one request; a status outside 2xx is an error in the harness's own
+// words.
+func (c client) do(method, path, ctype string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequest(method, c.URL+path, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Key)
+	if ctype != "" {
+		req.Header.Set("Content-Type", ctype)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode/100 != 2 {
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("%s %s: %d %s", method, path, resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return resp, nil
 }
 
 // raw prints a JSON reply as the harness sent it, indented.
@@ -190,7 +201,10 @@ func (c client) raw(path string) {
 
 // version refuses a harness from another release, and returns the one it runs.
 func (c client) version() string {
-	v := c.harness()
+	v, err := c.harness()
+	if err != nil {
+		die(err)
+	}
 	if !version.Match(v) {
 		die(fmt.Errorf("harness is version %s, this mainplane is %s: run mainplane update", v, version.V))
 	}
@@ -198,10 +212,14 @@ func (c client) version() string {
 }
 
 // harness is the release the harness runs.
-func (c client) harness() string {
+func (c client) harness() (string, error) {
+	resp, err := c.do("GET", "/", "", nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
 	var out struct{ Version string }
-	c.call("GET", "/", "", nil, &out)
-	return out.Version
+	return out.Version, json.NewDecoder(resp.Body).Decode(&out)
 }
 
 // post appends text and files as one turn: a single text/plain body, or one

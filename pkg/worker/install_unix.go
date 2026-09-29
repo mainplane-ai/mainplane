@@ -78,25 +78,22 @@ func setup(token string) error {
 }
 
 // done says the install is done, and whether the operator, so code on this
-// worker, can use sudo.
-func done() error {
+// worker, can use sudo. The worker runs by now, so a lookup that fails only
+// leaves the note out.
+func done() {
 	fmt.Print(version.Installed())
 	name := os.Getenv("SUDO_USER")
 	u, err := user.Lookup(name)
 	if err != nil {
-		return err
+		return
 	}
-	ids, err := u.GroupIds()
-	if err != nil {
-		return err
-	}
+	ids, _ := u.GroupIds()
 	for _, id := range ids {
 		if g, err := user.LookupGroupId(id); err == nil && slices.Contains(sudoers, g.Name) {
 			fmt.Printf("note: user %s is admin on this machine, this worker can use sudo\n", name)
-			return nil
+			return
 		}
 	}
-	return nil
 }
 
 // Uninstall stops the worker and removes its service, what a killed worker

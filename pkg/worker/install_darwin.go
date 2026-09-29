@@ -46,7 +46,8 @@ func Install(token string) error {
 	if err := run("launchctl", "bootstrap", "system", plistPath); err != nil {
 		return err
 	}
-	return done()
+	done()
+	return nil
 }
 
 // unregister stops the worker and removes its plist; none installed is fine.
