@@ -560,7 +560,7 @@ func tail(n *node) *tailcfg.Node {
 func (c *Coordinator) relayMap() *tailcfg.DERPMap {
 	return &tailcfg.DERPMap{Regions: map[int]*tailcfg.DERPRegion{region: {
 		RegionID:   region,
-		RegionCode: "mp",
+		RegionCode: "harness",
 		RegionName: "harness",
 		Nodes: []*tailcfg.DERPNode{
 			{Name: "harness", RegionID: region, HostName: c.host, DERPPort: 443, STUNPort: -1},
