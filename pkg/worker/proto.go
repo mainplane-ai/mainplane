@@ -21,10 +21,12 @@ const (
 
 // A worker dials the mesh node the coordinator names Harness, at Port, the
 // port the design names. The port is open on the mesh only, and the name is
-// one the coordinator gives no worker.
+// one the coordinator gives no worker. The CLI on a worker calls the API
+// there at APIPort, the harness's loopback port.
 const (
 	Harness = "harness"
 	Port    = 7000
+	APIPort = 8080
 )
 
 // Kinds. The first five go harness to worker; the rest come back. Hello,

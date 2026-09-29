@@ -17,7 +17,8 @@
 // connection, so each worker says hello to the next.
 //
 // The mesh is checked on the way: each machine's interface, hosts block and
-// Tailscale after the first phase; reach between every pair by long name,
+// Tailscale after the first phase; with no links, each worker sees only the
+// harness; linked, as every phase does, reach between every pair by long name,
 // mainplane status, endpoints, and an ephemeral node's view in it; workers
 // back within restartWait of a restart; one worker removed in the last
 // phase; and nothing of the mesh left after uninstall.
@@ -82,16 +83,14 @@ var (
 		false: `curl -fsSL %[1]s%[2]s/install.sh | sudo sh -s -- '%[3]s'`,
 		true:  `& ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) '%[3]s'`,
 	}
-	// The key only has to be set: install checks for one, and no step calls a model.
+	// No provider key: install works without one, and no step calls a model.
 	// Workers reach the harness on the mesh only: /worker, with a good key, is 404.
 	serverInstall = map[bool]string{
-		false: `export ANTHROPIC_API_KEY=e2e-unused
-curl -fsSL %[1]s%[2]s/install.sh | sh -s -- server || exit 1
+		false: `curl -fsSL %[1]s%[2]s/install.sh | sh -s -- server || exit 1
 /usr/local/bin/mainplane workers && echo workers-ok
 l=~/.mainplane/login.json
 curl -s -o /dev/null -w 'worker-%%{http_code}\n' -H "Authorization: Bearer $(sed 's/.*"key":"\([^"]*\)".*/\1/' $l)" "$(sed 's/.*"url":"\([^"]*\)".*/\1/' $l)/worker"`,
-		true: `$env:ANTHROPIC_API_KEY = 'e2e-unused'
-& ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) server
+		true: `& ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) server
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 mainplane workers
 if (!$LASTEXITCODE) { 'workers-ok' }
@@ -429,9 +428,9 @@ func phase(listen, url, secret, v string, oses []string, mode, text string) {
 	go func() { die.Fatal(http.Serve(ln, mux)) }()
 	p := harness.NewPool()
 	go func() {
-		l, err := coord.Listen(context.Background(), filepath.Join(dir(), "mesh"), "http://"+listen, worker.Port)
+		ls, err := coord.Listen(context.Background(), filepath.Join(dir(), "mesh"), "http://"+listen, worker.Port)
 		if err == nil {
-			err = p.Serve(l, coord.Node)
+			err = p.Serve(ls[0], coord.Node)
 		}
 		die.Fatal(err)
 	}()
@@ -456,6 +455,10 @@ func phase(listen, url, secret, v string, oses []string, mode, text string) {
 			}
 		}
 	}
+	if mode == "check" {
+		unlinked(p, got, oses)
+	}
+	link(coord, p, got, oses)
 	switch mode {
 	case "check":
 		for _, o := range oses {
@@ -594,6 +597,45 @@ func mesh(p *harness.Pool, got map[string]harness.Listed, oses []string) {
 		}
 	}
 	check("mesh", "no endpoint in Tailscale's ranges or the mesh", err == nil && n > 0 && len(bad) == 0, fmt.Sprint(n, " endpoints ", bad, err))
+}
+
+// unlinked checks that each worker, with no links, has only itself and the
+// harness in its hosts block.
+func unlinked(p *harness.Pool, got map[string]harness.Listed, oses []string) {
+	for _, o := range oses {
+		if r, ok := p.Get(got[o].Name); ok {
+			b, err := r.Read(context.Background(), hostsPath[o == "windows"])
+			_, block := hostsLines(string(b))
+			_, h := names(block)[worker.Harness]
+			check(o, "mesh: no links, sees only the harness", err == nil && len(block) == 2 && h, fmt.Sprint(block, err))
+		}
+	}
+}
+
+// link makes every worker see every other, as links in a config do, and
+// waits until each one's hosts block lists every node.
+func link(coord *coordinator.Coordinator, p *harness.Pool, got map[string]harness.Listed, oses []string) {
+	var pairs [][2]string
+	for _, a := range oses {
+		for _, b := range oses {
+			if a < b {
+				pairs = append(pairs, [2]string{got[a].Name, got[b].Name})
+			}
+		}
+	}
+	coord.Link(pairs)
+	for _, o := range oses {
+		r, ok := p.Get(got[o].Name)
+		if !ok {
+			continue
+		}
+		var block []string
+		for start := time.Now(); len(block) != len(oses)+1 && time.Since(start) < removeWait; time.Sleep(200 * time.Millisecond) {
+			b, _ := r.Read(context.Background(), hostsPath[o == "windows"])
+			_, block = hostsLines(string(b))
+		}
+		check(o, "mesh: linked, sees every node", len(block) == len(oses)+1, fmt.Sprint(block))
+	}
 }
 
 // tailnet is whether a is in Tailscale's ranges or the mesh's own: a path

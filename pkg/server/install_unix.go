@@ -18,10 +18,10 @@ const bin = "/usr/local/bin/mainplane-server"
 
 // Up runs the harness until SIGINT or SIGTERM, which systemd and launchd
 // send to stop it.
-func Up(c Config) error {
+func Up(path string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return Harness(ctx, c)
+	return Harness(ctx, path)
 }
 
 // Uninstall stops the harness and removes its service and binary. Dir stays:

@@ -187,6 +187,9 @@ func status(args []string) {
 	}
 	if err == nil {
 		fmt.Printf("mainplane-server version: %s\nmainplane-server url: %s\n", v, c.URL)
+		if c.mesh != "" {
+			fmt.Printf("mainplane-server on the mesh: %s\n", c.mesh)
+		}
 		if tunnel.QuickURL(c.URL) {
 			fmt.Println(tunnel.QuickWarning)
 		}

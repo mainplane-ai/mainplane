@@ -35,6 +35,9 @@ const (
 	publishRetry = time.Minute
 )
 
+// A person who saves the config sees it applied within this.
+const reread = 2 * time.Second
+
 // Config is the self-hosted config file. Provider values are expanded from
 // the environment, so a key can be "$ANTHROPIC_API_KEY".
 type Config struct {
@@ -42,6 +45,7 @@ type Config struct {
 	HTTP      string              `json:"http"`             // loopback address the tunnel carries connectors and workers to
 	Tunnel    *Tunnel             `json:"tunnel,omitempty"` // the user's own; none is a quick tunnel
 	Providers map[string]Provider `json:"providers"`
+	Links     [][2]string         `json:"links,omitempty"` // pairs of workers, by name, that reach each other on the mesh
 }
 
 // Tunnel is a tunnel the user made in Cloudflare, which routes URL to it and
@@ -101,8 +105,13 @@ func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
 // secret, /ts2021 coordinates the mesh, /derp relays between its nodes,
 // connectors call every other route with an api key, every session that was
 // open on start resumes. The harness joins its own mesh, and workers dial it
-// there. The pointer and the relay map follow the tunnel's URL.
-func Harness(ctx context.Context, c Config) error {
+// there. The pointer and the relay map follow the tunnel's URL. The config
+// at path is read again when it changes: providers and links apply at once.
+func Harness(ctx context.Context, path string) error {
+	c, err := Load(path)
+	if err != nil {
+		return err
+	}
 	if host, _, _ := net.SplitHostPort(c.HTTP); !net.ParseIP(host).IsLoopback() {
 		return fmt.Errorf("http %q: the harness listens on loopback only, such as 127.0.0.1:8080; the tunnel is the one way in", c.HTTP)
 	}
@@ -141,7 +150,16 @@ func Harness(ctx context.Context, c Config) error {
 	if err != nil {
 		return err
 	}
+	coord.Link(c.Links)
 	h := &harness.Harness{Sessions: statefile.Sessions{Dir: c.Admin}, Providers: ps, Workers: pool, Remove: coord.Remove}
+	go watch(ctx, path, func(c Config) error {
+		ps, err := providers(c.Providers)
+		if err == nil {
+			h.SetProviders(ps)
+			coord.Link(c.Links)
+		}
+		return err
+	})
 	var at atomic.Value
 	at.Store("")
 	urls := make(chan string, 1)
@@ -152,7 +170,8 @@ func Harness(ctx context.Context, c Config) error {
 	derp := relay.New()
 	derp.SetVerifyClientFunc(coord.Known)
 	relay.Handle(mux, derp)
-	mux.Handle("/", store.Bearer(limit, harness.Handler(ctx, h)))
+	api := store.Bearer(limit, harness.Handler(ctx, h))
+	mux.Handle("/", api)
 	srv := &http.Server{Addr: c.HTTP, Handler: mux}
 	go func() {
 		<-ctx.Done()
@@ -167,14 +186,23 @@ func Harness(ctx context.Context, c Config) error {
 		return err
 	}
 	log.Printf("harness: http on %s, sessions in %s, %d api keys, %d join secrets", c.HTTP, c.Admin, len(t[auth.Key]), len(t[auth.Join]))
-	errs := make(chan error, 3)
+	errs := make(chan error, 4)
 	go func() { errs <- srv.Serve(ln) }()
 	go func() {
-		l, err := coord.Listen(ctx, filepath.Join(c.Admin, "mesh"), "http://"+c.HTTP, worker.Port)
-		if err == nil {
-			err = pool.Serve(l, coord.Node)
+		ls, err := coord.Listen(ctx, filepath.Join(c.Admin, "mesh"), "http://"+c.HTTP, worker.Port, worker.APIPort)
+		if err != nil {
+			errs <- err
+			return
 		}
-		errs <- err
+		// The CLI on a worker, over the mesh: no tunnel, so no CF-Connecting-IP
+		// to trust; the limit counts the node's address.
+		go func() {
+			errs <- http.Serve(ls[1], http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.Header.Del("CF-Connecting-IP")
+				api.ServeHTTP(w, r)
+			}))
+		}()
+		errs <- pool.Serve(ls[0], coord.Node)
 	}()
 	up := func(url string) {
 		log.Printf("harness: reached at %s", url)
@@ -215,5 +243,35 @@ func publish(ctx context.Context, k ed25519.PrivateKey, urls <-chan string) {
 			log.Printf("harness: %v; again in %s", err, publishRetry)
 			wait = publishRetry
 		}
+	}
+}
+
+// watch applies the config at path each time it changes, and logs one it
+// cannot apply: the harness keeps what it had.
+func watch(ctx context.Context, path string, apply func(Config) error) {
+	var mod time.Time
+	if fi, err := os.Stat(path); err == nil {
+		mod = fi.ModTime()
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(reread):
+		}
+		fi, err := os.Stat(path)
+		if err != nil || fi.ModTime().Equal(mod) {
+			continue
+		}
+		mod = fi.ModTime()
+		c, err := Load(path)
+		if err == nil {
+			err = apply(c)
+		}
+		if err != nil {
+			log.Printf("harness: %s: %v; the config before it holds", path, err)
+			continue
+		}
+		log.Printf("harness: %s applied: %d providers, %d links; any other change applies at the next start", path, len(c.Providers), len(c.Links))
 	}
 }

@@ -83,8 +83,9 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /providers", func(w http.ResponseWriter, r *http.Request) {
-		names := make([]string, 0, len(h.Providers))
-		for name := range h.Providers {
+		ps := h.providers()
+		names := make([]string, 0, len(ps))
+		for name := range ps {
 			names = append(names, name)
 		}
 		slices.Sort(names)

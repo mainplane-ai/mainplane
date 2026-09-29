@@ -18,12 +18,13 @@ import (
 
 type Harness struct {
 	Sessions  statefile.Sessions
-	Providers map[string]provider.Provider
+	Providers map[string]provider.Provider // read and replaced under pmu once the harness runs
 	Workers   *Pool
 	Remove    func(name string) error // the coordinator's: the worker leaves the mesh for good
 
-	mu sync.Mutex
-	s  map[string]*session
+	pmu sync.RWMutex
+	mu  sync.Mutex
+	s   map[string]*session
 
 	imu   sync.Mutex
 	index map[string]Info
@@ -35,11 +36,25 @@ type Harness struct {
 // with its own slash survives, because only the first is cut.
 func (h *Harness) provider(model string) (provider.Provider, string, error) {
 	name, m, ok := strings.Cut(model, "/")
-	p, known := h.Providers[name]
+	p, known := h.providers()[name]
 	if !ok || !known || m == "" {
 		return provider.Provider{}, "", fmt.Errorf("model %q is not provider/model with a known provider", model)
 	}
 	return p, m, nil
+}
+
+// SetProviders replaces the providers: a session's next step uses the new
+// ones, a step running keeps its own.
+func (h *Harness) SetProviders(ps map[string]provider.Provider) {
+	h.pmu.Lock()
+	defer h.pmu.Unlock()
+	h.Providers = ps
+}
+
+func (h *Harness) providers() map[string]provider.Provider {
+	h.pmu.RLock()
+	defer h.pmu.RUnlock()
+	return h.Providers
 }
 
 // Create is the body of POST /sessions. From set is a copy of records 1

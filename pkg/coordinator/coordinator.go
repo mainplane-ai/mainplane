@@ -119,7 +119,8 @@ type Coordinator struct {
 
 	mu    sync.Mutex
 	st    state
-	host  string // the front door's, where the relay is
+	host  string             // the front door's, where the relay is
+	links map[[2]string]bool // worker pairs that see each other, by name, the lesser first
 	ver   uint64
 	wakes map[chan struct{}]bool // one per map poll
 }
@@ -186,9 +187,10 @@ func (c *Coordinator) Relay(u string) {
 // no root, with its keys in dir so its address holds across restarts. It
 // registers at control, this coordinator on loopback, so it needs neither the
 // tunnel nor a proof, with the secret only this process holds, and is named
-// worker.Harness. The listener takes port on the node's address, which only
-// nodes the coordinator gave keys to can reach. It all closes when ctx ends.
-func (c *Coordinator) Listen(ctx context.Context, dir, control string, port int) (net.Listener, error) {
+// worker.Harness. There is a listener for each port on the node's address,
+// which only nodes the coordinator gave keys to can reach. It all closes when
+// ctx ends.
+func (c *Coordinator) Listen(ctx context.Context, dir, control string, ports ...int) ([]net.Listener, error) {
 	// The node reaches the relay through the tunnel as every node does, and
 	// Cloudflare answers 400 to the native upgrade.
 	envknob.Setenv("TS_DEBUG_DERP_WS_CLIENT", "1")
@@ -210,12 +212,16 @@ func (c *Coordinator) Listen(ctx context.Context, dir, control string, port int)
 	if err != nil {
 		return nil, err
 	}
-	l, err := s.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		return nil, err
+	var ls []net.Listener
+	for _, p := range ports {
+		l, err := s.Listen("tcp", fmt.Sprintf(":%d", p))
+		if err != nil {
+			return nil, err
+		}
+		ls = append(ls, l)
 	}
-	log.Printf("coordinator: the harness is %v on the mesh, port %d", st.TailscaleIPs, port)
-	return l, nil
+	log.Printf("coordinator: the harness is %v on the mesh, ports %v", st.TailscaleIPs, ports)
+	return ls, nil
 }
 
 // Known is whether k is a registered node's. The relay admits no other.
@@ -488,7 +494,7 @@ func (c *Coordinator) delta(n *node, sent map[tailcfg.NodeID]uint64, host *strin
 	}
 	live := map[tailcfg.NodeID]bool{}
 	for _, p := range c.st.Nodes {
-		if p == n || !sees(n, p) {
+		if p == n || !c.sees(n, p) {
 			continue
 		}
 		live[p.ID] = true
@@ -517,18 +523,32 @@ func (c *Coordinator) delta(n *node, sent map[tailcfg.NodeID]uint64, host *strin
 // sees is whether a and b are in each other's map, which is the whole access
 // rule: WireGuard takes packets only from peers in the map, at both ends. The
 // harness sees every node and every node sees it, as will the file server
-// once there is one. Persistent workers, a user's own machines, see each
-// other. An ephemeral worker, one of a fleet, sees only those. A removed node
-// sees none and is seen by none.
-func sees(a, b *node) bool {
+// once there is one. Two workers see each other only when linked. A removed
+// node sees none and is seen by none.
+func (c *Coordinator) sees(a, b *node) bool {
 	switch {
 	case a.Removed || b.Removed:
 		return false
 	case a.Name == worker.Harness || b.Name == worker.Harness:
 		return true
 	}
-	return !a.Ephemeral && !b.Ephemeral
+	return c.links[pair(a.Name, b.Name)]
 }
+
+// Link makes each pair of workers, by name, see each other, and no others,
+// and wakes every map poll to send the change.
+func (c *Coordinator) Link(pairs [][2]string) {
+	links := map[[2]string]bool{}
+	for _, p := range pairs {
+		links[pair(p[0], p[1])] = true
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.links = links
+	c.wake()
+}
+
+func pair(a, b string) [2]string { return [2]string{min(a, b), max(a, b)} }
 
 // tail is headscale's TailNode, trimmed: one address, no routes, no caps. A
 // removed node is no longer authorized.
