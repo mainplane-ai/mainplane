@@ -165,12 +165,15 @@ func (s *server) run(f Frame) (Frame, error) {
 // An environment that ended while this run waited for it is not used: the
 // loop finds its replacement and the reset flag its end left.
 func (s *server) acquire(key, name string) (*env, bool, error) {
+	it, err := s.interp(name)
+	if err != nil {
+		return nil, false, err
+	}
 	for {
 		s.emu.Lock()
 		e, ok := s.envs[key]
 		if !ok {
-			var err error
-			if e, err = start(interps[name], s.Operator); err != nil {
+			if e, err = start(it, s.Operator); err != nil {
 				s.emu.Unlock()
 				return nil, false, err
 			}

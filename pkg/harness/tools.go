@@ -48,6 +48,14 @@ Tools:
 - A run result over 50 KiB or 2000 lines is cut. The tail is returned and the first line names the path to the full output, which will look like: <scratch>/output/<call id>
 - A non-zero exit code is the first line of the run result: "exit N"
 
+JS:
+- Every worker has the js interpreter: Bun, a JavaScript runtime with Node's APIs, fetch, and WebSocket. Its files are in <scratch>/js
+- The code of a js run is the body of an async function. Top-level await and return work. Import statements do not; await import() does
+- Variables declared in a js run end with the run. Properties of globalThis last until the environment resets
+- A js run's result is its console output, then its return value: a string as is, anything else as JSON. A throw is exit 1 with the stack, where snippet:N is line N of the code
+- Bun installs an npm package imported by name on its first import, when no node_modules folder is above the working directory
+- <scratch>/js/cdp.js is a Chrome DevTools Protocol client for driving browsers. <scratch>/js/cdp.md says how it and CDP work
+
 Drives:
 - There is a listed scratch directory for each worker, this directory is local to that worker only
 - The Mainplane has a file server with remote drives. Workers mount these drives. The mounted drives for each worker are listed
