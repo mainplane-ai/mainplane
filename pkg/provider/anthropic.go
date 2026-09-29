@@ -12,11 +12,11 @@ import (
 )
 
 // max_tokens is required by the Messages API. 16384 fits every current Claude
-// model and leaves room above the thinking budget.
+// model. No thinking field: Opus 4.8 and later think adaptively by default and
+// reject the enabled type with a budget.
 const (
-	anthMaxTokens      = 16384
-	anthThinkingBudget = 2048
-	anthCacheTTL       = 300 // ephemeral, refreshed on every hit
+	anthMaxTokens = 16384
+	anthCacheTTL  = 300 // ephemeral, refreshed on every hit
 )
 
 func Anthropic(key string) Provider {
@@ -38,18 +38,12 @@ func (anthropic) Name() string { return "anthropic" }
 func (anthropic) Accepts(typ string) bool { return slices.Contains(images, typ) }
 
 type anthReq struct {
-	Model     string       `json:"model"`
-	MaxTokens int          `json:"max_tokens"`
-	Stream    bool         `json:"stream"`
-	System    []anthBlock  `json:"system,omitempty"`
-	Thinking  anthThinking `json:"thinking"`
-	Tools     []anthTool   `json:"tools,omitempty"`
-	Messages  []anthMsg    `json:"messages"`
-}
-
-type anthThinking struct {
-	Type         string `json:"type"`
-	BudgetTokens int    `json:"budget_tokens"`
+	Model     string      `json:"model"`
+	MaxTokens int         `json:"max_tokens"`
+	Stream    bool        `json:"stream"`
+	System    []anthBlock `json:"system,omitempty"`
+	Tools     []anthTool  `json:"tools,omitempty"`
+	Messages  []anthMsg   `json:"messages"`
 }
 
 type anthTool struct {
@@ -95,7 +89,6 @@ func (e anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
 		Model:     req.Model,
 		MaxTokens: anthMaxTokens,
 		Stream:    true,
-		Thinking:  anthThinking{Type: "enabled", BudgetTokens: anthThinkingBudget},
 		Messages:  []anthMsg{},
 	}
 	var marks []string
