@@ -43,7 +43,11 @@ func Install(token string) error {
 	if err := os.WriteFile(plistPath, fmt.Appendf(nil, plist, label, Bin, logPath, logPath), 0o644); err != nil {
 		return err
 	}
-	return run("launchctl", "bootstrap", "system", plistPath)
+	if err := run("launchctl", "bootstrap", "system", plistPath); err != nil {
+		return err
+	}
+	done()
+	return nil
 }
 
 // unregister stops the worker and removes its plist; none installed is fine.

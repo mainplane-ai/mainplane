@@ -27,6 +27,7 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
+	"github.com/mainplane-ai/mainplane/pkg/version"
 )
 
 // The worker is the Windows service mainplaned as LocalSystem. It runs code
@@ -201,8 +202,11 @@ func Install(token string) error {
 	if err := register(); err != nil {
 		return err
 	}
-	fmt.Printf("code on this worker runs as %s, only while they are logged in\n", op.Username)
-	return path(registry.LOCAL_MACHINE, machineEnv, filepath.Dir(Bin), true)
+	if err := path(registry.LOCAL_MACHINE, machineEnv, filepath.Dir(Bin), true); err != nil {
+		return err
+	}
+	fmt.Printf("%snote: this worker runs as user %s, only while they are logged in\n", version.Installed(), op.Username)
+	return nil
 }
 
 // Uninstall stops and deletes the service, removes what a killed worker left

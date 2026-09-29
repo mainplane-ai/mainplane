@@ -273,12 +273,12 @@ func run(v, prev, port string, targets []string) {
 	gone := oses[len(oses)-1]
 	harnessAt(v, "remove", gone)
 	out, err := remote(gone, ssh[gone], meshGone[gone]+"\n"+status[gone == "windows"])
-	check(gone, "removed: interface, route, rule gone; status says so", err == nil && strings.TrimSpace(out) == "removed from the mesh by its harness", out)
+	check(gone, "removed: interface, route, rule gone; status says so", err == nil && strings.HasSuffix(strings.TrimSpace(out), "removed from the mesh by its harness"), out)
 	hostsCheck(gone, ssh[gone], "removed: hosts block gone, other lines kept", hosts[gone], 0)
 	for _, o := range oses {
 		win := o == "windows"
 		out, err := remote(o, ssh[o], fmt.Sprintf(serverInstall[win], release.DL, v))
-		check(o, "harness installed in one line, CLI logged in", err == nil && strings.Contains(out, "mainplane logged in to") && strings.Contains(out, "workers-ok"), last(out))
+		check(o, "harness installed in one line, CLI logged in", err == nil && strings.Contains(out, "mainplane-server running at") && strings.Contains(out, "workers-ok"), last(out))
 		check(o, "harness: /worker is gone (404)", strings.Contains(out, "worker-404"), last(out))
 		for _, u := range []string{prev, v} {
 			out, err = remote(o, ssh[o], fmt.Sprintf(serverUpdate[win], u))
@@ -536,7 +536,7 @@ func checks(r *harness.Remote, goos string) {
 // mesh checks the workers on the mesh, each as its operator: it reaches every
 // other worker by the long name in its hosts block, which on Windows is the
 // name Tailscale's do not shadow, and mainplane status lists every node with
-// the map poll up. No node offers a Tailscale or mesh address as an endpoint,
+// its harness responsive. No node offers a Tailscale or mesh address as an endpoint,
 // in the registry or as a direct path.
 func mesh(p *harness.Pool, got map[string]harness.Listed, oses []string) {
 	ctx := context.Background()
@@ -566,11 +566,11 @@ func mesh(p *harness.Pool, got map[string]harness.Listed, oses []string) {
 		}
 		out := sh(status[win])
 		listed, paths := parseStatus(out)
-		ok = strings.Contains(out, "map poll up")
+		ok = strings.Contains(out, "this machine") && !strings.Contains(out, "harness unresponsive")
 		for _, n := range want {
 			ok = ok && listed[n]
 		}
-		check(o, "mesh: status lists every node, poll up", ok, out)
+		check(o, "mesh: status lists every node, harness responsive", ok, out)
 		for _, s := range paths {
 			if a, err := netip.ParseAddrPort(s); err != nil || tailnet(a.Addr()) {
 				bad = append(bad, o+" path "+s)

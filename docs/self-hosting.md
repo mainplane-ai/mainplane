@@ -80,8 +80,9 @@ Nothing listens on that port outside the mesh.
   traffic goes through the relay in the harness, through the tunnel: it works,
   but is slower (about 40 ms more through a quick tunnel), and stops when the
   tunnel is down. The mesh keeps trying and moves to a direct path when one
-  opens. `mainplane status` on a worker shows its name and address, its
-  harness, and for each peer `direct <endpoint>`, `relay harness`, or `idle`
+  opens. `mainplane status` on a worker shows the harness the CLI is logged in
+  to, the worker's name and address (`harness unresponsive` when its harness
+  does not answer), and for each peer `direct <endpoint>`, `relay harness`, or `idle`
   (no traffic of late; the path is found when traffic starts). No
   inbound port is needed; a firewall that drops outbound UDP forces the relay.
 - Root: the worker needs root or admin for its interface, routes and hosts

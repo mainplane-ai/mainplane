@@ -40,7 +40,7 @@ jobs:
       - name: build
         run: |
           for b in mainplane mainplane-server; do
-            d="Mainplane CLI and worker"; [ $b = mainplane-server ] && d="Mainplane Server"
+            d="Mainplane Worker"; [ $b = mainplane-server ] && d="Mainplane Server"
             (cd "cmd/$b" && go run github.com/tc-hib/go-winres@v0.3.3 simply --arch amd64,arm64 --manifest cli --product-name Mainplane \
               --file-description "$d" --product-version "$TAG" --file-version "$TAG" --original-filename "$b.exe" --copyright "Copyright (c) 2026 Alexander Yue")
           done

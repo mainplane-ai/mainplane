@@ -43,16 +43,17 @@ func (h *Harness) provider(model string) (provider.Provider, string, error) {
 }
 
 // Create is the body of POST /sessions. From set is a copy of records 1
-// through N-1 of that session; otherwise a fresh session from Model, Context,
-// and Workers. Workers are not checked: the config is the whitelist, and a
-// worker named before it dials in is a worker the session waits for.
+// through N-1 of that session; otherwise a fresh session from Model,
+// ContextLimit, and Workers. Workers are not checked: the config is the
+// whitelist, and a worker named before it dials in is a worker the session
+// waits for.
 type Create struct {
-	From    string             `json:"from,omitempty"`
-	N       int                `json:"n,omitempty"`
-	Model   string             `json:"model,omitempty"`
-	Context int                `json:"context,omitempty"`
-	Workers []statefile.Worker `json:"workers,omitempty"`
-	Input   []string           `json:"input,omitempty"`
+	From         string             `json:"from,omitempty"`
+	N            int                `json:"n,omitempty"`
+	Model        string             `json:"model,omitempty"`
+	ContextLimit int                `json:"context_limit,omitempty"`
+	Workers      []statefile.Worker `json:"workers,omitempty"`
+	Input        []string           `json:"input,omitempty"`
 }
 
 func system(source, body string) statefile.Record {
@@ -65,7 +66,7 @@ func system(source, body string) statefile.Record {
 func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
 	id := statefile.NewID()
 	if c.From != "" {
-		if c.Model != "" || c.Context != 0 || c.Workers != nil || c.Input != nil {
+		if c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Input != nil {
 			return "", fmt.Errorf("a copy takes no config")
 		}
 		if err := h.cut(c.From, c.N); err != nil {
@@ -81,15 +82,15 @@ func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if c.Context <= 0 {
-		return "", fmt.Errorf("context limit must be set")
+	if c.ContextLimit <= 0 {
+		return "", fmt.Errorf("context_limit must be set")
 	}
 	for _, t := range c.Input {
 		if !p.Envelope.Accepts(t) {
 			return "", fmt.Errorf("%s does not take %s as input", p.Envelope.Name(), t)
 		}
 	}
-	conf := statefile.Conf{Model: c.Model, Tools: ToolSet(model), Workers: c.Workers, Context: c.Context, Input: c.Input}
+	conf := statefile.Conf{Model: c.Model, Tools: ToolSet(model), Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input}
 	if conf.Workers == nil {
 		conf.Workers = []statefile.Worker{}
 	}
@@ -204,8 +205,8 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	if err != nil {
 		return "", err
 	}
-	if p := statefile.Prompt(chain); p > conf.Context {
-		_, err := h.append(s, errorRecord("", fmt.Sprintf("context %d exceeds limit %d", p, conf.Context)))
+	if p := statefile.ContextUsed(chain); p > conf.ContextLimit {
+		_, err := h.append(s, errorRecord("", fmt.Sprintf("context %d exceeds limit %d", p, conf.ContextLimit)))
 		return statefile.StatusFailed, err
 	}
 	if list := h.workers(conf.Workers); list != last(chain, "workers") {

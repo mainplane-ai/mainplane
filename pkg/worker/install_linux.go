@@ -41,7 +41,11 @@ func Install(token string) error {
 	if err := run("systemctl", "enable", "mainplaned"); err != nil {
 		return err
 	}
-	return run("systemctl", "restart", "mainplaned")
+	if err := run("systemctl", "restart", "mainplaned"); err != nil {
+		return err
+	}
+	done()
+	return nil
 }
 
 // unregister stops the worker and removes its unit; none installed is fine.

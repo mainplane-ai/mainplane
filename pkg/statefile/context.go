@@ -91,9 +91,9 @@ func LastStep(chain []Record) *Record {
 	return nil
 }
 
-// Prompt is the size of the last step's prompt in tokens: what the context
-// costs now. Input excludes cache reads and writes on every provider.
-func Prompt(chain []Record) int {
+// ContextUsed is the size of the last step's prompt in tokens: what the
+// context costs now. Input excludes cache reads and writes on every provider.
+func ContextUsed(chain []Record) int {
 	s := LastStep(chain)
 	if s == nil || s.Usage == nil {
 		return 0

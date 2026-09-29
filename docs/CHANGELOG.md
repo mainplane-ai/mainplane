@@ -2,6 +2,15 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.4.0
+
+- The harness install prints a join token named `default`, good for any number of machines, and the lines that install a worker with it on Linux, macOS and Windows. Each install makes a new one; the one before joins no more machines. The name in `mainplane-server join new <name>` is the secret's, for revoke; a worker is named by its hostname
+- Installs print less: no checksum lines, a spinner while the harness and its tunnel start, then a wordmark, the version, and what to do next
+- Sessions: `context` in a create body and in the config record is `context_limit`, and `prompt` in session info is `context_used`. A session made before reads a limit of 0 and fails at its next step: start a new one
+- `mainplane status` starts with the harness the CLI is logged in to: its version and URL. The worker's own row says `harness unresponsive` where it said `map poll down`
+- `mainplane workers` shows a worker's version only when it is not the harness's
+- Windows: the UAC prompt names Mainplane Worker
+
 ## v0.3.0
 
 Workers join a WireGuard mesh that the harness coordinates, and reach the harness over it. A v0.2.0 worker dials `/worker`, which is gone, so it cannot reach a v0.3.0 harness and cannot update itself: on each worker, `mainplane uninstall`, then install again with its join token. Tokens and the harness config carry over. See `docs/self-hosting.md`, "The mesh".
