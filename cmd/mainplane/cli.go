@@ -141,12 +141,18 @@ func login() (client, error) {
 		c.mesh = "http://" + net.JoinHostPort(a.String(), strconv.Itoa(worker.APIPort))
 		return c, nil
 	}
+	return c, c.find()
+}
+
+// find proves the harness at its URL, or finds it again through the pointer
+// and saves it.
+func (c *client) find() error {
 	url, err := pointer.Find(context.Background(), c.Harness, c.URL)
 	if err != nil || url == c.URL {
-		return c, err
+		return err
 	}
 	c.URL = url
-	return c, c.save()
+	return c.save()
 }
 
 func (c client) save() error {

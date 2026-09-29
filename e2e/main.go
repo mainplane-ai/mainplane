@@ -600,15 +600,20 @@ func mesh(p *harness.Pool, got map[string]harness.Listed, oses []string) {
 }
 
 // unlinked checks that each worker, with no links, has only itself and the
-// harness in its hosts block.
+// harness in its hosts block, once the block is written.
 func unlinked(p *harness.Pool, got map[string]harness.Listed, oses []string) {
 	for _, o := range oses {
-		if r, ok := p.Get(got[o].Name); ok {
-			b, err := r.Read(context.Background(), hostsPath[o == "windows"])
-			_, block := hostsLines(string(b))
-			_, h := names(block)[worker.Harness]
-			check(o, "mesh: no links, sees only the harness", err == nil && len(block) == 2 && h, fmt.Sprint(block, err))
+		r, ok := p.Get(got[o].Name)
+		if !ok {
+			continue
 		}
+		var block []string
+		for start := time.Now(); len(block) < 2 && time.Since(start) < removeWait; time.Sleep(200 * time.Millisecond) {
+			b, _ := r.Read(context.Background(), hostsPath[o == "windows"])
+			_, block = hostsLines(string(b))
+		}
+		_, h := names(block)[worker.Harness]
+		check(o, "mesh: no links, sees only the harness", len(block) == 2 && h, fmt.Sprint(block))
 	}
 }
 

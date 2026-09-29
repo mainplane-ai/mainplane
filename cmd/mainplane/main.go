@@ -182,6 +182,9 @@ func status(args []string) {
 	}
 	c, err := login()
 	v := ""
+	if err == nil && c.mesh != "" { // calls go over the mesh; the URL shown must still be current
+		err = c.find()
+	}
 	if err == nil {
 		v, err = c.harness()
 	}
