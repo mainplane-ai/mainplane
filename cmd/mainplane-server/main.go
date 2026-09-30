@@ -191,7 +191,7 @@ func installLines(token string) string {
 // each shows, uneven so the dot swishes round.
 var spinner = []struct {
 	frame rune
-	ms    time.Duration
+	ms    int
 }{{'⣀', 103}, {'⡄', 129}, {'⠆', 148}, {'⠃', 129}, {'⠋', 58}, {'⠙', 49}, {'⠸', 62}, {'⢠', 122}}
 
 // spin shows label behind the spinner on a terminal until stop is called;
@@ -211,7 +211,7 @@ func spin(label string) (stop func()) {
 			case <-quit:
 				fmt.Printf("\r%s\r", strings.Repeat(" ", len(label)+2))
 				return
-			case <-time.After(s.ms * time.Millisecond):
+			case <-time.After(time.Duration(s.ms) * time.Millisecond):
 			}
 		}
 	}()
