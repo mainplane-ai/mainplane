@@ -201,7 +201,7 @@ func status(args []string) {
 		fmt.Printf("mainplane-server: %v\n\n", err)
 	}
 	s, err := mesh.Status()
-	if errors.Is(err, mesh.ErrNoWorker) { // a harness-only machine
+	if errors.Is(err, mesh.ErrNoWorker) {
 		fmt.Println(mesh.ErrNoWorker)
 		return
 	}
