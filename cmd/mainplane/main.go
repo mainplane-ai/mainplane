@@ -87,7 +87,7 @@ func main() {
 		if err := c.save(); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("logged in to %s\n", url)
+		fmt.Printf("logged in to mainplane-server at %s\n", url)
 	case "status":
 		status(os.Args[2:])
 	case "version":
@@ -201,6 +201,10 @@ func status(args []string) {
 		fmt.Printf("mainplane-server: %v\n\n", err)
 	}
 	s, err := mesh.Status()
+	if errors.Is(err, mesh.ErrNoWorker) {
+		fmt.Println(mesh.ErrNoWorker)
+		return
+	}
 	if err != nil {
 		log.Fatal(err)
 	}

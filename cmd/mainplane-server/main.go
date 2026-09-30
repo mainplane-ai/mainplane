@@ -172,14 +172,14 @@ func login(h handover) {
 func done(h handover) {
 	fmt.Printf("%smainplane-server running at %s\n", version.Installed(), h.URL)
 	if tunnel.QuickURL(h.URL) {
-		fmt.Printf("%s\nuse your own URL:  mainplane-server tunnel <url> <cloudflared token>\n", tunnel.QuickWarning)
+		fmt.Println(tunnel.QuickWarning)
 	}
 	if len(h.Providers) == 0 {
 		fmt.Printf("add api keys to the config: %s, as \"providers\": {\"anthropic\": {\"key\": \"sk-ant-...\"}}\n", server.Conf)
 	} else {
 		fmt.Printf("edit the config:   %s\n", server.Conf)
 	}
-	fmt.Printf("\nconnect a worker; one token works for any number of machines:\n%snote: a worker on this machine whose user is admin can read the config, api keys included\n", installLines(h.Join))
+	fmt.Printf("\nconnect a worker:\n%s", installLines(h.Join))
 }
 
 // installLines are the lines that make a machine a worker with a join token.
