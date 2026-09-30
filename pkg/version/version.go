@@ -6,12 +6,13 @@ package version
 // V is dev for every local build.
 var V = "dev"
 
-// wordmark heads what an install prints when it is done.
-const wordmark = `            _           _
- _ __  __ _(_)_ _  _ __| |__ _ _ _  ___
-| '  \/ _` + "`" + ` | | ' \| '_ \ / _` + "`" + ` | ' \/ -_)
-|_|_|_\__,_|_|_||_| .__/_\__,_|_||_\___|
-                  |_|
+// wordmark heads what an install prints when it is done. It is
+// design/ascii/wordmark.json: quadrant blocks, which terminals draw as exact
+// cell fills.
+const wordmark = `█▙   ▟█     ▝▘          ▐▌
+█▐▌ ▐▌█ ▀▀▜▖▐▌▐▙▀▜▖▐▙▀▀▙▐▌▝▀▀▙ █▞▀▙▗▛▀▜▖
+█ █▄█ █▗▞▀▜▌▐▌▐▌ ▐▌▐▙  █▐▌▄▀▀█ █  █▐▛▀▀▘
+▀ ▝▀▘ ▀ ▀▀▀▀▝▘▝▘ ▝▘▐▌▀▀ ▝▀▝▀▀▀▘▀  ▀ ▀▀▀
 `
 
 // Installed is the first thing a finished install prints.

@@ -187,7 +187,14 @@ func installLines(token string) string {
 	return fmt.Sprintf("  linux, macos:  curl -fsSL %[1]s%[2]s/install.sh | sudo sh -s -- %[3]s\n  windows:       & ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) %[3]s\n", release.DL, version.V, token)
 }
 
-// spin shows label with a turning mark on a terminal until stop is called;
+// spinner is design/ascii/spinner.json: Braille frames and the milliseconds
+// each shows, uneven so the dot swishes round.
+var spinner = []struct {
+	frame rune
+	ms    time.Duration
+}{{'⣀', 103}, {'⡄', 129}, {'⠆', 148}, {'⠃', 129}, {'⠋', 58}, {'⠙', 49}, {'⠸', 62}, {'⢠', 122}}
+
+// spin shows label behind the spinner on a terminal until stop is called;
 // elsewhere, as over ssh, only the label.
 func spin(label string) (stop func()) {
 	if fi, err := os.Stdout.Stat(); err != nil || fi.Mode()&os.ModeCharDevice == 0 {
@@ -198,12 +205,13 @@ func spin(label string) (stop func()) {
 	go func() {
 		defer close(finished)
 		for i := 0; ; i++ {
-			fmt.Printf("\r%s %c", label, `|/-\`[i%4])
+			s := spinner[i%len(spinner)]
+			fmt.Printf("\r%c %s", s.frame, label)
 			select {
 			case <-quit:
 				fmt.Printf("\r%s\r", strings.Repeat(" ", len(label)+2))
 				return
-			case <-time.After(100 * time.Millisecond):
+			case <-time.After(s.ms * time.Millisecond):
 			}
 		}
 	}()
