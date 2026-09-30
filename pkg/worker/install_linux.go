@@ -10,6 +10,8 @@ import (
 const (
 	stateDir = "/var/lib/mainplane"
 	unitPath = "/etc/systemd/system/mainplaned.service"
+	// HarnessDir is the harness's, here so a worker installed beside it can warn.
+	HarnessDir = "/var/lib/mainplane-server"
 )
 
 const unit = `[Unit]

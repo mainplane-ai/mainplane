@@ -8,7 +8,7 @@ Workers no longer see each other by default: each sees only the harness. To let 
 
 - Links and provider keys in the harness config apply within seconds of a save; the rest of the config at the next start
 - The harness installs with no provider key set; it says where to add one
-- The harness install notes that a worker on its machine, run by an admin, can read the config and its keys
+- A worker installed on the harness's machine by an admin warns that it can read and modify the harness secrets
 - A new worker asks the pointer again after 5s, then 10s, up to a minute, where it waited a minute: a worker installed right after its harness joins in seconds
 - The CLI on a worker calls its harness over the mesh, off the tunnel, when the worker follows the harness it is logged in to. The harness serves the API on its mesh node at port 8080
 - `mainplane status` on a worker whose harness does not answer says so, with its URL, and what to do if the harness was uninstalled or installed again
@@ -17,6 +17,8 @@ Workers no longer see each other by default: each sees only the harness. To let 
 - Sessions: `context` in a create body and in the config record is `context_limit`, and `prompt` in session info is `context_used`. A session made before reads a limit of 0 and fails at its next step: start a new one
 - Sessions: `params` in a create body sets vendor fields on every request, as a JSON merge patch in the vendor's own names: `{"output_config":{"effort":"high"}}` for Anthropic, `{"reasoning":{"effort":"high"}}` for OpenAI, `{"provider":{"order":["deepinfra"]}}` for OpenRouter, `{"thinking":null}` to drop a field. The vendor judges them. A field the harness builds from the session, such as `messages` or `tools`, fails the create. A copy keeps the params
 - `mainplane status` starts with the harness the CLI is logged in to: its version and URL. The worker's own row says `harness unresponsive` where it said `map poll down`
+- `mainplane status` on a machine with no worker says `this machine is not a worker`, and exits 0
+- `mainplane login` says `logged in to mainplane-server at <url>`
 - `mainplane workers` shows a worker's version only when it is not the harness's
 - Windows: the UAC prompt names Mainplane Worker
 

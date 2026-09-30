@@ -205,7 +205,7 @@ func Install(token string) error {
 	if err := path(registry.LOCAL_MACHINE, machineEnv, filepath.Dir(Bin), true); err != nil {
 		return err
 	}
-	fmt.Printf("%snote: this worker runs as user %s, only while they are logged in\n", version.Installed(), op.Username)
+	fmt.Print(version.Installed())
 	return nil
 }
 

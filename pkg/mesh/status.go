@@ -2,6 +2,7 @@ package mesh
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -21,6 +22,9 @@ var socket = "/var/run/mainplaned.sock"
 // A client that writes no line in this long is hung up on.
 const askWait = 5 * time.Second
 
+// ErrNoWorker is a socket no worker answers: none runs on this machine.
+var ErrNoWorker = errors.New("this machine is not a worker")
+
 func init() {
 	if runtime.GOOS == "windows" {
 		socket = `\\.\pipe\mainplaned`
@@ -37,7 +41,7 @@ func ask(line string) (string, error) {
 		c, err = net.Dial("unix", socket)
 	}
 	if err != nil {
-		return "", fmt.Errorf("no worker runs on this machine: %w", err)
+		return "", fmt.Errorf("%w: %w", ErrNoWorker, err)
 	}
 	defer func() { _ = c.Close() }()
 	if _, err := io.WriteString(c, line+"\n"); err != nil {

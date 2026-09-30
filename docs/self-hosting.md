@@ -37,8 +37,9 @@ on Linux) with the provider keys set in the shell, or none. Add keys there:
 
 The harness applies providers and links within seconds of a save; any other
 change applies at its next start. Only root can read the config. A worker on
-the harness's machine runs code as its operator, so an operator who is admin
-can read it, api keys included.
+the harness's machine runs code as its operator, so on Linux and macOS an
+operator who is admin can read it, api keys included, and the worker install
+warns of this. On Windows code runs unelevated and cannot.
 
 ## Your own domain
 
