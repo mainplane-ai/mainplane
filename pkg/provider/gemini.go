@@ -11,13 +11,6 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
-// geminiThinkingBudget is the legacy control that every Gemini 2.5 and 3 model still
-// accepts. 2048 is modest; the model may use less.
-const (
-	geminiThinkingBudget = 2048
-	geminiCacheTTL       = 300 // forecast: implicit caching has no documented ttl
-)
-
 func Gemini(key string) Provider {
 	return Provider{
 		URL:      "https://generativelanguage.googleapis.com/v1beta/models",
@@ -45,16 +38,6 @@ type gemReq struct {
 	SystemInstruction *gemContent  `json:"systemInstruction,omitempty"`
 	Contents          []gemContent `json:"contents"`
 	Tools             []gemTools   `json:"tools,omitempty"`
-	GenerationConfig  gemGenConfig `json:"generationConfig"`
-}
-
-type gemGenConfig struct {
-	ThinkingConfig gemThinking `json:"thinkingConfig"`
-}
-
-type gemThinking struct {
-	IncludeThoughts bool `json:"includeThoughts"`
-	ThinkingBudget  int  `json:"thinkingBudget"`
 }
 
 type gemTools struct {
@@ -108,10 +91,7 @@ type gemInline struct {
 
 func (e gemini) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
-	body := gemReq{
-		Contents:         []gemContent{},
-		GenerationConfig: gemGenConfig{gemThinking{IncludeThoughts: true, ThinkingBudget: geminiThinkingBudget}},
-	}
+	body := gemReq{Contents: []gemContent{}}
 	if len(system) > 0 {
 		body.SystemInstruction = &gemContent{Parts: []gemPart{{Text: systemText(system)}}}
 	}
@@ -140,7 +120,7 @@ func (e gemini) Compile(req Request) ([]byte, json.RawMessage, error) {
 			body.Contents = append(body.Contents, gemContent{Role: "model", Parts: parts})
 		}
 	}
-	cache, err := cacheHeader(geminiCacheTTL, req.Context[len(req.Context)-1].ID)
+	cache, err := cacheHeader(0, req.Context[len(req.Context)-1].ID)
 	if err != nil {
 		return nil, nil, err
 	}
