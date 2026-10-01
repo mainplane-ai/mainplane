@@ -11,11 +11,6 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
-const (
-	respEffort   = "low"
-	respCacheTTL = 300 // forecast: openai evicts after 5 to 10 idle minutes
-)
-
 func OpenAI(key string) Provider {
 	return Provider{
 		URL:      "https://api.openai.com/v1/responses",
@@ -38,20 +33,14 @@ func (openai) Owns(field string) bool {
 }
 
 type respReq struct {
-	Model        string        `json:"model"`
-	Store        bool          `json:"store"`
-	CacheKey     string        `json:"prompt_cache_key,omitempty"`
-	Stream       bool          `json:"stream"`
-	Include      []string      `json:"include"`
-	Reasoning    respReasoning `json:"reasoning"`
-	Instructions string        `json:"instructions,omitempty"`
-	Tools        []respTool    `json:"tools,omitempty"`
-	Input        []any         `json:"input"`
-}
-
-type respReasoning struct {
-	Effort  string `json:"effort"`
-	Summary string `json:"summary"`
+	Model        string     `json:"model"`
+	Store        bool       `json:"store"`
+	CacheKey     string     `json:"prompt_cache_key,omitempty"`
+	Stream       bool       `json:"stream"`
+	Include      []string   `json:"include"`
+	Instructions string     `json:"instructions,omitempty"`
+	Tools        []respTool `json:"tools,omitempty"`
+	Input        []any      `json:"input"`
 }
 
 type respTool struct {
@@ -94,7 +83,6 @@ func (e openai) Compile(req Request) ([]byte, json.RawMessage, error) {
 		CacheKey:     req.Key,
 		Stream:       true,
 		Include:      []string{"reasoning.encrypted_content"},
-		Reasoning:    respReasoning{Effort: respEffort, Summary: "auto"},
 		Instructions: systemText(system),
 		Input:        []any{},
 	}
@@ -112,7 +100,7 @@ func (e openai) Compile(req Request) ([]byte, json.RawMessage, error) {
 		}
 		body.Input = append(body.Input, items...)
 	}
-	cache, err := cacheHeader(respCacheTTL, req.Context[len(req.Context)-1].ID)
+	cache, err := cacheHeader(0, req.Context[len(req.Context)-1].ID)
 	if err != nil {
 		return nil, nil, err
 	}

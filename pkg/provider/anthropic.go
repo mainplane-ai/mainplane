@@ -11,14 +11,10 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
-// max_tokens is required by the Messages API. 16384 fits every current Claude
-// model. Thinking is adaptive: Opus 4.7 and later reject the enabled type with
-// a budget, and Opus 4.8 does not think when the field is left out. The 4.5
-// models, which predate adaptive, reject it.
-const (
-	anthMaxTokens = 16384
-	anthCacheTTL  = 300 // ephemeral, refreshed on every hit
-)
+// The body carries only what the session builds. max_tokens, which the
+// Messages API requires, thinking, and effort come from params: the API, not
+// the harness, says what each model takes.
+const anthCacheTTL = 300 // ephemeral: 5 minutes from the start of the request that writes or reads it
 
 func Anthropic(key string) Provider {
 	return Provider{
@@ -43,17 +39,11 @@ func (anthropic) Owns(field string) bool {
 }
 
 type anthReq struct {
-	Model     string       `json:"model"`
-	MaxTokens int          `json:"max_tokens"`
-	Stream    bool         `json:"stream"`
-	System    []anthBlock  `json:"system,omitempty"`
-	Thinking  anthThinking `json:"thinking"`
-	Tools     []anthTool   `json:"tools,omitempty"`
-	Messages  []anthMsg    `json:"messages"`
-}
-
-type anthThinking struct {
-	Type string `json:"type"`
+	Model    string      `json:"model"`
+	Stream   bool        `json:"stream"`
+	System   []anthBlock `json:"system,omitempty"`
+	Tools    []anthTool  `json:"tools,omitempty"`
+	Messages []anthMsg   `json:"messages"`
 }
 
 type anthTool struct {
@@ -95,13 +85,7 @@ var ephemeral = &anthCache{Type: "ephemeral"}
 
 func (e anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
-	body := anthReq{
-		Model:     req.Model,
-		MaxTokens: anthMaxTokens,
-		Stream:    true,
-		Thinking:  anthThinking{Type: "adaptive"},
-		Messages:  []anthMsg{},
-	}
+	body := anthReq{Model: req.Model, Stream: true, Messages: []anthMsg{}}
 	var marks []string
 	if len(system) > 0 {
 		body.System = []anthBlock{{Type: "text", Text: systemText(system), CacheControl: ephemeral}}

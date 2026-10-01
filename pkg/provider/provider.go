@@ -37,14 +37,14 @@ type Request struct {
 	Params  map[string]json.RawMessage
 }
 
-// Cache is the step record's cache header. Marks are the ids of the records
-// through which the prefix is cached. Anthropic and bedrock put a breakpoint
-// after the system prompt and after the last user block; openai and gemini
-// cache every prefix, so the mark is the last record. TTL is seconds from the step's
-// time: the provider's promise for anthropic and bedrock, a forecast for the
-// rest. The next step's usage.cache_read is the truth.
+// Cache is the step record's cache header, facts only. Marks are the ids of
+// the records that end a cache breakpoint. Anthropic and bedrock put one after
+// the system prompt and one after the last user block; openai and gemini place
+// their own, so the mark is the last record sent. TTL is seconds from the
+// step's sent time, set only where the request the harness sends fixes it:
+// anthropic and bedrock. The step's usage says what was read and written.
 type Cache struct {
-	TTL   int      `json:"ttl"`
+	TTL   int      `json:"ttl,omitempty"`
 	Marks []string `json:"marks"`
 }
 
@@ -140,10 +140,11 @@ func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Rec
 		return statefile.Header{}, fmt.Errorf("bad url %q", url) // configuration, not transient: checked before the retry loop
 	}
 	for attempt := 0; ; attempt++ {
+		sent := time.Now().UTC().Truncate(time.Millisecond)
 		h, emitted, err := p.once(ctx, url, body, emit)
 		if err == nil {
 			sum := sha256.Sum256(body)
-			h.Provider, h.Model, h.Request, h.Cache = p.Envelope.Name(), req.Model, "sha256:"+hex.EncodeToString(sum[:]), cache
+			h.Provider, h.Model, h.Request, h.Cache, h.Sent = p.Envelope.Name(), req.Model, "sha256:"+hex.EncodeToString(sum[:]), cache, sent
 			return h, nil
 		}
 		if emitted || attempt == retries || !transient(err) {

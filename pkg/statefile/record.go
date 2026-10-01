@@ -64,6 +64,7 @@ type Header struct {
 	Model   string          `json:"model,omitempty"`   // step
 	Harness string          `json:"harness,omitempty"` // step: version that built the request
 	Request string          `json:"request,omitempty"` // step: sha256 of the request bytes
+	Sent    time.Time       `json:"sent,omitzero"`     // step: when the request that served it went out; cache ttls count from here
 	Usage   *Usage          `json:"usage,omitempty"`   // step
 	Cache   json.RawMessage `json:"cache,omitempty"`   // step: provider cache markers
 }
