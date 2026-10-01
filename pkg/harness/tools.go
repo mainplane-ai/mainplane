@@ -175,7 +175,7 @@ func Tools(name string, input []string) []provider.Tool {
 	if len(input) > 0 {
 		read.Description = "Read a file on a worker. A file of type " + strings.Join(input, ", ") + " is returned as media, any other file as text"
 	}
-	return map[string][]provider.Tool{"default": {run, read, write, edit}, "patch": {run, patch}}[name]
+	return map[string][]provider.Tool{"default": {run, read, write, edit}, "patch": {run, read, patch}}[name]
 }
 
 func schema(s string) json.RawMessage { return json.RawMessage(s) }
