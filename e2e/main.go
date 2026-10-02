@@ -529,10 +529,25 @@ func checks(r *harness.Remote, goos string) {
 	check(goos, "big output spills to a file", err == nil && o.Full != "", o.Full)
 	b, err = r.Read(ctx, o.Full)
 	check(goos, "spill file readable", err == nil && strings.Count(string(b), "\n") >= 60000, fmt.Sprintf("%d bytes %v", len(b), err))
+	js := func(code string) (string, error) {
+		o, err := r.Run(ctx, "e2e", "js", code)
+		if err == nil && o.Exit != 0 {
+			err = fmt.Errorf("exit %d", o.Exit)
+		}
+		return strings.TrimSpace(strings.ReplaceAll(string(o.Body), "\r", "")), err
+	}
+	check(goos, "js: listed", slices.Contains(r.Interps, "js"), strings.Join(r.Interps, " "))
+	out, err := js("globalThis.n = 41; return process.versions.bun")
+	check(goos, "js: runs the pinned Bun", err == nil && out == worker.BunVersion, fmt.Sprint(out, err))
+	out, err = js("return n + 1")
+	check(goos, "js: globalThis lasts between runs", err == nil && out == "42", fmt.Sprint(out, err))
+	out, err = js(fmt.Sprintf("const cdp = await import(%q); return typeof cdp.connect", scratch+"/js/cdp.js"))
+	check(goos, "js: cdp.js imports", err == nil && out == "function", fmt.Sprint(out, err))
 	if goos != "windows" {
-		out, _ := sh("stat -c %U " + file + " " + o.Full + " 2>/dev/null || stat -f %Su " + file + " " + o.Full + "; id -un")
+		bun := path.Join(scratch, "js", "bun")
+		out, _ := sh("stat -c %U " + file + " " + o.Full + " " + bun + " 2>/dev/null || stat -f %Su " + file + " " + o.Full + " " + bun + "; id -un")
 		f := strings.Fields(out)
-		check(goos, "written and spilled files owned by the operator", len(f) == 3 && f[0] == f[2] && f[1] == f[2], out)
+		check(goos, "written, spilled, and js files owned by the operator", len(f) == 4 && f[0] == f[3] && f[1] == f[3] && f[2] == f[3], out)
 	}
 }
 

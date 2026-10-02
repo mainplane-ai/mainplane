@@ -24,16 +24,18 @@ const (
 	keepAlive   = 5 * time.Second
 )
 
-// Default is the interpreter each OS ships with. The first is the default.
-var Default = map[string][]string{"windows": {"pwsh"}, "linux": {"bash"}, "darwin": {"bash"}}
+// Default is the interpreters of each OS: the shell it ships with, the
+// default, then js, which every worker has.
+var Default = map[string][]string{"windows": {"pwsh", "js"}, "linux": {"bash", "js"}, "darwin": {"bash", "js"}}
 
 // Dial makes this machine a worker of the harness on m: dial the harness's
 // node at the address the last map gives it, serve until the connection
 // ends, dial again, until the harness removes this worker. WireGuard proved
 // both ends, so the hello carries no secret. A connection that ends within
 // the longest wait, as a refused hello does, keeps the backoff; only one that
-// held resets it.
+// held resets it. The js folder is readied beside it.
 func Dial(m *mesh.Mesh, l Local) {
+	go startJS(l)
 	wait, d := redialMin, net.Dialer{Timeout: dialTimeout, KeepAlive: keepAlive}
 	for {
 		err := errors.New("no harness in the mesh map yet")

@@ -22,7 +22,7 @@ const chunk = 32 << 10
 // ran before, so the worker knows where the output ends. pwsh's $? is a bool,
 // so its exit is 0 or 1; the text of the failure is in the output. bash is a
 // login shell: the worker is a service with the service manager's bare PATH,
-// and the operator's profile is where their tools are.
+// and the operator's profile is where their tools are. js is in js.go.
 type interp struct {
 	argv []string
 	done string

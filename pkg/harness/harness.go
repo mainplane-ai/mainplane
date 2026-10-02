@@ -77,7 +77,8 @@ func system(source, body string) statefile.Record {
 }
 
 // Create makes a session and returns its id. A fresh one starts with the
-// system prompt and the AGENTS.md scan. A copy is byte for byte and gets
+// system prompt, the AGENTS.md scan, and the worker list, so all three reach
+// the provider as system text ahead of the first message. A copy is byte for byte and gets
 // nothing appended: it already holds both.
 func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
 	id := statefile.NewID()
@@ -127,6 +128,9 @@ func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
 		return "", err
 	}
 	if err := f.Append(system("agents", h.agents(ctx, id, conf))); err != nil {
+		return "", err
+	}
+	if err := f.Append(system("workers", h.workers(conf.Workers))); err != nil {
 		return "", err
 	}
 	h.touch(id)

@@ -63,14 +63,8 @@ func main() {
 			log.Fatal(err)
 		}
 		fmt.Println("mainplane uninstalled; ~/.mainplane, the scratch folder with your login, stays")
-	case "file": // a root worker's read or write, run as the operator; not for people
-		if len(os.Args) != 4 {
-			usage()
-		}
-		if err := worker.File(os.Args[2], os.Args[3]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
+	case "file", "js":
+		operator(os.Args[1:])
 	case "login":
 		if len(os.Args) != 3 {
 			usage()
@@ -135,6 +129,25 @@ func work(install bool, args []string) {
 	}
 	if err := worker.Work(key, worker.Local{Name: name, Secret: secret, Scratch: filepath.Join(dir, ".mainplane"), Interps: worker.Default[runtime.GOOS], Operator: op}); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// operator is a root worker's own work, run as the operator; not for people:
+// `file read|write <path>`, one read or write, and `js <dir>`, which readies
+// the js interpreter's folder.
+func operator(args []string) {
+	var err error
+	switch {
+	case args[0] == "file" && len(args) == 3:
+		err = worker.File(args[1], args[2])
+	case args[0] == "js" && len(args) == 2:
+		err = worker.JS(args[1])
+	default:
+		usage()
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 }
 
