@@ -5,14 +5,16 @@
 //	mainplane login   <api key>       find the harness, and remember it and the key in ~/.mainplane/login.json
 //	mainplane update  [version]       become that release, by default the logged-in harness's, else the latest stable
 //	mainplane uninstall               remove the worker service and the CLI; ~/.mainplane stays
-//	mainplane status                  this worker on the mesh, from the worker's local socket
+//	mainplane status                  the harness logged in to, and this worker on the mesh from its local socket
 //	mainplane version                 the release this binary was built from
 //	mainplane <verb> ...              one verb per harness route, see cli.go
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/user"
@@ -25,6 +27,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
 	"github.com/mainplane-ai/mainplane/pkg/release"
+	"github.com/mainplane-ai/mainplane/pkg/tunnel"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
@@ -78,7 +81,7 @@ func main() {
 		if err := c.save(); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println(url)
+		fmt.Printf("logged in to mainplane-server at %s\n", url)
 	case "status":
 		status(os.Args[2:])
 	case "version":
@@ -154,9 +157,13 @@ func operator(args []string) {
 // elevated; v goes along, since sudo may give root a home without the login.
 func update(v string) {
 	if v == "" {
-		if c, err := login(); err == nil {
-			v = c.harness()
-		} else if v, err = release.Latest(); err != nil {
+		c, err := login()
+		if err == nil {
+			v, err = c.harness()
+		} else {
+			v, err = release.Latest()
+		}
+		if err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -180,13 +187,37 @@ func update(v string) {
 	fmt.Printf("mainplane %s -> %s\n", version.V, v)
 }
 
-// status prints what the worker on this machine says of its node on the
-// mesh; it needs no login and no root.
+// status prints the harness this CLI is logged in to, if any, then what the
+// worker on this machine says of its node on the mesh; it needs no root.
 func status(args []string) {
 	if len(args) != 0 {
 		usage()
 	}
+	c, err := login()
+	v := ""
+	if err == nil && c.mesh != "" { // calls go over the mesh; the URL shown must still be current
+		err = c.find()
+	}
+	if err == nil {
+		v, err = c.harness()
+	}
+	if err == nil {
+		fmt.Printf("mainplane-server version: %s\nmainplane-server url: %s\n", v, c.URL)
+		if c.mesh != "" {
+			fmt.Printf("mainplane-server on the mesh: %s\n", c.mesh)
+		}
+		if tunnel.QuickURL(c.URL) {
+			fmt.Println(tunnel.QuickWarning)
+		}
+		fmt.Println()
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		fmt.Printf("mainplane-server: %v\n\n", err)
+	}
 	s, err := mesh.Status()
+	if errors.Is(err, mesh.ErrNoWorker) {
+		fmt.Println(mesh.ErrNoWorker)
+		return
+	}
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -211,11 +242,12 @@ func usage() {
   login      <api key>               remember the harness and the key; every verb below uses them
   update     [version]               become that release, by default the logged-in harness's, else the latest stable
   uninstall                          remove the worker service and the CLI; asks for sudo or UAC; ~/.mainplane stays
-  status                             this worker on the mesh: its name and address, its harness, and each peer's
-                                     address and path, direct or through the relay
+  status                             the harness logged in to, then this worker on the mesh: its name and address,
+                                     and each peer's address and path, direct or through the relay
   version                            the release this binary was built from
 
-  new                                POST /sessions, body from stdin: {"model","context","workers"} or {"from","n"}
+  new                                POST /sessions, body from stdin: {"model","context_limit","workers","params"} or {"from","n"};
+                                     params are the vendor's own request fields, max_tokens included where its API requires it
   message    <id> <text> [file...]   POST /sessions/{id}/records, one record per part
   tail       <id> [after]            GET  /sessions/{id}/records, rendered
   chat       <id>                    tail that follows; every stdin line is a message

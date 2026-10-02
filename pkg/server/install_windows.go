@@ -54,14 +54,14 @@ var (
 
 // Up runs the harness until Ctrl+C, or under the service manager until it
 // says stop, with logs and panics in Dir\mainplane-server.log.
-func Up(c Config) error {
+func Up(path string) error {
 	if ok, err := svc.IsWindowsService(); err != nil || !ok {
 		if err != nil {
 			return err
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		return Harness(ctx, c)
+		return Harness(ctx, path)
 	}
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -72,17 +72,17 @@ func Up(c Config) error {
 	}
 	os.Stdout, os.Stderr = f, f
 	log.SetOutput(f)
-	return svc.Run(name, service{c})
+	return svc.Run(name, service{path})
 }
 
-type service struct{ c Config }
+type service struct{ path string }
 
 // Execute runs the harness for the service manager. A harness that fails
 // exits 1, which the recovery actions restart.
 func (s service) Execute(_ []string, reqs <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Harness(ctx, s.c) }()
+	go func() { done <- Harness(ctx, s.path) }()
 	status <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
 	for {
 		select {

@@ -11,13 +11,10 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
-// max_tokens is required by the Messages API. 16384 fits every current Claude
-// model and leaves room above the thinking budget.
-const (
-	anthMaxTokens      = 16384
-	anthThinkingBudget = 2048
-	anthCacheTTL       = 300 // ephemeral, refreshed on every hit
-)
+// The body carries only what the session builds. max_tokens, which the
+// Messages API requires, thinking, and effort come from params: the API, not
+// the harness, says what each model takes.
+const anthCacheTTL = 300 // ephemeral: 5 minutes from the start of the request that writes or reads it
 
 func Anthropic(key string) Provider {
 	return Provider{
@@ -37,19 +34,16 @@ func (anthropic) Name() string { return "anthropic" }
 
 func (anthropic) Accepts(typ string) bool { return slices.Contains(images, typ) }
 
-type anthReq struct {
-	Model     string       `json:"model"`
-	MaxTokens int          `json:"max_tokens"`
-	Stream    bool         `json:"stream"`
-	System    []anthBlock  `json:"system,omitempty"`
-	Thinking  anthThinking `json:"thinking"`
-	Tools     []anthTool   `json:"tools,omitempty"`
-	Messages  []anthMsg    `json:"messages"`
+func (anthropic) Owns(field string) bool {
+	return slices.Contains([]string{"model", "stream", "system", "tools", "messages"}, field)
 }
 
-type anthThinking struct {
-	Type         string `json:"type"`
-	BudgetTokens int    `json:"budget_tokens"`
+type anthReq struct {
+	Model    string      `json:"model"`
+	Stream   bool        `json:"stream"`
+	System   []anthBlock `json:"system,omitempty"`
+	Tools    []anthTool  `json:"tools,omitempty"`
+	Messages []anthMsg   `json:"messages"`
 }
 
 type anthTool struct {
@@ -91,13 +85,7 @@ var ephemeral = &anthCache{Type: "ephemeral"}
 
 func (e anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
-	body := anthReq{
-		Model:     req.Model,
-		MaxTokens: anthMaxTokens,
-		Stream:    true,
-		Thinking:  anthThinking{Type: "enabled", BudgetTokens: anthThinkingBudget},
-		Messages:  []anthMsg{},
-	}
+	body := anthReq{Model: req.Model, Stream: true, Messages: []anthMsg{}}
 	var marks []string
 	if len(system) > 0 {
 		body.System = []anthBlock{{Type: "text", Text: systemText(system), CacheControl: ephemeral}}
@@ -127,7 +115,7 @@ func (e anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	b, err := marshal(body)
+	b, err := encode(body, req.Params)
 	return b, cache, err
 }
 

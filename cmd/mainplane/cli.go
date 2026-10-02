@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"io/fs"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/textproto"
 	"net/url"
@@ -22,9 +24,11 @@ import (
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/harness"
+	"github.com/mainplane-ai/mainplane/pkg/mesh"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/version"
+	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 // via is what this connector writes on every record it causes.
@@ -56,7 +60,7 @@ func cli(verb string, args []string) {
 	if err != nil {
 		die(err)
 	}
-	c.version()
+	hv := c.version()
 	switch verb {
 	case "new":
 		var out struct{ ID string }
@@ -89,7 +93,7 @@ func cli(verb string, args []string) {
 		var infos []harness.Info
 		c.call("GET", "/sessions?status="+strings.Join(args, ""), "", nil, &infos)
 		for _, i := range infos {
-			fmt.Printf("%s  %-11s  %-40s  n=%-5d prompt=%d/%d  %s\n", i.ID, i.Status, i.Config.Model, i.N, i.Prompt, i.Config.Context, i.Updated.Local().Format(time.DateTime))
+			fmt.Printf("%s  %-11s  %-40s  n=%-5d context=%d/%d  %s\n", i.ID, i.Status, i.Config.Model, i.N, i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime))
 		}
 	case "workers":
 		var ws []harness.Listed
@@ -99,7 +103,10 @@ func cli(verb string, args []string) {
 			if w.Refused != "" {
 				state = "refused: " + w.Refused
 			}
-			fmt.Printf("%-28s  %-13s  %-10s  %-16s  %s\n", w.Name, w.OS+"/"+w.Arch, strings.Join(w.Interps, ","), w.Version, state)
+			if w.Version != hv { // a worker follows its harness; say so only when it has not
+				state += " at " + w.Version
+			}
+			fmt.Printf("%-28s  %-13s  %-10s  %s\n", w.Name, w.OS+"/"+w.Arch, strings.Join(w.Interps, ","), state)
 		}
 	case "worker remove":
 		c.call("DELETE", "/workers/"+url.PathEscape(args[0]), "", nil, nil)
@@ -109,14 +116,17 @@ func cli(verb string, args []string) {
 }
 
 // client is what login wrote: the harness's key, the URL it was last found
-// at, and the api key's secret.
+// at, and the api key's secret. On a worker of that harness, calls go to its
+// node on the mesh, at mesh.
 type client struct {
 	URL     string `json:"url"`
 	Key     string `json:"key"`
 	Harness string `json:"harness"`
+	mesh    string
 }
 
-// login is what login wrote, with the harness proved at its URL, or found
+// login is what login wrote, with the harness on the mesh when the worker on
+// this machine follows the same harness key, else proved at its URL, or found
 // again through the pointer and saved.
 func login() (client, error) {
 	var c client
@@ -127,12 +137,22 @@ func login() (client, error) {
 	if err := json.Unmarshal(b, &c); err != nil {
 		return c, err
 	}
+	if k, a, err := mesh.Harness(worker.Harness); err == nil && k == c.Harness {
+		c.mesh = "http://" + net.JoinHostPort(a.String(), strconv.Itoa(worker.APIPort))
+		return c, nil
+	}
+	return c, c.find()
+}
+
+// find proves the harness at its URL, or finds it again through the pointer
+// and saves it.
+func (c *client) find() error {
 	url, err := pointer.Find(context.Background(), c.Harness, c.URL)
 	if err != nil || url == c.URL {
-		return c, err
+		return err
 	}
 	c.URL = url
-	return c, c.save()
+	return c.save()
 }
 
 func (c client) save() error {
@@ -149,21 +169,9 @@ func (c client) save() error {
 // call does one request. A status outside 2xx is the harness's own words on
 // stderr and exit 1. A JSON reply lands in out when out is given.
 func (c client) call(method, path, ctype string, body io.Reader, out any) *http.Response {
-	req, err := http.NewRequest(method, c.URL+path, body)
+	resp, err := c.do(method, path, ctype, body)
 	if err != nil {
 		die(err)
-	}
-	req.Header.Set("Authorization", "Bearer "+c.Key)
-	if ctype != "" {
-		req.Header.Set("Content-Type", ctype)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		die(err)
-	}
-	if resp.StatusCode/100 != 2 {
-		b, _ := io.ReadAll(resp.Body)
-		die(fmt.Errorf("%s %s: %d %s", method, path, resp.StatusCode, strings.TrimSpace(string(b))))
 	}
 	if out != nil {
 		defer func() { _ = resp.Body.Close() }()
@@ -172,6 +180,29 @@ func (c client) call(method, path, ctype string, body io.Reader, out any) *http.
 		}
 	}
 	return resp
+}
+
+// do does one request; a status outside 2xx is an error in the harness's own
+// words.
+func (c client) do(method, path, ctype string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequest(method, cmp.Or(c.mesh, c.URL)+path, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Key)
+	if ctype != "" {
+		req.Header.Set("Content-Type", ctype)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode/100 != 2 {
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("%s %s: %d %s", method, path, resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return resp, nil
 }
 
 // raw prints a JSON reply as the harness sent it, indented.
@@ -185,18 +216,28 @@ func (c client) raw(path string) {
 	fmt.Println(b.String())
 }
 
-// version refuses a harness from another release.
-func (c client) version() {
-	if v := c.harness(); !version.Match(v) {
+// version refuses a harness from another release, and returns the one it runs.
+func (c client) version() string {
+	v, err := c.harness()
+	if err != nil {
+		die(err)
+	}
+	if !version.Match(v) {
 		die(fmt.Errorf("harness is version %s, this mainplane is %s: run mainplane update", v, version.V))
 	}
+	return v
 }
 
 // harness is the release the harness runs.
-func (c client) harness() string {
+func (c client) harness() (string, error) {
+	resp, err := c.do("GET", "/", "", nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
 	var out struct{ Version string }
-	c.call("GET", "/", "", nil, &out)
-	return out.Version
+	err = json.NewDecoder(resp.Body).Decode(&out)
+	return out.Version, err
 }
 
 // post appends text and files as one turn: a single text/plain body, or one

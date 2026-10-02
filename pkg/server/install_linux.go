@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+
+	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 const (
-	Dir      = "/var/lib/mainplane-server"
+	Dir      = worker.HarnessDir
 	unitPath = "/etc/systemd/system/mainplane-server.service"
 )
 

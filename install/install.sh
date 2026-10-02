@@ -31,7 +31,7 @@ curl -fsSLO "$dl/SHA256SUMS"
 get() {
   curl -fsSLO "$dl/$1-$os-$arch"
   grep " $1-$os-$arch\$" SHA256SUMS > sum || { echo "release $v has no $1-$os-$arch" >&2; exit 1; }
-  if command -v sha256sum > /dev/null; then sha256sum -c sum; else shasum -a 256 -c sum; fi
+  if command -v sha256sum > /dev/null; then sha256sum --quiet -c sum; else shasum -a 256 --quiet -c sum; fi
   chmod 755 "$1-$os-$arch"
   mv "$1-$os-$arch" "$1"
 }
@@ -48,5 +48,5 @@ elif [ $# -eq 1 ]; then
 else
   mkdir -p -m 755 /usr/local/bin
   mv mainplane /usr/local/bin/mainplane
+  echo "mainplane $v installed"
 fi
-echo "mainplane $v installed: $(/usr/local/bin/mainplane version)"

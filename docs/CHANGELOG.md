@@ -2,6 +2,28 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.4.0
+
+Workers no longer see each other by default: each sees only the harness. To let two reach each other, name them in the harness config: `"links": [["alexanders-mac-mini", "linuxbox"]]`.
+
+- Links and provider keys in the harness config apply within seconds of a save; the rest of the config at the next start
+- The harness installs with no provider key set; it says where to add one
+- A worker installed on the harness's machine by an admin warns that it can read and modify the harness secrets
+- A new worker asks the pointer again after 5s, then 10s, up to a minute, where it waited a minute: a worker installed right after its harness joins in seconds
+- The CLI on a worker calls its harness over the mesh, off the tunnel, when the worker follows the harness it is logged in to. The harness serves the API on its mesh node at port 8080
+- `mainplane status` on a worker whose harness does not answer says so, with its URL, and what to do if the harness was uninstalled or installed again
+- The harness install prints a join token named `default`, good for any number of machines, and the lines that install a worker with it on Linux, macOS and Windows. Each install makes a new one; the one before joins no more machines. The name in `mainplane-server join new <name>` is the secret's, for revoke; a worker is named by its hostname
+- Installs print less: no checksum lines, a spinner while the harness and its tunnel start, then a wordmark, the version, and what to do next
+- Sessions: `context` in a create body and in the config record is `context_limit`, and `prompt` in session info is `context_used`. A session made before reads a limit of 0 and fails at its next step: start a new one
+- Sessions: `params` in a create body sets vendor fields on every request, as a JSON merge patch in the vendor's own names: `{"output_config":{"effort":"high"}}` for Anthropic, `{"reasoning":{"effort":"high"}}` for OpenAI, `{"provider":{"order":["deepinfra"]}}` for OpenRouter. The vendor judges them. A field the harness builds from the session, such as `messages` or `tools`, fails the create. A copy keeps the params
+- Providers send only the fields the harness builds from the session; every model setting comes from `params`. Anthropic and Bedrock no longer get a default `max_tokens` (`maxTokens`) or thinking, OpenAI no reasoning effort, Gemini no thinking config. Anthropic requires `max_tokens`, so a session without it fails at its first step with Anthropic's error. Example for Opus: `{"max_tokens":16384,"thinking":{"type":"adaptive"}}`; for Haiku 4.5: `{"max_tokens":16384}`
+- Step records carry `sent`, when the request went out. The `cache` header keeps `marks` and has `ttl` only for Anthropic and Bedrock, whose lifetime the request fixes, counted from `sent`
+- `mainplane status` starts with the harness the CLI is logged in to: its version and URL. The worker's own row says `harness unresponsive` where it said `map poll down`
+- `mainplane status` on a machine with no worker says `this machine is not a worker`, and exits 0
+- `mainplane login` says `logged in to mainplane-server at <url>`
+- `mainplane workers` shows a worker's version only when it is not the harness's
+- Windows: the UAC prompt names Mainplane Worker
+
 ## v0.3.0
 
 Workers join a WireGuard mesh that the harness coordinates, and reach the harness over it. A v0.2.0 worker dials `/worker`, which is gone, so it cannot reach a v0.3.0 harness and cannot update itself: on each worker, `mainplane uninstall`, then install again with its join token. Tokens and the harness config carry over. See `docs/self-hosting.md`, "The mesh".

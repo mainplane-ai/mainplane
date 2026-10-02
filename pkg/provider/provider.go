@@ -28,21 +28,23 @@ type Tool struct {
 	Schema      json.RawMessage // JSON Schema for the arguments object
 }
 
+// Params are the session's vendor fields, see encode.
 type Request struct {
 	Model   string
 	Key     string // session id, the routing key for prefix caches
 	Tools   []Tool
 	Context []statefile.Record // statefile.Build output
+	Params  map[string]json.RawMessage
 }
 
-// Cache is the step record's cache header. Marks are the ids of the records
-// through which the prefix is cached. Anthropic and bedrock put a breakpoint
-// after the system prompt and after the last user block; openai and gemini
-// cache every prefix, so the mark is the last record. TTL is seconds from the step's
-// time: the provider's promise for anthropic and bedrock, a forecast for the
-// rest. The next step's usage.cache_read is the truth.
+// Cache is the step record's cache header, facts only. Marks are the ids of
+// the records that end a cache breakpoint. Anthropic and bedrock put one after
+// the system prompt and one after the last user block; openai and gemini place
+// their own, so the mark is the last record sent. TTL is seconds from the
+// step's sent time, set only where the request the harness sends fixes it:
+// anthropic and bedrock. The step's usage says what was read and written.
 type Cache struct {
-	TTL   int      `json:"ttl"`
+	TTL   int      `json:"ttl,omitempty"`
 	Marks []string `json:"marks"`
 }
 
@@ -55,10 +57,12 @@ func cacheHeader(ttl int, marks ...string) (json.RawMessage, error) {
 // deterministic and returns the cache markers it placed, which go on the step
 // record. Stream calls emit once per block as the stream completes it and
 // returns the step header with usage. Accepts is the media types the envelope
-// encodes as media; a record of any other type goes as text.
+// encodes as media; a record of any other type goes as text. Owns is the body
+// fields Compile builds from the session, which params may not set.
 type Envelope interface {
 	Name() string
 	Accepts(typ string) bool
+	Owns(field string) bool
 	Compile(req Request) (body []byte, cache json.RawMessage, err error)
 	Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error)
 }
@@ -136,10 +140,11 @@ func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Rec
 		return statefile.Header{}, fmt.Errorf("bad url %q", url) // configuration, not transient: checked before the retry loop
 	}
 	for attempt := 0; ; attempt++ {
+		sent := time.Now().UTC().Truncate(time.Millisecond)
 		h, emitted, err := p.once(ctx, url, body, emit)
 		if err == nil {
 			sum := sha256.Sum256(body)
-			h.Provider, h.Model, h.Request, h.Cache = p.Envelope.Name(), req.Model, "sha256:"+hex.EncodeToString(sum[:]), cache
+			h.Provider, h.Model, h.Request, h.Cache, h.Sent = p.Envelope.Name(), req.Model, "sha256:"+hex.EncodeToString(sum[:]), cache, sent
 			return h, nil
 		}
 		if emitted || attempt == retries || !transient(err) {
@@ -211,6 +216,42 @@ func marshal(v any) ([]byte, error) {
 		return nil, err
 	}
 	return bytes.TrimRight(b.Bytes(), "\n"), nil
+}
+
+// encode marshals a request body and applies params to it as a JSON merge
+// patch (RFC 7396) in the vendor's own field names: an object merges into the
+// object it names, null deletes, anything else replaces. The harness does not
+// know every vendor's fields, so the vendor judges them and its 400 is the
+// error. The harness refuses at create only the fields the envelope Owns.
+func encode(body any, params map[string]json.RawMessage) ([]byte, error) {
+	b, err := marshal(body)
+	if err != nil || len(params) == 0 {
+		return b, err
+	}
+	return merge(b, params)
+}
+
+func merge(target json.RawMessage, patch map[string]json.RawMessage) (json.RawMessage, error) {
+	var t map[string]json.RawMessage
+	if json.Unmarshal(target, &t) != nil || t == nil {
+		t = map[string]json.RawMessage{} // RFC 7396: a target that is not an object becomes one
+	}
+	for k, v := range patch {
+		var sub map[string]json.RawMessage
+		switch {
+		case string(v) == "null":
+			delete(t, k)
+		case json.Unmarshal(v, &sub) == nil:
+			m, err := merge(t[k], sub)
+			if err != nil {
+				return nil, err
+			}
+			t[k] = m
+		default:
+			t[k] = v
+		}
+	}
+	return marshal(t)
 }
 
 // Split separates the leading system records, which are the system prompt,

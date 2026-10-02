@@ -15,14 +15,9 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
-// maxTokens is required by Converse for Claude. 16384 fits every current
-// Claude model and leaves room above the thinking budget. The thinking field
-// is Claude's; other Bedrock models are not covered.
-const (
-	bedrockMaxTokens      = 16384
-	bedrockThinkingBudget = 1024
-	bedrockCacheTTL       = 300
-)
+// The body carries only what the session builds. inferenceConfig and
+// additionalModelRequestFields, where Claude's thinking goes, come from params.
+const bedrockCacheTTL = 300 // the default cachePoint: 5 minutes, refreshed on every hit
 
 // Bedrock authenticates with a Bedrock API key (AWS_BEARER_TOKEN_BEDROCK),
 // not SigV4. Model is an inference profile id such as
@@ -43,25 +38,14 @@ func (bedrock) Name() string { return "bedrock" }
 
 func (bedrock) Accepts(typ string) bool { return slices.Contains(images, typ) }
 
+func (bedrock) Owns(field string) bool {
+	return slices.Contains([]string{"system", "messages", "toolConfig"}, field)
+}
+
 type bedReq struct {
-	System                       []bedBlock     `json:"system,omitempty"`
-	Messages                     []bedMsg       `json:"messages"`
-	InferenceConfig              bedInference   `json:"inferenceConfig"`
-	ToolConfig                   *bedToolConfig `json:"toolConfig,omitempty"`
-	AdditionalModelRequestFields bedAdditional  `json:"additionalModelRequestFields"`
-}
-
-type bedInference struct {
-	MaxTokens int `json:"maxTokens"`
-}
-
-type bedAdditional struct {
-	Thinking bedThinking `json:"thinking"`
-}
-
-type bedThinking struct {
-	Type         string `json:"type"`
-	BudgetTokens int    `json:"budget_tokens"`
+	System     []bedBlock     `json:"system,omitempty"`
+	Messages   []bedMsg       `json:"messages"`
+	ToolConfig *bedToolConfig `json:"toolConfig,omitempty"`
 }
 
 type bedToolConfig struct {
@@ -137,11 +121,7 @@ var cachePoint = &bedCachePoint{Type: "default"}
 
 func (e bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
-	body := bedReq{
-		Messages:                     []bedMsg{},
-		InferenceConfig:              bedInference{MaxTokens: bedrockMaxTokens},
-		AdditionalModelRequestFields: bedAdditional{bedThinking{Type: "enabled", BudgetTokens: bedrockThinkingBudget}},
-	}
+	body := bedReq{Messages: []bedMsg{}}
 	var marks []string
 	if len(system) > 0 {
 		body.System = []bedBlock{{Text: systemText(system)}, {CachePoint: cachePoint}}
@@ -178,7 +158,7 @@ func (e bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	b, err := marshal(body)
+	b, err := encode(body, req.Params)
 	return b, cache, err
 }
 

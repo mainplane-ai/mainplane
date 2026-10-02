@@ -10,6 +10,8 @@ import (
 const (
 	stateDir = "/var/lib/mainplane"
 	unitPath = "/etc/systemd/system/mainplaned.service"
+	// HarnessDir is the harness's, here so a worker installed beside it can warn.
+	HarnessDir = "/var/lib/mainplane-server"
 )
 
 const unit = `[Unit]
@@ -41,7 +43,11 @@ func Install(token string) error {
 	if err := run("systemctl", "enable", "mainplaned"); err != nil {
 		return err
 	}
-	return run("systemctl", "restart", "mainplaned")
+	if err := run("systemctl", "restart", "mainplaned"); err != nil {
+		return err
+	}
+	done()
+	return nil
 }
 
 // unregister stops the worker and removes its unit; none installed is fine.

@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"time"
+
+	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 // launchd removes a daemon a few milliseconds after bootout returns; seconds
@@ -13,7 +15,7 @@ import (
 const unloadWait = 5 * time.Second
 
 const (
-	Dir       = "/Library/Application Support/mainplane-server"
+	Dir       = worker.HarnessDir
 	label     = "ai.mainplane.server"
 	plistPath = "/Library/LaunchDaemons/" + label + ".plist"
 	logPath   = "/var/log/mainplane-server.log"

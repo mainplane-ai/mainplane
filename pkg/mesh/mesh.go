@@ -42,11 +42,13 @@ const (
 	// mesh apart and is easy to name in a firewall.
 	port = 41642
 
-	// A worker whose map poll is down proves the harness this often, and
-	// asks the pointer at most once a minute: a harness that is down would
-	// otherwise draw a lookup from every worker.
-	check      = 20 * time.Second
-	lookupWait = time.Minute
+	// A worker whose map poll is down proves the harness this often. A failed
+	// pointer lookup is tried again after lookupWait, doubled each time up to
+	// maxLookupWait: a new worker finds a harness that just started in seconds,
+	// and a harness that is down draws at most a lookup a minute from each.
+	check         = 20 * time.Second
+	lookupWait    = 5 * time.Second
+	maxLookupWait = time.Minute
 )
 
 // Mesh is this worker's node.
@@ -59,6 +61,7 @@ type Mesh struct {
 	err     error // leaving's
 	removed chan struct{}
 	sock    net.Listener // mainplane status asks here
+	harness string       // the key of the harness this node follows
 }
 
 // Up brings the node up with its state in dir: the TUN, then the engine.
@@ -119,7 +122,7 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 	lb.SetVarRoot(dir)
 	log.Printf("mesh: %s up, port %d", tun, port)
 	ctx, unwatch := context.WithCancel(context.Background())
-	m := &Mesh{lb: lb, health: sys.HealthTracker.Get(), unwatch: unwatch, watched: make(chan struct{}), removed: make(chan struct{})}
+	m := &Mesh{lb: lb, health: sys.HealthTracker.Get(), unwatch: unwatch, watched: make(chan struct{}), removed: make(chan struct{}), harness: harness}
 	go func() {
 		defer close(m.watched)
 		// Any change may be to a name: the block is made again from the
@@ -264,22 +267,23 @@ func run(name string, args ...string) error {
 // answers every poll with 404: the client starts again, which registers,
 // with the join secret when the keys are unknown.
 func follow(ctx context.Context, lb *ipnlocal.LocalBackend, h *health.Tracker, harness, secret, name string) {
-	url, asked := "", time.Time{}
-	for ; ctx.Err() == nil; time.Sleep(check) {
+	var url string
+	var wait, backoff time.Duration
+	for ; ctx.Err() == nil; time.Sleep(wait) {
+		wait = check
 		if h.GetInPollNetMap() {
 			continue
 		}
 		u := url
 		if u == "" || pointer.Prove(ctx, harness, u) != nil {
-			if time.Since(asked) < lookupWait {
-				continue
-			}
-			asked = time.Now()
 			var err error
 			if u, err = pointer.Find(ctx, harness, ""); err != nil {
-				log.Printf("mesh: %v, the pointer is asked again within a minute", err)
+				backoff = min(max(2*backoff, lookupWait), maxLookupWait)
+				wait = backoff
+				log.Printf("mesh: %v, the pointer is asked again in %s", err, wait)
 				continue
 			}
+			backoff = 0
 		}
 		p := ipn.NewPrefs()
 		p.ControlURL, p.Hostname, p.WantRunning = u, name, true
