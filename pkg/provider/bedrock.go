@@ -298,11 +298,10 @@ func (p *bedPart) record() (statefile.Record, bool, error) {
 
 func (bedrock) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
 	parts := map[int]*bedPart{}
-	var usage statefile.Usage
 	for {
 		headers, payload, err := readFrame(resp)
 		if errors.Is(err, io.EOF) {
-			return statefile.Header{Usage: &usage}, nil
+			return statefile.Header{}, errors.New("bedrock: stream ended before metadata")
 		}
 		if err != nil {
 			return statefile.Header{}, err
@@ -337,13 +336,15 @@ func (bedrock) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.He
 				emit(r)
 			}
 			delete(parts, e.ContentBlockIndex)
-		case "metadata":
+		case "metadata": // the last event
+			var usage statefile.Usage
 			if e.Usage != nil {
 				usage = statefile.Usage{
 					Input: e.Usage.InputTokens, Output: e.Usage.OutputTokens,
 					CacheRead: e.Usage.CacheReadInputTokens, CacheWrite: e.Usage.CacheWriteInputTokens,
 				}
 			}
+			return statefile.Header{Usage: &usage}, nil
 		}
 	}
 }

@@ -189,8 +189,10 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 	var text strings.Builder
 	var calls []*chatToolCall
 	var usage statefile.Usage
+	var done bool
 	err := Events(resp, func(_, data string) error {
 		if data == "[DONE]" {
+			done = true
 			return nil
 		}
 		var c chatChunk
@@ -223,6 +225,9 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 		}
 		return nil
 	})
+	if err == nil && !done {
+		err = fmt.Errorf("openai-chat: stream ended before [DONE]")
+	}
 	if err != nil {
 		return statefile.Header{}, err
 	}

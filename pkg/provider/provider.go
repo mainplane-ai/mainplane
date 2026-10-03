@@ -87,6 +87,13 @@ const (
 	retryCap  = 30 * time.Second
 )
 
+// idle bounds the wait for response headers and then the gap between body
+// bytes, which a silent connection otherwise holds forever. 300 s is
+// opencode's header and chunk timeout, pi's, and codex's per event: a
+// reasoning model can think that long before it sends a byte. It counts bytes,
+// not events, so bedrock's binary frames are bounded too.
+const idle = 300 * time.Second
+
 // httpError is a non-200 response. After is the Retry-After header, 0 if none.
 type httpError struct {
 	name, status string
@@ -159,7 +166,18 @@ func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Rec
 }
 
 // once is one HTTP attempt. emitted reports whether any block reached emit.
+// An idle timeout cancels the request, and its cause is the error.
 func (p Provider) once(ctx context.Context, url string, body []byte, emit func(statefile.Record)) (h statefile.Header, emitted bool, err error) {
+	name := p.Envelope.Name()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	timer := time.AfterFunc(idle, func() { cancel(fmt.Errorf("%s: no bytes for %s", name, idle)) })
+	defer timer.Stop()
+	defer func() {
+		if cause := context.Cause(ctx); err != nil && cause != nil {
+			err = cause
+		}
+	}()
 	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return h, false, err
@@ -171,7 +189,6 @@ func (p Provider) once(ctx context.Context, url string, body []byte, emit func(s
 		return h, false, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	name := p.Envelope.Name()
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return h, false, &httpError{name: name, status: resp.Status, code: resp.StatusCode, body: msg, after: retryAfter(resp.Header)}
@@ -183,8 +200,22 @@ func (p Provider) once(ctx context.Context, url string, body []byte, emit func(s
 		}
 		emit(r)
 	}
-	h, err = p.Envelope.Stream(resp.Body, tagged)
+	h, err = p.Envelope.Stream(idleReader{resp.Body, timer}, tagged)
 	return h, emitted, err
+}
+
+// idleReader restarts the idle timer on every read that returns bytes.
+type idleReader struct {
+	r io.Reader
+	t *time.Timer
+}
+
+func (b idleReader) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	if n > 0 {
+		b.t.Reset(idle)
+	}
+	return n, err
 }
 
 // callRecord builds a call record. Providers stream nothing for a tool called
