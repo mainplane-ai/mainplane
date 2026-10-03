@@ -94,7 +94,7 @@ var (
 /usr/local/bin/mainplane workers && echo workers-ok
 for i in $(seq 90); do /usr/local/bin/mainplane workers | grep -q '^admin ' && { echo admin-ok; break; }; sleep 1; done
 d=/var/lib/mainplane-server; [ -d $d ] || d="/Library/Application Support/mainplane-server"
-cat "$d/config.json" >/dev/null && test -d "$d/sessions" && echo dir-ok
+cat "$d/config.json" >/dev/null && touch "$d/config.json" "$d/sessions/e2e" && rm "$d/sessions/e2e" && echo dir-ok
 l=~/.mainplane/login.json
 curl -s -o /dev/null -w 'worker-%%{http_code}\n' -H "Authorization: Bearer $(sed 's/.*"key":"\([^"]*\)".*/\1/' $l)" "$(sed 's/.*"url":"\([^"]*\)".*/\1/' $l)/worker"`,
 		true: `& ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) server
@@ -103,7 +103,7 @@ mainplane workers
 if (!$LASTEXITCODE) { 'workers-ok' }
 for ($i = 0; $i -lt 90; $i++) { if (mainplane workers | Select-String '^admin ') { 'admin-ok'; break }; Start-Sleep 1 }
 $d = "$env:ProgramData\mainplane-server"
-if ((Test-Path "$d\sessions") -and ((Get-Acl $d).Access.IdentityReference.Value -like "*\$env:USERNAME")) { 'dir-ok' }
+if ((Test-Path "$d\sessions") -and ((Get-Acl $d).Access | Where-Object { $_.IdentityReference.Value -like "*\$env:USERNAME" -and $_.FileSystemRights -eq 'FullControl' -and $_.AccessControlType -eq 'Allow' })) { 'dir-ok' }
 $l = Get-Content "$HOME\.mainplane\login.json" | ConvertFrom-Json
 try { Invoke-WebRequest "$($l.url)/worker" -Headers @{ Authorization = "Bearer $($l.key)" } -UseBasicParsing | Out-Null; 'worker-200' } catch { "worker-$([int]$_.Exception.Response.StatusCode)" }`,
 	}

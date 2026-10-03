@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/signal"
@@ -42,12 +43,25 @@ func Uninstall() error {
 }
 
 // prepare makes Dir, which only root and the operator may read: the config
-// in it holds the provider keys.
+// in it holds the provider keys. Root writes in it next, so until start gives
+// it back Dir is root's, and a link in it, which only the operator could have
+// made, is refused: root would write through it.
 func prepare() error {
 	if err := os.MkdirAll(Dir, 0o700); err != nil {
 		return err
 	}
-	return os.Chmod(Dir, 0o700)
+	if err := os.Lchown(Dir, 0, 0); err != nil {
+		return err
+	}
+	if err := os.Chmod(Dir, 0o700); err != nil {
+		return err
+	}
+	return filepath.WalkDir(Dir, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && d.Type()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a link, which the harness never makes; remove it", p)
+		}
+		return err
+	})
 }
 
 // operator is the user who ran sudo. The harness runs as them, since it needs

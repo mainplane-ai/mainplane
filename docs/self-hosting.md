@@ -60,7 +60,8 @@ uninstall` removes `admin` with the harness.
 
 The harness restarts on the new URL and publishes it. Workers and the CLI
 follow, usually in about a minute, with no new tokens. The token is stored in
-the harness config, which only root can read. `mainplane-server tunnel quick`
+the harness config, which only root and you can read (on Windows, also SYSTEM
+and Administrators). `mainplane-server tunnel quick`
 goes back to a quick tunnel.
 
 ## The mesh
