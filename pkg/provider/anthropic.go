@@ -268,6 +268,7 @@ func (p *anthPart) record() (statefile.Record, bool, error) {
 func (anthropic) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
 	parts := map[int]*anthPart{}
 	var usage statefile.Usage
+	var done bool
 	err := Events(resp, func(_, data string) error {
 		var e anthEvent
 		if err := json.Unmarshal([]byte(data), &e); err != nil {
@@ -295,8 +296,13 @@ func (anthropic) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.
 				emit(r)
 			}
 			delete(parts, e.Index)
+		case "message_stop":
+			done = true
 		}
 		return nil
 	})
+	if err == nil && !done {
+		err = fmt.Errorf("anthropic: stream ended before message_stop")
+	}
 	return statefile.Header{Usage: &usage}, err
 }

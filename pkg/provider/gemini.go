@@ -226,7 +226,8 @@ func (e gemini) model(recs []statefile.Record, names map[string]string) ([]gemPa
 
 type gemChunk struct {
 	Candidates []struct {
-		Content gemContent `json:"content"`
+		Content      gemContent `json:"content"`
+		FinishReason string     `json:"finishReason"`
 	} `json:"candidates"`
 	UsageMetadata *struct {
 		PromptTokenCount        int `json:"promptTokenCount"`
@@ -328,6 +329,7 @@ func gemCall(p gemPart, emit func(statefile.Record)) error {
 func (gemini) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
 	var usage statefile.Usage
 	var block gemBlock
+	var done bool
 	err := Events(resp, func(_, data string) error {
 		var c gemChunk
 		if err := json.Unmarshal([]byte(data), &c); err != nil {
@@ -344,6 +346,7 @@ func (gemini) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Hea
 			}
 		}
 		for _, cand := range c.Candidates {
+			done = done || cand.FinishReason != ""
 			for _, p := range cand.Content.Parts {
 				if err := block.add(p, emit); err != nil {
 					return err
@@ -352,6 +355,9 @@ func (gemini) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Hea
 		}
 		return nil
 	})
+	if err == nil && !done {
+		err = fmt.Errorf("gemini: stream ended before finishReason")
+	}
 	if err != nil {
 		return statefile.Header{}, err
 	}

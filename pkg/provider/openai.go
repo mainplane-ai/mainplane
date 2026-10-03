@@ -215,6 +215,7 @@ func respRecord(raw json.RawMessage) (statefile.Record, bool, error) {
 
 func (openai) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
 	var usage statefile.Usage
+	var done bool
 	err := Events(resp, func(_, data string) error {
 		var e respEvent
 		if err := json.Unmarshal([]byte(data), &e); err != nil {
@@ -232,6 +233,7 @@ func (openai) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Hea
 				emit(r)
 			}
 		case "response.completed", "response.incomplete":
+			done = true
 			u := e.Response.Usage
 			usage = statefile.Usage{
 				Input:     u.InputTokens - u.InputTokensDetails.CachedTokens,
@@ -241,5 +243,8 @@ func (openai) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Hea
 		}
 		return nil
 	})
+	if err == nil && !done {
+		err = fmt.Errorf("openai: stream ended before response.completed")
+	}
 	return statefile.Header{Usage: &usage}, err
 }

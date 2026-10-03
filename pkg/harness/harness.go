@@ -16,6 +16,11 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/version"
 )
 
+// halted is the body of a stop's error record. The model reads it only when a
+// retry or a new message steps the session again, so it says to go on; who
+// stopped it is the record's via.
+const halted = "The session was halted during the last step. Calls running were cancelled. If you see this message please continue."
+
 type Harness struct {
 	Sessions  statefile.Sessions
 	Providers map[string]provider.Provider // read and replaced under pmu once the harness runs
@@ -280,7 +285,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 	}
 	if err != nil {
 		if via := s.stoppedBy(); via != "" {
-			_, err := h.append(s, errorRecord(via, "stopped via "+via))
+			_, err := h.append(s, errorRecord(via, halted))
 			return statefile.StatusFailed, err
 		}
 		_, err := h.append(s, errorRecord("", err.Error()))
@@ -303,7 +308,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 		}
 	}
 	if via := s.stoppedBy(); via != "" {
-		_, err := h.append(s, errorRecord(via, "stopped via "+via))
+		_, err := h.append(s, errorRecord(via, halted))
 		return statefile.StatusFailed, err
 	}
 	if len(calls) == 0 {
