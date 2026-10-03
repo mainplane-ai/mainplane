@@ -39,9 +39,11 @@ const (
 const reread = 2 * time.Second
 
 // Config is the self-hosted config file. Provider values are expanded from
-// the environment, so a key can be "$ANTHROPIC_API_KEY".
+// the environment, so a key can be "$ANTHROPIC_API_KEY". The directory it is
+// in is the harness's: the harness key, the auth table, the mesh and the
+// tunnel are there, and sessions in sessions/ under it, the one directory a
+// drive may ever share.
 type Config struct {
-	Admin     string              `json:"admin"`            // directory holding sessions, the auth table and the tunnel
 	HTTP      string              `json:"http"`             // loopback address the tunnel carries connectors and workers to
 	Tunnel    *Tunnel             `json:"tunnel,omitempty"` // the user's own; none is a quick tunnel
 	Providers map[string]Provider `json:"providers"`
@@ -55,11 +57,12 @@ type Tunnel struct {
 	Token string `json:"token"` // the tunnel's, as Cloudflare shows it
 }
 
-func (c Config) Auth() auth.Store { return auth.Store{Path: filepath.Join(c.Admin, "auth.json")} }
+// Auth is the auth table of the harness in dir.
+func Auth(dir string) auth.Store { return auth.Store{Path: filepath.Join(dir, "auth.json")} }
 
 // Key is the harness key every token carries, made on first use.
-func (c Config) Key() (ed25519.PrivateKey, error) {
-	return pointer.Key(filepath.Join(c.Admin, "harness.key"))
+func Key(dir string) (ed25519.PrivateKey, error) {
+	return pointer.Key(filepath.Join(dir, "harness.key"))
 }
 
 type Provider struct {
@@ -119,14 +122,16 @@ func Harness(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(c.Admin, 0o755); err != nil {
+	dir := filepath.Dir(path)
+	sessions := filepath.Join(dir, "sessions")
+	if err := os.MkdirAll(sessions, 0o755); err != nil {
 		return err
 	}
-	k, err := c.Key()
+	k, err := Key(dir)
 	if err != nil {
 		return err
 	}
-	store := c.Auth()
+	store := Auth(dir)
 	t, err := store.Load()
 	if err != nil {
 		return err
@@ -134,24 +139,24 @@ func Harness(ctx context.Context, path string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	limit := &auth.Limit{}
-	join := func(secret, addr string) (bool, error) {
+	join := func(secret, addr string) (auth.Entry, error) {
 		if err := limit.Wait(addr); err != nil {
-			return false, err
+			return auth.Entry{}, err
 		}
 		e, ok := store.Find(auth.Join, secret)
 		if !ok {
 			limit.Refused(addr)
-			return false, errors.New("join secret refused")
+			return e, errors.New("join secret refused")
 		}
-		return e.Ephemeral, nil
+		return e, nil
 	}
 	pool := harness.NewPool()
-	coord, err := coordinator.New(c.Admin, join)
+	coord, err := coordinator.New(dir, join)
 	if err != nil {
 		return err
 	}
 	coord.Link(c.Links)
-	h := &harness.Harness{Sessions: statefile.Sessions{Dir: c.Admin}, Providers: ps, Workers: pool, Remove: coord.Remove}
+	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove}
 	go watch(ctx, path, func(c Config) error {
 		ps, err := providers(c.Providers)
 		if err == nil {
@@ -185,11 +190,11 @@ func Harness(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("harness: http on %s, sessions in %s, %d api keys, %d join secrets", c.HTTP, c.Admin, len(t[auth.Key]), len(t[auth.Join]))
+	log.Printf("harness: http on %s, sessions in %s, %d api keys, %d join secrets", c.HTTP, sessions, len(t[auth.Key]), len(t[auth.Join]))
 	errs := make(chan error, 4)
 	go func() { errs <- srv.Serve(ln) }()
 	go func() {
-		ls, err := coord.Listen(ctx, filepath.Join(c.Admin, "mesh"), "http://"+c.HTTP, worker.Port, worker.APIPort)
+		ls, err := coord.Listen(ctx, filepath.Join(dir, "mesh"), "http://"+c.HTTP, worker.Port, worker.APIPort)
 		if err != nil {
 			errs <- err
 			return
@@ -216,9 +221,9 @@ func Harness(ctx context.Context, path string) error {
 	}
 	go func() {
 		if c.Tunnel != nil {
-			errs <- tunnel.Own(ctx, c.Admin, c.Tunnel.URL, c.Tunnel.Token, "http://"+c.HTTP, up)
+			errs <- tunnel.Own(ctx, dir, c.Tunnel.URL, c.Tunnel.Token, "http://"+c.HTTP, up)
 		} else {
-			errs <- tunnel.Quick(ctx, c.Admin, "http://"+c.HTTP, up)
+			errs <- tunnel.Quick(ctx, dir, "http://"+c.HTTP, up)
 		}
 	}()
 	if err := <-errs; ctx.Err() == nil {

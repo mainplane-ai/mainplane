@@ -36,10 +36,14 @@ on Linux) with the provider keys set in the shell, or none. Add keys there:
 ```
 
 The harness applies providers and links within seconds of a save; any other
-change applies at its next start. Only root can read the config. A worker on
-the harness's machine runs code as its operator, so on Linux and macOS an
-operator who is admin can read it, api keys included, and the worker install
-warns of this. On Windows code runs unelevated and cannot.
+change applies at its next start.
+
+The install also makes the machine a worker named `admin`, which runs code as
+you, the user who installed. The config's directory is yours and root's (on
+Windows, yours, SYSTEM's and Administrators'), so `admin`, and you without
+sudo, read and edit the config and keys. On Linux and macOS the harness runs
+as you. Sessions are in `sessions/` in that directory. `mainplane-server
+uninstall` removes `admin` with the harness.
 
 ## Your own domain
 

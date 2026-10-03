@@ -17,8 +17,6 @@ const (
 	label     = "ai.mainplane.mainplaned"
 	plistPath = "/Library/LaunchDaemons/" + label + ".plist"
 	logPath   = "/var/log/mainplaned.log"
-	// HarnessDir is the harness's, here so a worker installed beside it can warn.
-	HarnessDir = "/Library/Application Support/mainplane-server"
 )
 
 const plist = `<?xml version="1.0" encoding="UTF-8"?>

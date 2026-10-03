@@ -6,8 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"time"
-
-	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 // launchd removes a daemon a few milliseconds after bootout returns; seconds
@@ -15,7 +13,7 @@ import (
 const unloadWait = 5 * time.Second
 
 const (
-	Dir       = worker.HarnessDir
+	Dir       = "/Library/Application Support/mainplane-server"
 	label     = "ai.mainplane.server"
 	plistPath = "/Library/LaunchDaemons/" + label + ".plist"
 	logPath   = "/var/log/mainplane-server.log"
@@ -25,6 +23,7 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>%s</string>
+<key>UserName</key><string>%s</string>
 <key>ProgramArguments</key><array><string>%s</string><string>up</string><string>%s</string></array>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><true/>
@@ -33,13 +32,32 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
 </dict></plist>
 `
 
-// start runs the harness at every boot: a LaunchDaemon, as root. Logs are in
-// /var/log/mainplane-server.log.
+// start runs the harness at every boot: a LaunchDaemon, as the operator. Logs
+// are in /var/log/mainplane-server.log.
 func start() error {
+	u, err := operator()
+	if err != nil {
+		return err
+	}
 	if err := bootout(); err != nil {
 		return err
 	}
-	if err := os.WriteFile(plistPath, fmt.Appendf(nil, plist, label, bin, Conf, logPath, logPath), 0o644); err != nil {
+	if err := own(u, Dir); err != nil {
+		return err
+	}
+	// launchd opens the log as the operator, and stops a harness whose log
+	// root made before.
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := own(u, logPath); err != nil {
+		return err
+	}
+	if err := os.WriteFile(plistPath, fmt.Appendf(nil, plist, label, u.Username, bin, Conf, logPath, logPath), 0o644); err != nil {
 		return err
 	}
 	return run("launchctl", "bootstrap", "system", plistPath)

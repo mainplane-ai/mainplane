@@ -9,7 +9,7 @@
 //	mainplane-server key  new <name> | revoke <name> | list    on the installed harness, as root
 //	mainplane-server join new <name> [ephemeral] | revoke <name> | list
 //	mainplane-server update [version]         the installed harness becomes release version, the latest stable by default
-//	mainplane-server uninstall                the service and binary go; sessions and the auth table stay
+//	mainplane-server uninstall                the service, binary and admin worker go; sessions and the auth table stay
 //	mainplane-server version
 package main
 
@@ -32,6 +32,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/server"
 	"github.com/mainplane-ai/mainplane/pkg/tunnel"
 	"github.com/mainplane-ai/mainplane/pkg/version"
+	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 func main() {
@@ -48,7 +49,7 @@ func main() {
 	case verb == "uninstall" && len(args) == 1:
 		elevate.Root(args...)
 		fatal(server.Uninstall())
-		fmt.Printf("harness uninstalled; its config, sessions and auth table stay in %s\n", server.Dir)
+		fmt.Printf("harness and its admin worker uninstalled; its config, sessions and auth table stay in %s\n", server.Dir)
 	case verb == "up" && len(args) == 2:
 		fatal(server.Up(args[1]))
 	case verb == "install":
@@ -70,13 +71,13 @@ func main() {
 		stop()
 		fatal(err)
 		if h.Key != "" {
-			fatal(h.Auth().Set(auth.Key, hostname(), h.Key))
+			fatal(server.Auth(server.Dir).Set(auth.Key, hostname(), h.Key))
 		}
-		k, err := h.Config.Key()
+		k, err := server.Key(server.Dir)
 		fatal(err)
 		h.Harness, h.URL = pointer.Encode(k), url
 		secret := rand.Text()
-		fatal(h.Auth().Set(auth.Join, defaultJoin, secret))
+		fatal(server.Auth(server.Dir).Set(auth.Join, defaultJoin, secret))
 		h.Join = auth.Token(auth.Join, h.Harness, secret)
 		if h.Key != "" && !fresh { // an unelevated install handed over; hand back what it prints
 			b, err := json.Marshal(h)
@@ -93,11 +94,10 @@ func main() {
 	case (verb == auth.Key || verb == auth.Join) && (len(args) == 2 && args[1] == "list" || len(args) == 3 && (args[1] == "new" || args[1] == "revoke")),
 		verb == auth.Join && len(args) == 4 && args[1] == "new" && args[3] == "ephemeral":
 		elevate.Root(args...)
-		c, err := server.Load(server.Conf)
-		if err != nil {
+		if _, err := server.Load(server.Conf); err != nil {
 			log.Fatalf("no installed harness: %v", err)
 		}
-		table(c, verb, args[1:])
+		table(verb, args[1:])
 	default:
 		usage()
 	}
@@ -245,11 +245,14 @@ func hostname() string {
 	return h
 }
 
-func table(c server.Config, kind string, args []string) {
-	store := c.Auth()
+func table(kind string, args []string) {
+	store := server.Auth(server.Dir)
 	switch args[0] {
 	case "new":
-		k, err := c.Key()
+		if kind == auth.Join && args[1] == worker.Admin {
+			log.Fatalf("%s is the name of the worker on this machine, which install joins", worker.Admin)
+		}
+		k, err := server.Key(server.Dir)
 		fatal(err)
 		secret, err := store.Issue(kind, args[1], len(args) == 3)
 		fatal(err)
@@ -278,9 +281,10 @@ func fatal(err error) {
 func usage() {
 	fmt.Fprint(os.Stderr, `usage: mainplane-server <verb> ...
 
-  up        <config.json>                 run the harness
+  up        <config.json>                 run the harness, with its keys, auth table and sessions beside the config
   install                                 run it at every boot, with the provider keys set in this shell, if any, behind a
-                                          quick tunnel: a temporary URL, no domain needed. Logs this machine's CLI in.
+                                          quick tunnel: a temporary URL, no domain needed. Makes this machine the worker
+                                          admin and logs its CLI in.
                                           Providers and links in the config apply when it is saved
   install   <config.json>                 run it at every boot from a root-only copy of the config
                                           Either install prints a new join token named default, for any number of
@@ -297,7 +301,8 @@ func usage() {
                                           mainplane worker remove <worker>
   update    [version]                     the installed harness becomes that release, the latest stable by default;
                                           prints the changelog between, restarts it, and workers follow
-  uninstall                               remove the service and the binary; the config, sessions and auth table stay
+  uninstall                               remove the service, the binary and the admin worker; the config, sessions and
+                                          auth table stay
   version                                 the release this binary was built from
 
 key, join, tunnel, update and uninstall ask for sudo or admin themselves.

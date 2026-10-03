@@ -78,8 +78,8 @@ func setup(token string) error {
 }
 
 // done says the install is done, and whether the operator, so code on this
-// worker, can use sudo, and so reach a harness on this machine. The worker
-// runs by now, so a lookup that fails only leaves the note out.
+// worker, can use sudo. The worker runs by now, so a lookup that fails only
+// leaves the note out.
 func done() {
 	fmt.Print(version.Installed())
 	name := os.Getenv("SUDO_USER")
@@ -91,9 +91,6 @@ func done() {
 	for _, id := range ids {
 		if g, err := user.LookupGroupId(id); err == nil && slices.Contains(sudoers, g.Name) {
 			fmt.Printf("note: user %s is admin on this machine, this worker can use sudo\n", name)
-			if _, err := os.Stat(HarnessDir); err == nil {
-				fmt.Println("warning: this worker can read and modify the harness secrets")
-			}
 			return
 		}
 	}

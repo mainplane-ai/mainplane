@@ -2,6 +2,17 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.5.0
+
+The harness install also makes its machine a worker, `admin`, and the harness's directory is split: config, keys, auth table, nodes, mesh and tunnel stay in it, and sessions move to `sessions/` under it. The `admin` config field is gone. A harness from before keeps its files in `admin/`, which this one does not read: to keep its key, workers and sessions, stop it, move the files in `admin/` up into the directory and each `.state` file into `sessions/`, run `mainplane uninstall` if the machine is a worker, so it joins again as `admin`, then run the harness install line again.
+
+- `mainplane-server install` makes the machine a worker named `admin` while the tunnel starts, from the CLI the install line puts on PATH. It joins with a join secret named `admin` that no token shows, new at each install. `admin` is reserved like `harness`: a machine named admin joins as `admin-2`, and `mainplane-server join new admin` is refused
+- The harness's directory belongs to the user who installs: on Linux and macOS the harness runs as them, not root, and on Windows they are on its access list beside SYSTEM and Administrators. `admin`, whose code runs as them, and they without sudo, read and edit the config and keys
+- Linux and macOS: the harness install needs sudo from your own user, not a root shell
+- `mainplane-server uninstall` removes `admin`, and the CLI with it, with the harness
+- The worker install no longer warns that a worker on the harness's machine can read the harness secrets
+- A session's `run` on `harness` says it is not a worker, and that the worker on the harness's machine is `admin`
+
 ## v0.4.0
 
 Workers no longer see each other by default: each sees only the harness. To let two reach each other, name them in the harness config: `"links": [["alexanders-mac-mini", "linuxbox"]]`.

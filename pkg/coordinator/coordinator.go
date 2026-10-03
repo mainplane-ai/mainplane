@@ -4,7 +4,7 @@
 // in the project's /48 and a name. The harness's own node registers the same
 // way, on loopback, with a secret only this process holds. Then each node
 // long-polls a map of the nodes it may reach and of the relay. The nodes are
-// in nodes.json in the admin dir.
+// in nodes.json in the harness's directory.
 //
 // The protocol handling is copied from headscale's hscontrol (see LICENSE)
 // and trimmed to register, map, keepalive, deltas and ephemeral expiry: no
@@ -114,7 +114,7 @@ type state struct {
 type Coordinator struct {
 	key  key.MachinePrivate
 	file string
-	join func(secret, addr string) (ephemeral bool, err error)
+	join func(secret, addr string) (auth.Entry, error)
 	self string // the harness's own node registers with it; never on disk
 
 	mu    sync.Mutex
@@ -126,10 +126,10 @@ type Coordinator struct {
 }
 
 // New loads the Noise key and the nodes from dir, made there the first time.
-// join checks a join secret sent from addr and says whether it makes
-// ephemeral nodes. Each ephemeral node loaded has idle from now to poll
-// again.
-func New(dir string, join func(secret, addr string) (bool, error)) (*Coordinator, error) {
+// join checks a join secret sent from addr and returns its entry: whether it
+// makes ephemeral nodes, and its name, which names the node when it is
+// worker.Admin. Each ephemeral node loaded has idle from now to poll again.
+func New(dir string, join func(secret, addr string) (auth.Entry, error)) (*Coordinator, error) {
 	k, err := noiseKey(filepath.Join(dir, "noise.key"))
 	if err != nil {
 		return nil, err
@@ -347,25 +347,9 @@ func (c *Coordinator) register(machine key.MachinePublic, addr string, req tailc
 		if req.Auth != nil {
 			secret = req.Auth.AuthKey
 		}
-		self, ephemeral := subtle.ConstantTimeCompare([]byte(secret), []byte(c.self)) == 1, false
-		if !self {
-			var err error
-			if ephemeral, err = c.join(secret, addr); err != nil {
-				return tailcfg.RegisterResponse{Error: err.Error()}
-			}
-		}
-		// A machine that registers a new node key keeps its address and name.
-		if n = c.byMachine(machine); n == nil {
-			name := c.name(req.Hostinfo)
-			if self {
-				// A harness whose node lost its keys replaces its old node.
-				name = worker.Harness
-				c.st.Nodes = slices.DeleteFunc(c.st.Nodes, func(p *node) bool { return p.Name == name })
-			}
-			n = &node{ID: c.st.Next, Name: name, Machine: machine, Ephemeral: ephemeral}
-			c.st.Next++
-			c.st.Nodes = append(c.st.Nodes, n)
-			c.expire(n)
+		var err error
+		if n, err = c.admit(machine, secret, addr, req.Hostinfo); err != nil {
+			return tailcfg.RegisterResponse{Error: err.Error()}
 		}
 		n.Key, n.Hostinfo = req.NodeKey, req.Hostinfo
 		c.changed(n)
@@ -379,6 +363,39 @@ func (c *Coordinator) register(machine key.MachinePublic, addr string, req tailc
 		User:              tailcfg.User{ID: user, DisplayName: "mainplane"},
 		Login:             tailcfg.Login{ID: tailcfg.LoginID(user), LoginName: "mainplane", DisplayName: "mainplane"},
 	}
+}
+
+// admit is the node machine registers a new node key as, with secret from
+// addr. A machine keeps its address and name. A new harness node or admin
+// takes its reserved name from the node that had it, as when the harness's
+// node lost its keys or admin was installed again. The caller holds mu.
+func (c *Coordinator) admit(machine key.MachinePublic, secret, addr string, hi *tailcfg.Hostinfo) (*node, error) {
+	var e auth.Entry
+	reserved := worker.Harness
+	if subtle.ConstantTimeCompare([]byte(secret), []byte(c.self)) != 1 {
+		var err error
+		if e, err = c.join(secret, addr); err != nil {
+			return nil, err
+		}
+		reserved = ""
+		if e.Name == worker.Admin {
+			reserved = worker.Admin
+		}
+	}
+	if n := c.byMachine(machine); n != nil {
+		return n, nil
+	}
+	name := reserved
+	if name == "" {
+		name = c.name(hi)
+	} else {
+		c.st.Nodes = slices.DeleteFunc(c.st.Nodes, func(p *node) bool { return p.Name == name })
+	}
+	n := &node{ID: c.st.Next, Name: name, Machine: machine, Ephemeral: e.Ephemeral}
+	c.st.Next++
+	c.st.Nodes = append(c.st.Nodes, n)
+	c.expire(n)
+	return n, nil
 }
 
 // serveMap is headscale's PollNetMapHandler. A poll gets the whole map, then
@@ -609,7 +626,7 @@ func write(w http.ResponseWriter, compress string, r *tailcfg.MapResponse) error
 // name is the hostname's first label in lower case letters, digits and
 // single dashes, made unique with -2, -3. No name has "--", the separator of
 // long names, none is "xn", because a label starting "xn--" is punycode, and
-// none is the harness's.
+// none is the harness's or admin's.
 func (c *Coordinator) name(hi *tailcfg.Hostinfo) string {
 	var h string
 	if hi != nil {
@@ -629,7 +646,7 @@ func (c *Coordinator) name(hi *tailcfg.Hostinfo) string {
 		base = "worker"
 	}
 	name := base
-	for i := 2; name == "xn" || name == worker.Harness || slices.ContainsFunc(c.st.Nodes, func(p *node) bool { return p.Name == name && !p.Removed }); i++ {
+	for i := 2; name == "xn" || name == worker.Harness || name == worker.Admin || slices.ContainsFunc(c.st.Nodes, func(p *node) bool { return p.Name == name && !p.Removed }); i++ {
 		name = fmt.Sprintf("%s-%d", base, i)
 	}
 	return name

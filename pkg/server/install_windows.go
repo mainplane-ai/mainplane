@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -26,9 +27,9 @@ import (
 // placed, because Windows cannot replace a running one.
 const (
 	name = "mainplane-server"
-	// Dir and all under it: SYSTEM and Administrators full control, nothing
-	// inherited and no one else.
-	sddl = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+	// Dir and all under it: SYSTEM, Administrators and the operator full
+	// control, nothing inherited and no one else.
+	sddl = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;%s)"
 	// A harness that fails starts again after 5 s, then every minute; a day
 	// without failures resets the count.
 	firstRestart, laterRestart, resetAfter = 5 * time.Second, time.Minute, 24 * 60 * 60
@@ -105,19 +106,26 @@ func (s service) Execute(_ []string, reqs <-chan svc.ChangeRequest, status chan<
 	}
 }
 
-// prepare stops a running harness and makes Dir, which only SYSTEM and
-// Administrators may read: the config in it holds the provider keys, and
-// ProgramData lets every user read by default. A protected DACL drops every
-// entry an earlier install or someone else left on Dir, and an empty
-// unprotected one on each child drops its own, so it inherits Dir's alone.
+// prepare stops a running harness and makes Dir, which only SYSTEM,
+// Administrators and the operator may read: the config in it holds the
+// provider keys, and ProgramData lets every user read by default. The
+// operator is the user who installs, as the admin worker's is, so admin, whose
+// code runs unelevated as them, reads and edits the config and keys. A
+// protected DACL drops every entry an earlier install or someone else left on
+// Dir, and an empty unprotected one on each child drops its own, so it
+// inherits Dir's alone.
 func prepare() error {
 	if err := stop(); err != nil {
+		return err
+	}
+	op, err := user.Current()
+	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(Dir, 0o700); err != nil {
 		return err
 	}
-	sd, err := windows.SecurityDescriptorFromString(sddl)
+	sd, err := windows.SecurityDescriptorFromString(fmt.Sprintf(sddl, op.Uid))
 	if err != nil {
 		return err
 	}
@@ -183,11 +191,14 @@ func start() error {
 	return path(true)
 }
 
-// Uninstall stops and deletes the service, removes the binary, and takes
-// bin's folder off PATH once nothing else is in it. Dir stays: it holds the
-// sessions.
+// Uninstall stops and deletes the service, removes the worker admin and the
+// binary, and takes bin's folder off PATH once nothing else is in it. Dir
+// stays: it holds the sessions.
 func Uninstall() error {
 	if err := stop(); err != nil {
+		return err
+	}
+	if err := uninstallAdmin(); err != nil {
 		return err
 	}
 	m, err := mgr.Connect()

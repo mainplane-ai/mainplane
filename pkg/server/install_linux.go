@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-
-	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 const (
-	Dir      = worker.HarnessDir
+	Dir      = "/var/lib/mainplane-server"
 	unitPath = "/etc/systemd/system/mainplane-server.service"
 )
 
@@ -21,6 +19,7 @@ Wants=network-online.target
 
 [Service]
 ExecStart=%s up %s
+User=%s
 Restart=always
 RestartSec=2
 
@@ -28,16 +27,26 @@ RestartSec=2
 WantedBy=multi-user.target
 `
 
-// start runs the harness at every boot: a systemd unit, as root. Logs are in
-// journalctl -u mainplane-server.
+// start runs the harness at every boot: a systemd unit, as the operator. Logs
+// are in journalctl -u mainplane-server.
 func start() error {
-	if err := os.WriteFile(unitPath, fmt.Appendf(nil, unit, bin, Conf), 0o644); err != nil {
+	u, err := operator()
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(unitPath, fmt.Appendf(nil, unit, bin, Conf, u.Username), 0o644); err != nil {
 		return err
 	}
 	if err := run("systemctl", "daemon-reload"); err != nil {
 		return err
 	}
 	if err := run("systemctl", "enable", "mainplane-server"); err != nil {
+		return err
+	}
+	if err := run("systemctl", "stop", "mainplane-server"); err != nil {
+		return err
+	}
+	if err := own(u, Dir); err != nil {
 		return err
 	}
 	return restart()
