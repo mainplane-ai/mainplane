@@ -190,8 +190,9 @@ func (p Provider) once(ctx context.Context, url string, body []byte, emit func(s
 	}
 	defer func() { _ = resp.Body.Close() }()
 	timer.Reset(idle)
+	rb := idleReader{resp.Body, timer}
 	if resp.StatusCode != http.StatusOK {
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		msg, _ := io.ReadAll(io.LimitReader(rb, 4096))
 		return h, false, &httpError{name: name, status: resp.Status, code: resp.StatusCode, body: msg, after: retryAfter(resp.Header)}
 	}
 	tagged := func(r statefile.Record) {
@@ -201,7 +202,7 @@ func (p Provider) once(ctx context.Context, url string, body []byte, emit func(s
 		}
 		emit(r)
 	}
-	h, err = p.Envelope.Stream(idleReader{resp.Body, timer}, tagged)
+	h, err = p.Envelope.Stream(rb, tagged)
 	return h, emitted, err
 }
 
