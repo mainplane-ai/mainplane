@@ -14,6 +14,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/version"
+	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 // halted is the body of a stop's error record. The model reads it only when a
@@ -351,6 +352,9 @@ func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, c
 	var a args
 	if err := json.Unmarshal(c.Arguments, &a); err != nil {
 		return result(call.ID, "error: "+err.Error())
+	}
+	if a.Worker == worker.Harness { // a model may take the mesh's name for the machine
+		return result(call.ID, "error: harness is the harness's address on the mesh, not a worker; the worker on the harness's machine is "+worker.Admin)
 	}
 	if !slices.ContainsFunc(conf.Workers, func(w statefile.Worker) bool { return w.Name == a.Worker }) {
 		return result(call.ID, "error: unknown worker "+a.Worker)

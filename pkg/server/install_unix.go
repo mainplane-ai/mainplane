@@ -8,9 +8,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"os/signal"
-	"strings"
+	"os/user"
+	"path/filepath"
+	"strconv"
 	"syscall"
 )
 
@@ -24,10 +25,13 @@ func Up(path string) error {
 	return Harness(ctx, path)
 }
 
-// Uninstall stops the harness and removes its service and binary. Dir stays:
-// it holds the sessions.
+// Uninstall stops the harness and removes its service and binary, and the
+// worker admin. Dir stays: it holds the sessions.
 func Uninstall() error {
 	if err := unregister(); err != nil {
+		return err
+	}
+	if err := uninstallAdmin(); err != nil {
 		return err
 	}
 	for _, f := range []string{bin, bin + ".old", bin + ".new"} {
@@ -38,20 +42,49 @@ func Uninstall() error {
 	return nil
 }
 
-// prepare makes Dir, which only root may read: the config in it holds the
-// provider keys.
+// prepare makes Dir, which only root and the operator may read: the config
+// in it holds the provider keys. Root writes in it next, so until start gives
+// it back Dir is root's, and a link in it, which only the operator could have
+// made, is refused: root would write through it.
 func prepare() error {
 	if err := os.MkdirAll(Dir, 0o700); err != nil {
 		return err
 	}
-	return os.Chmod(Dir, 0o700)
+	if err := os.Lchown(Dir, 0, 0); err != nil {
+		return err
+	}
+	if err := os.Chmod(Dir, 0o700); err != nil {
+		return err
+	}
+	return filepath.WalkDir(Dir, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && d.Type()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a link, which the harness never makes; remove it", p)
+		}
+		return err
+	})
 }
 
-// run is one service manager command; its output is the error when it fails.
-func run(name string, args ...string) error {
-	out, err := exec.Command(name, args...).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, out)
+// operator is the user who ran sudo. The harness runs as them, since it needs
+// no root, and Dir is theirs: so every file the harness makes is theirs too,
+// and admin, whose code runs as them, reads and edits the config and keys
+// without sudo.
+func operator() (*user.User, error) {
+	name := os.Getenv("SUDO_USER")
+	if name == "" {
+		return nil, errors.New("install needs sudo: the harness and its admin worker run as you")
 	}
-	return nil
+	return user.Lookup(name)
+}
+
+// own gives path and all in it to u. The harness is stopped, so it writes
+// nothing as root behind.
+func own(u *user.User, path string) error {
+	uid, _ := strconv.Atoi(u.Uid)
+	gid, _ := strconv.Atoi(u.Gid)
+	return filepath.WalkDir(path, func(p string, _ fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Lchown(p, uid, gid)
+	})
 }

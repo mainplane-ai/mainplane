@@ -22,9 +22,13 @@ const (
 // A worker dials the mesh node the coordinator names Harness, at Port, the
 // port the design names. The port is open on the mesh only, and the name is
 // one the coordinator gives no worker. The CLI on a worker calls the API
-// there at APIPort, the harness's loopback port.
+// there at APIPort, the harness's loopback port. Admin is the worker on the
+// harness's machine, which the harness install makes: the coordinator gives
+// its name to the node that joins with the join secret of that name, and to
+// no other.
 const (
 	Harness = "harness"
+	Admin   = "admin"
 	Port    = 7000
 	APIPort = 8080
 )

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,10 +10,14 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
+	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 // A started harness listens within a second; one that has not after this
@@ -36,11 +41,11 @@ var envProviders = map[string]Provider{
 }
 
 // Default is the config install writes when given none: the tunnel carries
-// workers and connectors to port 8080 on loopback, sessions live under Dir,
-// and every provider whose key is set in this environment serves. With none
-// set, keys go in the config after install.
+// workers and connectors to port 8080 on loopback, and every provider whose
+// key is set in this environment serves. With none set, keys go in the
+// config after install.
 func Default() Config {
-	c := Config{Admin: "admin", HTTP: "127.0.0.1:8080", Providers: map[string]Provider{}}
+	c := Config{HTTP: "127.0.0.1:8080", Providers: map[string]Provider{}}
 	for name, p := range envProviders {
 		if os.ExpandEnv(p.Key) != "" {
 			c.Providers[name] = p
@@ -50,12 +55,8 @@ func Default() Config {
 }
 
 // Expand fills provider values in from this process's environment, which a
-// service will not have, refuses a provider the harness does not know, and
-// moves a relative admin under Dir.
+// service will not have, and refuses a provider the harness does not know.
 func (c *Config) Expand() error {
-	if !filepath.IsAbs(c.Admin) {
-		c.Admin = filepath.Join(Dir, c.Admin)
-	}
 	for name, p := range c.Providers {
 		for _, s := range []*string{&p.Key, &p.URL, &p.Region} {
 			if *s != "" && os.ExpandEnv(*s) == "" {
@@ -70,8 +71,10 @@ func (c *Config) Expand() error {
 }
 
 // Install makes this machine run the harness at every boot, from a copy of an
-// expanded c at Conf, and returns its URL once it answers there. Dir is
-// root's alone: the copy holds the keys.
+// expanded c at Conf, makes it the worker admin while the tunnel starts, and
+// returns the harness's URL once it answers there. Dir is root's and the
+// operator's alone: the copy holds the keys, and admin runs code as the
+// operator so that it may read and edit them.
 func Install(c Config) (string, error) {
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
@@ -83,6 +86,15 @@ func Install(c Config) (string, error) {
 	if err := os.WriteFile(Conf, b, 0o600); err != nil {
 		return "", err
 	}
+	// admin's secret is in no token anyone sees, and new at each install.
+	secret := rand.Text()
+	if err := Auth(Dir).Set(auth.Join, worker.Admin, secret); err != nil {
+		return "", err
+	}
+	k, err := Key(Dir)
+	if err != nil {
+		return "", err
+	}
 	if err := place(); err != nil {
 		return "", err
 	}
@@ -92,7 +104,42 @@ func Install(c Config) (string, error) {
 	if err := answers(c.HTTP); err != nil {
 		return "", err
 	}
-	return reached(c)
+	if err := admin(auth.Token(auth.Join, pointer.Encode(k), secret)); err != nil {
+		return "", err
+	}
+	return reached()
+}
+
+// admin makes this machine the worker admin, joined with token, through the
+// CLI the install line put on PATH. Its output is shown only when it fails,
+// and the token never: the harness install says nothing of admin.
+func admin(token string) error {
+	cli, err := exec.LookPath("mainplane")
+	if err != nil {
+		return fmt.Errorf("the admin worker: %w", err)
+	}
+	if out, err := exec.Command(cli, "install", token).CombinedOutput(); err != nil {
+		return fmt.Errorf("the admin worker: %w: %s", err, out)
+	}
+	return nil
+}
+
+// uninstallAdmin removes the worker admin, and the CLI with it, which goes
+// with the harness it was installed with.
+func uninstallAdmin() error {
+	if _, err := os.Stat(worker.Bin); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return run(worker.Bin, "uninstall")
+}
+
+// run is one command; its output is the error when it fails.
+func run(name string, args ...string) error {
+	out, err := exec.Command(name, args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, out)
+	}
+	return nil
 }
 
 // SetTunnel makes the installed harness reached through t, or through a quick
@@ -114,13 +161,13 @@ func SetTunnel(t *Tunnel) (string, error) {
 	if err := restart(); err != nil {
 		return "", err
 	}
-	return reached(c)
+	return reached()
 }
 
 // reached waits for the pointer to name a URL where the harness proves its
 // key, through Cloudflare, as a worker finds it, and returns that URL.
-func reached(c Config) (string, error) {
-	k, err := c.Key()
+func reached() (string, error) {
+	k, err := Key(Dir)
 	if err != nil {
 		return "", err
 	}

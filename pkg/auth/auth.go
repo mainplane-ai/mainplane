@@ -1,7 +1,7 @@
 // Package auth is the two credentials a harness checks. An api key lets a
 // connector call every HTTP route. A join secret lets a machine join the mesh
 // as a worker; it can add a worker and nothing else. Both kinds live hashed in one
-// table on the admin drive. What a person pastes is a token: the kind, the
+// table in the harness's directory. What a person pastes is a token: the kind, the
 // key of the harness its holder finds through the pointer, and the secret
 // itself.
 //

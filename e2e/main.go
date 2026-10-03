@@ -10,7 +10,8 @@
 // mesh, so prev must be a release whose workers do. Linux and macOS targets
 // need passwordless sudo. The Windows target must be an elevated login, with
 // the operator logged in at the console. Then each machine becomes a harness
-// in one line, which updates to prev and back, and both are uninstalled: a
+// and its worker admin in one line, the harness updates to prev and back, and
+// its uninstall takes both: a
 // run ends with every machine clean, and any harness it had is replaced and
 // gone, though its config and sessions stay. Each phase is this
 // program again, as a harness at one version: its exit drops every
@@ -85,15 +86,24 @@ var (
 	}
 	// No provider key: install works without one, and no step calls a model.
 	// Workers reach the harness on the mesh only: /worker, with a good key, is 404.
+	// The install makes the machine the worker admin, which joins once it
+	// finds the harness through the pointer. Dir is the operator's, with
+	// sessions in it.
 	serverInstall = map[bool]string{
 		false: `curl -fsSL %[1]s%[2]s/install.sh | sh -s -- server || exit 1
 /usr/local/bin/mainplane workers && echo workers-ok
+for i in $(seq 90); do /usr/local/bin/mainplane workers | grep -q '^admin ' && { echo admin-ok; break; }; sleep 1; done
+d=/var/lib/mainplane-server; [ -d $d ] || d="/Library/Application Support/mainplane-server"
+cat "$d/config.json" >/dev/null && touch "$d/config.json" "$d/sessions/e2e" && rm "$d/sessions/e2e" && echo dir-ok
 l=~/.mainplane/login.json
 curl -s -o /dev/null -w 'worker-%%{http_code}\n' -H "Authorization: Bearer $(sed 's/.*"key":"\([^"]*\)".*/\1/' $l)" "$(sed 's/.*"url":"\([^"]*\)".*/\1/' $l)/worker"`,
 		true: `& ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) server
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 mainplane workers
 if (!$LASTEXITCODE) { 'workers-ok' }
+for ($i = 0; $i -lt 90; $i++) { if (mainplane workers | Select-String '^admin ') { 'admin-ok'; break }; Start-Sleep 1 }
+$d = "$env:ProgramData\mainplane-server"
+if ((Test-Path "$d\sessions") -and ((Get-Acl $d).Access | Where-Object { $_.IdentityReference.Value -like "*\$env:USERNAME" -and $_.FileSystemRights -eq 'FullControl' -and $_.AccessControlType -eq 'Allow' })) { 'dir-ok' }
 $l = Get-Content "$HOME\.mainplane\login.json" | ConvertFrom-Json
 try { Invoke-WebRequest "$($l.url)/worker" -Headers @{ Authorization = "Bearer $($l.key)" } -UseBasicParsing | Out-Null; 'worker-200' } catch { "worker-$([int]$_.Exception.Response.StatusCode)" }`,
 	}
@@ -105,17 +115,17 @@ systemctl is-active mainplane-server 2>/dev/null || { sudo launchctl print syste
 		true: `$b = "$env:ProgramFiles\mainplane\mainplane-server.exe"
 & $b update %[1]s *> $null; & $b version; if ((Get-Service mainplane-server).Status -eq 'Running') { 'active' }`,
 	}
-	// Each uninstall elevates itself. What is left of either, the worker's
-	// state, and the mesh (%s, from meshGone) is printed before clean.
+	// The harness uninstall elevates itself and takes the worker admin with
+	// it. What is left of either, the worker's state, and the mesh (%s, from
+	// meshGone) is printed before clean.
 	uninstall = map[bool]string{
-		false: `/usr/local/bin/mainplane-server uninstall >/dev/null && /usr/local/bin/mainplane uninstall >/dev/null || exit 1
+		false: `/usr/local/bin/mainplane-server uninstall >/dev/null || exit 1
 ls /usr/local/bin | grep mainplane
 ls /etc/systemd/system/mainplane* /Library/LaunchDaemons/ai.mainplane.* 2>/dev/null
 ls -d /var/lib/mainplane "/Library/Application Support/mainplane" /var/run/mainplaned.sock 2>/dev/null
 %s
 echo clean`,
 		true: `& "$env:ProgramFiles\mainplane\mainplane-server.exe" uninstall *> $null; if ($LASTEXITCODE) { exit 1 }
-& "$env:ProgramFiles\mainplane\mainplane.exe" uninstall *> $null; if ($LASTEXITCODE) { exit 1 }
 Get-Service mainplane* -ErrorAction SilentlyContinue | ForEach-Object Name
 Get-ChildItem "$env:ProgramFiles\mainplane", "$env:LOCALAPPDATA\Programs\mainplane" -ErrorAction SilentlyContinue | ForEach-Object FullName
 Get-Item "$env:ProgramData\mainplane" -ErrorAction SilentlyContinue | ForEach-Object FullName
@@ -279,9 +289,14 @@ func run(v, prev, port string, targets []string) {
 		out, err := remote(o, ssh[o], fmt.Sprintf(serverInstall[win], release.DL, v))
 		check(o, "harness installed in one line, CLI logged in", err == nil && strings.Contains(out, "mainplane-server running at") && strings.Contains(out, "workers-ok"), last(out))
 		check(o, "harness: /worker is gone (404)", strings.Contains(out, "worker-404"), last(out))
+		check(o, "harness: worker admin joined", strings.Contains(out, "admin-ok"), last(out))
+		check(o, "harness: Dir the operator's, sessions in it", strings.Contains(out, "dir-ok"), last(out))
+		// A harness before v0.5.0 finds its files elsewhere in Dir and stops,
+		// so prev is checked to be placed, and v to run again.
 		for _, u := range []string{prev, v} {
 			out, err = remote(o, ssh[o], fmt.Sprintf(serverUpdate[win], u))
-			check(o, "harness updated to "+u+", running", err == nil && strings.Join(strings.Fields(out), " ") == u+" active", out)
+			f := strings.Fields(out)
+			check(o, "harness updated to "+u, err == nil && len(f) > 0 && f[0] == u && (u == prev || strings.Join(f, " ") == u+" active"), out)
 		}
 		out, err = remote(o, ssh[o], fmt.Sprintf(uninstall[win], meshGone[o]))
 		check(o, "uninstall: no service, binary, state or mesh left", err == nil && strings.TrimSpace(out) == "clean", out)
@@ -405,11 +420,11 @@ func phase(listen, url, secret, v string, oses []string, mode, text string) {
 	}
 	log.SetOutput(f)
 	die := log.New(os.Stderr, "", log.LstdFlags) // the gate sees why a phase ended
-	coord, err := coordinator.New(dir(), func(s, _ string) (bool, error) {
+	coord, err := coordinator.New(dir(), func(s, _ string) (auth.Entry, error) {
 		if s != secret && s != "ephemeral-"+secret {
-			return false, errors.New("join secret refused")
+			return auth.Entry{}, errors.New("join secret refused")
 		}
-		return s != secret, nil
+		return auth.Entry{Ephemeral: s != secret}, nil
 	})
 	if err != nil {
 		die.Fatal(err)
