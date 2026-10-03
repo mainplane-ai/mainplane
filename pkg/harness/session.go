@@ -90,12 +90,29 @@ type Part struct {
 // Post appends one message record per part under one lock and kicks the
 // session once, so a text and an image reach the model as one turn. The
 // append is the acknowledgement: a closed session starts stepping on it, a
-// stepping one sees it at its next context build. Returns the last n.
-func (h *Harness) Post(ctx context.Context, id, via string, parts []Part) (int, error) {
+// stepping one sees it at its next context build. Returns the last n. A post
+// with a key appends only the parts the file does not hold with that key, so
+// a connector that lost the reply posts again and the post ends whole, once.
+func (h *Harness) Post(ctx context.Context, id, via, key string, parts []Part) (int, error) {
 	s := h.session(id)
 	n, err := func() (int, error) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		var done, n int
+		if key != "" {
+			chain, err := h.Sessions.Load(id)
+			if err != nil {
+				return 0, err
+			}
+			for _, r := range chain {
+				if r.Kind == statefile.Message && r.IdempotencyKey == key {
+					done, n = done+1, r.N
+				}
+			}
+		}
+		if done >= len(parts) {
+			return n, nil
+		}
 		f := s.f
 		if f == nil {
 			var err error
@@ -104,10 +121,9 @@ func (h *Harness) Post(ctx context.Context, id, via string, parts []Part) (int, 
 			}
 			defer func() { _ = f.Close() }()
 		}
-		var n int
-		for _, p := range parts {
+		for _, p := range parts[done:] {
 			var err error
-			if n, err = h.write(s, f, statefile.Record{Header: statefile.Header{Kind: statefile.Message, Type: p.Type, Via: via}, Body: p.Body}); err != nil {
+			if n, err = h.write(s, f, statefile.Record{Header: statefile.Header{Kind: statefile.Message, Type: p.Type, Via: via, IdempotencyKey: key}, Body: p.Body}); err != nil {
 				return 0, err
 			}
 		}

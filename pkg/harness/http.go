@@ -32,7 +32,10 @@ const MaxPost = 8 << 20
 //	GET  /sessions/{id}/records       ?after=N  ?wait=30s to long poll             -> records
 //	POST /sessions/{id}/records       one body, or multipart; ?via= required,      -> {"n"}
 //	                                  who is posting. one message record per
-//	                                  part, each with its Content-Type
+//	                                  part, each with its Content-Type. With
+//	                                  an Idempotency-Key header, a repost
+//	                                  appends only the parts not yet held
+//	                                  under that key and returns the post's n
 //	POST /sessions/{id}/retry         step from the tip, whatever it is            -> {"status"}
 //	POST /sessions/{id}/stop          ?via= required. cut the step, write it       -> 204; the records
 //	                                  down                                            say what happened
@@ -132,7 +135,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 			fail(w, err)
 			return
 		}
-		n, err := h.Post(ctx, r.PathValue("id"), via, parts)
+		n, err := h.Post(ctx, r.PathValue("id"), via, r.Header.Get("Idempotency-Key"), parts)
 		if err != nil {
 			fail(w, err)
 			return
