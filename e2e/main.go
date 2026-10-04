@@ -364,7 +364,8 @@ func run(v, prev, port string, targets []string) {
 		for _, u := range []string{prev, v} {
 			out, err = remote(o, ssh[o], fmt.Sprintf(serverUpdate[win], u))
 			f := strings.Fields(out)
-			check(o, "harness updated to "+u, err == nil && len(f) > 0 && f[0] == u && (u == prev || strings.Join(f, " ") == u+" active"), out)
+			// prev only placed: before v0.5.0 a harness stops on this Dir, so systemctl fails the script
+			check(o, "harness updated to "+u, len(f) > 0 && f[0] == u && (u == prev || err == nil && strings.Join(f, " ") == u+" active"), out)
 		}
 		out, err = remote(o, ssh[o], fmt.Sprintf(uninstall[win], meshGone[o]+"\n"+drivesGone[o]))
 		check(o, "uninstall: no service, binary, state, mesh or drive left", err == nil && strings.TrimSpace(out) == "clean", out)

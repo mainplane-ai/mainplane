@@ -216,7 +216,7 @@ func Install(token string) error {
 	return nil
 }
 
-// Uninstall has the service drop its drives, stops and deletes it, removes
+// Uninstall deletes the service, has it drop its drives and stops it, removes
 // what a killed worker left of the mesh, Bin and wintun.dll, the state
 // directory with the join token and the mesh keys, and the CLI install.ps1
 // puts in cliDir, and takes each folder off PATH once nothing else is in it.
@@ -227,24 +227,21 @@ func Uninstall() error {
 		return err
 	}
 	defer func() { _ = m.Disconnect() }()
-	// The service takes controls in order, so the stop waits for the drop.
+	// Deleted first: a worker that failed moments before has a restart
+	// pending, which the service manager runs after a stop, but not on a
+	// service marked for deletion. The service takes controls in order, so
+	// the stop waits for the drop.
 	s, err := m.OpenService(name)
 	if err == nil {
-		_, err = s.Control(dropControl)
+		if err = s.Delete(); err == nil {
+			_, err = s.Control(dropControl)
+		}
 		_ = s.Close()
 	}
 	if err != nil && !errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) && !errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
 		return err
 	}
 	if err := stop(); err != nil {
-		return err
-	}
-	s, err = m.OpenService(name)
-	if err == nil {
-		err = s.Delete()
-		_ = s.Close()
-	}
-	if err != nil && !errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return err
 	}
 	// A hosts file that cannot be written must not keep the token and keys.
