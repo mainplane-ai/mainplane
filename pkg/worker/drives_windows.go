@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/svc"
 )
 
 // A Windows worker maps each drive over SMB to a letter of its own, from
@@ -167,18 +168,24 @@ func unmap(name string, o mapped, ours map[string]mapped, at map[string]string, 
 			return fmt.Errorf("%s is still mapped", o.Letter)
 		}
 	}
-	delete(ours, name)
-	for _, p := range ours {
-		if p.Host == o.Host {
+	for n, p := range ours {
+		if n != name && p.Host == o.Host {
+			delete(ours, name)
 			return nil
 		}
 	}
 	// cmdkey fails to delete a credential that is gone already, so it looks
 	// first, in the full list: one host's list names it even when it has none.
-	if out, err := as(op, "cmdkey", "/list"); err == nil && strings.Contains(out, "target="+o.Host) {
-		_, err = as(op, "cmdkey", "/delete:"+o.Host)
+	out, err := as(op, "cmdkey", "/list")
+	if err != nil {
 		return err
 	}
+	if strings.Contains(out, "target="+o.Host) {
+		if _, err := as(op, "cmdkey", "/delete:"+o.Host); err != nil {
+			return err
+		}
+	}
+	delete(ours, name)
 	return nil
 }
 
@@ -215,13 +222,17 @@ func mappings(op *user.User) (map[string]string, error) {
 }
 
 // as runs a program of System32 as op, in their logon session, where a
-// mapping and a credential are theirs. Its error names the program and its
-// first argument only, since cmdkey's carry the password, and has its
+// mapping and a credential are theirs; a worker run by hand is op already,
+// and only the service may take op's token. Its error names the program and
+// its first argument only, since cmdkey's carry the password, and has its
 // output on one line, for status.
 func as(op *user.User, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), mapWait)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, filepath.Join(os.Getenv("SystemRoot"), "System32", name+".exe"), args...)
+	if ok, _ := svc.IsWindowsService(); !ok {
+		op = nil
+	}
 	if err := prepare(cmd, op); err != nil {
 		return "", err
 	}

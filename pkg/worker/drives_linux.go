@@ -300,12 +300,19 @@ func smbUsers(users map[string]string) error {
 }
 
 // unsmb stops our smbd and removes its users, state and unit; the package
-// stays. The unit goes last, so a step that fails is tried again next round.
+// stays. Each step waits for the one before, and the unit goes last, so a
+// step that fails is tried again next round.
 func unsmb() error {
 	if _, err := os.Stat(smbUnit); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
-	if err := errors.Join(smbUsers(nil), run("systemctl", "stop", smbService), os.RemoveAll(smbDir)); err != nil {
+	if err := run("systemctl", "stop", smbService); err != nil {
+		return err
+	}
+	if err := smbUsers(nil); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(smbDir); err != nil {
 		return err
 	}
 	if err := os.Remove(smbUnit); err != nil {

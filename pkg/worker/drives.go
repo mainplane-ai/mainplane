@@ -102,10 +102,11 @@ type drives struct {
 	kick chan struct{}
 	run  sync.Mutex // one reconcile at a time
 
-	mu   sync.Mutex
-	want *Desired
-	have []Drive
-	send func(Frame) error // the connection to the harness, while there is one
+	mu      sync.Mutex
+	want    *Desired
+	dropped bool // a frame after drop would bring a drive back
+	have    []Drive
+	send    func(Frame) error // the connection to the harness, while there is one
 }
 
 func newDrives(op *user.User) (*drives, error) {
@@ -127,7 +128,9 @@ func (d *drives) set(body []byte) error {
 		return err
 	}
 	d.mu.Lock()
-	d.want = &want
+	if !d.dropped {
+		d.want = &want
+	}
 	d.mu.Unlock()
 	select {
 	case d.kick <- struct{}{}:
@@ -191,13 +194,13 @@ func (d *drives) detach() {
 	d.mu.Unlock()
 }
 
-// drop ends every drive on this machine, for a worker that left the mesh:
-// nothing reconciles them again.
+// drop ends every drive on this machine, for a worker that left the mesh or
+// is uninstalled: nothing reconciles them again.
 func (d *drives) drop() {
 	d.run.Lock()
 	defer d.run.Unlock()
 	d.mu.Lock()
-	d.want = nil
+	d.want, d.dropped = nil, true
 	d.mu.Unlock()
 	if err := dropDrives(d.op); err != nil {
 		log.Printf("drives: %v", err)
