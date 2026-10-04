@@ -99,6 +99,9 @@ func serve(es []Export, op *user.User) []Drive {
 		return nil
 	}
 	err := nfsServer()
+	if err != nil { // a server that cannot be set up serves no one, not the clients of an older list
+		err = errors.Join(err, unexport())
+	}
 	have, lines := []Drive{}, []string{"# mainplane drives, written by mainplaned"}
 	for _, e := range es {
 		d := Drive{Name: e.Name, Serve: true, State: Serving}
@@ -321,7 +324,7 @@ func mountpoints() map[string]string {
 // left the drive and so the server's sight. Cut short, the server forgets
 // this client after one lease.
 func unmount(p string, force bool) error {
-	args := []string{"-i", "-c", "-f", p}
+	args := []string{"-i", "-c", p}
 	if force {
 		args = []string{"-i", "-c", "-f", "-l", p}
 	}
@@ -335,14 +338,19 @@ func unmount(p string, force bool) error {
 }
 
 // unexport stops serving every drive. The packages stay: they may serve
-// something else by then.
+// something else by then. The file is emptied first and removed only once
+// exportfs took that, so a failed exportfs is tried again next round.
 func unexport() error {
-	if err := os.Remove(exportsFile); errors.Is(err, fs.ErrNotExist) {
+	if _, err := os.Stat(exportsFile); errors.Is(err, fs.ErrNotExist) {
 		return nil
-	} else if err != nil {
+	}
+	if err := os.WriteFile(exportsFile, nil, 0o644); err != nil {
 		return err
 	}
-	return run("exportfs", "-ra")
+	if err := run("exportfs", "-ra"); err != nil {
+		return err
+	}
+	return os.Remove(exportsFile)
 }
 
 // dropDrives unmounts every drive and stops serving, for a worker that left
