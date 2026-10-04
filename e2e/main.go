@@ -751,7 +751,7 @@ func drives(coord *coordinator.Coordinator, p *harness.Pool, got map[string]harn
 	if !slices.Contains(oses, "linux") {
 		return
 	}
-	d := drive{coord: coord, p: p, got: got, at: map[string]string{}}
+	d := drive{coord: coord, p: p, got: got, at: map[string]string{}, session: "e2e-drives"}
 	var all []string
 	for _, o := range oses {
 		all = append(all, got[o].Name)
@@ -782,7 +782,8 @@ func drives(coord *coordinator.Coordinator, p *harness.Pool, got map[string]harn
 		d.lock("darwin", "windows")
 		d.lock("windows", "darwin")
 	}
-	d.kill(oses) // nothing of ours holds the drive open
+	d.kill(oses)         // nothing of ours holds the drive open
+	d.session += "-gone" // a killed session's next run begins with "environment was reset"
 	d.set(got["linux"].Name)
 	for _, o := range oses {
 		if o != "linux" {
@@ -798,14 +799,15 @@ func drives(coord *coordinator.Coordinator, p *harness.Pool, got map[string]harn
 	d.kill(oses)
 }
 
-// The drive the e2e func serves, and the session its shells run in.
-const driveName, driveSession = "e2e", "e2e-drives"
+// The drive the e2e func serves.
+const driveName = "e2e"
 
 type drive struct {
-	coord *coordinator.Coordinator
-	p     *harness.Pool
-	got   map[string]harness.Listed
-	at    map[string]string // the drive's path on each OS, with its separator
+	coord   *coordinator.Coordinator
+	p       *harness.Pool
+	got     map[string]harness.Listed
+	at      map[string]string // the drive's path on each OS, with its separator
+	session string            // the session its shells run in
 }
 
 // set serves the drive from the Linux worker to workers, none: no drive.
@@ -825,7 +827,7 @@ func (d drive) sh(o, code string) (string, error) {
 	if !ok {
 		return "", errors.New("not connected")
 	}
-	out, err := r.Run(context.Background(), driveSession, "", code)
+	out, err := r.Run(context.Background(), d.session, "", code)
 	if err == nil && out.Exit != 0 {
 		err = fmt.Errorf("exit %d", out.Exit)
 	}
@@ -835,7 +837,7 @@ func (d drive) sh(o, code string) (string, error) {
 func (d drive) kill(oses []string) {
 	for _, o := range oses {
 		if r, ok := d.p.Get(d.got[o].Name); ok {
-			_ = r.Kill(context.Background(), driveSession)
+			_ = r.Kill(context.Background(), d.session)
 		}
 	}
 }
