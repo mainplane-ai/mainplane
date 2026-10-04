@@ -55,6 +55,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/coordinator"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
+	mpmesh "github.com/mainplane-ai/mainplane/pkg/mesh"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
 	"github.com/mainplane-ai/mainplane/pkg/relay"
 	"github.com/mainplane-ai/mainplane/pkg/release"
@@ -675,7 +676,7 @@ func link(coord *coordinator.Coordinator, p *harness.Pool, got map[string]harnes
 
 // tailnet is whether a is in Tailscale's ranges or the mesh's own: a path
 // over either would ride a tunnel inside a tunnel.
-func tailnet(a netip.Addr) bool { return tsaddr.IsTailscaleIP(a) || coordinator.Prefix.Contains(a) }
+func tailnet(a netip.Addr) bool { return tsaddr.IsTailscaleIP(a) || mpmesh.Prefix.Contains(a) }
 
 // parseStatus reads mainplane status: the names on it, and each direct path.
 func parseStatus(out string) (listed map[string]bool, paths []string) {

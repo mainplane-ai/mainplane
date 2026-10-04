@@ -52,6 +52,10 @@ const (
 	maxLookupWait = time.Minute
 )
 
+// Prefix holds every node's address, prefix::N. It is one random ULA /48, so
+// it meets no LAN and not Tailscale's 100.64/10 or fd7a:115c:a1e0::/48.
+var Prefix = netip.MustParsePrefix("fd7c:9a2e:4b10::/48")
+
 // Mesh is this worker's node.
 type Mesh struct {
 	lb      *ipnlocal.LocalBackend
