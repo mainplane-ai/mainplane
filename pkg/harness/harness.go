@@ -186,16 +186,23 @@ func config(chain []statefile.Record) (statefile.Conf, error) {
 }
 
 // workers is the session's worker list as the model reads it: what each named
-// worker is right now and the drives it mounts, or that it is not connected.
+// worker is right now and the drives it mounts, each it also serves marked,
+// or that it is not connected.
 func (h *Harness) workers(workers []statefile.Worker) string {
 	var b strings.Builder
 	for _, w := range workers {
 		if r, ok := h.Workers.Get(w.Name); ok {
 			fmt.Fprintf(&b, "worker %s: %s, %s, scratch %s\n", w.Name, r.OS, strings.Join(r.Interps, " "), r.Scratch)
-			for _, d := range r.Drives() {
-				if !d.Serve {
-					fmt.Fprintf(&b, "  drive %v\n", d)
+			ds := r.Drives()
+			for _, d := range ds {
+				if d.Serve {
+					continue
 				}
+				fmt.Fprintf(&b, "  drive %v", d)
+				if slices.ContainsFunc(ds, func(s worker.Drive) bool { return s.Serve && s.State == worker.Serving && s.Name == d.Name }) {
+					b.WriteString(", served from this worker")
+				}
+				b.WriteString("\n")
 			}
 		} else {
 			fmt.Fprintf(&b, "worker %s: not connected\n", w.Name)

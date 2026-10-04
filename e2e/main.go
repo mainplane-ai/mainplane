@@ -23,6 +23,10 @@
 // mainplane status, endpoints, and an ephemeral node's view in it; workers
 // back within restartWait of a restart; one worker removed in the last
 // phase; and nothing of the mesh left after uninstall.
+//
+// Drives too: in the first phase the Linux worker serves one to every
+// worker (drives in the e2e func); the Linux harness gives its admin the
+// sessions drive, read-only; and nothing of drives is left after uninstall.
 package main
 
 import (
@@ -77,6 +81,16 @@ const (
 	// learns at its next poll, so the harness stays up for linger after.
 	removeWait = 10 * time.Second
 	linger     = 5 * time.Second
+	// A first drive on a fresh server installs the NFS server and Samba
+	// with apt, and a Windows client may fail one 10s round before the
+	// server has its user.
+	driveWait = 5 * time.Minute
+	// A file made elsewhere can read as missing on Windows for 5s (the SMB
+	// client's not-found cache), in a listing elsewhere for 1s (actimeo).
+	driveLag = 15 * time.Second
+	// A server whose NFS server just started takes no new lock for its
+	// grace, 20s, so a holder can take that long to have its lock.
+	lockWait = time.Minute
 )
 
 // Scripts for each machine, by whether it is Windows.
@@ -117,8 +131,8 @@ systemctl is-active mainplane-server 2>/dev/null || { sudo launchctl print syste
 & $b update %[1]s *> $null; & $b version; if ((Get-Service mainplane-server).Status -eq 'Running') { 'active' }`,
 	}
 	// The harness uninstall elevates itself and takes the worker admin with
-	// it. What is left of either, the worker's state, and the mesh (%s, from
-	// meshGone) is printed before clean.
+	// it. What is left of either, the worker's state, the mesh and drives
+	// (%s, from meshGone and drivesGone) is printed before clean.
 	uninstall = map[bool]string{
 		false: `/usr/local/bin/mainplane-server uninstall >/dev/null || exit 1
 ls /usr/local/bin | grep mainplane
@@ -148,6 +162,31 @@ Get-Item "$env:ProgramData\mainplane" -ErrorAction SilentlyContinue | ForEach-Ob
 		"darwin":  `ifconfig | grep 'inet6 fd7c'; netstat -rn -f inet6 | grep '^fd7c'`,
 		"windows": `Get-NetAdapter -Name Mainplane -ErrorAction SilentlyContinue | ForEach-Object Name; Get-NetRoute -AddressFamily IPv6 | Where-Object DestinationPrefix -like 'fd7c*' | ForEach-Object DestinationPrefix; Get-NetFirewallRule -DisplayName Mainplane -ErrorAction SilentlyContinue | ForEach-Object DisplayName`,
 	}
+	// drivesGone prints what is left of drives after uninstall: our exports
+	// and nfs.conf (the smbd unit and state are under the paths uninstall
+	// lists), a mount, or, from the operator's logon session, where a
+	// scheduled task runs, a mapping or credential of a mesh name.
+	drivesGone = map[string]string{
+		"linux":  `ls /etc/exports.d/mainplane.exports /etc/nfs.conf.d/mainplane.conf 2>/dev/null; grep ' /drives/' /proc/mounts`,
+		"darwin": `mount | grep fd7c`,
+		"windows": `$f = "$env:ProgramData\mainplane-e2e.txt"
+$a = New-ScheduledTaskAction -Execute cmd.exe -Argument "/c (net use & cmdkey /list) | findstr /i mainplane.net > $f"
+Register-ScheduledTask mainplane-e2e -Action $a -Principal (New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited) -Force | Out-Null
+Start-ScheduledTask mainplane-e2e
+for ($i = 0; $i -lt 50 -and !((Test-Path $f) -and (Get-ScheduledTask mainplane-e2e).State -eq 'Ready'); $i++) { Start-Sleep -Milliseconds 200 }
+Unregister-ScheduledTask mainplane-e2e -Confirm:$false
+if (Test-Path $f) { Get-Content $f; Remove-Item $f } else { 'no probe ran in the operator session' }`,
+	}
+	// sessionsDrive gives the worker admin the sessions drive in the
+	// harness config, which the harness reads when it changes, and prints
+	// its mount options, that it lists, and that a write is refused. The
+	// first time, admin installs the NFS server and Samba.
+	sessionsDrive = `d=/var/lib/mainplane-server/config.json
+python3 -c 'import json, sys; c = json.load(open(sys.argv[1])); c["drives"] = {"sessions": {"workers": ["admin"]}}; open(sys.argv[1], "w").write(json.dumps(c))' $d
+for i in $(seq 300); do findmnt -n /drives/sessions >/dev/null && break; sleep 1; done
+findmnt -n -o OPTIONS /drives/sessions | cut -d, -f1
+ls /drives/sessions >/dev/null && echo listed
+touch /drives/sessions/e2e 2>&1 | grep -q 'Read-only file system' && echo refused`
 	hostsFile = map[bool]string{false: `cat /etc/hosts`, true: `[IO.File]::ReadAllText("$env:SystemRoot\System32\drivers\etc\hosts")`}
 	tailscale = map[string]string{
 		"linux":   `tailscale status >/dev/null && echo ok`,
@@ -159,6 +198,30 @@ Get-Item "$env:ProgramData\mainplane" -ErrorAction SilentlyContinue | ForEach-Ob
 	ping      = map[string]string{"linux": "ping -6 -c 3 -W 2 %s", "darwin": "ping6 -c 3 %s", "windows": "ping -6 -n 3 -w 2000 %s"}
 	status    = map[bool]string{false: "/usr/local/bin/mainplane status", true: `& "$env:ProgramFiles\mainplane\mainplane.exe" status`}
 	hostsPath = map[bool]string{false: "/etc/hosts", true: `C:\Windows\System32\drivers\etc\hosts`}
+	// Run by a worker on a drive, as its operator. A macOS flock over NFS is
+	// a lock on the server, as is a Windows byte-range lock through Samba's
+	// posix locking, so each refuses the other. A holder makes <file>.held
+	// once it has the lock and holds it 20s, past driveLag, so the other
+	// worker sees that file in time to try.
+	put      = map[bool]string{false: `printf %%s '%[2]s' > '%[1]s'`, true: `[IO.File]::WriteAllText('%[1]s', '%[2]s')`}
+	cat      = map[bool]string{false: `cat '%s'`, true: `[IO.File]::ReadAllText('%s')`}
+	exists   = map[bool]string{false: `test -e '%s' && echo yes`, true: `if (Test-Path '%s') { 'yes' }`}
+	lockHold = map[string]string{
+		"darwin":  `perl -MFcntl=:flock -e 'open(F, ">>", $ARGV[0]) or die $!; flock(F, LOCK_EX) or die $!; open(M, ">", "$ARGV[0].held") or die $!; close(M); sleep 20' '%s'`,
+		"windows": `$f = [IO.File]::Open('%[1]s', 'OpenOrCreate', 'ReadWrite', 'ReadWrite'); $f.Lock(0, 1); [IO.File]::WriteAllText('%[1]s.held', ''); Start-Sleep 20; $f.Close()`,
+	}
+	lockTry = map[string]string{
+		"darwin":  `perl -MFcntl=:flock -e 'open(F, ">>", $ARGV[0]) or die $!; print flock(F, LOCK_EX | LOCK_NB) ? "locked" : $!{EWOULDBLOCK} ? "refused" : "error: $!"' '%s'`,
+		"windows": `$f = [IO.File]::Open('%s', 'OpenOrCreate', 'ReadWrite', 'ReadWrite'); try { $f.Lock(0, 1); 'locked' } catch [IO.IOException] { 'refused' } finally { $f.Close() }`,
+	}
+	// unmounted prints what is left of a drive on a client, from the
+	// operator's session.
+	unmounted = map[string]string{
+		"darwin":  `mount | grep fd7c`,
+		"windows": `net use | Select-String mainplane.net; cmdkey /list | Select-String mainplane.net`,
+	}
+	// unserved prints what is left of serving on a server that serves nothing.
+	unserved = `ls /etc/exports.d/mainplane.exports /etc/systemd/system/mainplane-smbd.service 2>/dev/null; grep ' /drives/' /proc/mounts`
 )
 
 const (
@@ -292,6 +355,10 @@ func run(v, prev, port string, targets []string) {
 		check(o, "harness: /worker is gone (404)", strings.Contains(out, "worker-404"), last(out))
 		check(o, "harness: worker admin joined", strings.Contains(out, "admin-ok"), last(out))
 		check(o, "harness: Dir the operator's, sessions in it", strings.Contains(out, "dir-ok"), last(out))
+		if o == "linux" {
+			out, err = remote(o, ssh[o], sessionsDrive)
+			check(o, "harness: sessions drive on admin, read-only", err == nil && strings.Join(strings.Fields(out), " ") == "ro listed refused", out)
+		}
 		// A harness before v0.5.0 finds its files elsewhere in Dir and stops,
 		// so prev is checked to be placed, and v to run again.
 		for _, u := range []string{prev, v} {
@@ -299,8 +366,8 @@ func run(v, prev, port string, targets []string) {
 			f := strings.Fields(out)
 			check(o, "harness updated to "+u, err == nil && len(f) > 0 && f[0] == u && (u == prev || strings.Join(f, " ") == u+" active"), out)
 		}
-		out, err = remote(o, ssh[o], fmt.Sprintf(uninstall[win], meshGone[o]))
-		check(o, "uninstall: no service, binary, state or mesh left", err == nil && strings.TrimSpace(out) == "clean", out)
+		out, err = remote(o, ssh[o], fmt.Sprintf(uninstall[win], meshGone[o]+"\n"+drivesGone[o]))
+		check(o, "uninstall: no service, binary, state, mesh or drive left", err == nil && strings.TrimSpace(out) == "clean", out)
 		hostsCheck(o, ssh[o], "uninstall: hosts block gone, other lines kept", hosts[o], 0)
 		out, err = remote(o, ssh[o], tailscale[o])
 		check(o, "tailscale status works after uninstall", err == nil && strings.TrimSpace(out) == "ok", out)
@@ -487,6 +554,7 @@ func phase(listen, url, secret, v string, oses []string, mode, text string) {
 		mesh(p, got, oses)
 		peers, err := ephemeral(listen, secret)
 		check("mesh", "an ephemeral node sees only the harness", err == nil && slices.Equal(peers, []string{worker.Harness}), fmt.Sprint(peers, err))
+		drives(coord, p, got, oses)
 	case "remove":
 		remove(coord, p, got, oses, text)
 	}
@@ -672,6 +740,152 @@ func link(coord *coordinator.Coordinator, p *harness.Pool, got map[string]harnes
 		}
 		check(o, "mesh: linked, sees every node", len(block) == len(oses)+1, fmt.Sprint(block))
 	}
+}
+
+// drives checks a drive the Linux worker serves to every worker: mounted at
+// its OS's path on each, a file written on each read on every other, a lock
+// held on the macOS client refusing the Windows client's and the other way,
+// then removal: the clients' mounts and mappings go, then the server's
+// exports, smbd and bind mount.
+func drives(coord *coordinator.Coordinator, p *harness.Pool, got map[string]harness.Listed, oses []string) {
+	if !slices.Contains(oses, "linux") {
+		return
+	}
+	d := drive{coord: coord, p: p, got: got, at: map[string]string{}}
+	var all []string
+	for _, o := range oses {
+		all = append(all, got[o].Name)
+	}
+	d.set(all...)
+	for _, o := range oses {
+		m, ok := d.wait(o, false)
+		want := map[string]string{"linux": "/drives/" + driveName, "darwin": "/Volumes/" + driveName}[o]
+		d.at[o] = m.Path + "/"
+		if o == "windows" {
+			want, d.at[o] = m.Path, m.Path
+			ok = ok && len(m.Path) == 3 && strings.HasSuffix(m.Path, `:\`)
+		}
+		check(o, "drive: mounted at its OS's path", ok && m.Path == want, fmt.Sprint(m))
+	}
+	for _, o := range oses {
+		_, err := d.sh(o, fmt.Sprintf(put[o == "windows"], d.at[o]+o+".txt", "from "+o))
+		check(o, "drive: write a file", err == nil, fmt.Sprint(err))
+	}
+	for _, o := range oses {
+		for _, q := range oses {
+			if q != o {
+				d.read(o, q)
+			}
+		}
+	}
+	if slices.Contains(oses, "darwin") && slices.Contains(oses, "windows") {
+		d.lock("darwin", "windows")
+		d.lock("windows", "darwin")
+	}
+	d.kill(oses) // nothing of ours holds the drive open
+	d.set(got["linux"].Name)
+	for _, o := range oses {
+		if o != "linux" {
+			_, ok := d.wait(o, true)
+			out, err := d.sh(o, unmounted[o])
+			check(o, "drive: removed from it, unmounted", ok && out == "", fmt.Sprint(out, err))
+		}
+	}
+	d.set()
+	_, ok := d.wait("linux", true)
+	out, err := d.sh("linux", unserved)
+	check("linux", "drive: serves none, no exports, smbd or mount", ok && out == "", fmt.Sprint(out, err))
+	d.kill(oses)
+}
+
+// The drive the e2e func serves, and the session its shells run in.
+const driveName, driveSession = "e2e", "e2e-drives"
+
+type drive struct {
+	coord *coordinator.Coordinator
+	p     *harness.Pool
+	got   map[string]harness.Listed
+	at    map[string]string // the drive's path on each OS, with its separator
+}
+
+// set serves the drive from the Linux worker to workers, none: no drive.
+func (d drive) set(workers ...string) {
+	ds := map[string]coordinator.Drive{}
+	if len(workers) > 0 {
+		ds[driveName] = coordinator.Drive{Server: d.got["linux"].Name, Workers: workers}
+	}
+	for _, err := range d.coord.SetDrives(ds) {
+		check("drive", "config applied", false, err.Error())
+	}
+	d.p.Resend()
+}
+
+func (d drive) sh(o, code string) (string, error) {
+	r, ok := d.p.Get(d.got[o].Name)
+	if !ok {
+		return "", errors.New("not connected")
+	}
+	out, err := r.Run(context.Background(), driveSession, "", code)
+	if err == nil && out.Exit != 0 {
+		err = fmt.Errorf("exit %d", out.Exit)
+	}
+	return strings.TrimSpace(strings.ReplaceAll(string(out.Body), "\r", "")), err
+}
+
+func (d drive) kill(oses []string) {
+	for _, o := range oses {
+		if r, ok := d.p.Get(d.got[o].Name); ok {
+			_ = r.Kill(context.Background(), driveSession)
+		}
+	}
+}
+
+// wait is o's mount of the drive once it is mounted, or, when gone, once o
+// has nothing of it.
+func (d drive) wait(o string, gone bool) (worker.Drive, bool) {
+	for start := time.Now(); time.Since(start) < driveWait; time.Sleep(time.Second) {
+		r, ok := d.p.Get(d.got[o].Name)
+		if !ok {
+			break
+		}
+		ds := r.Drives()
+		i := slices.IndexFunc(ds, func(m worker.Drive) bool { return m.Name == driveName && (gone || !m.Serve) })
+		if gone && i < 0 {
+			return worker.Drive{}, true
+		}
+		if !gone && i >= 0 && ds[i].State == worker.Mounted {
+			return ds[i], true
+		}
+	}
+	return worker.Drive{}, false
+}
+
+// read checks o reads the file q wrote, within driveLag.
+func (d drive) read(o, q string) {
+	var out string
+	for start := time.Now(); out != "from "+q && time.Since(start) < driveLag; time.Sleep(time.Second) {
+		out, _ = d.sh(o, fmt.Sprintf(cat[o == "windows"], d.at[o]+q+".txt"))
+	}
+	check(o, "drive: reads what "+q+" wrote", out == "from "+q, out)
+}
+
+// lock checks a lock h holds refuses t's, once t sees h has it, and t
+// takes it once h let go.
+func (d drive) lock(h, t string) {
+	f := "lock-" + h
+	held := make(chan error, 1)
+	go func() {
+		_, err := d.sh(h, fmt.Sprintf(lockHold[h], d.at[h]+f))
+		held <- err
+	}()
+	var seen string
+	for start := time.Now(); seen != "yes" && time.Since(start) < lockWait; time.Sleep(time.Second) {
+		seen, _ = d.sh(t, fmt.Sprintf(exists[t == "windows"], d.at[t]+f+".held"))
+	}
+	busy, _ := d.sh(t, fmt.Sprintf(lockTry[t], d.at[t]+f))
+	err := <-held
+	free, _ := d.sh(t, fmt.Sprintf(lockTry[t], d.at[t]+f))
+	check(t, "drive: lock refused while "+h+" holds one", seen == "yes" && err == nil && busy == "refused" && free == "locked", fmt.Sprint(seen, " ", busy, " then ", free, " ", err))
 }
 
 // tailnet is whether a is in Tailscale's ranges or the mesh's own: a path

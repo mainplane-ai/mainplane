@@ -35,7 +35,7 @@ on Linux) with the provider keys set in the shell, or none. Add keys there:
 "providers": {"anthropic": {"key": "sk-ant-..."}}
 ```
 
-The harness applies providers and links within seconds of a save; any other
+The harness applies providers, links and drives within seconds of a save; any other
 change applies at its next start.
 
 The install also makes the machine a worker named `admin`, which runs code as
@@ -124,6 +124,49 @@ Nothing listens on that port outside the mesh.
   signed TUN driver (the same one Tailscale ships), from wintun.net, pinned to
   a sha256. A worker started by hand, `mainplane worker <token>`, needs
   `wintun.dll` beside `mainplane.exe`.
+
+## Drives
+
+```
+ harness config                     drive server (a Linux worker)        workers
+ "drives": {                        knfsd, NFSv4, lease and grace 20 s   Linux   /drives/proj    NFSv4.2
+   "proj": {"server": "linuxbox",   mainplane-smbd, SMB3, mesh only      macOS   /Volumes/proj   NFSv4.0
+            "workers": ["*"]}       /srv/mainplane/proj, the operator's  Windows W:              SMB3
+ }
+```
+
+A drive is one directory that many workers mount, with one copy on its
+server. Nothing is shared until the harness config names a drive:
+
+```
+"drives": {
+  "proj":     {"server": "linuxbox", "workers": ["admin", "alexanders-mac-mini"]},
+  "sessions": {"workers": ["judge-1"]}
+}
+```
+
+- The server is a Linux worker with apt (Debian or Ubuntu). With no Linux
+  machine there are no drives: add a Linux worker, or use Mainplane cloud.
+  Each drive names its one server; any number of workers can be servers.
+- `"*"` is every persistent worker. An ephemeral worker must be named.
+- The first drive on a server installs `nfs-kernel-server` and `samba`. A
+  machine that already exports anything over NFS, or has a program on port
+  445, is refused, in `mainplane status` and the harness log. Samba's own
+  services stay off; the drive's smbd, `mainplane-smbd`, takes connections from
+  the mesh only. Every file on a drive belongs to the server's operator,
+  whoever wrote it.
+- Workers mount at `/drives/<name>` (Linux), `/Volumes/<name>` (macOS, listed
+  in Finder), and a letter from `W:` down (Windows, in the operator's session,
+  listed in Explorer). The server mounts its own drives from its disk.
+- `sessions` is the harness's `sessions/` directory, read-only, for workers
+  named in it. Its server is `admin`, so it exists only on a Linux harness.
+  Act on sessions through the API, not the files.
+- While a server is out of reach, file operations on its drives wait. Drives
+  stay mounted across restarts and updates. A worker removed from a drive, or
+  from the mesh, or uninstalled, unmounts it. A server that serves nothing
+  removes its exports and smbd; the packages and `/srv/mainplane` stay.
+- On a drive's server, `flock(1)` on the drive does not see other workers'
+  locks. Use fcntl locks there (`lockf`, Python's `fcntl.lockf`).
 
 ## What Cloudflare can read
 
