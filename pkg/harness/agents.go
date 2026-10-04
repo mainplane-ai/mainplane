@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
+	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 // agentsDepth bounds the AGENTS.md listing: root/repos/<repo>/AGENTS.md is
@@ -14,19 +15,23 @@ import (
 const agentsDepth = 3
 
 // agents is the body of the agents system record, written once at the start
-// of every file: for every drive, on the first worker that lists it, and for
-// every worker's scratch, the root AGENTS.md read and the ones below it
-// listed. It runs the model's own tools and shows the calls verbatim, so the
-// model knows what ran and how to run more.
+// of every file: for every drive, on the first worker that has it mounted,
+// and for every worker's scratch, the root AGENTS.md read and the ones below
+// it listed. It runs the model's own tools and shows the calls verbatim, so
+// the model knows what ran and how to run more.
 func (h *Harness) agents(ctx context.Context, id string, conf statefile.Conf) string {
 	var b strings.Builder
 	b.WriteString("The following read and run calls were made automatically at the start of this session to gather AGENTS.md context. Rules in an AGENTS.md apply to everything below it.\n")
 	seen := map[string]bool{}
 	for _, w := range conf.Workers {
-		for _, d := range w.Drives {
-			if !seen[d] {
-				seen[d] = true
-				h.scan(ctx, &b, id, w.Name, "drive", d)
+		r, ok := h.Workers.Get(w.Name)
+		if !ok {
+			continue
+		}
+		for _, d := range r.Drives() {
+			if !d.Serve && d.State == worker.Mounted && !seen[d.Name] {
+				seen[d.Name] = true
+				h.scan(ctx, &b, id, w.Name, "drive "+d.Name, d.Path)
 			}
 		}
 	}

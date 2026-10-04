@@ -33,9 +33,15 @@ var Default = map[string][]string{"windows": {"pwsh", "js"}, "linux": {"bash", "
 // ends, dial again, until the harness removes this worker. WireGuard proved
 // both ends, so the hello carries no secret. A connection that ends within
 // the longest wait, as a refused hello does, keeps the backoff; only one that
-// held resets it. The js folder is readied beside it.
+// held resets it. The js folder is readied beside it. The drives outlive
+// every connection, and go with the mesh.
 func Dial(m *mesh.Mesh, l Local) {
 	go startJS(l)
+	ds, err := newDrives(l.Operator)
+	if err != nil {
+		log.Fatal(err)
+	}
+	m.Report(ds.text)
 	wait, d := redialMin, net.Dialer{Timeout: dialTimeout, KeepAlive: keepAlive}
 	for {
 		err := errors.New("no harness in the mesh map yet")
@@ -46,7 +52,7 @@ func Dial(m *mesh.Mesh, l Local) {
 				log.Printf("connected to the harness at %s as %s", at, l.Name)
 				start, done := time.Now(), make(chan struct{})
 				go hangUpOnMove(m, conn, done)
-				err = Serve(conn, l)
+				err = Serve(conn, l, ds)
 				close(done)
 				_ = conn.Close()
 				if time.Since(start) > redialMax {
@@ -57,7 +63,8 @@ func Dial(m *mesh.Mesh, l Local) {
 		log.Printf("%v, redial in %s", err, wait)
 		select {
 		case <-m.Removed():
-			log.Print("removed from the mesh: no redial")
+			log.Print("removed from the mesh: no redial, its drives go")
+			ds.drop()
 			return
 		case <-time.After(wait):
 		}

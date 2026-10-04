@@ -441,7 +441,7 @@ func phase(listen, url, secret, v string, oses []string, mode, text string) {
 		die.Fatal(err)
 	}
 	go func() { die.Fatal(http.Serve(ln, mux)) }()
-	p := harness.NewPool()
+	p := harness.NewPool(coord.Desired)
 	go func() {
 		ls, err := coord.Listen(context.Background(), filepath.Join(dir(), "mesh"), "http://"+listen, worker.Port)
 		if err == nil {

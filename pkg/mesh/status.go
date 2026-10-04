@@ -139,6 +139,9 @@ func (m *Mesh) status() string {
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", p.Name(), p.Addresses().At(0).Addr(), path)
 	}
 	_ = w.Flush()
+	if f := m.report.Load(); f != nil {
+		b.WriteString((*f)())
+	}
 	if hint != "" {
 		b.WriteString("\n" + hint)
 	}

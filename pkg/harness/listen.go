@@ -3,6 +3,7 @@ package harness
 import (
 	"errors"
 	"log"
+	"maps"
 	"net"
 	"net/netip"
 	"slices"
@@ -20,6 +21,9 @@ type Pool struct {
 	mu      sync.Mutex
 	m       map[string]*Remote
 	refused map[string]Listed // admitted workers the last connection of which was refused
+
+	smu     sync.Mutex                  // one Resend at a time, so an older one never lands last
+	desired func(string) worker.Desired // the drives of the worker by name
 }
 
 // Listed is a worker as GET /workers shows it: its hello, and why its last
@@ -29,8 +33,21 @@ type Listed struct {
 	Refused string `json:"refused,omitempty"`
 }
 
-func NewPool() *Pool {
-	return &Pool{m: map[string]*Remote{}, refused: map[string]Listed{}}
+func NewPool(desired func(string) worker.Desired) *Pool {
+	return &Pool{m: map[string]*Remote{}, refused: map[string]Listed{}, desired: desired}
+}
+
+// Resend sends each connected worker its drives when they changed: after
+// the config, or the workers on the mesh, did.
+func (p *Pool) Resend() {
+	p.smu.Lock()
+	defer p.smu.Unlock()
+	p.mu.Lock()
+	rs := slices.Collect(maps.Values(p.m))
+	p.mu.Unlock()
+	for _, r := range rs {
+		_ = r.desire(p.desired(r.Name)) // a failed send is the connection gone; serve sees it
+	}
 }
 
 func (p *Pool) Add(r *Remote) {
@@ -64,7 +81,9 @@ func (p *Pool) List() []Listed {
 	defer p.mu.Unlock()
 	out := make([]Listed, 0, len(p.m)+len(p.refused))
 	for _, r := range p.m {
-		out = append(out, Listed{Header: r.Header})
+		l := Listed{Header: r.Header}
+		l.Drives = r.Drives()
+		out = append(out, l)
 	}
 	for name, l := range p.refused {
 		if _, ok := p.m[name]; !ok {
@@ -97,20 +116,16 @@ func (p *Pool) Serve(l net.Listener, node func(netip.Addr) (string, bool)) error
 // worker that passed admit is listed with the reason until it connects. The
 // source is read after the hello: netstack knows it once the handshake ends.
 func (p *Pool) serve(conn net.Conn, node func(netip.Addr) (string, bool)) {
-	who, name := "", ""
-	r, err := Connect(conn, func() error {
+	who := ""
+	r, err := Connect(conn, func() (string, error) {
 		a, err := netip.ParseAddrPort(conn.RemoteAddr().String())
 		who = a.Addr().String()
 		n, ok := node(a.Addr())
 		if err != nil || !ok {
-			return errors.New("not a node of this mesh")
+			return "", errors.New("not a node of this mesh")
 		}
-		name = n
-		return nil
+		return n, nil
 	})
-	if r != nil {
-		r.Name = name
-	}
 	if err != nil {
 		if r != nil {
 			who = r.Name + " at " + who
@@ -125,6 +140,7 @@ func (p *Pool) serve(conn net.Conn, node func(netip.Addr) (string, bool)) {
 	}
 	log.Printf("worker %s connected from %s: %s %s %s", r.Name, who, r.OS, r.Arch, r.Version)
 	p.Add(r)
+	p.Resend()
 	<-r.done
 	p.mu.Lock()
 	if p.m[r.Name] == r {
@@ -132,4 +148,5 @@ func (p *Pool) serve(conn net.Conn, node func(netip.Addr) (string, bool)) {
 		log.Printf("worker %s disconnected", r.Name)
 	}
 	p.mu.Unlock()
+	p.Resend()
 }

@@ -12,6 +12,12 @@ The harness install also makes its machine a worker, `admin`, and the harness's 
 - `mainplane-server uninstall` removes `admin`, and the CLI with it, with the harness
 - The worker install no longer warns that a worker on the harness's machine can read the harness secrets
 - A session's `run` on `harness` says it is not a worker, and that the worker on the harness's machine is `admin`
+- Drives, Linux only for now: `"drives": {"proj": {"server": "linuxbox", "workers": ["admin", "laptop"]}, "sessions": {"workers": ["judge-1"]}}` in the harness config, applied within seconds of a save. A drive's server is a Linux worker, Debian or Ubuntu; `"*"` is every persistent worker, and an ephemeral one is named. `sessions` is the harness's `sessions/`, served by `admin` on a Linux harness, read-only, named workers only. A drive that cannot be served is an error in the harness log
+- A drive's server serves it over NFSv4 from `/srv/mainplane/<name>`, each client by its mesh address, and every client acts as the server's operator, so what any worker writes is the operator's. The first drive installs `nfs-kernel-server`. It refuses a machine that already exports something over NFS or has a program on port 445, in `mainplane status` and the harness log
+- A Linux worker mounts each of its drives at `/drives/<name>`, NFSv4 hard, its server's own from its disk. A server out of reach is waited for. Drives stay mounted across restarts and updates, and are unmounted when the worker leaves the drive or the mesh, or is uninstalled
+- A drive's server sees each worker that mounts it; two workers on one drive do not see each other for it
+- `mainplane status`, `mainplane workers` and a session's worker list show each drive's path and state. A session's config no longer lists drives
+- Every interpreter has `GIT_CONFIG_*` set so git trusts repositories on a drive, whose files are the server operator's
 
 ## v0.4.0
 

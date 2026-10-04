@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"slices"
 	"sync"
@@ -36,14 +38,19 @@ type Remote struct {
 	calls map[string]chan worker.Frame
 	left  map[string]chan struct{} // closed by a call that stopped listening
 	done  chan struct{}            // closed when the connection ends
+
+	sent   []byte // the last drives frame, under wmu
+	dmu    sync.Mutex
+	drives []worker.Drive // from the hello, then each status
 }
 
 // Connect reads the worker's hello, checks the connection with admit, whose
-// error is why it is refused, and starts routing its replies. A worker from another release is
+// error is why it is refused and whose name is the worker's, and starts
+// routing its replies. A worker from another release is
 // told to update to this one and refused: it comes back as this release, and
 // the error says whether the update began or why it failed. That worker is
 // returned with the error, so the pool can list it.
-func Connect(conn net.Conn, admit func() error) (*Remote, error) {
+func Connect(conn net.Conn, admit func() (string, error)) (*Remote, error) {
 	br := bufio.NewReader(conn)
 	hello, err := worker.Decode(br)
 	if err != nil {
@@ -52,15 +59,57 @@ func Connect(conn net.Conn, admit func() error) (*Remote, error) {
 	if hello.Kind != worker.Hello {
 		return nil, fmt.Errorf("first frame is %q, want hello", hello.Kind)
 	}
-	if err := admit(); err != nil {
+	name, err := admit()
+	if err != nil {
 		return nil, err
 	}
 	r := &Remote{Header: hello.Header, conn: conn, calls: map[string]chan worker.Frame{}, left: map[string]chan struct{}{}, done: make(chan struct{})}
+	r.Name, r.Header.Drives = name, nil
 	if !version.Match(hello.Version) {
 		return r, fmt.Errorf("worker is version %s, harness is %s: %w", hello.Version, version.V, update(conn, br))
 	}
+	r.status(hello.Drives)
 	go r.recv(br)
 	return r, nil
+}
+
+// status keeps the worker's drives and logs each one that changed, so a
+// refusal shows in the harness log as well as in the worker's status.
+func (r *Remote) status(ds []worker.Drive) {
+	r.dmu.Lock()
+	defer r.dmu.Unlock()
+	for _, d := range ds {
+		if !slices.Contains(r.drives, d) {
+			log.Printf("worker %s: drive %v", r.Name, d)
+		}
+	}
+	r.drives = ds
+}
+
+// Drives is every drive the worker serves or mounts, as it last said.
+func (r *Remote) Drives() []worker.Drive {
+	r.dmu.Lock()
+	defer r.dmu.Unlock()
+	return r.drives
+}
+
+// desire sends the worker its drives frame when it differs from the last.
+func (r *Remote) desire(want worker.Desired) error {
+	b, err := json.Marshal(want)
+	if err != nil {
+		return err
+	}
+	r.wmu.Lock()
+	defer r.wmu.Unlock()
+	if bytes.Equal(b, r.sent) {
+		return nil
+	}
+	err = worker.Encode(r.conn, worker.Frame{Header: worker.Header{Kind: worker.Drives}, Body: b})
+	if err == nil {
+		r.sent = b
+		log.Printf("worker %s: drives %s", r.Name, b)
+	}
+	return err
 }
 
 // update tells a worker to become this release and waits for its answer. The
@@ -95,6 +144,9 @@ func (r *Remote) recv(br *bufio.Reader) {
 			_ = r.conn.Close()
 			close(r.done)
 			return
+		}
+		if f.ID == "" && f.Kind == worker.Status {
+			r.status(f.Drives)
 		}
 		if ch, ok := r.calls[f.ID]; ok {
 			select {

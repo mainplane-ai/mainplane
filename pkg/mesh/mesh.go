@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"tailscale.com/control/controlclient"
@@ -62,7 +63,11 @@ type Mesh struct {
 	removed chan struct{}
 	sock    net.Listener // mainplane status asks here
 	harness string       // the key of the harness this node follows
+	report  atomic.Pointer[func() string]
 }
+
+// Report adds what f says to the end of mainplane status.
+func (m *Mesh) Report(f func() string) { m.report.Store(&f) }
 
 // Up brings the node up with its state in dir: the TUN, then the engine.
 // It registers as name with the join secret on first start; the keys in
