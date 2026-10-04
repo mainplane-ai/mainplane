@@ -55,6 +55,9 @@ func reconcile(want Desired, op *user.User) []Drive {
 		have = append(have, Drive{Name: e.Name, Serve: true, State: Failed, Error: "only a Linux worker serves drives"})
 	}
 	ours := load()
+	if len(want.Mount) == 0 && len(ours) == 0 { // most workers: nothing to look at every round
+		return have
+	}
 	at, err := mappings(op)
 	if err != nil {
 		for _, m := range want.Mount {
