@@ -33,7 +33,8 @@ const (
 // NFSv4 only: 4.0 for macOS, whose client before macOS 26 speaks no newer,
 // 4.1 and 4.2 for Linux, whose sessions answer a retransmit once. No v3: its
 // locks live in side daemons. A dead client's delegations go after 20s, not 90s: an agent
-// between tool calls does not notice 20s.
+// between tool calls does not notice 20s. After a start, new locks wait out the grace
+// in which clients reclaim theirs, which one lease is enough for: 20s, not 90s.
 const nfsConfText = `# mainplane drives, written by mainplaned
 [nfsd]
 vers3=n
@@ -42,6 +43,7 @@ vers4.0=y
 vers4.1=y
 vers4.2=y
 lease-time=20
+grace-time=20
 `
 
 // Windows workers mount over SMB from an smbd of our own, with its config,

@@ -129,7 +129,7 @@ Nothing listens on that port outside the mesh.
 
 ```
  harness config                     drive server (a Linux worker)        workers
- "drives": {                        knfsd, NFSv4, lease 20 s             Linux   /drives/proj    NFSv4.2
+ "drives": {                        knfsd, NFSv4, lease and grace 20 s   Linux   /drives/proj    NFSv4.2
    "proj": {"server": "linuxbox",   mainplane-smbd, SMB3, mesh only      macOS   /Volumes/proj   NFSv4.0
             "workers": ["*"]}       /srv/mainplane/proj, the operator's  Windows W:              SMB3
  }

@@ -199,7 +199,7 @@ func (h *Harness) workers(workers []statefile.Worker) string {
 					continue
 				}
 				fmt.Fprintf(&b, "  drive %v", d)
-				if slices.ContainsFunc(ds, func(s worker.Drive) bool { return s.Serve && s.Name == d.Name }) {
+				if slices.ContainsFunc(ds, func(s worker.Drive) bool { return s.Serve && s.State == worker.Serving && s.Name == d.Name }) {
 					b.WriteString(", served from this worker")
 				}
 				b.WriteString("\n")

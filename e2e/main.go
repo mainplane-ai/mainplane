@@ -88,9 +88,9 @@ const (
 	// A file made elsewhere can read as missing on Windows for 5s (the SMB
 	// client's not-found cache), in a listing elsewhere for 1s (actimeo).
 	driveLag = 15 * time.Second
-	// A lock holder holds for 10s (the sleep in lockHold); the other worker
-	// tries well inside that, after the holder took it.
-	lockWait = 4 * time.Second
+	// A server whose NFS server just started takes no new lock for its
+	// grace, 20s, so a holder can take that long to have its lock.
+	lockWait = time.Minute
 )
 
 // Scripts for each machine, by whether it is Windows.
@@ -200,12 +200,15 @@ touch /drives/sessions/e2e 2>&1 | grep -q 'Read-only file system' && echo refuse
 	hostsPath = map[bool]string{false: "/etc/hosts", true: `C:\Windows\System32\drivers\etc\hosts`}
 	// Run by a worker on a drive, as its operator. A macOS flock over NFS is
 	// a lock on the server, as is a Windows byte-range lock through Samba's
-	// posix locking, so each refuses the other.
+	// posix locking, so each refuses the other. A holder makes <file>.held
+	// once it has the lock and holds it 20s, past driveLag, so the other
+	// worker sees that file in time to try.
 	put      = map[bool]string{false: `printf %%s '%[2]s' > '%[1]s'`, true: `[IO.File]::WriteAllText('%[1]s', '%[2]s')`}
 	cat      = map[bool]string{false: `cat '%s'`, true: `[IO.File]::ReadAllText('%s')`}
+	exists   = map[bool]string{false: `test -e '%s' && echo yes`, true: `if (Test-Path '%s') { 'yes' }`}
 	lockHold = map[string]string{
-		"darwin":  `perl -MFcntl=:flock -e 'open(F, ">>", $ARGV[0]) or die $!; flock(F, LOCK_EX) or die $!; sleep 10' '%s'`,
-		"windows": `$f = [IO.File]::Open('%s', 'OpenOrCreate', 'ReadWrite', 'ReadWrite'); $f.Lock(0, 1); Start-Sleep 10; $f.Close()`,
+		"darwin":  `perl -MFcntl=:flock -e 'open(F, ">>", $ARGV[0]) or die $!; flock(F, LOCK_EX) or die $!; open(M, ">", "$ARGV[0].held") or die $!; close(M); sleep 20' '%s'`,
+		"windows": `$f = [IO.File]::Open('%[1]s', 'OpenOrCreate', 'ReadWrite', 'ReadWrite'); $f.Lock(0, 1); [IO.File]::WriteAllText('%[1]s.held', ''); Start-Sleep 20; $f.Close()`,
 	}
 	lockTry = map[string]string{
 		"darwin":  `perl -MFcntl=:flock -e 'open(F, ">>", $ARGV[0]) or die $!; print flock(F, LOCK_EX | LOCK_NB) ? "locked" : $!{EWOULDBLOCK} ? "refused" : "error: $!"' '%s'`,
@@ -866,18 +869,23 @@ func (d drive) read(o, q string) {
 	check(o, "drive: reads what "+q+" wrote", out == "from "+q, out)
 }
 
-// lock checks a lock h holds refuses t's, and t takes it once h let go.
+// lock checks a lock h holds refuses t's, once t sees h has it, and t
+// takes it once h let go.
 func (d drive) lock(h, t string) {
+	f := "lock-" + h
 	held := make(chan error, 1)
 	go func() {
-		_, err := d.sh(h, fmt.Sprintf(lockHold[h], d.at[h]+"lock"))
+		_, err := d.sh(h, fmt.Sprintf(lockHold[h], d.at[h]+f))
 		held <- err
 	}()
-	time.Sleep(lockWait)
-	busy, _ := d.sh(t, fmt.Sprintf(lockTry[t], d.at[t]+"lock"))
+	var seen string
+	for start := time.Now(); seen != "yes" && time.Since(start) < lockWait; time.Sleep(time.Second) {
+		seen, _ = d.sh(t, fmt.Sprintf(exists[t == "windows"], d.at[t]+f+".held"))
+	}
+	busy, _ := d.sh(t, fmt.Sprintf(lockTry[t], d.at[t]+f))
 	err := <-held
-	free, _ := d.sh(t, fmt.Sprintf(lockTry[t], d.at[t]+"lock"))
-	check(t, "drive: lock refused while "+h+" holds one", err == nil && busy == "refused" && free == "locked", fmt.Sprint(busy, " then ", free, " ", err))
+	free, _ := d.sh(t, fmt.Sprintf(lockTry[t], d.at[t]+f))
+	check(t, "drive: lock refused while "+h+" holds one", seen == "yes" && err == nil && busy == "refused" && free == "locked", fmt.Sprint(seen, " ", busy, " then ", free, " ", err))
 }
 
 // tailnet is whether a is in Tailscale's ranges or the mesh's own: a path
