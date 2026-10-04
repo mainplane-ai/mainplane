@@ -191,16 +191,12 @@ func start() error {
 	return path(true)
 }
 
-// Uninstall stops and deletes the service, removes the worker admin and the
+// Uninstall deletes and stops the service, removes the worker admin and the
 // binary, and takes bin's folder off PATH once nothing else is in it. Dir
-// stays: it holds the sessions.
+// stays: it holds the sessions. The delete comes first: a harness that failed
+// moments before has a restart pending, which the service manager runs after
+// a stop, but not on a service marked for deletion.
 func Uninstall() error {
-	if err := stop(); err != nil {
-		return err
-	}
-	if err := uninstallAdmin(); err != nil {
-		return err
-	}
 	m, err := mgr.Connect()
 	if err != nil {
 		return err
@@ -212,6 +208,12 @@ func Uninstall() error {
 		_ = s.Close()
 	}
 	if err != nil && !errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+		return err
+	}
+	if err := stop(); err != nil {
+		return err
+	}
+	if err := uninstallAdmin(); err != nil {
 		return err
 	}
 	for _, f := range []string{bin, bin + ".old", bin + ".new"} {
