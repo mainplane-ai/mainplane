@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mainplane-ai/mainplane/pkg/mesh"
 )
 
 // A Linux server serves each drive from its own directory under exportsDir,
@@ -43,6 +45,68 @@ vers4.1=y
 vers4.2=y
 lease-time=20
 `
+
+// Windows workers mount over SMB from an smbd of our own, with its config,
+// state, passwords and unit apart from a Samba the machine may have, so
+// removing them undoes it. Its users are marked by smbComment.
+const (
+	smbDir     = stateDir + "/smb"
+	smbConf    = smbDir + "/smb.conf"
+	smbService = "mainplane-smbd"
+	smbUnit    = "/etc/systemd/system/" + smbService + ".service"
+	smbComment = "mainplane drive client"
+)
+
+// Samba listens on no point-to-point interface, and the mesh's TUN is one,
+// so smbd listens on every address and the kernel lets in only the mesh's
+// /48. A reload reaches every smbd of ours: a HUP reaches only the first,
+// and a client's own smbd would not see a new share. No [Install]:
+// mainplaned starts it.
+const smbUnitText = `[Unit]
+Description=mainplane drives for Windows workers, started by mainplaned
+
+[Service]
+ExecStart=/usr/sbin/smbd --foreground --no-process-group --configfile=` + smbConf + `
+ExecReload=/usr/bin/smbcontrol --configfile=` + smbConf + ` all reload-config
+Restart=always
+RestartSec=2
+IPAddressDeny=any
+IPAddressAllow=%s
+`
+
+// SMB3 only, with no NetBIOS, printers or guests. posix locking makes a
+// Windows byte-range lock an fcntl lock, which NFS clients and local
+// programs meet; kernel oplocks makes an oplock a kernel lease, which an NFS
+// or local open breaks. Every file is the operator's, whoever wrote it, as
+// over NFS.
+const smbConfText = `# mainplane drives, written by mainplaned
+[global]
+	server role = standalone server
+	smb ports = 445
+	disable netbios = yes
+	server min protocol = SMB3
+	map to guest = never
+	restrict anonymous = 2
+	load printers = no
+	printcap name = /dev/null
+	disable spoolss = yes
+	passdb backend = tdbsam:%[1]s/passdb.tdb
+	private dir = %[1]s/private
+	lock directory = %[1]s/lock
+	state directory = %[1]s/state
+	cache directory = %[1]s/cache
+	pid directory = %[1]s
+	ncalrpc dir = %[1]s/ncalrpc
+	log file = %[1]s/log
+	max log size = 1000
+	posix locking = yes
+	kernel oplocks = yes
+	force user = %[2]s
+`
+
+// smbSet is the password each of our SMB users was given since this
+// process started, so a password is set once a run, not every round.
+var smbSet = map[string]string{}
 
 // A server on the mesh, relayed too, answers a connect well within
 // probeWait. A mount that takes longer than mountWait is waited for again
@@ -90,19 +154,21 @@ func exportPath(name string) string {
 
 // serve makes this machine export es, each to its clients' mesh addresses
 // only, every client squashed to op, so every file on a drive is op's
-// whoever wrote it. Serving nothing removes our exports.
+// whoever wrote it, and share it over SMB to its Windows clients. Serving
+// nothing removes our exports and our smbd.
 func serve(es []Export, op *user.User) []Drive {
 	if len(es) == 0 {
-		if err := unexport(); err != nil {
+		if err := errors.Join(unexport(), unsmb()); err != nil {
 			log.Printf("drives: %v", err)
 		}
 		return nil
 	}
 	err := nfsServer()
 	if err != nil { // a server that cannot be set up serves no one, not the clients of an older list
-		err = errors.Join(err, unexport())
+		err = errors.Join(err, unexport(), unsmb())
 	}
 	have, lines := []Drive{}, []string{"# mainplane drives, written by mainplaned"}
+	shares, users := "", map[string]string{}
 	for _, e := range es {
 		d := Drive{Name: e.Name, Serve: true, State: Serving}
 		if ValidDrive(e.Name) {
@@ -118,18 +184,134 @@ func serve(es []Export, op *user.User) []Drive {
 				d.State, d.Error = Failed, derr.Error()
 			} else if len(e.Clients) > 0 { // a line with no clients would export to everyone
 				lines = append(lines, exportLine(d.Path, e, op))
+				shares += share(d.Path, e, users)
 			}
 		}
 		have = append(have, d)
 	}
 	if err == nil {
-		if err := write(exportsFile, strings.Join(lines, "\n")+"\n", "exportfs", "-ra"); err != nil {
+		err := write(exportsFile, strings.Join(lines, "\n")+"\n", "exportfs", "-ra")
+		if err == nil {
+			err = smbServer(shares, users, op)
+		}
+		if err != nil {
 			for i := range have {
 				have[i].State, have[i].Error = Failed, err.Error()
 			}
 		}
 	}
 	return have
+}
+
+// share is e's section of our smb.conf, for its Windows clients, whose
+// users and passwords it adds to users. None: no section, since one with no
+// valid users would take any.
+func share(path string, e Export, users map[string]string) string {
+	var valid []string
+	for _, c := range e.Clients {
+		if c.SMB != nil {
+			valid = append(valid, c.SMB.User)
+			users[c.SMB.User] = c.SMB.Password
+		}
+	}
+	if len(valid) == 0 {
+		return ""
+	}
+	ro := "no"
+	if e.Name == Sessions {
+		ro = "yes"
+	}
+	return fmt.Sprintf("[%s]\n\tpath = %s\n\tread only = %s\n\tvalid users = %s\n", e.Name, path, ro, strings.Join(valid, " "))
+}
+
+// smbServer serves shares from our smbd, with a nologin user for each
+// Windows client. The samba package, installed here, would start the
+// distro's smbd on every address, and it was off (preflight): it stays off.
+func smbServer(shares string, users map[string]string, op *user.User) error {
+	if _, err := exec.LookPath("smbd"); err != nil {
+		if err := apt("samba"); err != nil {
+			return err
+		}
+		if err := run("systemctl", "disable", "--now", "smbd", "nmbd"); err != nil {
+			return err
+		}
+	}
+	if err := os.MkdirAll(smbDir+"/private", 0o700); err != nil {
+		return err
+	}
+	p, err := mesh.Network()
+	if err != nil {
+		return err
+	}
+	if err := write(smbUnit, fmt.Sprintf(smbUnitText, p), "systemctl", "daemon-reload"); err != nil {
+		return err
+	}
+	if err := write(smbConf, fmt.Sprintf(smbConfText, smbDir, op.Username)+shares, "systemctl", "reload-or-restart", smbService); err != nil {
+		return err
+	}
+	if err := smbUsers(users); err != nil {
+		return err
+	}
+	// Started at the first round after a boot, or after a stop it did not
+	// come back from.
+	out, err := exec.Command("ss", "-Hltn", "sport", "=", ":445").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ss: %w: %s", err, out)
+	}
+	if len(bytes.TrimSpace(out)) == 0 {
+		return run("systemctl", "start", smbService)
+	}
+	return nil
+}
+
+// smbUsers makes users, by name, our smbd's, with their passwords, each a
+// system user that cannot log in, and removes ours no longer in users.
+func smbUsers(users map[string]string) error {
+	b, err := os.ReadFile("/etc/passwd")
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for line := range strings.Lines(string(b)) {
+		if f := strings.Split(line, ":"); len(f) > 4 && f[4] == smbComment && users[f[0]] == "" {
+			errs = append(errs, run("smbpasswd", "-c", smbConf, "-x", f[0]), run("userdel", f[0]))
+			delete(smbSet, f[0])
+		}
+	}
+	for u, pw := range users {
+		if smbSet[u] == pw {
+			continue
+		}
+		if _, err := user.Lookup(u); err != nil {
+			if err := run("useradd", "--system", "--no-create-home", "--home-dir", "/nonexistent", "--shell", "/usr/sbin/nologin", "--comment", smbComment, u); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		}
+		cmd := exec.Command("smbpasswd", "-c", smbConf, "-s", "-a", u)
+		cmd.Stdin = strings.NewReader(pw + "\n" + pw + "\n")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			errs = append(errs, fmt.Errorf("smbpasswd %s: %w: %s", u, err, out))
+			continue
+		}
+		smbSet[u] = pw
+	}
+	return errors.Join(errs...)
+}
+
+// unsmb stops our smbd and removes its users, state and unit; the package
+// stays. The unit goes last, so a step that fails is tried again next round.
+func unsmb() error {
+	if _, err := os.Stat(smbUnit); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err := errors.Join(smbUsers(nil), run("systemctl", "stop", smbService), os.RemoveAll(smbDir)); err != nil {
+		return err
+	}
+	if err := os.Remove(smbUnit); err != nil {
+		return err
+	}
+	return run("systemctl", "daemon-reload")
 }
 
 func exportLine(path string, e Export, op *user.User) string {
@@ -355,7 +537,7 @@ func unexport() error {
 
 // dropDrives unmounts every drive and stops serving, for a worker that left
 // the mesh or is uninstalled.
-func dropDrives() error {
+func dropDrives(*user.User) error {
 	var errs []error
 	for _, p := range slices.Sorted(maps.Keys(mountpoints())) {
 		errs = append(errs, unmount(p, true))
@@ -363,7 +545,7 @@ func dropDrives() error {
 	if err := os.Remove(nfsConf); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		errs = append(errs, err)
 	}
-	return errors.Join(append(errs, unexport())...)
+	return errors.Join(append(errs, unexport(), unsmb())...)
 }
 
 // write puts text in path when it differs, then runs then. A failed then

@@ -34,14 +34,20 @@ var Default = map[string][]string{"windows": {"pwsh", "js"}, "linux": {"bash", "
 // both ends, so the hello carries no secret. A connection that ends within
 // the longest wait, as a refused hello does, keeps the backoff; only one that
 // held resets it. The js folder is readied beside it. The drives outlive
-// every connection, and go with the mesh.
-func Dial(m *mesh.Mesh, l Local) {
+// every connection, and go with the mesh; Dial returns them at once, for a
+// Windows service told to drop them.
+func Dial(m *mesh.Mesh, l Local) *drives {
 	go startJS(l)
 	ds, err := newDrives(l.Operator)
 	if err != nil {
 		log.Fatal(err)
 	}
 	m.Report(ds.text)
+	go dial(m, l, ds)
+	return ds
+}
+
+func dial(m *mesh.Mesh, l Local, ds *drives) {
 	wait, d := redialMin, net.Dialer{Timeout: dialTimeout, KeepAlive: keepAlive}
 	for {
 		err := errors.New("no harness in the mesh map yet")

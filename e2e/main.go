@@ -420,7 +420,7 @@ func phase(listen, url, secret, v string, oses []string, mode, text string) {
 	}
 	log.SetOutput(f)
 	die := log.New(os.Stderr, "", log.LstdFlags) // the gate sees why a phase ended
-	coord, err := coordinator.New(dir(), func(s, _ string) (auth.Entry, error) {
+	coord, err := coordinator.New(dir(), key(), func(s, _ string) (auth.Entry, error) {
 		if s != secret && s != "ephemeral-"+secret {
 			return auth.Entry{}, errors.New("join secret refused")
 		}

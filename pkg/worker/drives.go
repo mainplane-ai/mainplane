@@ -48,12 +48,25 @@ type Export struct {
 type Client struct {
 	Name string     `json:"name"`
 	Addr netip.Addr `json:"addr"`
+	SMB  *SMB       `json:"smb,omitempty"` // a Windows client's user on this server
 }
 
 type Mount struct {
 	Name   string     `json:"name"`
 	Server string     `json:"server"`
 	Addr   netip.Addr `json:"addr"`
+	SMB    *SMB       `json:"smb,omitempty"` // how a Windows worker signs in to Server
+}
+
+// SMB is a Windows worker's user on one server, the same for each of that
+// server's drives, since Windows holds one credential per server. The
+// harness derives the password from its key, so neither end stores it
+// before the harness sends it. Host is the server's long name, for a mount:
+// on Windows a short name that is also a Tailscale name resolves there.
+type SMB struct {
+	Host     string `json:"host,omitempty"`
+	User     string `json:"user"`
+	Password string `json:"password"`
 }
 
 // Drive is one drive as the worker reports it.
@@ -186,7 +199,7 @@ func (d *drives) drop() {
 	d.mu.Lock()
 	d.want = nil
 	d.mu.Unlock()
-	if err := dropDrives(); err != nil {
+	if err := dropDrives(d.op); err != nil {
 		log.Printf("drives: %v", err)
 	}
 }

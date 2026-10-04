@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build !linux && !windows
 
 package worker
 
@@ -20,4 +20,4 @@ func reconcile(want Desired, _ *user.User) []Drive {
 	return have
 }
 
-func dropDrives() error { return nil }
+func dropDrives(*user.User) error { return nil }

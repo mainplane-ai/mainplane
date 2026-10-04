@@ -112,10 +112,11 @@ type state struct {
 
 // Coordinator holds the nodes of one project.
 type Coordinator struct {
-	key  key.MachinePrivate
-	file string
-	join func(secret, addr string) (auth.Entry, error)
-	self string // the harness's own node registers with it; never on disk
+	key    key.MachinePrivate
+	secret []byte // the harness key, which SMB passwords derive from
+	file   string
+	join   func(secret, addr string) (auth.Entry, error)
+	self   string // the harness's own node registers with it; never on disk
 
 	mu     sync.Mutex
 	st     state
@@ -127,15 +128,16 @@ type Coordinator struct {
 }
 
 // New loads the Noise key and the nodes from dir, made there the first time.
-// join checks a join secret sent from addr and returns its entry: whether it
-// makes ephemeral nodes, and its name, which names the node when it is
-// worker.Admin. Each ephemeral node loaded has idle from now to poll again.
-func New(dir string, join func(secret, addr string) (auth.Entry, error)) (*Coordinator, error) {
+// secret is the harness key. join checks a join secret sent from addr and
+// returns its entry: whether it makes ephemeral nodes, and its name, which
+// names the node when it is worker.Admin. Each ephemeral node loaded has
+// idle from now to poll again.
+func New(dir string, secret []byte, join func(secret, addr string) (auth.Entry, error)) (*Coordinator, error) {
 	k, err := noiseKey(filepath.Join(dir, "noise.key"))
 	if err != nil {
 		return nil, err
 	}
-	c := &Coordinator{key: k, file: filepath.Join(dir, "nodes.json"), join: join, self: crand.Text(), st: state{Next: 1}, wakes: map[chan struct{}]bool{}}
+	c := &Coordinator{key: k, secret: secret, file: filepath.Join(dir, "nodes.json"), join: join, self: crand.Text(), st: state{Next: 1}, wakes: map[chan struct{}]bool{}}
 	b, err := os.ReadFile(c.file)
 	if errors.Is(err, fs.ErrNotExist) {
 		return c, nil
