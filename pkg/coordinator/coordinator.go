@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
+	"github.com/mainplane-ai/mainplane/pkg/mesh"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 	"golang.org/x/net/http2"
 	"tailscale.com/control/controlhttp/controlhttpserver"
@@ -44,10 +45,6 @@ import (
 	"tailscale.com/types/key"
 	"tailscale.com/util/zstdframe"
 )
-
-// Prefix holds every node's address, prefix::N. It is one random ULA /48, so
-// it meets no LAN and not Tailscale's 100.64/10 or fd7a:115c:a1e0::/48.
-var Prefix = netip.MustParsePrefix("fd7c:9a2e:4b10::/48")
 
 const (
 	// The tunnel closes a response idle for about 100s. Headscale's 50s plus
@@ -656,7 +653,7 @@ func (c *Coordinator) name(hi *tailcfg.Hostinfo) string {
 }
 
 func address(id tailcfg.NodeID) netip.Addr {
-	a := Prefix.Addr().As16()
+	a := mesh.Prefix.Addr().As16()
 	binary.BigEndian.PutUint64(a[8:], uint64(id))
 	return netip.AddrFrom16(a)
 }

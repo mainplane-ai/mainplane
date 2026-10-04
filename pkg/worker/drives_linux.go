@@ -22,19 +22,17 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
 )
 
-// A Linux server serves each drive from its own directory under exportsDir,
-// and a Linux client mounts each under mountsDir. The exports file and the
-// nfs.conf drop-in are ours alone, so removing them undoes what we did.
+// A Linux client mounts each drive under mountsDir. The exports file and
+// the nfs.conf drop-in are ours alone, so removing them undoes what we did.
 const (
-	exportsDir  = "/srv/mainplane"
 	mountsDir   = "/drives"
 	exportsFile = "/etc/exports.d/mainplane.exports"
 	nfsConf     = "/etc/nfs.conf.d/mainplane.conf"
 )
 
-// NFSv4 only: 4.0 for macOS, whose client speaks no newer, 4.1 and 4.2 for
-// Linux, whose sessions answer a retransmit once. No v3: its locks live in
-// side daemons. A dead client's delegations go after 20s, not 90s: an agent
+// NFSv4 only: 4.0 for macOS, whose client before macOS 26 speaks no newer,
+// 4.1 and 4.2 for Linux, whose sessions answer a retransmit once. No v3: its
+// locks live in side daemons. A dead client's delegations go after 20s, not 90s: an agent
 // between tool calls does not notice 20s.
 const nfsConfText = `# mainplane drives, written by mainplaned
 [nfsd]
@@ -142,14 +140,6 @@ func reconcile(want Desired, op *user.User) []Drive {
 		}
 	}
 	return have
-}
-
-// exportPath is where a Linux server keeps the drive name.
-func exportPath(name string) string {
-	if name == Sessions {
-		return filepath.Join(HarnessDir, Sessions)
-	}
-	return filepath.Join(exportsDir, name)
 }
 
 // serve makes this machine export es, each to its clients' mesh addresses
