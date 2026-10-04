@@ -117,12 +117,13 @@ type Coordinator struct {
 	join func(secret, addr string) (auth.Entry, error)
 	self string // the harness's own node registers with it; never on disk
 
-	mu    sync.Mutex
-	st    state
-	host  string             // the front door's, where the relay is
-	links map[[2]string]bool // worker pairs that see each other, by name, the lesser first
-	ver   uint64
-	wakes map[chan struct{}]bool // one per map poll
+	mu     sync.Mutex
+	st     state
+	host   string             // the front door's, where the relay is
+	links  map[[2]string]bool // worker pairs that see each other, by name, the lesser first
+	drives map[string]Drive   // by name
+	ver    uint64
+	wakes  map[chan struct{}]bool // one per map poll
 }
 
 // New loads the Noise key and the nodes from dir, made there the first time.
@@ -250,11 +251,10 @@ func (c *Coordinator) Node(a netip.Addr) (string, bool) {
 func (c *Coordinator) Remove(name string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	i := slices.IndexFunc(c.st.Nodes, func(n *node) bool { return n.Name == name && !n.Removed })
-	if i < 0 || name == worker.Harness {
+	n := c.byName(name)
+	if n == nil || name == worker.Harness {
 		return fmt.Errorf("no worker %q on the mesh", name)
 	}
-	n := c.st.Nodes[i]
 	n.Removed = true
 	c.changed(n)
 	log.Printf("coordinator: %s removed", n.Name)
@@ -539,9 +539,10 @@ func (c *Coordinator) delta(n *node, sent map[tailcfg.NodeID]uint64, host *strin
 
 // sees is whether a and b are in each other's map, which is the whole access
 // rule: WireGuard takes packets only from peers in the map, at both ends. The
-// harness sees every node and every node sees it, as will the file server
-// once there is one. Two workers see each other only when linked. A removed
-// node sees none and is seen by none.
+// harness sees every node and every node sees it. A drive's server sees each
+// worker that mounts it; two workers on one drive do not see each other for
+// it. Two workers see each other otherwise only when linked. A removed node
+// sees none and is seen by none.
 func (c *Coordinator) sees(a, b *node) bool {
 	switch {
 	case a.Removed || b.Removed:
@@ -549,7 +550,7 @@ func (c *Coordinator) sees(a, b *node) bool {
 	case a.Name == worker.Harness || b.Name == worker.Harness:
 		return true
 	}
-	return c.links[pair(a.Name, b.Name)]
+	return c.links[pair(a.Name, b.Name)] || c.serves(a, b) || c.serves(b, a)
 }
 
 // Link makes each pair of workers, by name, see each other, and no others,
@@ -683,6 +684,15 @@ func (c *Coordinator) wake() {
 
 func (c *Coordinator) byKey(k key.NodePublic) *node {
 	i := slices.IndexFunc(c.st.Nodes, func(n *node) bool { return n.Key == k })
+	if i < 0 {
+		return nil
+	}
+	return c.st.Nodes[i]
+}
+
+// byName is the node named name that is not removed.
+func (c *Coordinator) byName(name string) *node {
+	i := slices.IndexFunc(c.st.Nodes, func(n *node) bool { return n.Name == name && !n.Removed })
 	if i < 0 {
 		return nil
 	}

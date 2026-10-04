@@ -1,0 +1,392 @@
+package worker
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"log"
+	"maps"
+	"net"
+	"net/netip"
+	"os"
+	"os/exec"
+	"os/user"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// A Linux server serves each drive from its own directory under exportsDir,
+// and a Linux client mounts each under mountsDir. The exports file and the
+// nfs.conf drop-in are ours alone, so removing them undoes what we did.
+const (
+	exportsDir  = "/srv/mainplane"
+	mountsDir   = "/drives"
+	exportsFile = "/etc/exports.d/mainplane.exports"
+	nfsConf     = "/etc/nfs.conf.d/mainplane.conf"
+)
+
+// NFSv4 only: 4.0 for macOS, whose client speaks no newer, 4.1 and 4.2 for
+// Linux, whose sessions answer a retransmit once. No v3: its locks live in
+// side daemons. A dead client's delegations go after 20s, not 90s: an agent
+// between tool calls does not notice 20s.
+const nfsConfText = `# mainplane drives, written by mainplaned
+[nfsd]
+vers3=n
+vers4=y
+vers4.0=y
+vers4.1=y
+vers4.2=y
+lease-time=20
+`
+
+// A server on the mesh, relayed too, answers a connect well within
+// probeWait. A mount that takes longer than mountWait is waited for again
+// next round, so one dead server does not hold up the other drives.
+const (
+	probeWait = 5 * time.Second
+	mountWait = time.Minute
+	nfsPort   = "2049"
+)
+
+// reconcile serves and mounts what want says, unmounts what it no longer
+// says, and returns each drive as it is now.
+func reconcile(want Desired, op *user.User) []Drive {
+	have := serve(want.Serve, op)
+	at := mountpoints()
+	wanted := map[string]bool{}
+	for _, m := range want.Mount {
+		d := Drive{Name: m.Name, State: Failed, Error: "not a drive name"}
+		if ValidDrive(m.Name) {
+			p := filepath.Join(mountsDir, m.Name)
+			src, ok := at[p]
+			wanted[p] = true
+			own := slices.IndexFunc(have, func(s Drive) bool { return s.Name == m.Name })
+			d = mount(m, p, own >= 0, own >= 0 && have[own].State == Serving, src, ok)
+		}
+		have = append(have, d)
+	}
+	for _, p := range slices.Sorted(maps.Keys(at)) {
+		if !wanted[p] {
+			if err := unmount(p, false); err != nil {
+				have = append(have, Drive{Name: filepath.Base(p), Path: p, State: Failed, Error: "no longer this worker's, still mounted: " + err.Error()})
+			}
+		}
+	}
+	return have
+}
+
+// exportPath is where a Linux server keeps the drive name.
+func exportPath(name string) string {
+	if name == Sessions {
+		return filepath.Join(HarnessDir, Sessions)
+	}
+	return filepath.Join(exportsDir, name)
+}
+
+// serve makes this machine export es, each to its clients' mesh addresses
+// only, every client squashed to op, so every file on a drive is op's
+// whoever wrote it. Serving nothing removes our exports.
+func serve(es []Export, op *user.User) []Drive {
+	if len(es) == 0 {
+		if err := unexport(); err != nil {
+			log.Printf("drives: %v", err)
+		}
+		return nil
+	}
+	err := nfsServer()
+	have, lines := []Drive{}, []string{"# mainplane drives, written by mainplaned"}
+	for _, e := range es {
+		d := Drive{Name: e.Name, Serve: true, State: Serving}
+		if ValidDrive(e.Name) {
+			d.Path = exportPath(e.Name)
+		}
+		switch {
+		case !ValidDrive(e.Name):
+			d.State, d.Error = Failed, "not a drive name"
+		case err != nil:
+			d.State, d.Error = Failed, err.Error()
+		default:
+			if derr := makeDir(d.Path, e.Name, op); derr != nil {
+				d.State, d.Error = Failed, derr.Error()
+			} else if len(e.Clients) > 0 { // a line with no clients would export to everyone
+				lines = append(lines, exportLine(d.Path, e, op))
+			}
+		}
+		have = append(have, d)
+	}
+	if err == nil {
+		if err := write(exportsFile, strings.Join(lines, "\n")+"\n", "exportfs", "-ra"); err != nil {
+			for i := range have {
+				have[i].State, have[i].Error = Failed, err.Error()
+			}
+		}
+	}
+	return have
+}
+
+func exportLine(path string, e Export, op *user.User) string {
+	mode := "rw"
+	if e.Name == Sessions {
+		mode = "ro"
+	}
+	line := path
+	for _, c := range e.Clients {
+		line += fmt.Sprintf(" %s(%s,sync,all_squash,anonuid=%s,anongid=%s,no_subtree_check)", c.Addr, mode, op.Uid, op.Gid)
+	}
+	return line
+}
+
+// makeDir makes a drive's directory, op's. Sessions is the harness's own,
+// so a machine without it is not the harness's.
+func makeDir(path, name string, op *user.User) error {
+	if name == Sessions {
+		if _, err := os.Stat(path); err != nil {
+			return fmt.Errorf("sessions is served by the harness's own machine, from %s: %w", path, err)
+		}
+		return nil
+	}
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return err
+	}
+	uid, _ := strconv.Atoi(op.Uid)
+	gid, _ := strconv.Atoi(op.Gid)
+	return os.Lchown(path, uid, gid)
+}
+
+// nfsServer makes this machine an NFS server the first time a drive names it:
+// the preflight, the package, our nfs.conf. Our exports file marks a machine
+// that passed.
+func nfsServer() error {
+	if _, err := os.Stat(exportsFile); err != nil {
+		if err := preflight(); err != nil {
+			return err
+		}
+	}
+	if _, err := exec.LookPath("exportfs"); err != nil {
+		if err := apt("nfs-kernel-server"); err != nil {
+			return err
+		}
+	}
+	return write(nfsConf, nfsConfText, "systemctl", "restart", "nfs-server")
+}
+
+// preflight refuses a machine that already serves files to others: knfsd is
+// one per machine, so our nfs.conf would change their exports too, and SMB
+// for Windows workers needs port 445 to itself.
+func preflight() error {
+	if _, err := exec.LookPath("apt-get"); err != nil {
+		return errors.New("refused: a drive server is Debian or Ubuntu, and this machine has no apt")
+	}
+	files, _ := filepath.Glob("/etc/exports.d/*.exports")
+	for _, f := range append([]string{"/etc/exports"}, files...) {
+		b, err := os.ReadFile(f)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		for line := range strings.Lines(string(b)) {
+			if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+				return fmt.Errorf("refused: %s exports %q, and drives would set this machine's NFS server to v4 only with a 20s lease; serve drives from another Linux worker, or remove that export", f, line)
+			}
+		}
+	}
+	out, err := exec.Command("ss", "-Hltnp", "sport", "=", ":445").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ss: %w: %s", err, out)
+	}
+	if out = bytes.TrimSpace(out); len(out) > 0 {
+		return fmt.Errorf("refused: another program listens on port 445, which drives need for Windows workers: %s", out)
+	}
+	return nil
+}
+
+// mount puts drive m at p: from this machine's own disk when it serves m,
+// since knfsd and its own client on one machine can deadlock, else over NFS
+// from m's server. src is the NFS source of what is mounted at p now, empty
+// for a bind mount, and ok whether anything is. A server that does not
+// answer is waited for, never worked around.
+func mount(m Mount, p string, own, served bool, src string, ok bool) Drive {
+	d := Drive{Name: m.Name, Path: p}
+	nfs := ""
+	if !own {
+		nfs = fmt.Sprintf("[%s]:%s", m.Addr, exportPath(m.Name))
+	}
+	if ok && src == nfs {
+		d.State = Mounted
+		if !own && !reach(m.Addr) {
+			d.State, d.Error = Waiting, "server unreachable, the mount waits for it"
+		}
+		return d
+	}
+	if ok { // the drive moved to another server
+		if err := unmount(p, false); err != nil {
+			d.State, d.Error = Failed, err.Error()
+			return d
+		}
+	}
+	switch {
+	case own && !served:
+		d.State, d.Error = Failed, "this machine serves it and refused, see its serve entry"
+		return d
+	case !own && !reach(m.Addr):
+		d.State, d.Error = Waiting, "server unreachable"
+		return d
+	}
+	// Root's and read-only while nothing is mounted on it, so a write meant
+	// for the drive fails instead of landing on local disk as a second copy.
+	if err := os.MkdirAll(mountsDir, 0o755); err != nil {
+		d.State, d.Error = Failed, err.Error()
+		return d
+	}
+	if err := os.Mkdir(p, 0o555); err != nil && !errors.Is(err, fs.ErrExist) {
+		d.State, d.Error = Failed, err.Error()
+		return d
+	}
+	opts, src := "hard,actimeo=1", nfs
+	if own {
+		opts, src = "bind", exportPath(m.Name)
+	}
+	if m.Name == Sessions {
+		opts += ",ro"
+	}
+	args := []string{"-o", opts, src, p}
+	if !own {
+		args = append([]string{"-t", "nfs4"}, args...)
+		if _, err := exec.LookPath("mount.nfs4"); err != nil {
+			if err := apt("nfs-common"); err != nil {
+				d.State, d.Error = Failed, err.Error()
+				return d
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), mountWait)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, "mount", args...).CombinedOutput(); err != nil {
+		d.State, d.Error = Failed, fmt.Sprintf("mount: %v: %s", err, bytes.TrimSpace(out))
+		return d
+	}
+	d.State = Mounted
+	return d
+}
+
+// reach is whether a's NFS server takes a connection.
+func reach(a netip.Addr) bool {
+	c, err := net.DialTimeout("tcp", net.JoinHostPort(a.String(), nfsPort), probeWait)
+	if err == nil {
+		_ = c.Close()
+	}
+	return err == nil
+}
+
+// mountpoints is every mount under mountsDir and its NFS source, empty for
+// any other, from the kernel's table: a stat of a mount whose server is
+// gone would hang.
+func mountpoints() map[string]string {
+	at := map[string]string{}
+	b, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return at
+	}
+	for line := range strings.Lines(string(b)) {
+		f := strings.Fields(line)
+		i := slices.Index(f, "-")
+		if len(f) < 5 || i < 0 || i+2 >= len(f) || filepath.Dir(f[4]) != mountsDir {
+			continue
+		}
+		at[f[4]] = ""
+		if strings.HasPrefix(f[i+1], "nfs") {
+			at[f[4]] = f[i+2]
+		}
+	}
+	return at
+}
+
+// unmount takes the drive at p away and its mount point with it. One that
+// is in use stays and says so, unless force, for a worker that is leaving:
+// then it is detached at once and goes when the last user lets go. Neither
+// the NFS helper nor a canonical path is asked for: both touch the mount,
+// which hangs while its server is away. The mount table says whether it
+// went: an NFS mount leaves it at once, then its end tells the server and
+// waits, past mountWait, for one no longer reachable, as when this worker
+// left the drive and so the server's sight. Cut short, the server forgets
+// this client after one lease.
+func unmount(p string, force bool) error {
+	args := []string{"-i", "-c", "-f", p}
+	if force {
+		args = []string{"-i", "-c", "-f", "-l", p}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), mountWait)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "umount", args...).CombinedOutput()
+	if _, ok := mountpoints()[p]; ok {
+		return fmt.Errorf("umount: %w: %s", err, bytes.TrimSpace(out))
+	}
+	return os.Remove(p)
+}
+
+// unexport stops serving every drive. The packages stay: they may serve
+// something else by then.
+func unexport() error {
+	if err := os.Remove(exportsFile); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return run("exportfs", "-ra")
+}
+
+// dropDrives unmounts every drive and stops serving, for a worker that left
+// the mesh or is uninstalled.
+func dropDrives() error {
+	var errs []error
+	for _, p := range slices.Sorted(maps.Keys(mountpoints())) {
+		errs = append(errs, unmount(p, true))
+	}
+	if err := os.Remove(nfsConf); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		errs = append(errs, err)
+	}
+	return errors.Join(append(errs, unexport())...)
+}
+
+// write puts text in path when it differs, then runs then. A failed then
+// takes the file away again, so the next round writes and runs it again.
+func write(path, text string, then ...string) error {
+	if b, err := os.ReadFile(path); err == nil && string(b) == text {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		return err
+	}
+	if err := run(then[0], then[1:]...); err != nil {
+		return errors.Join(err, os.Remove(path))
+	}
+	return nil
+}
+
+// apt installs pkg, for a drive that needs it.
+func apt(pkg string) error {
+	if _, err := exec.LookPath("apt-get"); err != nil {
+		return fmt.Errorf("this machine has no apt to install %s, which drives need", pkg)
+	}
+	for _, args := range [][]string{{"update"}, {"install", "-y", "--no-install-recommends", pkg}} {
+		cmd := exec.Command("apt-get", args...)
+		cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("apt-get %s: %w: %s", strings.Join(args, " "), err, out[max(0, len(out)-500):])
+		}
+	}
+	return nil
+}

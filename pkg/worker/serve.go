@@ -43,17 +43,22 @@ type server struct {
 // Serve answers one harness until the connection ends, then kills every
 // environment. Each request runs in its own goroutine; runs that share an
 // environment queue on it. An error frame with no id is the harness ending
-// the connection on purpose, and its text is the error.
-func Serve(conn net.Conn, l Local) error {
+// the connection on purpose, and its text is the error. The drives go to d,
+// which reports on the connection while it lasts.
+func Serve(conn net.Conn, l Local, d *drives) error {
 	s := &server{Local: l, conn: conn, envs: map[string]*env{}, dead: map[string]bool{}}
-	if err := s.send(Frame{Header: Header{Kind: Hello, OS: runtime.GOOS, Arch: runtime.GOARCH, Interps: l.Interps, Scratch: l.Scratch, Version: version.V}}); err != nil {
+	if err := d.attach(Frame{Header: Header{Kind: Hello, OS: runtime.GOOS, Arch: runtime.GOARCH, Interps: l.Interps, Scratch: l.Scratch, Version: version.V}}, s.send); err != nil {
 		return err
 	}
+	defer d.detach()
 	br := bufio.NewReader(conn)
 	for {
 		f, err := Decode(br)
 		if err == nil && f.Kind == Error && f.ID == "" {
 			err = errors.New(string(f.Body))
+		}
+		if err == nil && f.Kind == Drives {
+			err = d.set(f.Body)
 		}
 		if err != nil {
 			s.emu.Lock()
@@ -63,7 +68,9 @@ func Serve(conn net.Conn, l Local) error {
 			s.emu.Unlock()
 			return err
 		}
-		go s.handle(f)
+		if f.Kind != Drives {
+			go s.handle(f)
+		}
 	}
 }
 

@@ -49,7 +49,10 @@ func start(it interp, op *user.User) (*env, error) {
 	if err := prepare(cmd, op); err != nil {
 		return nil, err
 	}
-	cmd.Env = append(cmd.Env, "NO_COLOR=1")
+	// A drive's files are its owner's whoever wrote them, and git refuses a
+	// repository another user owns; this trusts every one without touching
+	// the operator's gitconfig.
+	cmd.Env = append(cmd.Env, "NO_COLOR=1", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.directory", "GIT_CONFIG_VALUE_0=*")
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

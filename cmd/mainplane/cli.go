@@ -107,6 +107,9 @@ func cli(verb string, args []string) {
 				state += " at " + w.Version
 			}
 			fmt.Printf("%-28s  %-13s  %-10s  %s\n", w.Name, w.OS+"/"+w.Arch, strings.Join(w.Interps, ","), state)
+			for _, d := range w.Drives {
+				fmt.Printf("  drive %v\n", d)
+			}
 		}
 	case "worker remove":
 		c.call("DELETE", "/workers/"+url.PathEscape(args[0]), "", nil, nil)

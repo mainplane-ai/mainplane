@@ -90,12 +90,10 @@ type Conf struct {
 	Params       map[string]json.RawMessage `json:"params,omitempty"`
 }
 
-// Worker is one worker the session may use and the drives it has. A drive is
-// a directory at the same path on every worker that lists it; a path only one
-// worker lists is a local directory used as one.
+// Worker is one worker the session may use. Its drives are the harness
+// config's: the session sees what the worker mounts.
 type Worker struct {
-	Name   string   `json:"name"`
-	Drives []string `json:"drives,omitempty"`
+	Name string `json:"name"`
 }
 
 func NewID() string {

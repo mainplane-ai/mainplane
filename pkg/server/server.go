@@ -44,10 +44,11 @@ const reread = 2 * time.Second
 // tunnel are there, and sessions in sessions/ under it, the one directory a
 // drive may ever share.
 type Config struct {
-	HTTP      string              `json:"http"`             // loopback address the tunnel carries connectors and workers to
-	Tunnel    *Tunnel             `json:"tunnel,omitempty"` // the user's own; none is a quick tunnel
-	Providers map[string]Provider `json:"providers"`
-	Links     [][2]string         `json:"links,omitempty"` // pairs of workers, by name, that reach each other on the mesh
+	HTTP      string                       `json:"http"`             // loopback address the tunnel carries connectors and workers to
+	Tunnel    *Tunnel                      `json:"tunnel,omitempty"` // the user's own; none is a quick tunnel
+	Providers map[string]Provider          `json:"providers"`
+	Links     [][2]string                  `json:"links,omitempty"`  // pairs of workers, by name, that reach each other on the mesh
+	Drives    map[string]coordinator.Drive `json:"drives,omitempty"` // by name: each one's server and workers
 }
 
 // Tunnel is a tunnel the user made in Cloudflare, which routes URL to it and
@@ -109,7 +110,8 @@ func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
 // connectors call every other route with an api key, every session that was
 // open on start resumes. The harness joins its own mesh, and workers dial it
 // there. The pointer and the relay map follow the tunnel's URL. The config
-// at path is read again when it changes: providers and links apply at once.
+// at path is read again when it changes: providers, links and drives apply
+// at once.
 func Harness(ctx context.Context, path string) error {
 	c, err := Load(path)
 	if err != nil {
@@ -150,18 +152,20 @@ func Harness(ctx context.Context, path string) error {
 		}
 		return e, nil
 	}
-	pool := harness.NewPool()
 	coord, err := coordinator.New(dir, join)
 	if err != nil {
 		return err
 	}
+	pool := harness.NewPool(coord.Desired)
 	coord.Link(c.Links)
+	setDrives(coord, pool, c.Drives)
 	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove}
 	go watch(ctx, path, func(c Config) error {
 		ps, err := providers(c.Providers)
 		if err == nil {
 			h.SetProviders(ps)
 			coord.Link(c.Links)
+			setDrives(coord, pool, c.Drives)
 		}
 		return err
 	})
@@ -232,6 +236,15 @@ func Harness(ctx context.Context, path string) error {
 	return nil
 }
 
+// setDrives applies the drives and sends each worker its own. A drive that
+// cannot be served is a config error in the log; the others are served.
+func setDrives(coord *coordinator.Coordinator, pool *harness.Pool, ds map[string]coordinator.Drive) {
+	for _, err := range coord.SetDrives(ds) {
+		log.Printf("harness: config: %v", err)
+	}
+	pool.Resend()
+}
+
 // publish puts each URL from urls on the pointer, again daily so the record
 // does not expire, and a minute after a failure.
 func publish(ctx context.Context, k ed25519.PrivateKey, urls <-chan string) {
@@ -277,6 +290,6 @@ func watch(ctx context.Context, path string, apply func(Config) error) {
 			log.Printf("harness: %s: %v; the config before it holds", path, err)
 			continue
 		}
-		log.Printf("harness: %s applied: %d providers, %d links; any other change applies at the next start", path, len(c.Providers), len(c.Links))
+		log.Printf("harness: %s applied: %d providers, %d links, %d drives; any other change applies at the next start", path, len(c.Providers), len(c.Links), len(c.Drives))
 	}
 }

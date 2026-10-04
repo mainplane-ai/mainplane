@@ -33,7 +33,7 @@ const (
 	APIPort = 8080
 )
 
-// Kinds. The first five go harness to worker; the rest come back. Hello,
+// Kinds. The first six go harness to worker; the rest come back. Hello,
 // update, and the done or error that answers an update are the contract every
 // version from v0.1.0 keeps: they are how a worker of another release becomes
 // this one. Workers from before it do not know update and are reinstalled.
@@ -43,6 +43,7 @@ const (
 	Write  = "write"
 	Kill   = "kill"   // end a session's environments
 	Update = "update" // become release Version, then restart
+	Drives = "drives" // no id, no answer: the body is the Desired drives, whole
 
 	Hello  = "hello"  // first frame on a connection: what the worker is
 	Output = "output" // run: one chunk, in order
@@ -50,6 +51,7 @@ const (
 	Bytes  = "bytes"  // read: the file
 	Done   = "done"   // write, kill, update
 	Error  = "error"  // any request: text the model reads
+	Status = "status" // no id: the worker's drives changed
 )
 
 type Header struct {
@@ -71,6 +73,7 @@ type Header struct {
 	Interps []string `json:"interps,omitempty"` // hello: first is the default
 	Scratch string   `json:"scratch,omitempty"` // hello: where spilled output lands
 	Version string   `json:"version,omitempty"` // hello: the release this worker was built from; update: the one to become
+	Drives  []Drive  `json:"drives,omitempty"`  // hello, status: every drive this worker serves or mounts
 }
 
 type Frame struct {

@@ -96,15 +96,20 @@ func done() {
 	}
 }
 
-// Uninstall stops the worker and removes its service, what a killed worker
-// left of the mesh, Bin, which is also the CLI, and the state directory with
-// the join token and the mesh keys. Scratch stays: it is the operator's.
+// Uninstall stops the worker and removes its service, its drives, what a
+// killed worker left of the mesh, Bin, which is also the CLI, and the state
+// directory with the join token and the mesh keys. Scratch stays, it is the
+// operator's, and so do the files of the drives this machine served.
 func Uninstall() error {
+	// The drives go while the worker's mesh still reaches their servers: an
+	// NFS mount's end tells its server, and waits for one it cannot reach.
+	// Once more after the stop, for one a last reconcile made.
+	derr := dropDrives()
 	if err := unregister(); err != nil {
 		return err
 	}
 	// A hosts file that cannot be written must not keep the token and keys.
-	cerr := mesh.Clean()
+	cerr := errors.Join(derr, dropDrives(), mesh.Clean())
 	for _, f := range []string{Bin, Bin + ".old", Bin + ".new"} {
 		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
