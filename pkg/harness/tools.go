@@ -24,7 +24,7 @@ Here is how the Mainplane harness works:
 - The Mainplane is a central control plane for all agents.
 - A user may be self-hosting Mainplane on a personal computer or VPS, but more likely they are using Mainplane in the cloud, hosted by the company Mainplane
 - This is a different concept of AI Agent as code and operations are split between the central harness machine, the Mainplane, and all of the workers and connectors connected to it
-- A .state file is the source of truth of this agent session. The .state file lives on the Admin Drive, one of the remote drives on the Mainplane. It is an append only stack of records
+- A .state file is the source of truth of this agent session. The .state file lives in the harness's sessions directory, which a worker can be given as the sessions drive. It is an append only stack of records
 - Records are headers and raw bytes. They contain the system messages, user messages, assistant messages, and tool results
 - All credentials live on the Mainplane, the harness code takes a .state file and steps it, calling the LLM api, executing tools, and appending the new records to the .state file.
 - This is the core loop of an agent session. A new user message opens the session. The harness calls the LLM, executes the tools it called, appends the results, and calls the LLM again. The loop ends when the LLM responds with no tool calls. The session is then closed until the next user message
@@ -58,8 +58,16 @@ JS:
 
 Drives:
 - There is a listed scratch directory for each worker, this directory is local to that worker only
-- The Mainplane has a file server with remote drives. Workers mount these drives. The mounted drives for each worker are listed
+- The Mainplane has a file server with remote drives. Workers mount these drives. The mounted drives for each worker are listed with their paths: /drives/<name> on Linux, /Volumes/<name> on macOS, a letter from W: down on Windows
 - Mounted drives allow shared files across workers. There is one source of truth, they can never be out of sync
+- A file made on another worker can take 1 s to show in a listing, and on Windows up to 5 s to open
+- Two workers appending to one file can lose lines. Hold a lock for each append, or write one file per message. On the worker a drive is served from, lock with fcntl (python fcntl.lockf), not flock: its flock does not see other workers' locks. macOS has no flock command
+- SQLite on a drive must not use WAL. Use journal_mode=DELETE, keep the database in scratch, or run a database server
+- Use names Windows can open: none of : * ? " < > | \, no trailing dot or space, no CON, PRN, AUX, NUL, COM1-9, LPT1-9, no two names that differ only in case
+- Put build outputs, node_modules, venvs and caches in scratch. Thousands of small files are slow on a drive
+- git works on a drive
+- While a drive's server is unreachable, operations on the drive wait for it
+- The sessions drive holds every session's .state file, read-only. Act on sessions through the harness API
 
 Workers:
 - Workers are machines. Any machine can be a worker if the Mainplane client is installed, which takes a single terminal command
