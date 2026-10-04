@@ -51,6 +51,10 @@ const (
 	wintunSum = "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51"
 	// The zip is 0.7 MB; a download that stalls fails the install instead.
 	fetchWait = time.Minute
+	// Uninstall asks the service to drop its drives, since only LocalSystem
+	// acts in the operator's session, where they are mapped. A stop alone
+	// keeps them, for an update. 128 is the first code a service may define.
+	dropControl = svc.Cmd(128)
 )
 
 // x/sys/windows does not wrap SendMessageTimeout. A broadcast waits on every
@@ -105,7 +109,7 @@ func Work(key string, l Local) error {
 		if err != nil {
 			return err
 		}
-		go Dial(m, l)
+		Dial(m, l)
 		log.Printf("%v: leaving the mesh", <-stop)
 		return m.Close()
 	}
@@ -134,13 +138,16 @@ func (s service) Execute(_ []string, reqs <-chan svc.ChangeRequest, status chan<
 	if err != nil {
 		log.Fatalf("mesh: %v", err)
 	}
-	go Dial(m, s.l)
+	ds := Dial(m, s.l)
 	status <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
 	for r := range reqs {
-		//exhaustive:ignore the service accepts stop and shutdown only
+		//exhaustive:ignore the service accepts stop and shutdown only, and its own drop
 		switch r.Cmd {
 		case svc.Interrogate:
 			status <- r.CurrentStatus
+		case dropControl:
+			log.Print("uninstall: the drives go")
+			ds.drop()
 		case svc.Stop, svc.Shutdown:
 			status <- svc.Status{State: svc.StopPending}
 			if err := m.Close(); err != nil {
@@ -209,21 +216,30 @@ func Install(token string) error {
 	return nil
 }
 
-// Uninstall stops and deletes the service, removes what a killed worker left
-// of the mesh, Bin and wintun.dll, the state directory with the join token
-// and the mesh keys, and the CLI install.ps1 puts in cliDir, and takes each
-// folder off PATH once nothing else is in it. Scratch stays: it is the
-// operator's.
+// Uninstall has the service drop its drives, stops and deletes it, removes
+// what a killed worker left of the mesh, Bin and wintun.dll, the state
+// directory with the join token and the mesh keys, and the CLI install.ps1
+// puts in cliDir, and takes each folder off PATH once nothing else is in it.
+// Scratch stays: it is the operator's.
 func Uninstall() error {
-	if err := stop(); err != nil {
-		return err
-	}
 	m, err := mgr.Connect()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = m.Disconnect() }()
+	// The service takes controls in order, so the stop waits for the drop.
 	s, err := m.OpenService(name)
+	if err == nil {
+		_, err = s.Control(dropControl)
+		_ = s.Close()
+	}
+	if err != nil && !errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) && !errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
+		return err
+	}
+	if err := stop(); err != nil {
+		return err
+	}
+	s, err = m.OpenService(name)
 	if err == nil {
 		err = s.Delete()
 		_ = s.Close()

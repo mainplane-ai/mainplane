@@ -1,6 +1,10 @@
 package mesh
 
-import "net/netip"
+import (
+	"errors"
+	"net"
+	"net/netip"
+)
 
 const (
 	tunName = "mainplane0"
@@ -12,6 +16,25 @@ const (
 	priority = "5200"
 	table    = "5200"
 )
+
+// Network is the project's /48, from this machine's address on the mesh,
+// for a server that lets in only the mesh.
+func Network() (netip.Prefix, error) {
+	ifc, err := net.InterfaceByName(tunName)
+	if err != nil {
+		return netip.Prefix{}, err
+	}
+	as, err := ifc.Addrs()
+	if err != nil {
+		return netip.Prefix{}, err
+	}
+	for _, a := range as {
+		if p, err := netip.ParsePrefix(a.String()); err == nil && !p.Addr().IsLinkLocalUnicast() {
+			return project(p), nil
+		}
+	}
+	return netip.Prefix{}, errors.New("no address on the mesh yet")
+}
 
 func (r *osRouter) Up() error { return run("ip", "link", "set", "dev", r.tun, "up") }
 

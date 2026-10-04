@@ -1,10 +1,14 @@
 package coordinator
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"slices"
 
+	"github.com/mainplane-ai/mainplane/pkg/mesh"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
@@ -91,14 +95,32 @@ func (c *Coordinator) Desired(name string) worker.Desired {
 			e := worker.Export{Name: dn, Clients: []worker.Client{}}
 			for _, n := range c.st.Nodes {
 				if n != s && on(d, n) {
-					e.Clients = append(e.Clients, worker.Client{Name: n.Name, Addr: address(n.ID)})
+					e.Clients = append(e.Clients, worker.Client{Name: n.Name, Addr: address(n.ID), SMB: c.smb(s, n)})
 				}
 			}
 			want.Serve = append(want.Serve, e)
 		}
 		if n := c.byName(name); n != nil && on(d, n) {
-			want.Mount = append(want.Mount, worker.Mount{Name: dn, Server: s.Name, Addr: address(s.ID)})
+			m := worker.Mount{Name: dn, Server: s.Name, Addr: address(s.ID), SMB: c.smb(s, n)}
+			if m.SMB != nil {
+				m.SMB.Host = mesh.Long(s.Name, project)
+			}
+			want.Mount = append(want.Mount, m)
 		}
 	}
 	return want
+}
+
+// smb is the user Windows worker n has on server s, with the password both
+// get from the harness: an HMAC of the harness key, so the key stays here,
+// a server learns only its own clients' passwords, and nothing is stored.
+// Other OSes mount over NFS and get none.
+func (c *Coordinator) smb(s, n *node) *worker.SMB {
+	if n.Hostinfo == nil || n.Hostinfo.OS != "windows" {
+		return nil
+	}
+	h := hmac.New(sha256.New, c.secret)
+	h.Write([]byte(s.Name + "/" + n.Name))
+	// A Linux user's name starts with a letter, and a worker's need not.
+	return &worker.SMB{User: "mp-" + n.Name, Password: hex.EncodeToString(h.Sum(nil))}
 }

@@ -104,12 +104,12 @@ func Uninstall() error {
 	// The drives go while the worker's mesh still reaches their servers: an
 	// NFS mount's end tells its server, and waits for one it cannot reach.
 	// Once more after the stop, for one a last reconcile made.
-	derr := dropDrives()
+	derr := dropDrives(nil)
 	if err := unregister(); err != nil {
 		return err
 	}
 	// A hosts file that cannot be written must not keep the token and keys.
-	cerr := errors.Join(derr, dropDrives(), mesh.Clean())
+	cerr := errors.Join(derr, dropDrives(nil), mesh.Clean())
 	for _, f := range []string{Bin, Bin + ".old", Bin + ".new"} {
 		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err

@@ -38,8 +38,11 @@ func hostsPath() string {
 	return "/etc/hosts"
 }
 
+// Long is the long name of the node name in project.
+func Long(name, project string) string { return name + "--" + project + "." + domain }
+
 // block is a line for every node in nm, this one too: its address, its
-// name, and its long name, <name>--<project>.mainplane.net.
+// name, and its long name.
 func block(nm *netmap.NetworkMap) string {
 	if nm == nil {
 		return ""
@@ -47,7 +50,7 @@ func block(nm *netmap.NetworkMap) string {
 	var b strings.Builder
 	for _, n := range append([]tailcfg.NodeView{nm.SelfNode}, nm.Peers...) {
 		if n.Valid() && n.Addresses().Len() > 0 {
-			fmt.Fprintf(&b, "%s %s %s--%s.%s\n", n.Addresses().At(0).Addr(), n.Name(), n.Name(), nm.Domain, domain)
+			fmt.Fprintf(&b, "%s %s %s\n", n.Addresses().At(0).Addr(), n.Name(), Long(n.Name(), nm.Domain))
 		}
 	}
 	return begin + "\n" + b.String() + end + "\n"

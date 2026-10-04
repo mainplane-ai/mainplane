@@ -48,12 +48,25 @@ type Export struct {
 type Client struct {
 	Name string     `json:"name"`
 	Addr netip.Addr `json:"addr"`
+	SMB  *SMB       `json:"smb,omitempty"` // a Windows client's user on this server
 }
 
 type Mount struct {
 	Name   string     `json:"name"`
 	Server string     `json:"server"`
 	Addr   netip.Addr `json:"addr"`
+	SMB    *SMB       `json:"smb,omitempty"` // how a Windows worker signs in to Server
+}
+
+// SMB is a Windows worker's user on one server, the same for each of that
+// server's drives, since Windows holds one credential per server. The
+// harness derives the password from its key, so neither end stores it
+// before the harness sends it. Host is the server's long name, for a mount:
+// on Windows a short name that is also a Tailscale name resolves there.
+type SMB struct {
+	Host     string `json:"host,omitempty"`
+	User     string `json:"user"`
+	Password string `json:"password"`
 }
 
 // Drive is one drive as the worker reports it.
@@ -89,10 +102,11 @@ type drives struct {
 	kick chan struct{}
 	run  sync.Mutex // one reconcile at a time
 
-	mu   sync.Mutex
-	want *Desired
-	have []Drive
-	send func(Frame) error // the connection to the harness, while there is one
+	mu      sync.Mutex
+	want    *Desired
+	dropped bool // a frame after drop would bring a drive back
+	have    []Drive
+	send    func(Frame) error // the connection to the harness, while there is one
 }
 
 func newDrives(op *user.User) (*drives, error) {
@@ -114,7 +128,9 @@ func (d *drives) set(body []byte) error {
 		return err
 	}
 	d.mu.Lock()
-	d.want = &want
+	if !d.dropped {
+		d.want = &want
+	}
 	d.mu.Unlock()
 	select {
 	case d.kick <- struct{}{}:
@@ -178,15 +194,15 @@ func (d *drives) detach() {
 	d.mu.Unlock()
 }
 
-// drop ends every drive on this machine, for a worker that left the mesh:
-// nothing reconciles them again.
+// drop ends every drive on this machine, for a worker that left the mesh or
+// is uninstalled: nothing reconciles them again.
 func (d *drives) drop() {
 	d.run.Lock()
 	defer d.run.Unlock()
 	d.mu.Lock()
-	d.want = nil
+	d.want, d.dropped = nil, true
 	d.mu.Unlock()
-	if err := dropDrives(); err != nil {
+	if err := dropDrives(d.op); err != nil {
 		log.Printf("drives: %v", err)
 	}
 }

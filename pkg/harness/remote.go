@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"regexp"
 	"slices"
 	"sync"
 	"time"
@@ -25,6 +26,9 @@ const runTimeout = 10 * time.Minute
 // updateTimeout bounds a worker's answer to an update, which it gives after
 // three downloads of up to five minutes each.
 const updateTimeout = 20 * time.Minute
+
+// password finds SMB passwords in a drives frame, which the log leaves out.
+var password = regexp.MustCompile(`"password":"[^"]*"`)
 
 // Remote is a worker on the far end of a connection. Its hello header says
 // what it is. Requests are multiplexed by id; a call waits for its terminal
@@ -107,7 +111,7 @@ func (r *Remote) desire(want worker.Desired) error {
 	err = worker.Encode(r.conn, worker.Frame{Header: worker.Header{Kind: worker.Drives}, Body: b})
 	if err == nil {
 		r.sent = b
-		log.Printf("worker %s: drives %s", r.Name, b)
+		log.Printf("worker %s: drives %s", r.Name, password.ReplaceAll(b, []byte(`"password":"-"`)))
 	}
 	return err
 }

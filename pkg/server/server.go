@@ -152,7 +152,7 @@ func Harness(ctx context.Context, path string) error {
 		}
 		return e, nil
 	}
-	coord, err := coordinator.New(dir, join)
+	coord, err := coordinator.New(dir, k, join)
 	if err != nil {
 		return err
 	}
