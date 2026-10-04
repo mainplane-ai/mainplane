@@ -35,6 +35,8 @@ const cdp = await import("<scratch>/js/cdp.js")
 
 - A Connection and a Target are plain objects. On `globalThis` they last until the environment resets. A reset closes the socket.
 - The browser is another process. It keeps running and keeps its tabs when the environment resets, unless it was a child of the environment (see Processes).
+- Before task end, prefer closing tabs you created that are not part of the deliverable or necessary to keep open.
+- `Target.createTarget` with a url and `Page.navigate` answer before the page loads.
 
 ```js
 const cdp = await import("<scratch>/js/cdp.js")
@@ -94,6 +96,7 @@ The client fails these at once, since the thing waited for can never come:
 
 - `Page.captureScreenshot` returns base64 in `data`. Its pixels are device pixels. `Input` events take CSS pixels. `devicePixelRatio` is the ratio.
 - A `clip` with `scale: 1 / devicePixelRatio` makes the image CSS pixels, so an image point is a click point.
+- `Page.captureScreenshot` of a tab that is not in front, or of any tab in a minimized window, can take many seconds or get no answer. The front tab of a visible window answers in under a second. `Page.bringToFront` makes a tab the front one.
 - The read tool shows a saved image. Calls in one step run in order, so a read after a run in the same step sees what the run wrote.
 
 ```js
