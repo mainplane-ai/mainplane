@@ -128,7 +128,10 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 		return nil, err
 	}
 	sys.Set(st)
-	sys.Tun.Get().Start()
+	w := sys.Tun.Get()
+	w.PreFilterPacketInboundFromWireGuard = clamped(w.PreFilterPacketInboundFromWireGuard)
+	w.PostFilterPacketOutboundToWireGuard = clamped(w.PostFilterPacketOutboundToWireGuard)
+	w.Start()
 	lb, err := ipnlocal.NewLocalBackend(logf, logid.PublicID{}, sys, controlclient.LocalBackendStartKeyOSNeutral)
 	if err != nil {
 		eng.Close()
