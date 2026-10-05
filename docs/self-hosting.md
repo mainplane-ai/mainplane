@@ -37,6 +37,11 @@ replaces it. Add keys there:
 "providers": {"anthropic": {"key": "sk-ant-..."}}
 ```
 
+or from any machine whose CLI is logged in: `mainplane key anthropic sk-ant-...`.
+The providers are `anthropic`, `openai`, `google` (Gemini, from
+`GEMINI_API_KEY` at install), `openai-chat` (with `url`) and `bedrock` (with
+`region`).
+
 The harness applies providers, links and drives within seconds of a save; any other
 change applies at its next start.
 

@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -37,6 +39,9 @@ const (
 
 // A person who saves the config sees it applied within this.
 const reread = 2 * time.Second
+
+// A provider key is one line, far shorter than this.
+const maxKey = 4 << 10
 
 // Config is the self-hosted config file. Provider values are expanded from
 // the environment, so a key can be "$ANTHROPIC_API_KEY". The directory it is
@@ -92,7 +97,7 @@ func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
 			out[name] = provider.OpenAI(key)
 		case "openai-chat":
 			out[name] = provider.OpenAIChat(url, key)
-		case "gemini":
+		case "google":
 			out[name] = provider.Gemini(key)
 		case "bedrock":
 			out[name] = provider.Bedrock(region, key)
@@ -179,7 +184,16 @@ func Harness(ctx context.Context, path string) error {
 	derp := relay.New()
 	derp.SetVerifyClientFunc(coord.Known)
 	relay.Handle(mux, derp)
-	api := store.Bearer(limit, harness.Handler(ctx, h))
+	routes := http.NewServeMux()
+	routes.Handle("/", harness.Handler(ctx, h))
+	routes.HandleFunc("PUT /providers/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if err := setKey(path, r.PathValue("name"), r.Body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	api := store.Bearer(limit, routes)
 	mux.Handle("/", api)
 	srv := &http.Server{Addr: c.HTTP, Handler: mux}
 	go func() {
@@ -234,6 +248,37 @@ func Harness(ctx context.Context, path string) error {
 		return err
 	}
 	return nil
+}
+
+// setKey makes the body the key of provider name in the config at path,
+// beside the provider's other fields, which the watch then applies.
+func setKey(path, name string, body io.Reader) error {
+	b, err := io.ReadAll(io.LimitReader(body, maxKey))
+	if err != nil {
+		return err
+	}
+	key := strings.TrimSpace(string(b))
+	if key == "" {
+		return errors.New("no key")
+	}
+	c, err := Load(path)
+	if err != nil {
+		return err
+	}
+	if c.Providers == nil {
+		c.Providers = map[string]Provider{}
+	}
+	p := c.Providers[name]
+	p.Key = key
+	c.Providers[name] = p
+	if _, err := providers(c.Providers); err != nil {
+		return err
+	}
+	out, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0o600)
 }
 
 // setDrives applies the drives and sends each worker its own. A drive that

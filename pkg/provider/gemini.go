@@ -23,7 +23,7 @@ func Gemini(key string) Provider {
 
 type gemini struct{}
 
-func (gemini) Name() string { return "gemini" }
+func (gemini) Name() string { return "google" }
 
 // geminiMedia is what inlineData takes, named as http.DetectContentType names it.
 var geminiMedia = slices.Concat(images, []string{"application/pdf", "audio/mpeg", "audio/aiff", "video/mp4", "video/webm"})

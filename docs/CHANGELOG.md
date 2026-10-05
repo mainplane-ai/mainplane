@@ -12,6 +12,10 @@ The harness install also makes its machine a worker, `admin`, and the harness's 
 - `mainplane-server install` with no config keeps an installed `config.json` exactly as it is; `mainplane-server install <config.json>` replaces it
 - `mainplane-server uninstall` removes `admin`, and the CLI with it, with the harness
 - `mainplane-server install` prints a new api key named `default` beside the default join token, each in the `mainplane.ai/install` lines that use it on any machine, not the lines of its own version. The default keys from earlier installs stay valid until `mainplane-server key revoke default`, so a reinstall logs no connector out. The CLI on the harness's machine logs in with it, except after an install from a config file, which only prints it; no key is named after the hostname
+- `mainplane login` to the harness it is logged in to says `already logged in to this mainplane-server`, and to another one that it switched; it refuses a key the harness does not take. Then the CLI becomes the harness's release when it is another
+- `mainplane key <provider> <key>` saves a provider key in the harness config from any logged-in machine (`PUT /providers/{name}`); the harness serves the provider within seconds
+- `mainplane chat` with no id follows the session updated last
+- The Gemini provider is `google`, as in `google/gemini-...` model strings (models.dev, OpenRouter), in the config and in step records; its key still comes from `GEMINI_API_KEY` at install. A config that names `gemini` must name `google` instead, or the harness does not start
 - Shorter output: the harness install no longer prints its URL, a quick tunnel warning or the config path, `mainplane status` no quick tunnel warning, `mainplane login` says `logged in`, and the uninstalls say only that they uninstalled
 - `mainplane uninstall` logs the worker out of its harness as the worker stops, so the machine installed again joins under its own name, not `<name>-2`
 - The harness checks cloudflared against its pinned sha256 at every start, not only at download, and downloads it again when it differs
