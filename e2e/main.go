@@ -352,7 +352,7 @@ func run(v, prev, port string, targets []string) {
 	for _, o := range oses {
 		win := o == "windows"
 		out, err := remote(o, ssh[o], fmt.Sprintf(serverInstall[win], release.DL, v))
-		check(o, "harness installed in one line, CLI logged in", err == nil && strings.Contains(out, "mainplane-server running at") && strings.Contains(out, "workers-ok"), last(out))
+		check(o, "harness installed in one line, CLI logged in", err == nil && strings.Contains(out, "mainplane "+v+" installed") && strings.Contains(out, "mp_key_") && strings.Contains(out, "workers-ok"), last(out))
 		check(o, "harness: /worker is gone (404)", strings.Contains(out, "worker-404"), last(out))
 		check(o, "harness: worker admin joined", strings.Contains(out, "admin-ok"), last(out))
 		check(o, "harness: Dir the operator's, sessions in it", strings.Contains(out, "dir-ok"), last(out))

@@ -48,6 +48,12 @@ sudo, read and edit the config and keys. On Linux and macOS the harness runs
 as you. Sessions are in `sessions/` in that directory. `mainplane-server
 uninstall` removes `admin` with the harness.
 
+Every install prints a new join token and a new api key, both named `default`,
+in the lines that use them on any machine. The CLI on the harness's machine
+logs in with that key. The default keys from earlier installs keep working, so
+a reinstall logs no connector out; `mainplane-server key revoke default`
+revokes them all. The default join token before it joins no more.
+
 ## Your own domain
 
 1. In the Cloudflare dashboard, open Zero Trust, Networks, Tunnels, and create

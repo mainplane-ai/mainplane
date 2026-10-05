@@ -40,14 +40,6 @@ const (
 	nameWait = 90 * time.Second
 )
 
-// QuickWarning is what the harness install and the CLI say of a quick
-// tunnel's URL.
-const QuickWarning = "warning: this quick tunnel URL is not meant for production use; see https://github.com/mainplane-ai/mainplane/blob/main/docs/self-hosting.md"
-
-// QuickURL says whether url is a quick tunnel's: Cloudflare names every one
-// under trycloudflare.com.
-func QuickURL(url string) bool { return strings.HasSuffix(url, ".trycloudflare.com") }
-
 // assets are the release file for each platform and the sha256 of the
 // cloudflared binary in it: GitHub states it for a bare binary, and for a
 // .tgz it is the sum of the file in it. Cloudflare ships no Windows arm64

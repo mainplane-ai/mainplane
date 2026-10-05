@@ -4,7 +4,8 @@
 //
 //	mainplane-server up   <config.json>
 //	mainplane-server install [config.json]    and again at every boot, as a service, behind a quick tunnel; asks for sudo or admin itself;
-//	                                          with none, keeps an installed config; prints a new join token "default", the one before it refused
+//	                                          with none, keeps an installed config; prints a new join token "default", the one before it refused,
+//	                                          and a new api key "default", the ones before it kept
 //	mainplane-server tunnel <url> <cloudflared token> | quick   the installed harness moves to the user's own tunnel, or back
 //	mainplane-server key  new <name> | revoke <name> | list    on the installed harness, as root
 //	mainplane-server join new <name> [ephemeral] | revoke <name> | list
@@ -14,6 +15,7 @@
 package main
 
 import (
+	"cmp"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -28,9 +30,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/elevate"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
-	"github.com/mainplane-ai/mainplane/pkg/release"
 	"github.com/mainplane-ai/mainplane/pkg/server"
-	"github.com/mainplane-ai/mainplane/pkg/tunnel"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
@@ -49,7 +49,7 @@ func main() {
 	case verb == "uninstall" && len(args) == 1:
 		elevate.Root(args...)
 		fatal(server.Uninstall())
-		fmt.Printf("harness and its admin worker uninstalled; its config, sessions and auth table stay in %s\n", server.Dir)
+		fmt.Println("harness and its admin worker uninstalled")
 	case verb == "up" && len(args) == 2:
 		fatal(server.Up(args[1]))
 	case verb == "install":
@@ -67,20 +67,21 @@ func main() {
 			return
 		}
 		stop := spin("installing mainplane-server")
-		// a plain install, the only one with a key, keeps the config there is
-		url, err := server.Install(&h.Config, h.Key != "")
+		// a plain install, the only one with a key yet, keeps the config there is
+		keep := h.Key != ""
+		_, err := server.Install(&h.Config, keep)
 		stop()
 		fatal(err)
-		if h.Key != "" {
-			fatal(server.Auth(server.Dir).Set(auth.Key, hostname(), h.Key))
-		}
+		h.Key = cmp.Or(h.Key, rand.Text())
+		// beside the default keys before it, so a reinstall logs no connector out
+		fatal(server.Auth(server.Dir).Add(auth.Key, defaultName, h.Key))
 		k, err := server.Key(server.Dir)
 		fatal(err)
-		h.Harness, h.URL = pointer.Encode(k), url
+		h.Harness = pointer.Encode(k)
 		secret := rand.Text()
-		fatal(server.Auth(server.Dir).Set(auth.Join, defaultJoin, secret))
+		fatal(server.Auth(server.Dir).Set(auth.Join, defaultName, secret))
 		h.Join = auth.Token(auth.Join, h.Harness, secret)
-		if h.Key != "" && !fresh { // an unelevated install handed over; hand back what it prints
+		if keep && !fresh { // an unelevated install handed over; hand back what it prints
 			b, err := json.Marshal(h)
 			fatal(err)
 			fatal(os.WriteFile(args[1], b, 0o600))
@@ -104,19 +105,21 @@ func main() {
 	}
 }
 
-// defaultJoin names the join secret every install makes anew, so the first
-// worker needs no second command.
-const defaultJoin = "default"
+// defaultName names the api key and the join secret every install makes
+// anew, so the first connector and worker need no second command.
+const defaultName = "default"
+
+// script is the latest release's install script for Linux and macOS; with
+// .ps1, for Windows.
+const script = "https://mainplane.ai/install"
 
 // handover is a config and, from an install that made the config itself, the
-// secret of the api key this machine's CLI logs in with, and then what the
-// elevated install found: the harness key, its URL, and the default join
-// token.
+// secret of the api key the install prints, and then what the elevated
+// install found: the harness key and the default join token.
 type handover struct {
 	server.Config
 	Key     string `json:"key,omitempty"`
 	Harness string `json:"harness,omitempty"`
-	URL     string `json:"url,omitempty"`
 	Join    string `json:"join,omitempty"`
 }
 
@@ -156,36 +159,28 @@ func install(h handover) (handover, int) {
 	return h, 0
 }
 
-// login logs this machine's CLI in to the harness just installed, or says how.
+// login logs in the CLI the admin install placed, with the default api key.
 func login(h handover) {
-	token := auth.Token(auth.Key, h.Harness, h.Key)
-	if _, err := exec.LookPath("mainplane"); err != nil {
-		fmt.Printf("no mainplane CLI on PATH; log one in with:  mainplane login %s\n", token)
-		return
-	}
-	cmd := exec.Command("mainplane", "login", token)
+	cmd := exec.Command(worker.Bin, "login", auth.Token(auth.Key, h.Harness, h.Key))
 	cmd.Stderr = os.Stderr
 	fatal(cmd.Run())
 }
 
-// done says the harness is installed, where it is reached, and how to
-// connect the first worker.
+// done says the harness is installed, and how to make any machine a worker
+// of it or log its CLI in.
 func done(h handover) {
-	fmt.Printf("%smainplane-server running at %s\n", version.Installed(), h.URL)
-	if tunnel.QuickURL(h.URL) {
-		fmt.Println(tunnel.QuickWarning)
-	}
-	if len(h.Providers) == 0 {
-		fmt.Printf("add api keys to the config: %s, as \"providers\": {\"anthropic\": {\"key\": \"sk-ant-...\"}}\n", server.Conf)
-	} else {
-		fmt.Printf("edit the config:   %s\n", server.Conf)
-	}
-	fmt.Printf("\nconnect a worker:\n%s", installLines(h.Join))
+	fmt.Printf("%s\non any machine:\n%s%s", version.Installed(), installLines(auth.Join, h.Join), installLines(auth.Key, auth.Token(auth.Key, h.Harness, h.Key)))
 }
 
-// installLines are the lines that make a machine a worker with a join token.
-func installLines(token string) string {
-	return fmt.Sprintf("  linux, macos:  curl -fsSL %[1]s%[2]s/install.sh | sudo sh -s -- %[3]s\n  windows:       & ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) %[3]s\n", release.DL, version.V, token)
+// installLines are the lines that run the latest install script with token,
+// on Linux and macOS, then on Windows: a join token makes the machine a
+// worker, an api key logs its CLI in.
+func installLines(kind, token string) string {
+	label, sh := "log in:", "sh"
+	if kind == auth.Join {
+		label, sh = "connect it as a worker:", "sudo sh"
+	}
+	return fmt.Sprintf("  %-25scurl -fsSL %s | %s -s -- %s\n  %-25s& ([scriptblock]::Create((irm %s.ps1))) %s\n", label, script, sh, token, "", script, token)
 }
 
 // spinner is design/ascii/spinner.json: Braille frames and the milliseconds
@@ -240,12 +235,6 @@ func move(args []string) {
 	fmt.Printf("harness reached at %s; workers follow in about a minute\n", url)
 }
 
-func hostname() string {
-	h, err := os.Hostname()
-	fatal(err)
-	return h
-}
-
 func table(kind string, args []string) {
 	store := server.Auth(server.Dir)
 	switch args[0] {
@@ -259,9 +248,7 @@ func table(kind string, args []string) {
 		fatal(err)
 		token := auth.Token(kind, pointer.Encode(k), secret)
 		fmt.Println(token)
-		if kind == auth.Join { // stderr, so stdout stays the token for scripts
-			fmt.Fprintf(os.Stderr, "\n%s", installLines(token))
-		}
+		fmt.Fprintf(os.Stderr, "\n%s", installLines(kind, token)) // stderr, so stdout stays the token for scripts
 	case "revoke":
 		fatal(store.Revoke(kind, args[1]))
 	case "list":
@@ -289,7 +276,9 @@ func usage() {
                                           Providers and links in the config apply when it is saved
   install   <config.json>                 run it at every boot from a root-only copy of the config
                                           Either install prints a new join token named default, for any number of
-                                          machines; the default token before it joins no more
+                                          machines; the default token before it joins no more. It also prints a new
+                                          api key named default; the default keys before it still work until
+                                          key revoke default
   tunnel    <url> <cloudflared token>     reach the installed harness at url, through a tunnel you made in Cloudflare
                                           that routes url to http://localhost:8080; workers follow
   tunnel    quick                         back to a quick tunnel
