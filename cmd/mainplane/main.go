@@ -2,7 +2,7 @@
 //
 //	mainplane worker  [join token]    make this machine a worker, named by its hostname
 //	mainplane install <join token>    and again at every boot, as a service; asks for sudo or UAC, code still runs as you
-//	mainplane login   <api key>       find the harness, and remember it and the key in ~/.mainplane/login.json
+//	mainplane login   <api key>       find the harness, remember it and the key in ~/.mainplane/login.json, and become its release
 //	mainplane update  [version]       become that release, by default the logged-in harness's, else the latest stable
 //	mainplane uninstall               remove the worker service and the CLI; ~/.mainplane stays
 //	mainplane status                  the harness logged in to, and this worker on the mesh from its local socket
@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -68,19 +69,7 @@ func main() {
 		if len(os.Args) != 3 {
 			usage()
 		}
-		harness, key, err := auth.Parse(auth.Key, os.Args[2])
-		if err != nil {
-			log.Fatal(err)
-		}
-		url, err := pointer.Find(context.Background(), harness, "")
-		if err != nil {
-			log.Fatal(err)
-		}
-		c := client{URL: url, Key: key, Harness: harness}
-		if err := c.save(); err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println("logged in")
+		logIn(os.Args[2])
 	case "status":
 		status(os.Args[2:])
 	case "version":
@@ -90,6 +79,43 @@ func main() {
 		fmt.Println(version.V)
 	default:
 		cli(os.Args[1], os.Args[2:])
+	}
+}
+
+// logIn finds the harness of an api key, checks that it takes the key, and
+// remembers both, saying whether this CLI was logged in to it or to another
+// harness before. Then the CLI becomes the harness's release.
+func logIn(token string) {
+	harness, key, err := auth.Parse(auth.Key, token)
+	if err != nil {
+		log.Fatal(err)
+	}
+	url, err := pointer.Find(context.Background(), harness, "")
+	if err != nil {
+		log.Fatal(err)
+	}
+	c := client{URL: url, Key: key, Harness: harness}
+	v, err := c.harness()
+	if err != nil {
+		log.Fatal(err)
+	}
+	var was client // a login file that does not read is written anew
+	if b, err := os.ReadFile(loginPath()); err == nil {
+		_ = json.Unmarshal(b, &was)
+	}
+	if err := c.save(); err != nil {
+		log.Fatal(err)
+	}
+	switch was.Harness {
+	case harness:
+		fmt.Println("already logged in to this mainplane-server")
+	case "":
+		fmt.Println("logged in")
+	default:
+		fmt.Printf("logged in; switched from the mainplane-server at %s\n", was.URL)
+	}
+	if !version.Match(v) {
+		update(v)
 	}
 }
 
@@ -235,7 +261,8 @@ func usage() {
 
   worker     [join token]            make this machine a worker, named by its hostname; no token reads the installed one
   install    <join token>            and again at every boot, as a service; asks for sudo or UAC, code still runs as you
-  login      <api key>               remember the harness and the key; every verb below uses them
+  login      <api key>               remember the harness and the key, which every verb below uses, and become the
+                                     harness's release
   update     [version]               become that release, by default the logged-in harness's, else the latest stable
   uninstall                          remove the worker service and the CLI; asks for sudo or UAC; ~/.mainplane stays
   status                             the harness logged in to, then this worker on the mesh: its name and address,
@@ -246,7 +273,7 @@ func usage() {
                                      params are the vendor's own request fields, max_tokens included where its API requires it
   message    <id> <text> [file...]   POST /sessions/{id}/records, one record per part
   tail       <id> [after]            GET  /sessions/{id}/records, rendered
-  chat       <id>                    tail that follows; every stdin line is a message
+  chat       [id]                    tail that follows; every stdin line is a message. No id: the session updated last
   retry      <id>                    POST /sessions/{id}/retry, step a failed or idle session from its tip
   stop       <id>                    POST /sessions/{id}/stop
   info       <id>                    GET  /sessions/{id}
@@ -255,6 +282,8 @@ func usage() {
   worker     remove <name>           DELETE /workers/{name}: it leaves the mesh for good; revoke its join secret too
                                      to keep that secret from joining machines again
   providers                          GET  /providers
+  key        <provider> <key>        PUT  /providers/{provider}: the harness saves the key in its config, and serves
+                                     the provider within seconds
 `)
 	os.Exit(2)
 }

@@ -40,8 +40,8 @@ const resultLines = 20
 // arity is how many arguments each verb takes, least and most; -1 is any
 // number.
 var arity = map[string][2]int{
-	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {1, 1}, "retry": {1, 1}, "stop": {1, 1},
-	"info": {1, 1}, "sessions": {0, 1}, "workers": {0, 0}, "worker remove": {1, 1}, "providers": {0, 0},
+	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {0, 1}, "retry": {1, 1}, "stop": {1, 1},
+	"info": {1, 1}, "sessions": {0, 1}, "workers": {0, 0}, "worker remove": {1, 1}, "providers": {0, 0}, "key": {2, 2},
 }
 
 // cli is the harness API as verbs: one verb, one route, its reply printed.
@@ -80,7 +80,7 @@ func cli(verb string, args []string) {
 			render(r)
 		}
 	case "chat":
-		c.chat(args[0])
+		c.chat(strings.Join(args, ""))
 	case "retry":
 		var out struct{ Status string }
 		c.call("POST", "/sessions/"+args[0]+"/retry", "", nil, &out)
@@ -115,6 +115,8 @@ func cli(verb string, args []string) {
 		c.call("DELETE", "/workers/"+url.PathEscape(args[0]), "", nil, nil)
 	case "providers":
 		c.raw("/providers")
+	case "key":
+		c.call("PUT", "/providers/"+url.PathEscape(args[0]), "text/plain", strings.NewReader(args[1]), nil)
 	}
 }
 
@@ -303,7 +305,16 @@ func (c client) records(id string, after int, wait string) []statefile.Record {
 // own line comes back as a message record: that is the receipt, and it shows
 // where it landed, behind a running step if there was one. Ctrl+C prints the
 // id and touches nothing on the harness.
+// With no id, it follows the session updated last.
 func (c client) chat(id string) {
+	if id == "" {
+		var infos []harness.Info
+		c.call("GET", "/sessions?limit=1", "", nil, &infos)
+		if len(infos) == 0 {
+			die(errors.New("no sessions: mainplane new"))
+		}
+		id = infos[0].ID
+	}
 	fmt.Println(id)
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt)

@@ -36,7 +36,7 @@ var Conf = filepath.Join(Dir, "config.json")
 var envProviders = map[string]Provider{
 	"anthropic": {Key: "$ANTHROPIC_API_KEY"},
 	"openai":    {Key: "$OPENAI_API_KEY"},
-	"gemini":    {Key: "$GEMINI_API_KEY"},
+	"google":    {Key: "$GEMINI_API_KEY"},
 	"bedrock":   {Key: "$AWS_BEARER_TOKEN_BEDROCK", Region: "$AWS_REGION"},
 }
 
