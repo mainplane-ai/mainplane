@@ -1,10 +1,14 @@
-# Installs the mainplane CLI for the user who runs it, on their PATH; with a join token it installs it
-# for the machine instead and makes this Windows machine a worker for that user, after a UAC prompt.
-# With server it also makes this machine the harness, from the provider keys set in this shell, after a
-# UAC prompt, and logs the CLI in to it. The release stamps its version.
-#   & ([scriptblock]::Create((irm https://dl.mainplane.ai/@VERSION@/install.ps1))) [join token | server]
+# Installs the mainplane CLI for the user who runs it, on their PATH, unless this machine has one; with
+# an api key it logs that CLI in. With a join token it installs the CLI for the machine instead and
+# makes this Windows machine a worker for that user, after a UAC prompt. With server it also makes this
+# machine the harness, from the provider keys set in this shell, after a UAC prompt, and logs the CLI
+# in to it. The release stamps its version.
+#   & ([scriptblock]::Create((irm https://dl.mainplane.ai/@VERSION@/install.ps1))) [api key | join token | server]
 param([string]$Token)
 $ErrorActionPreference = 'Stop'
+if ($args -or ($Token -and $Token -ne 'server' -and $Token -notlike 'mp_key_*' -and $Token -notlike 'mp_join_*')) {
+  throw 'usage: install.ps1 [api key | join token | server]'
+}
 $ProgressPreference = 'SilentlyContinue'
 $dl = 'https://dl.mainplane.ai/@VERSION@'
 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
@@ -20,30 +24,38 @@ function Fetch($name) {
   if ($want -ne (Get-FileHash $t).Hash.ToLower()) { throw "$f does not match SHA256SUMS" }
   $t
 }
-$t = Fetch mainplane
-if ($Token) {
-  $bin = "$env:ProgramFiles\mainplane"
-} else {
-  $bin = "$env:LOCALAPPDATA\Programs\mainplane"
-  New-Item -ItemType Directory -Force $bin | Out-Null
-  Move-Item -Force $t "$bin\mainplane.exe"
-  # SetEnvironmentVariable tells running programs, so a shell Explorer starts next finds mainplane.
-  $p = [string][Environment]::GetEnvironmentVariable('Path', 'User')
-  if (($p -split ';') -notcontains $bin) {
-    [Environment]::SetEnvironmentVariable('Path', "$($p.TrimEnd(';'));$bin".TrimStart(';'), 'User')
-  }
-  Write-Output 'mainplane @VERSION@ installed'
-}
-# install puts Program Files\mainplane on the machine PATH, which this shell read before
-if (($env:Path -split ';') -notcontains $bin) { $env:Path += ";$bin" }
 if ($Token -eq 'server') {
   # install places mainplane-server in Program Files, runs it as a service, makes this machine the
-  # worker admin with the mainplane beside it, which places that in $bin, and logs that in
-  $s = Fetch mainplane-server
-  & $s install
+  # worker admin with the mainplane beside it, which places that in Program Files, and logs that in
+  Fetch mainplane | Out-Null
+  & (Fetch mainplane-server) install
   if ($LASTEXITCODE) { exit $LASTEXITCODE }
-} elseif ($Token) {
-  & $t install $Token
+  $bin = "$env:ProgramFiles\mainplane"
+} elseif ($Token -like 'mp_join_*') {
+  & (Fetch mainplane) install $Token
+  if ($LASTEXITCODE) { exit $LASTEXITCODE }
+  $bin = "$env:ProgramFiles\mainplane"
+} else {
+  # A CLI this machine has is used: a worker's or harness's in Program Files, else this user's.
+  $bin = "$env:ProgramFiles\mainplane", "$env:LOCALAPPDATA\Programs\mainplane" | Where-Object { Test-Path "$_\mainplane.exe" } | Select-Object -First 1
+  if ($bin) {
+    if (!$Token) { Write-Output "mainplane is installed: $bin\mainplane.exe" }
+  } else {
+    $bin = "$env:LOCALAPPDATA\Programs\mainplane"
+    New-Item -ItemType Directory -Force $bin | Out-Null
+    Move-Item -Force (Fetch mainplane) "$bin\mainplane.exe"
+    # SetEnvironmentVariable tells running programs, so a shell Explorer starts next finds mainplane.
+    $p = [string][Environment]::GetEnvironmentVariable('Path', 'User')
+    if (($p -split ';') -notcontains $bin) {
+      [Environment]::SetEnvironmentVariable('Path', "$($p.TrimEnd(';'));$bin".TrimStart(';'), 'User')
+    }
+    Write-Output 'mainplane @VERSION@ installed'
+  }
+}
+# $bin is on the machine's or the user's PATH now, which this shell read before
+if (($env:Path -split ';') -notcontains $bin) { $env:Path += ";$bin" }
+Remove-Item -Recurse $d
+if ($Token -like 'mp_key_*') {
+  & "$bin\mainplane.exe" login $Token
   if ($LASTEXITCODE) { exit $LASTEXITCODE }
 }
-Remove-Item -Recurse $d
