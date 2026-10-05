@@ -39,6 +39,14 @@ type Usage struct {
 	CacheWrite int `json:"cache_write,omitempty"`
 }
 
+// Prompt is the size of the prompt the step was built from.
+func (u *Usage) Prompt() int {
+	if u == nil {
+		return 0
+	}
+	return u.Input + u.CacheRead + u.CacheWrite
+}
+
 // Header is the JSON line before every body. Fields beyond the first six
 // belong to particular kinds and are omitted otherwise.
 type Header struct {
@@ -73,6 +81,7 @@ type Header struct {
 type Record struct {
 	Header
 	Body []byte
+	Note string // result: text the build renders after the body, derived from the file, never written
 }
 
 // Conf is the body of the config record, record 2, fixed for the session's

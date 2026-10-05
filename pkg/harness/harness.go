@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
@@ -277,6 +278,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 		return "", err
 	}
 	records, upto := statefile.Build(chain)
+	records = clock(records, chain[0].Time, conf.ContextLimit)
 	stepID := statefile.NewID()
 	var calls []statefile.Record
 	var appendErr error
@@ -328,6 +330,25 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 		return statefile.StatusClosed, nil
 	}
 	return statefile.StatusOpen, nil
+}
+
+// clock gives the model time and context from the file alone, never the
+// clock, so the same file builds the same bytes and the cached prefix holds.
+// The session line follows the system prompt and never changes. Each result
+// ends with its time since start and the prompt size of the step that made
+// its call, fixed once the result is written.
+func clock(ctx []statefile.Record, start time.Time, limit int) []statefile.Record {
+	used := 0
+	for i, r := range ctx {
+		if r.Kind == statefile.Step {
+			used = r.Usage.Prompt()
+		}
+		if r.Kind == statefile.Result {
+			ctx[i].Note = fmt.Sprintf("time %s context %d", r.Time.Sub(start).Round(time.Second), used)
+		}
+	}
+	line := fmt.Sprintf("Session started %s with context limit %d. Every tool result ends with \"time\", the time since session start, and \"context\", the prompt tokens of the step that made the call", start.Format(time.RFC3339), limit)
+	return slices.Insert(ctx, 1, system("session", line))
 }
 
 // last is the body of the newest system record from source, or empty.

@@ -116,9 +116,9 @@ func chatUser(recs []statefile.Record) []chatMsg {
 	for _, r := range recs {
 		switch r.Kind {
 		case statefile.Result:
-			m := chatMsg{Role: "tool", ToolCallID: r.For, Content: string(r.Body)}
+			m := chatMsg{Role: "tool", ToolCallID: r.For, Content: noted(string(r.Body), r.Note)}
 			if slices.Contains(images, r.Type) {
-				m.Content = "(see attached image)"
+				m.Content = noted("(see attached image)", r.Note)
 				parts = append(parts, chatPart{Type: "image_url", ImageURL: &chatImageURL{URL: imageURL(r)}})
 			}
 			msgs = append(msgs, m)
