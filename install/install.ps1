@@ -6,7 +6,7 @@
 #   & ([scriptblock]::Create((irm https://dl.mainplane.ai/@VERSION@/install.ps1))) [api key | join token | server]
 param([string]$Token)
 $ErrorActionPreference = 'Stop'
-if ($Token -and $Token -ne 'server' -and $Token -notlike 'mp_key_*' -and $Token -notlike 'mp_join_*') {
+if ($args -or ($Token -and $Token -ne 'server' -and $Token -notlike 'mp_key_*' -and $Token -notlike 'mp_join_*')) {
   throw 'usage: install.ps1 [api key | join token | server]'
 }
 $ProgressPreference = 'SilentlyContinue'
