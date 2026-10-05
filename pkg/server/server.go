@@ -262,7 +262,7 @@ func setKey(path, name string, body io.Reader) error {
 		return err
 	}
 	key := strings.TrimSpace(string(b))
-	if key == "" || len(b) > maxKey {
+	if key == "" || len(b) > maxKey || strings.ContainsAny(key, "\r\n") {
 		return fmt.Errorf("a key is one line of 1 to %d bytes", maxKey)
 	}
 	keyMu.Lock()
