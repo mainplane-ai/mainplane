@@ -4,7 +4,7 @@
 //
 //	mainplane-server up   <config.json>
 //	mainplane-server install [config.json]    and again at every boot, as a service, behind a quick tunnel; asks for sudo or admin itself;
-//	                                          prints a new join token "default", the one before it refused
+//	                                          with none, keeps an installed config; prints a new join token "default", the one before it refused
 //	mainplane-server tunnel <url> <cloudflared token> | quick   the installed harness moves to the user's own tunnel, or back
 //	mainplane-server key  new <name> | revoke <name> | list    on the installed harness, as root
 //	mainplane-server join new <name> [ephemeral] | revoke <name> | list
@@ -67,7 +67,8 @@ func main() {
 			return
 		}
 		stop := spin("installing mainplane-server")
-		url, err := server.Install(h.Config)
+		// a plain install, the only one with a key, keeps the config there is
+		url, err := server.Install(&h.Config, h.Key != "")
 		stop()
 		fatal(err)
 		if h.Key != "" {
@@ -284,7 +285,7 @@ func usage() {
   up        <config.json>                 run the harness, with its keys, auth table and sessions beside the config
   install                                 run it at every boot, with the provider keys set in this shell, if any, behind a
                                           quick tunnel: a temporary URL, no domain needed. Makes this machine the worker
-                                          admin and logs its CLI in.
+                                          admin and logs its CLI in. A config already installed stays as it is.
                                           Providers and links in the config apply when it is saved
   install   <config.json>                 run it at every boot from a root-only copy of the config
                                           Either install prints a new join token named default, for any number of

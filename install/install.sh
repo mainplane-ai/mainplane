@@ -1,8 +1,8 @@
 #!/bin/sh
 # Installs the mainplane CLI; with a join token it also makes this Linux or macOS machine a worker.
 # With server it makes this machine the harness instead, from the provider keys set in this shell, and
-# logs the CLI in to it. Run it without sudo so those keys reach it; it asks for sudo itself. The
-# release stamps its version.
+# logs the CLI in to it. Run it without sudo so those keys reach it; it asks for sudo itself. In a root
+# shell with no sudo, both run as root, and code runs as root. The release stamps its version.
 #   curl -fsSL https://dl.mainplane.ai/@VERSION@/install.sh | sudo sh -s -- [join token]
 #   curl -fsSL https://dl.mainplane.ai/@VERSION@/install.sh | sh -s -- server
 set -eu
@@ -38,8 +38,11 @@ get() {
 get mainplane
 if [ "${1:-}" = server ]; then
   get mainplane-server
-  sudo mkdir -p -m 755 /usr/local/bin
-  sudo install -m 755 mainplane /usr/local/bin/mainplane
+  # root, as on a fresh VPS, may have no sudo; then root is the operator
+  sudo=sudo
+  if [ "$(id -u)" -eq 0 ]; then sudo=; fi
+  $sudo mkdir -p -m 755 /usr/local/bin
+  $sudo install -m 755 mainplane /usr/local/bin/mainplane
   # install places mainplane-server, runs it as a service, and logs mainplane in to it, which it finds on
   # PATH; a shell without a profile, as over ssh, may not have /usr/local/bin there
   PATH=/usr/local/bin:$PATH ./mainplane-server install

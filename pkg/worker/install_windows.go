@@ -150,6 +150,7 @@ func (s service) Execute(_ []string, reqs <-chan svc.ChangeRequest, status chan<
 			ds.drop()
 		case svc.Stop, svc.Shutdown:
 			status <- svc.Status{State: svc.StopPending}
+			leave(m)
 			if err := m.Close(); err != nil {
 				log.Printf("leaving the mesh: %v", err)
 			}
@@ -239,6 +240,10 @@ func Uninstall() error {
 		_ = s.Close()
 	}
 	if err != nil && !errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) && !errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
+		return err
+	}
+	// so the worker logs out as it stops: see leave
+	if err := os.Remove(filepath.Join(stateDir, "join")); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	if err := stop(); err != nil {

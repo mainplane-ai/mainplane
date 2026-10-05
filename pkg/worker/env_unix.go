@@ -72,6 +72,9 @@ func Work(key string, l Local) error {
 	}
 	Dial(m, l)
 	log.Printf("%v: leaving the mesh", <-stop)
+	if l.Operator != nil {
+		leave(m)
+	}
 	return m.Close()
 }
 
