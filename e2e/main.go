@@ -3,7 +3,7 @@
 // down to release prev and back, and past a release that does not exist. An
 // rc is tagged stable only after it passes.
 //
-//	task e2e -- <v> <prev> <port> <os>=<ssh target>...
+//	infisical run --env=dev --path=/llm -- task e2e -- <v> <prev> <port> <os>=<ssh target>...
 //
 // The machines reach this one through a quick tunnel the run opens to port on
 // loopback, as they reach an installed harness, and dial the harness on its
@@ -13,7 +13,11 @@
 // and its worker admin in one line, the harness updates to prev and back, and
 // its uninstall takes both: a
 // run ends with every machine clean, and any harness it had is replaced and
-// gone, though its config and sessions stay. Each phase is this
+// gone, though its config and sessions stay. Each harness also runs the
+// README quickstart with the lines its install printed, pointed at v: on its
+// own machine the worker and login lines say it is already both; the next
+// machine runs each twice, then sets an OpenAI key from OPENAI_API_KEY and
+// starts a session on admin with mainplane new and chat. Each phase is this
 // program again, as a harness at one version: its exit drops every
 // connection, so each worker says hello to the next.
 //
@@ -48,6 +52,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -96,10 +101,10 @@ const (
 // Scripts for each machine, by whether it is Windows.
 var (
 	install = map[bool]string{
-		false: `curl -fsSL %[1]s%[2]s/install.sh | sudo sh -s -- '%[3]s'`,
+		false: `curl -fsSL %[1]s%[2]s/install.sh | sh -s -- '%[3]s'`,
 		true:  `& ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) '%[3]s'`,
 	}
-	// No provider key: install works without one, and no step calls a model.
+	// No provider key: install works without one; the quickstart sets one.
 	// Workers reach the harness on the mesh only: /worker, with a good key, is 404.
 	// The install makes the machine the worker admin, which joins once it
 	// finds the harness through the pointer. Dir is the operator's, with
@@ -120,7 +125,8 @@ for ($i = 0; $i -lt 90; $i++) { if (mainplane workers | Select-String '^admin ')
 $d = "$env:ProgramData\mainplane-server"
 if ((Test-Path "$d\sessions") -and ((Get-Acl $d).Access | Where-Object { $_.IdentityReference.Value -like "*\$env:USERNAME" -and $_.FileSystemRights -eq 'FullControl' -and $_.AccessControlType -eq 'Allow' })) { 'dir-ok' }
 $l = Get-Content "$HOME\.mainplane\login.json" | ConvertFrom-Json
-try { Invoke-WebRequest "$($l.url)/worker" -Headers @{ Authorization = "Bearer $($l.key)" } -UseBasicParsing | Out-Null; 'worker-200' } catch { "worker-$([int]$_.Exception.Response.StatusCode)" }`,
+try { Invoke-WebRequest "$($l.url)/worker" -Headers @{ Authorization = "Bearer $($l.key)" } -UseBasicParsing | Out-Null; 'worker-200' } catch { "worker-$([int]$_.Exception.Response.StatusCode)" }
+` + oneCLI,
 	}
 	serverUpdate = map[bool]string{
 		false: `b=/usr/local/bin/mainplane-server
@@ -223,6 +229,33 @@ touch /drives/sessions/e2e 2>&1 | grep -q 'Read-only file system' && echo refuse
 	}
 	// unserved prints what is left of serving on a server that serves nothing.
 	unserved = `ls /etc/exports.d/mainplane.exports /etc/systemd/system/mainplane-smbd.service 2>/dev/null; grep ' /drives/' /proc/mounts`
+	// quickstart is the README's step 3 after the login line: an OpenAI key
+	// (%[1]s), a session on admin (%[2]s), and chat with no id, which follows
+	// the newest session, posts the line (%[3]s) and ends with stdin. Then the
+	// session once its step is done. /usr/local/bin is not on a macOS ssh PATH.
+	quickstart = map[bool]string{
+		false: `PATH=/usr/local/bin:$PATH
+mainplane key openai '%[1]s' && echo key-ok
+id=$(echo '%[2]s' | mainplane new) || exit 1
+echo '%[3]s' | mainplane chat | sed -n 1p | grep -qx "$id" && echo chat-ok
+for i in $(seq 180); do mainplane info $id | grep -Eq '"status": "(closed|failed)"' && break; sleep 1; done
+mainplane tail $id`,
+		true: `mainplane key openai '%[1]s'; if (!$LASTEXITCODE) { 'key-ok' }
+$id = '%[2]s' | mainplane new
+if (!$id) { exit 1 }
+if (@('%[3]s' | mainplane chat)[0] -eq $id) { 'chat-ok' }
+for ($i = 0; $i -lt 180 -and (mainplane info $id | Out-String) -notmatch '"status": "(closed|failed)"'; $i++) { Start-Sleep 1 }
+mainplane tail $id`,
+	}
+	// The README's session, and a line whose answer runs a command on admin.
+	session = `{"model":"openai/gpt-6.1-sol","context_limit":200000,"workers":[{"name":"admin"}],"params":{"reasoning":{"effort":"medium","summary":"auto"}}}`
+	ask     = `With the run tool on worker admin, print 6*7 using its shell. Then reply with only the number.`
+	// oneCLI prints every mainplane on a Windows machine: the PATH's and this
+	// user's own copy. oneWin is its line when the only one is the machine's.
+	oneWin = "cli C:\\Program Files\\mainplane\\mainplane.exe\n"
+	oneCLI = `"cli $((@((Get-Command mainplane -All).Source) + @((Get-Item "$env:LOCALAPPDATA\Programs\mainplane\mainplane.exe" -ErrorAction SilentlyContinue).FullName) | Sort-Object -Unique) -join ',')"`
+	// workerUninstall takes a worker and its CLI off a second machine.
+	workerUninstall = map[bool]string{false: `/usr/local/bin/mainplane uninstall`, true: `& "$env:ProgramFiles\mainplane\mainplane.exe" uninstall`}
 )
 
 const (
@@ -270,6 +303,10 @@ func run(v, prev, port string, targets []string) {
 		ssh[o] = host
 	}
 	oses := slices.Sorted(maps.Keys(ssh))
+	llm := os.Getenv("OPENAI_API_KEY")
+	if llm == "" {
+		log.Fatal("OPENAI_API_KEY is not set: infisical run --env=dev --path=/llm -- task e2e -- ...")
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		log.Fatal(err)
@@ -349,13 +386,14 @@ func run(v, prev, port string, targets []string) {
 	out, err := remote(gone, ssh[gone], meshGone[gone]+"\n"+status[gone == "windows"])
 	check(gone, "removed: interface, route, rule gone; status says so", err == nil && strings.HasSuffix(strings.TrimSpace(out), "removed from the mesh by its harness"), out)
 	hostsCheck(gone, ssh[gone], "removed: hosts block gone, other lines kept", hosts[gone], 0)
-	for _, o := range oses {
+	for i, o := range oses {
 		win := o == "windows"
 		out, err := remote(o, ssh[o], fmt.Sprintf(serverInstall[win], release.DL, v))
 		check(o, "harness installed in one line, CLI logged in", err == nil && strings.Contains(out, "mainplane "+v+" installed") && strings.Contains(out, "mp_key_") && strings.Contains(out, "workers-ok"), last(out))
 		check(o, "harness: /worker is gone (404)", strings.Contains(out, "worker-404"), last(out))
 		check(o, "harness: worker admin joined", strings.Contains(out, "admin-ok"), last(out))
 		check(o, "harness: Dir the operator's, sessions in it", strings.Contains(out, "dir-ok"), last(out))
+		quick(ssh, oses[(i+1)%len(oses)], o, v, llm, out)
 		if o == "linux" {
 			out, err = remote(o, ssh[o], sessionsDrive)
 			check(o, "harness: sessions drive on admin, read-only", err == nil && strings.Join(strings.Fields(out), " ") == "ro listed refused", out)
@@ -378,6 +416,53 @@ func run(v, prev, port string, targets []string) {
 		out, err := remote("windows", t, fmt.Sprintf(defender, start.Format(time.RFC3339)))
 		check("windows", "Defender: no detection since the run began", err == nil && strings.TrimSpace(out) == "0", out)
 	}
+}
+
+// quick runs the README quickstart against the harness just installed on o,
+// with the tokens its install printed (out) in lines pointed at v. On o the
+// worker and login lines find it already both. On q each runs twice, the
+// second time with nothing to do, then step 3 in the login line's shell, and
+// q's worker goes again.
+func quick(ssh map[string]string, q, o, v, llm, out string) {
+	join, key := regexp.MustCompile(`mp_join_\S+`).FindString(out), regexp.MustCompile(`mp_key_\S+`).FindString(out)
+	if o == "windows" {
+		check(o, "harness: one mainplane, in Program Files", strings.Contains(out, oneWin), last(out))
+	}
+	line := func(m, token string) (string, error) {
+		return remote(m, ssh[m], fmt.Sprintf(install[m == "windows"], release.DL, v, token))
+	}
+	got, err := line(o, join)
+	check(o, "quickstart: worker line, already worker admin", err == nil && strings.Contains(got, "this machine is already worker admin of this mainplane-server"), last(got))
+	got, err = line(o, key)
+	check(o, "quickstart: login line, already logged in", err == nil && strings.Contains(got, "already logged in to this mainplane-server"), last(got))
+	if q == o {
+		return
+	}
+	win := q == "windows"
+	got, err = line(q, join)
+	check(q, "quickstart: worker line joins "+o, err == nil, last(got))
+	// the worker says it is joined once the harness has registered it
+	for i := 0; i < 60 && !strings.Contains(got, "this machine"); i++ {
+		time.Sleep(time.Second)
+		got, _ = remote(q, ssh[q], status[win])
+	}
+	got, err = line(q, join)
+	check(q, "quickstart: worker line again, already worker", err == nil && strings.Contains(got, "this machine is already worker "), last(got))
+	got, err = line(q, key)
+	check(q, "quickstart: login line logs in", err == nil && strings.Contains(got, "logged in"), last(got))
+	script := fmt.Sprintf(install[win], release.DL, v, key) + "\n" + fmt.Sprintf(quickstart[win], llm, session, ask)
+	if win {
+		script += "\n" + oneCLI
+	}
+	got, err = remote(q, ssh[q], script)
+	check(q, "quickstart: login line again, already logged in", strings.Contains(got, "already logged in to this mainplane-server"), fmt.Sprint(err))
+	check(q, "quickstart: key, new, chat with no id follows it", strings.Contains(got, "key-ok") && strings.Contains(got, "chat-ok"), fmt.Sprint(err))
+	check(q, "quickstart: the session ran 6*7 on admin, said 42", strings.Contains(got, "exit=0\n42\n") && strings.Contains(got, "  text\n42\n"), got)
+	if win {
+		check(q, "quickstart: one mainplane, in Program Files", strings.Contains(got, oneWin), last(got))
+	}
+	got, err = remote(q, ssh[q], workerUninstall[win])
+	check(q, "quickstart: worker uninstalled", err == nil && strings.Contains(got, "mainplane uninstalled"), last(got))
 }
 
 // remote runs script on a machine: sh on Linux and macOS, and Windows
