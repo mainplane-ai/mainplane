@@ -286,7 +286,7 @@ func usage() {
                                      to keep that secret from joining machines again
   providers                          GET  /providers
   key        <provider> <key>        PUT  /providers/{provider}: the harness saves the key in its config, and serves
-                                     the provider within seconds
+                                     the provider at once
 `)
 	os.Exit(2)
 }

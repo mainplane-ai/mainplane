@@ -188,7 +188,7 @@ func Harness(ctx context.Context, path string) error {
 	routes := http.NewServeMux()
 	routes.Handle("/", harness.Handler(ctx, h))
 	routes.HandleFunc("PUT /providers/{name}", func(w http.ResponseWriter, r *http.Request) {
-		if err := setKey(path, r.PathValue("name"), r.Body); err != nil {
+		if err := setKey(path, r.PathValue("name"), r.Body, h.SetProviders); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -255,8 +255,10 @@ func Harness(ctx context.Context, path string) error {
 var keyMu sync.Mutex
 
 // setKey makes the body the key of provider name in the config at path,
-// beside the provider's other fields, which the watch then applies.
-func setKey(path, name string, body io.Reader) error {
+// beside the provider's other fields, and serves the providers it makes at
+// once: the README runs mainplane new right after mainplane key, sooner than
+// the watch rereads. The lock holds the write and serve in one order.
+func setKey(path, name string, body io.Reader, serve func(map[string]provider.Provider)) error {
 	b, err := io.ReadAll(io.LimitReader(body, maxKey+1))
 	if err != nil {
 		return err
@@ -277,14 +279,19 @@ func setKey(path, name string, body io.Reader) error {
 	p := c.Providers[name]
 	p.Key = key
 	c.Providers[name] = p
-	if _, err := providers(c.Providers); err != nil {
+	ps, err := providers(c.Providers)
+	if err != nil {
 		return err
 	}
 	out, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, out, 0o600)
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		return err
+	}
+	serve(ps)
+	return nil
 }
 
 // setDrives applies the drives and sends each worker its own. A drive that
