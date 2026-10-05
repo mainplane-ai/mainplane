@@ -176,11 +176,11 @@ func done(h handover) {
 // on Linux and macOS, then on Windows: a join token makes the machine a
 // worker, an api key logs its CLI in.
 func installLines(kind, token string) string {
-	label, sh := "log in:", "sh"
+	label := "log in:"
 	if kind == auth.Join {
-		label, sh = "connect it as a worker:", "sudo sh"
+		label = "connect it as a worker:"
 	}
-	return fmt.Sprintf("  %-25scurl -fsSL %s | %s -s -- %s\n  %-25s& ([scriptblock]::Create((irm %s.ps1))) %s\n", label, script, sh, token, "", script, token)
+	return fmt.Sprintf("  %-25scurl -fsSL %s | sh -s -- %s\n  %-25s& ([scriptblock]::Create((irm %s.ps1))) %s\n", label, script, token, "", script, token)
 }
 
 // spinner is design/ascii/spinner.json: Braille frames and the milliseconds

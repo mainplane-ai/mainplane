@@ -10,20 +10,18 @@ $dl = 'https://dl.mainplane.ai/@VERSION@'
 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
 $d = New-Item -ItemType Directory (Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid()))
 $sums = (Invoke-WebRequest "$dl/SHA256SUMS" -UseBasicParsing).Content -split "`n"
-# Fetch gets this machine's build of release binary $name into $d, checked against SHA256SUMS.
+# Fetch gets this machine's build of release binary $name into $d as $name.exe, checked against
+# SHA256SUMS. mainplane-server install finds mainplane.exe there.
 function Fetch($name) {
   $f = "$name-windows-$arch.exe"
-  $t = Join-Path $d $f
+  $t = Join-Path $d "$name.exe"
   Invoke-WebRequest "$dl/$f" -OutFile $t -UseBasicParsing
   $want = ($sums | Where-Object { $_ -match " $([regex]::Escape($f))$" }) -split ' ' | Select-Object -First 1
   if ($want -ne (Get-FileHash $t).Hash.ToLower()) { throw "$f does not match SHA256SUMS" }
   $t
 }
 $t = Fetch mainplane
-if ($Token -and $Token -ne 'server') {
-  # install places the binary in Program Files and that folder on the machine PATH
-  & $t install $Token
-  if ($LASTEXITCODE) { exit $LASTEXITCODE }
+if ($Token) {
   $bin = "$env:ProgramFiles\mainplane"
 } else {
   $bin = "$env:LOCALAPPDATA\Programs\mainplane"
@@ -34,15 +32,18 @@ if ($Token -and $Token -ne 'server') {
   if (($p -split ';') -notcontains $bin) {
     [Environment]::SetEnvironmentVariable('Path', "$($p.TrimEnd(';'));$bin".TrimStart(';'), 'User')
   }
-  if (!$Token) { Write-Output 'mainplane @VERSION@ installed' }
+  Write-Output 'mainplane @VERSION@ installed'
 }
+# install puts Program Files\mainplane on the machine PATH, which this shell read before
 if (($env:Path -split ';') -notcontains $bin) { $env:Path += ";$bin" }
 if ($Token -eq 'server') {
-  # install places mainplane-server in Program Files, runs it as a service, and logs mainplane in to it
+  # install places mainplane-server in Program Files, runs it as a service, makes this machine the
+  # worker admin with the mainplane beside it, which places that in $bin, and logs it in
   $s = Fetch mainplane-server
   & $s install
   if ($LASTEXITCODE) { exit $LASTEXITCODE }
-  # install put that folder on the machine PATH, which this shell read before
-  $env:Path += ";$env:ProgramFiles\mainplane"
+} elseif ($Token) {
+  & $t install $Token
+  if ($LASTEXITCODE) { exit $LASTEXITCODE }
 }
 Remove-Item -Recurse $d

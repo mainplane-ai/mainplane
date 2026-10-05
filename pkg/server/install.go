@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
+	"github.com/mainplane-ai/mainplane/pkg/mesh"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
@@ -93,11 +94,6 @@ func Install(c *Config, keep bool) (string, error) {
 			return "", err
 		}
 	}
-	// admin's secret is in no token anyone sees, and new at each install.
-	secret := rand.Text()
-	if err := Auth(Dir).Set(auth.Join, worker.Admin, secret); err != nil {
-		return "", err
-	}
 	k, err := Key(Dir)
 	if err != nil {
 		return "", err
@@ -111,21 +107,31 @@ func Install(c *Config, keep bool) (string, error) {
 	if err := answers(c.HTTP); err != nil {
 		return "", err
 	}
-	if err := admin(auth.Token(auth.Join, pointer.Encode(k), secret)); err != nil {
+	if err := admin(pointer.Encode(k)); err != nil {
 		return "", err
 	}
 	return reached()
 }
 
-// admin makes this machine the worker admin, joined with token, through the
-// CLI the install line put on PATH. Its output is shown only when it fails,
-// and the token never: the harness install says nothing of admin.
-func admin(token string) error {
-	cli, err := exec.LookPath("mainplane")
-	if err != nil {
-		return fmt.Errorf("the admin worker: %w", err)
+// admin makes this machine the worker admin of the harness with key harness,
+// through the CLI the install line put beside this binary, which the worker
+// install places as the machine's only one. A machine already a worker of
+// this harness stays as it is. admin's secret is in no token anyone sees, and
+// new at each install that joins it. Its output is shown only when it fails.
+func admin(harness string) error {
+	if h, _, err := mesh.Joined(); err == nil && h == harness {
+		return nil
 	}
-	if out, err := exec.Command(cli, "install", token).CombinedOutput(); err != nil {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	secret := rand.Text()
+	if err := Auth(Dir).Set(auth.Join, worker.Admin, secret); err != nil {
+		return err
+	}
+	cli := filepath.Join(filepath.Dir(exe), "mainplane"+filepath.Ext(exe))
+	if out, err := exec.Command(cli, "install", auth.Token(auth.Join, harness, secret)).CombinedOutput(); err != nil {
 		return fmt.Errorf("the admin worker: %w: %s", err, out)
 	}
 	return nil

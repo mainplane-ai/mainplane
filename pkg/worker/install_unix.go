@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -22,11 +21,6 @@ import (
 // Bin is the binary the service runs. It and the state directory are root's:
 // code that runs as the operator cannot replace the service or read its token.
 const Bin = "/usr/local/bin/mainplane"
-
-// sudoers are the groups sudo lets act as root on Debian, Fedora, and macOS.
-// Code runs as the operator, so an operator in one can become root, and
-// install says so instead of letting the root service suggest otherwise.
-var sudoers = []string{"sudo", "wheel", "admin"}
 
 // Installed is what install left for the service: the join token and the
 // operator, the user code runs as.
@@ -79,24 +73,8 @@ func setup(token string) error {
 	return os.Lchown(scratch, uid, gid)
 }
 
-// done says the install is done, and whether the operator, so code on this
-// worker, can use sudo. The worker runs by now, so a lookup that fails only
-// leaves the note out.
-func done() {
-	fmt.Print(version.Installed())
-	name := cmp.Or(os.Getenv("SUDO_USER"), "root")
-	u, err := user.Lookup(name)
-	if err != nil {
-		return
-	}
-	ids, _ := u.GroupIds()
-	for _, id := range ids {
-		if g, err := user.LookupGroupId(id); err == nil && slices.Contains(sudoers, g.Name) {
-			fmt.Printf("note: user %s is admin on this machine, this worker can use sudo\n", name)
-			return
-		}
-	}
-}
+// done says the install is done.
+func done() { fmt.Print(version.Installed()) }
 
 // Uninstall stops the worker and removes its service, its drives, what a
 // killed worker left of the mesh, Bin, which is also the CLI, and the state
