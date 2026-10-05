@@ -188,14 +188,10 @@ func Harness(ctx context.Context, path string) error {
 	routes := http.NewServeMux()
 	routes.Handle("/", harness.Handler(ctx, h))
 	routes.HandleFunc("PUT /providers/{name}", func(w http.ResponseWriter, r *http.Request) {
-		keyMu.Lock()
-		defer keyMu.Unlock()
-		ps, err := setKey(path, r.PathValue("name"), r.Body)
-		if err != nil {
+		if err := setKey(path, r.PathValue("name"), r.Body, h.SetProviders); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		h.SetProviders(ps)
 		w.WriteHeader(http.StatusNoContent)
 	})
 	api := store.Bearer(limit, routes)
@@ -255,26 +251,27 @@ func Harness(ctx context.Context, path string) error {
 	return nil
 }
 
-// keyMu keeps two keys set at once from writing over each other, in the
-// config and in the providers served.
+// keyMu keeps two keys set at once from writing over each other.
 var keyMu sync.Mutex
 
 // setKey makes the body the key of provider name in the config at path,
-// beside the provider's other fields, and returns the providers it makes.
-// The caller holds keyMu and serves them at once: the README runs mainplane new right after
-// mainplane key, sooner than the watch rereads.
-func setKey(path, name string, body io.Reader) (map[string]provider.Provider, error) {
+// beside the provider's other fields, and serves the providers it makes at
+// once: the README runs mainplane new right after mainplane key, sooner than
+// the watch rereads. The lock holds the write and serve in one order.
+func setKey(path, name string, body io.Reader, serve func(map[string]provider.Provider)) error {
 	b, err := io.ReadAll(io.LimitReader(body, maxKey+1))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	key := strings.TrimSpace(string(b))
 	if key == "" || len(b) > maxKey || strings.ContainsAny(key, "\r\n") {
-		return nil, fmt.Errorf("a key is one line of 1 to %d bytes", maxKey)
+		return fmt.Errorf("a key is one line of 1 to %d bytes", maxKey)
 	}
+	keyMu.Lock()
+	defer keyMu.Unlock()
 	c, err := Load(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if c.Providers == nil {
 		c.Providers = map[string]Provider{}
@@ -284,13 +281,17 @@ func setKey(path, name string, body io.Reader) (map[string]provider.Provider, er
 	c.Providers[name] = p
 	ps, err := providers(c.Providers)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	out, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return ps, os.WriteFile(path, out, 0o600)
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		return err
+	}
+	serve(ps)
+	return nil
 }
 
 // setDrives applies the drives and sends each worker its own. A drive that
