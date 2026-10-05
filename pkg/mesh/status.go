@@ -16,7 +16,7 @@ import (
 
 // socket is where the worker answers mainplane status and the CLI's question
 // for its harness: a unix socket any local user may open, a named pipe on
-// Windows. A client writes one line, status or harness <peer name>.
+// Windows. A client writes one line: status, joined, or harness <peer name>.
 var socket = "/var/run/mainplaned.sock"
 
 // A client that writes no line in this long is hung up on.
@@ -67,6 +67,21 @@ func Harness(name string) (string, netip.Addr, error) {
 	return k, addr, err
 }
 
+// Joined is the key of the harness the worker on this machine follows, and
+// its name there, once the harness has registered it and until it removes
+// it. A worker that never joined, as with a revoked token, is an error.
+func Joined() (harness, name string, err error) {
+	s, err := ask("joined")
+	if err != nil {
+		return "", "", err
+	}
+	harness, name, ok := strings.Cut(strings.TrimSpace(s), " ")
+	if !ok {
+		return "", "", errors.New("the worker on this machine is not joined to its harness")
+	}
+	return harness, name, nil
+}
+
 // serve answers every connection to the socket until Close.
 func (m *Mesh) serve() {
 	for {
@@ -93,6 +108,15 @@ func (m *Mesh) answer(c net.Conn) {
 	case "harness":
 		if a, ok := m.Peer(name); ok && m.health.GetInPollNetMap() {
 			_, _ = fmt.Fprintf(c, "%s %s\n", m.harness, a)
+		}
+	case "joined":
+		select {
+		case <-m.removed:
+			return
+		default:
+		}
+		if nm := m.lb.NetMapWithPeers(); nm != nil {
+			_, _ = fmt.Fprintf(c, "%s %s\n", m.harness, nm.SelfNode.Name())
 		}
 	}
 }

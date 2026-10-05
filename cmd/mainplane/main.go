@@ -45,9 +45,6 @@ func main() {
 		if len(os.Args) > 3 || os.Args[1] == "install" && len(os.Args) != 3 {
 			usage()
 		}
-		if os.Args[1] == "install" {
-			elevate.Root(os.Args[1:]...)
-		}
 		work(os.Args[1] == "install", os.Args[2:])
 	case "update":
 		if len(os.Args) > 3 {
@@ -121,7 +118,8 @@ func logIn(token string) {
 
 // work installs the worker, or is the worker: with a token given, as whoever
 // runs it; without, as the service install left, whose scratch is the
-// operator's.
+// operator's. A machine already a worker of the token's harness keeps its
+// install and its token, and the install asks for no root.
 func work(install bool, args []string) {
 	token, op := "", (*user.User)(nil)
 	if len(args) == 1 {
@@ -137,6 +135,11 @@ func work(install bool, args []string) {
 		log.Fatal(err)
 	}
 	if install {
+		if h, name, err := mesh.Joined(); err == nil && h == key {
+			fmt.Printf("this machine is already worker %s of this mainplane-server\n", name)
+			return
+		}
+		elevate.Root("install", token)
 		if err := worker.Install(token); err != nil {
 			log.Fatal(err)
 		}
