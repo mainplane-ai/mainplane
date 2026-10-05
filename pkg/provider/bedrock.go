@@ -174,8 +174,11 @@ func bedUser(recs []statefile.Record) []bedBlock {
 					Format: strings.TrimPrefix(r.Type, "image/"),
 					Source: bedSource{Bytes: base64.StdEncoding.EncodeToString(r.Body)},
 				}}}
-			case len(r.Body) > 0:
-				res.Content = []bedBlock{{Text: string(r.Body)}}
+				if r.Note != "" {
+					res.Content = append(res.Content, bedBlock{Text: r.Note})
+				}
+			case len(r.Body) > 0 || r.Note != "":
+				res.Content = []bedBlock{{Text: noted(string(r.Body), r.Note)}}
 			default:
 				res.Content = []bedBlock{{Text: "(empty)"}} // Converse rejects empty text blocks
 			}

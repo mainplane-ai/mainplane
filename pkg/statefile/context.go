@@ -95,10 +95,10 @@ func LastStep(chain []Record) *Record {
 // context costs now. Input excludes cache reads and writes on every provider.
 func ContextUsed(chain []Record) int {
 	s := LastStep(chain)
-	if s == nil || s.Usage == nil {
+	if s == nil {
 		return 0
 	}
-	return s.Usage.Input + s.Usage.CacheRead + s.Usage.CacheWrite
+	return s.Usage.Prompt()
 }
 
 // Derive reads status off the tip. Stepping is the lock's word, not the

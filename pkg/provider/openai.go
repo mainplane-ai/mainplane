@@ -118,9 +118,13 @@ func respUser(recs []statefile.Record) []any {
 	for _, r := range recs {
 		switch r.Kind {
 		case statefile.Result:
-			out := respOutput{Type: "function_call_output", CallID: r.For, Output: string(r.Body)}
+			out := respOutput{Type: "function_call_output", CallID: r.For, Output: noted(string(r.Body), r.Note)}
 			if slices.Contains(images, r.Type) {
-				out.Output = []respPart{{Type: "input_image", ImageURL: imageURL(r), Detail: "auto"}}
+				parts := []respPart{{Type: "input_image", ImageURL: imageURL(r), Detail: "auto"}}
+				if r.Note != "" {
+					parts = append(parts, respPart{Type: "input_text", Text: r.Note})
+				}
+				out.Output = parts
 			}
 			items = append(items, out)
 		case statefile.Message, statefile.System, statefile.Error:

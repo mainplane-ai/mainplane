@@ -287,6 +287,18 @@ func merge(target json.RawMessage, patch map[string]json.RawMessage) (json.RawMe
 	return marshal(t)
 }
 
+// noted is a result's text as the model reads it: the text, then its note on
+// the next line.
+func noted(text, note string) string {
+	if note == "" {
+		return text
+	}
+	if text == "" {
+		return note
+	}
+	return strings.TrimSuffix(text, "\n") + "\n" + note
+}
+
 // Split separates the leading system records, which are the system prompt,
 // from the rest of the context.
 func Split(ctx []statefile.Record) (system, rest []statefile.Record) {

@@ -130,8 +130,11 @@ func anthUser(recs []statefile.Record) []anthBlock {
 				b.Content = []anthBlock{{Type: "image", Source: &anthSource{
 					Type: "base64", MediaType: r.Type, Data: base64.StdEncoding.EncodeToString(r.Body),
 				}}}
-			case len(r.Body) > 0:
-				b.Content = []anthBlock{{Type: "text", Text: string(r.Body)}}
+				if r.Note != "" {
+					b.Content = append(b.Content, anthBlock{Type: "text", Text: r.Note})
+				}
+			case len(r.Body) > 0 || r.Note != "":
+				b.Content = []anthBlock{{Type: "text", Text: noted(string(r.Body), r.Note)}}
 			}
 			blocks = append(blocks, b)
 		case statefile.Message, statefile.System, statefile.Error:
