@@ -44,7 +44,10 @@ if [ "${1:-}" = server ]; then
 elif [ $# -eq 1 ]; then
   ./mainplane install "$1"
 else
-  mkdir -p -m 755 /usr/local/bin
-  mv mainplane /usr/local/bin/mainplane
+  # root, as on a fresh VPS, may have no sudo
+  sudo=sudo
+  if [ "$(id -u)" -eq 0 ]; then sudo=; fi
+  $sudo mkdir -p -m 755 /usr/local/bin
+  $sudo install -m 755 mainplane /usr/local/bin/mainplane
   echo "mainplane $v installed"
 fi
