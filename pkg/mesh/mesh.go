@@ -26,10 +26,12 @@ import (
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnauth"
 	"tailscale.com/ipn/ipnlocal"
+	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/ipn/store"
 	"tailscale.com/net/tsdial"
 	"tailscale.com/net/tstun"
 	"tailscale.com/safesocket"
+	"tailscale.com/tailcfg"
 	"tailscale.com/tsd"
 	"tailscale.com/types/key"
 	"tailscale.com/types/logid"
@@ -94,7 +96,8 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 		return nil, err
 	}
 	logf := func(format string, a ...any) {
-		if !strings.Contains(format, "[v") { // tailscale's verbose levels
+		// tailscale's verbose levels, and the fragmenter's probes
+		if !strings.Contains(format, "[v") && !strings.HasPrefix(format, "ping(") {
 			log.Printf("mesh: "+format, a...)
 		}
 	}
@@ -102,12 +105,30 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The TUN is read from inside the engine, before eng is set.
+	var eng wgengine.Engine
+	engUp := make(chan struct{})
+	frag := newFragmenter(dev, func(ip netip.Addr) bool {
+		<-engUp
+		pong := make(chan *ipnstate.PingResult, 1)
+		eng.Ping(ip, tailcfg.PingDisco, probeSize, func(r *ipnstate.PingResult) { pong <- r })
+		select {
+		case r := <-pong:
+			// A pong through the relay counts: the relay carries any size,
+			// and cutting packets for it halves its speed too. A ping goes
+			// on both while a direct path is not yet trusted; the next one,
+			// on that path alone, corrects the answer.
+			return r.Err == ""
+		case <-time.After(probeWait):
+			return false
+		}
+	})
 	sys := tsd.NewSystem()
 	dialer := &tsdial.Dialer{Logf: logf}
 	dialer.SetBus(sys.Bus.Get())
 	sys.Set(dialer)
-	eng, err := wgengine.NewUserspaceEngine(logf, wgengine.Config{
-		Tun:           dev,
+	eng, err = wgengine.NewUserspaceEngine(logf, wgengine.Config{
+		Tun:           frag,
 		Router:        &osRouter{tun: tun},
 		ListenPort:    port,
 		EventBus:      sys.Bus.Get(),
@@ -121,6 +142,7 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 		_ = dev.Close()
 		return nil, err
 	}
+	close(engUp)
 	sys.Set(eng)
 	st, err := store.NewFileStore(logf, filepath.Join(dir, "state"))
 	if err != nil {

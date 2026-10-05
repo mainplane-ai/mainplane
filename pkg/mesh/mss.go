@@ -10,14 +10,21 @@ import (
 	"tailscale.com/wgengine/filter"
 )
 
-// A mesh packet crosses the underlay in WireGuard's 32 bytes, UDP's 8 and
-// IPv6's 40 (IPv4's 20). The TUN's MTU is 1280, IPv6's minimum, below which
-// no OS keeps IPv6 on it, so a full one is 1360 bytes on the wire. A path of
-// 1280 (a VPN, WSL2 behind a Tailscale adapter) must fragment that, and one
-// that drops fragments or ICMP drops it: small packets pass, large ones
-// vanish. TCP, nearly all the mesh carries, is held to segments whose packet
-// fits such a path: 1280 less 80 of tunnel, 40 of IPv6 and 20 of TCP.
-const maxMSS = 1280 - 80 - 40 - 20
+const (
+	// A mesh packet crosses the underlay in WireGuard's 32 bytes, UDP's 8 and
+	// IPv6's 40 (IPv4's 20). The TUN's MTU is 1280, IPv6's minimum, below
+	// which no OS keeps IPv6 on it, so a full one is 1360 bytes on the wire.
+	// A path of 1280 (a VPN, WSL2 behind a Tailscale adapter) must fragment
+	// that, and one that drops fragments or ICMP drops it: small packets
+	// pass, large ones vanish. A packet of at most this inside is at most 1280
+	// outside; a longer one goes in fragments to a peer whose path may not
+	// carry it (frag.go).
+	maxInner = 1280 - 80
+
+	// TCP, nearly all the mesh carries, is held to segments whose packet is
+	// maxInner: less 40 of IPv6 and 20 of TCP. Windows ignores it.
+	maxMSS = maxInner - 40 - 20
+)
 
 // clamped is next with the MSS of every TCP SYN lowered to maxMSS first. It
 // runs on packets both to and from peers, so either end of a connection

@@ -55,4 +55,4 @@ require (
 	gvisor.dev/gvisor v0.0.0-20260224225140-573d5e7127a8 // indirect
 )
 
-replace tailscale.com => github.com/mainplane-ai/tailscale v1.102.4-mainplane.7
+replace tailscale.com => github.com/mainplane-ai/tailscale v1.102.4-mainplane.8
