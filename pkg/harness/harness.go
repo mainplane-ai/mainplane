@@ -18,10 +18,13 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
-// halted is the body of a stop's error record. The model reads it only when a
-// retry or a new message steps the session again, so it says to go on; who
-// stopped it is the record's via.
-const halted = "The session was halted during the last step. Calls running were cancelled. If you see this message please continue."
+// halted is the body of a stop's error record, with who stopped it. The model
+// reads it only when a retry or a new message steps the session again; a
+// retry adds resume as a message, so the model goes on rather than stopping.
+const (
+	halted = "The session was stopped during the last step by %s. Running calls were cancelled."
+	resume = "Continue"
+)
 
 type Harness struct {
 	Sessions  statefile.Sessions
@@ -137,7 +140,7 @@ func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
 	if err := f.Append(system("agents", h.agents(ctx, id, conf))); err != nil {
 		return "", err
 	}
-	if err := f.Append(system("workers", h.workers(conf.Workers))); err != nil {
+	if err := f.Append(system("workers", workersFirst+h.workers(conf.Workers))); err != nil {
 		return "", err
 	}
 	h.touch(id)
@@ -186,6 +189,12 @@ func config(chain []statefile.Record) (statefile.Conf, error) {
 	return conf, fmt.Errorf("no config record")
 }
 
+// The worker list's lead line says whether it is the first or a change.
+const (
+	workersFirst   = "Workers:\n"
+	workersChanged = "Workers (changed):\n"
+)
+
 // workers is the session's worker list as the model reads it: what each named
 // worker is right now and the drives it mounts, each it also serves marked,
 // or that it is not connected.
@@ -216,9 +225,10 @@ func (h *Harness) workers(workers []statefile.Worker) string {
 // stepped only when a run asked for it; every step spends the ask, so a run
 // on a closed session does not carry over to a later failure. Interrupted sessions get a result for
 // every orphan call and become open; the next cycle steps. Past the context
-// limit nothing is called: the error says so and the session is failed. The
-// worker list enters as a system record whenever it differs from the last one
-// the model saw.
+// limit nothing is called: the error says so and the session is failed. A
+// retry of a failed session adds resume as a message from retry. The worker
+// list enters as a system record whenever it differs from the last one the
+// model saw.
 func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status, err error) {
 	chain, err := h.Sessions.Load(id)
 	if err != nil {
@@ -253,10 +263,19 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 		_, err := h.append(s, errorRecord("", fmt.Sprintf("context %d exceeds limit %d", p, conf.ContextLimit)))
 		return statefile.StatusFailed, err
 	}
-	if list := h.workers(conf.Workers); list != last(chain, "workers") {
-		if _, err := h.append(s, system("workers", list)); err != nil {
+	var add []statefile.Record
+	if status == statefile.StatusFailed {
+		add = append(add, statefile.Record{Header: statefile.Header{Kind: statefile.Message, Type: "text/plain", Via: "retry"}, Body: []byte(resume)})
+	}
+	if list := h.workers(conf.Workers); list != strings.TrimPrefix(strings.TrimPrefix(last(chain, "workers"), workersFirst), workersChanged) {
+		add = append(add, system("workers", workersChanged+list))
+	}
+	for _, r := range add {
+		if _, err := h.append(s, r); err != nil {
 			return "", err
 		}
+	}
+	if len(add) > 0 {
 		if chain, err = h.Sessions.Load(id); err != nil {
 			return "", err
 		}
@@ -300,7 +319,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 	}
 	if err != nil {
 		if via := s.stoppedBy(); via != "" {
-			_, err := h.append(s, errorRecord(via, halted))
+			_, err := h.append(s, errorRecord(via, fmt.Sprintf(halted, via)))
 			return statefile.StatusFailed, err
 		}
 		_, err := h.append(s, errorRecord("", err.Error()))
@@ -323,7 +342,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 		}
 	}
 	if via := s.stoppedBy(); via != "" {
-		_, err := h.append(s, errorRecord(via, halted))
+		_, err := h.append(s, errorRecord(via, fmt.Sprintf(halted, via)))
 		return statefile.StatusFailed, err
 	}
 	if len(calls) == 0 {
@@ -334,9 +353,10 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 
 // clock gives the model time and context from the file alone, never the
 // clock, so the same file builds the same bytes and the cached prefix holds.
-// The session line follows the system prompt and never changes. Each result
-// ends with its time since start and the prompt size of the step that made
-// its call, fixed once the result is written.
+// The session line follows the system prompt and never changes; the system
+// prompt says what the notes mean. Each result ends with its time since start
+// and the prompt size of the step that made its call, fixed once the result
+// is written.
 func clock(ctx []statefile.Record, start time.Time, limit int) []statefile.Record {
 	used := 0
 	for i, r := range ctx {
@@ -347,7 +367,7 @@ func clock(ctx []statefile.Record, start time.Time, limit int) []statefile.Recor
 			ctx[i].Note = fmt.Sprintf("time %s context %d", r.Time.Sub(start).Round(time.Second), used)
 		}
 	}
-	line := fmt.Sprintf("Session started %s with context limit %d. Every tool result ends with \"time\", the time since session start, and \"context\", the prompt tokens of the step that made the call", start.Format(time.RFC3339), limit)
+	line := fmt.Sprintf("Session started %s. Context limit %d", start.Format(time.RFC3339), limit)
 	return slices.Insert(ctx, 1, system("session", line))
 }
 
