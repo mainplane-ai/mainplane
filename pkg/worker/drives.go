@@ -51,9 +51,13 @@ type Client struct {
 	SMB  *SMB       `json:"smb,omitempty"` // a Windows client's user on this server
 }
 
+// Mount is a drive to mount from Server. Host is the server's long name,
+// which macOS and Windows mount by: Finder and Explorer show it, and on
+// Windows a short name that is also a Tailscale name resolves there.
 type Mount struct {
 	Name   string     `json:"name"`
 	Server string     `json:"server"`
+	Host   string     `json:"host"`
 	Addr   netip.Addr `json:"addr"`
 	SMB    *SMB       `json:"smb,omitempty"` // how a Windows worker signs in to Server
 }
@@ -61,10 +65,8 @@ type Mount struct {
 // SMB is a Windows worker's user on one server, the same for each of that
 // server's drives, since Windows holds one credential per server. The
 // harness derives the password from its key, so neither end stores it
-// before the harness sends it. Host is the server's long name, for a mount:
-// on Windows a short name that is also a Tailscale name resolves there.
+// before the harness sends it.
 type SMB struct {
-	Host     string `json:"host,omitempty"`
 	User     string `json:"user"`
 	Password string `json:"password"`
 }

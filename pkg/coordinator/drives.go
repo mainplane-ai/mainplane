@@ -101,11 +101,7 @@ func (c *Coordinator) Desired(name string) worker.Desired {
 			want.Serve = append(want.Serve, e)
 		}
 		if n := c.byName(name); n != nil && on(d, n) {
-			m := worker.Mount{Name: dn, Server: s.Name, Addr: address(s.ID), SMB: c.smb(s, n)}
-			if m.SMB != nil {
-				m.SMB.Host = mesh.Long(s.Name, project)
-			}
-			want.Mount = append(want.Mount, m)
+			want.Mount = append(want.Mount, worker.Mount{Name: dn, Server: s.Name, Host: mesh.Long(s.Name, project), Addr: address(s.ID), SMB: c.smb(s, n)})
 		}
 	}
 	return want

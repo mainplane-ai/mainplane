@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 	"golang.org/x/sys/windows/svc"
 )
 
@@ -97,9 +98,9 @@ func mount(m Mount, ours map[string]mapped, at map[string]string, op *user.User)
 		d.Error = "not a drive name, or no SMB user from the harness"
 		return d
 	}
-	remote := `\\` + m.SMB.Host + `\` + m.Name
+	remote := `\\` + m.Host + `\` + m.Name
 	o, ok := ours[m.Name]
-	if ok && o.Host != m.SMB.Host { // the drive moved to another server
+	if ok && o.Host != m.Host { // the drive moved to another server
 		if err := unmap(m.Name, o, ours, at, op, false); err != nil {
 			d.Error = err.Error()
 			return d
@@ -111,10 +112,14 @@ func mount(m Mount, ours map[string]mapped, at map[string]string, op *user.User)
 			d.Error = fmt.Sprintf("no free drive letter from %c: to %c:", firstLetter, lastLetter)
 			return d
 		}
-		o.Host = m.SMB.Host
+		o.Host = m.Host
 		ours[m.Name] = o
 	}
 	d.Path = o.Letter + `\`
+	if err := label(op, m.Host, m.Name, m.Name); err != nil {
+		d.Error = err.Error()
+		return d
+	}
 	switch r := at[o.Letter]; {
 	case strings.EqualFold(r, remote) && !reach(m.Addr):
 		d.State, d.Error = Waiting, "server unreachable, the mapping waits for it"
@@ -125,7 +130,7 @@ func mount(m Mount, ours map[string]mapped, at map[string]string, op *user.User)
 	case !reach(m.Addr):
 		d.State, d.Error = Waiting, "server unreachable"
 	default:
-		if _, err := as(op, "cmdkey", "/add:"+m.SMB.Host, "/user:"+m.SMB.User, "/pass:"+m.SMB.Password); err != nil {
+		if _, err := as(op, "cmdkey", "/add:"+m.Host, "/user:"+m.SMB.User, "/pass:"+m.SMB.Password); err != nil {
 			d.Error = err.Error()
 			return d
 		}
@@ -138,6 +143,8 @@ func mount(m Mount, ours map[string]mapped, at map[string]string, op *user.User)
 			d.Error = lerr.Error()
 		case strings.EqualFold(now[o.Letter], remote):
 			d.State = Mounted
+		case err != nil && !ok: // the harness tells the server and this worker at once
+			d.State, d.Error = Waiting, "its server may not share it with this worker yet: "+err.Error()
 		case err != nil:
 			d.Error = err.Error()
 		default:
@@ -168,6 +175,9 @@ func unmap(name string, o mapped, ours map[string]mapped, at map[string]string, 
 			return fmt.Errorf("%s is still mapped", o.Letter)
 		}
 	}
+	if err := label(op, o.Host, name, ""); err != nil {
+		return err
+	}
 	for n, p := range ours {
 		if n != name && p.Host == o.Host {
 			delete(ours, name)
@@ -187,6 +197,27 @@ func unmap(name string, o mapped, ours map[string]mapped, at map[string]string, 
 	}
 	delete(ours, name)
 	return nil
+}
+
+// label sets the name Explorer shows for a mapping of \\host\share, in op's
+// own registry, to text alone, not "share (\\host)"; empty text takes it away.
+func label(op *user.User, host, share, text string) error {
+	path := op.Uid + `\Software\Microsoft\Windows\CurrentVersion\Explorer\MountPoints2\##` + host + `#` + share
+	if text == "" {
+		k, err := registry.OpenKey(registry.USERS, path, registry.SET_VALUE)
+		if err == nil {
+			err = errors.Join(k.DeleteValue("_LabelFromReg"), k.Close())
+		}
+		if errors.Is(err, registry.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	k, _, err := registry.CreateKey(registry.USERS, path, registry.SET_VALUE)
+	if err != nil {
+		return err
+	}
+	return errors.Join(k.SetStringValue("_LabelFromReg", text), k.Close())
 }
 
 // free is the first letter from firstLetter down that no drive of ours has,

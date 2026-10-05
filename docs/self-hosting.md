@@ -164,8 +164,9 @@ server. Nothing is shared until the harness config names a drive:
   the mesh only. Every file on a drive belongs to the server's operator,
   whoever wrote it.
 - Workers mount at `/drives/<name>` (Linux), `/Volumes/<name>` (macOS, listed
-  in Finder), and a letter from `W:` down (Windows, in the operator's session,
-  listed in Explorer). The server mounts its own drives from its disk.
+  in Finder under the server's `<server>--<project>.mainplane.net`), and a
+  letter from `W:` down (Windows, in the operator's session, listed in Explorer
+  as `<name> (W:)`). The server mounts its own drives from its disk.
 - `sessions` is the harness's `sessions/` directory, read-only, for workers
   named in it. Its server is `admin`, so it exists only on a Linux harness.
   Act on sessions through the API, not the files.
@@ -173,8 +174,8 @@ server. Nothing is shared until the harness config names a drive:
   stay mounted across restarts and updates. A worker removed from a drive, or
   from the mesh, or uninstalled, unmounts it. A server that serves nothing
   removes its exports and smbd; the packages and `/srv/mainplane` stay.
-- On a drive's server, `flock(1)` on the drive does not see other workers'
-  locks. Use fcntl locks there (`lockf`, Python's `fcntl.lockf`).
+- Lock files on a drive with fcntl locks (`lockf(3)`, Python's `fcntl.lockf`),
+  not `flock`: on a drive's server, `flock` does not see other workers' locks.
 
 ## What Cloudflare can read
 
