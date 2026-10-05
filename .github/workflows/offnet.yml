@@ -35,7 +35,8 @@ jobs:
             sleep 2
           done
           echo "$s"
-          echo "$s" | grep -q 'map poll up'
+          # with the map poll down, its own line ends ", harness unresponsive"
+          echo "$s" | grep -Eq 'fd7c:\S+ +this machine$'
           echo "$s" | grep -Eq '^harness +fd7c:\S+ +(direct|relay)'
-          [ "$(echo "$s" | sed 1,2d | grep -c .)" = 1 ]
+          [ "$(echo "$s" | grep -Ec '^\S+ +fd7c:')" = 2 ]
           sudo journalctl -u mainplaned --no-pager | grep 'connected to the harness at \[fd7c:'
