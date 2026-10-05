@@ -19,7 +19,7 @@ The harness install also makes its machine a worker, `admin`, and the harness's 
 - `mainplane key <provider> <key>` saves a provider key in the harness config from any logged-in machine (`PUT /providers/{name}`); the harness serves the provider at once, so a `mainplane new` right after it finds it
 - The model sees time and context: the system prompt states the session's start time and context limit, and every tool result ends with `time 3m12s context 48210`, the time since session start and the prompt tokens of the step that made the call. Both are built from the file, so the same file builds the same request bytes
 - The system prompt and `cdp.md` are shorter and clearer. The system prompt says what the time and context note on each tool result means, and that a cut read keeps its head
-- A stop's error says who stopped the session, and a retry of a failed session adds the message `Continue` from `retry`, so the model goes on instead of stopping
+- A stop's error says who stopped the session, and a retry of a failed session under its context limit adds the message `Continue` from `retry`, so the model goes on instead of stopping
 - The worker list starts with `Workers:`, and with `Workers (changed):` when it changes mid-session. The AGENTS.md scan starts with one line, and the session line is only the start time and context limit
 - `mainplane chat` with no id follows the session updated last
 - The Gemini provider is `google`, as in `google/gemini-...` model strings (models.dev, OpenRouter), in the config and in step records; its key still comes from `GEMINI_API_KEY` at install. A config that names `gemini` must name `google` instead, or the harness does not start
