@@ -242,6 +242,7 @@ for i in $(seq 180); do mainplane info $id | grep -Eq '"status": "(closed|failed
 mainplane tail $id`,
 		true: `mainplane key openai '%[1]s'; if (!$LASTEXITCODE) { 'key-ok' }
 $id = '%[2]s' | mainplane new
+if (!$id) { exit 1 }
 if (@('%[3]s' | mainplane chat)[0] -eq $id) { 'chat-ok' }
 for ($i = 0; $i -lt 180 -and (mainplane info $id | Out-String) -notmatch '"status": "(closed|failed)"'; $i++) { Start-Sleep 1 }
 mainplane tail $id`,
