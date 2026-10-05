@@ -48,14 +48,15 @@ const QuickWarning = "warning: this quick tunnel URL is not meant for production
 // under trycloudflare.com.
 func QuickURL(url string) bool { return strings.HasSuffix(url, ".trycloudflare.com") }
 
-// assets are the release file for each platform and its sha256, as GitHub
-// states it for that file. Cloudflare ships no Windows arm64 build; the amd64
-// one runs there under emulation.
+// assets are the release file for each platform and the sha256 of the
+// cloudflared binary in it: GitHub states it for a bare binary, and for a
+// .tgz it is the sum of the file in it. Cloudflare ships no Windows arm64
+// build; the amd64 one runs there under emulation.
 var assets = map[string][2]string{
 	"linux/amd64":   {"cloudflared-linux-amd64", "77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2"},
 	"linux/arm64":   {"cloudflared-linux-arm64", "aaeb2d7d0da3614634c7e03ab13487a1522c2e79165ed2929cfe23d5e95b326d"},
-	"darwin/amd64":  {"cloudflared-darwin-amd64.tgz", "d1155d0837487f261183b15c1eab6c4ebcad9dc49b94675f1524c3564cea3977"},
-	"darwin/arm64":  {"cloudflared-darwin-arm64.tgz", "587c2cfb1c230fe36c7fa7727da78be459dae028cabe8c001291999350f07095"},
+	"darwin/amd64":  {"cloudflared-darwin-amd64.tgz", "ab588b3b4db9cdb4476c30a3db2a72635b1d8327d44741fee6799a0f37b0ec07"},
+	"darwin/arm64":  {"cloudflared-darwin-arm64.tgz", "5472c1a01c84bc31b3021056a73b4e5774ddddefc572124ea8fdf6c340639f32"},
 	"windows/amd64": {"cloudflared-windows-amd64.exe", "f096265ec2fcbe9bb6e2d64268db167ced3fcbb83d894bdb9e2fcdb26f2ea7e2"},
 	"windows/arm64": {"cloudflared-windows-amd64.exe", "f096265ec2fcbe9bb6e2d64268db167ced3fcbb83d894bdb9e2fcdb26f2ea7e2"},
 }
@@ -227,8 +228,8 @@ func quick(file string) (credentials, bool, error) {
 	return c, true, os.WriteFile(file, b, 0o600)
 }
 
-// fetch is the path of this platform's cloudflared in dir, downloaded and
-// checked against its sum the first time.
+// fetch is the path of this platform's cloudflared in dir, checked against
+// its sum at every start, and downloaded when it is missing or differs.
 func fetch(dir string) (string, error) {
 	a, ok := assets[runtime.GOOS+"/"+runtime.GOARCH]
 	if !ok {
@@ -238,8 +239,11 @@ func fetch(dir string) (string, error) {
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
-	if _, err := os.Stat(bin); err == nil {
-		return bin, nil
+	if b, err := os.ReadFile(bin); err == nil {
+		if sum(b) == a[1] {
+			return bin, nil
+		}
+		log.Printf("tunnel: %s does not match its sha256", bin)
 	}
 	url := releases + version + "/" + a[0]
 	log.Printf("tunnel: downloading %s", url)
@@ -252,13 +256,13 @@ func fetch(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if sum := sha256.Sum256(b); hex.EncodeToString(sum[:]) != a[1] {
-		return "", fmt.Errorf("%s: %s, sha256 %x, not %s", url, resp.Status, sum, a[1])
-	}
 	if strings.HasSuffix(a[0], ".tgz") {
 		if b, err = untar(b); err != nil {
-			return "", err
+			return "", fmt.Errorf("%s: %s: %w", url, resp.Status, err)
 		}
+	}
+	if s := sum(b); s != a[1] {
+		return "", fmt.Errorf("%s: %s, cloudflared sha256 %s, not %s", url, resp.Status, s, a[1])
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -267,6 +271,11 @@ func fetch(dir string) (string, error) {
 		return "", err
 	}
 	return bin, os.Rename(bin+".new", bin)
+}
+
+func sum(b []byte) string {
+	s := sha256.Sum256(b)
+	return hex.EncodeToString(s[:])
 }
 
 // untar is the cloudflared file in a gzipped tar.

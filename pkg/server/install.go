@@ -40,10 +40,10 @@ var envProviders = map[string]Provider{
 	"bedrock":   {Key: "$AWS_BEARER_TOKEN_BEDROCK", Region: "$AWS_REGION"},
 }
 
-// Default is the config install writes when given none: the tunnel carries
-// workers and connectors to port 8080 on loopback, and every provider whose
-// key is set in this environment serves. With none set, keys go in the
-// config after install.
+// Default is the config install writes when given none and none is
+// installed: the tunnel carries workers and connectors to port 8080 on
+// loopback, and every provider whose key is set in this environment serves.
+// With none set, keys go in the config after install.
 func Default() Config {
 	c := Config{HTTP: "127.0.0.1:8080", Providers: map[string]Provider{}}
 	for name, p := range envProviders {
@@ -71,20 +71,27 @@ func (c *Config) Expand() error {
 }
 
 // Install makes this machine run the harness at every boot, from a copy of an
-// expanded c at Conf, makes it the worker admin while the tunnel starts, and
+// expanded c at Conf, or with keep from the config already there, as it is,
+// which c becomes, makes it the worker admin while the tunnel starts, and
 // returns the harness's URL once it answers there. Dir is root's and the
-// operator's alone: the copy holds the keys, and admin runs code as the
+// operator's alone: the config holds the keys, and admin runs code as the
 // operator so that it may read and edit them.
-func Install(c Config) (string, error) {
-	b, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return "", err
-	}
+func Install(c *Config, keep bool) (string, error) {
 	if err := prepare(); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(Conf, b, 0o600); err != nil {
-		return "", err
+	if _, err := os.Stat(Conf); keep && err == nil {
+		if *c, err = Load(Conf); err != nil {
+			return "", err
+		}
+	} else {
+		b, err := json.MarshalIndent(c, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(Conf, b, 0o600); err != nil {
+			return "", err
+		}
 	}
 	// admin's secret is in no token anyone sees, and new at each install.
 	secret := rand.Text()

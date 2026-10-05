@@ -29,7 +29,9 @@ domain, a name like `https://four-random-words.trycloudflare.com`.
 ## The config
 
 `mainplane-server install` writes the config (`/var/lib/mainplane-server/config.json`
-on Linux) with the provider keys set in the shell, or none. Add keys there:
+on Linux) with the provider keys set in the shell, or none. Installing again
+keeps the config there as it is; `mainplane-server install <config.json>`
+replaces it. Add keys there:
 
 ```
 "providers": {"anthropic": {"key": "sk-ant-..."}}
@@ -39,8 +41,9 @@ The harness applies providers, links and drives within seconds of a save; any ot
 change applies at its next start.
 
 The install also makes the machine a worker named `admin`, which runs code as
-you, the user who installed. The config's directory is yours and root's (on
-Windows, yours, SYSTEM's and Administrators'), so `admin`, and you without
+you, the user who installed (root, from a root shell with no sudo). The
+config's directory is yours and root's (on Windows, yours, SYSTEM's and
+Administrators'), so `admin`, and you without
 sudo, read and edit the config and keys. On Linux and macOS the harness runs
 as you. Sessions are in `sessions/` in that directory. `mainplane-server
 uninstall` removes `admin` with the harness.
@@ -99,6 +102,10 @@ Nothing listens on that port outside the mesh.
   `mainplane uninstall` on it, then install again. `mainplane-server join
   revoke` refuses new joins with that secret, and leaves the workers that
   joined with it.
+- `mainplane uninstall` logs the worker out of its harness, so the machine
+  installed again joins under its own name. A worker uninstalled while its
+  harness was out of reach stays registered, and the machine joins again as
+  `<name>-2`: `mainplane worker remove <name>` before the install avoids it.
 - Paths: two workers talk direct, UDP to UDP, when their NATs let them. This
   is usual on one LAN and common across the internet. When they cannot, their
   traffic goes through the relay in the harness, through the tunnel: it works,

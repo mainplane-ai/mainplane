@@ -3,6 +3,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -64,16 +65,12 @@ func prepare() error {
 	})
 }
 
-// operator is the user who ran sudo. The harness runs as them, since it needs
-// no root, and Dir is theirs: so every file the harness makes is theirs too,
-// and admin, whose code runs as them, reads and edits the config and keys
-// without sudo.
+// operator is the user who ran sudo, or root in a root shell with no sudo.
+// The harness runs as them, since it needs no root, and Dir is theirs: so
+// every file the harness makes is theirs too, and admin, whose code runs as
+// them, reads and edits the config and keys without sudo.
 func operator() (*user.User, error) {
-	name := os.Getenv("SUDO_USER")
-	if name == "" {
-		return nil, errors.New("install needs sudo: the harness and its admin worker run as you")
-	}
-	return user.Lookup(name)
+	return user.Lookup(cmp.Or(os.Getenv("SUDO_USER"), "root"))
 }
 
 // own gives path and all in it to u. The harness is stopped, so it writes

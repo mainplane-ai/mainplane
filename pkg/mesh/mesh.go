@@ -24,6 +24,7 @@ import (
 	_ "tailscale.com/feature/condregister/portmapper" // UPnP and NAT-PMP make direct paths likelier, as in tailscaled
 	"tailscale.com/health"
 	"tailscale.com/ipn"
+	"tailscale.com/ipn/ipnauth"
 	"tailscale.com/ipn/ipnlocal"
 	"tailscale.com/ipn/store"
 	"tailscale.com/net/tsdial"
@@ -50,6 +51,10 @@ const (
 	check         = 20 * time.Second
 	lookupWait    = 5 * time.Second
 	maxLookupWait = time.Minute
+
+	// A logout is one request to the harness. One that is down does not
+	// answer in this long, and the stop it is part of goes on without it.
+	logoutWait = 5 * time.Second
 )
 
 // Prefix holds every node's address, prefix::N. It is one random ULA /48, so
@@ -200,6 +205,17 @@ func (m *Mesh) Close() error {
 	m.unwatch()
 	<-m.watched
 	return m.leave()
+}
+
+// Logout deletes this node from the harness's registry, so the name is free
+// for the next node from this machine, which has new keys. It stops
+// following the harness first, which would register the node again; Close
+// follows.
+func (m *Mesh) Logout() error {
+	m.unwatch()
+	ctx, cancel := context.WithTimeout(context.Background(), logoutWait)
+	defer cancel()
+	return m.lb.Logout(ctx, ipnauth.Self)
 }
 
 // leave shuts the node down, once, and removes the hosts block.

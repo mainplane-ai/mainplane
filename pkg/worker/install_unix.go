@@ -3,6 +3,7 @@
 package worker
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -43,12 +44,13 @@ func Installed() (token string, op *user.User, err error) {
 }
 
 // setup is the install both service managers share. The operator is the user
-// who ran sudo. The binary goes to Bin, the token and the operator's name to
-// the state directory, and the operator's scratch is theirs. A token an older
-// install left in scratch is removed.
+// who ran sudo, or root in a root shell with no sudo. The binary goes to Bin,
+// the token and the operator's name to the state directory, and the
+// operator's scratch is theirs. A token an older install left in scratch is
+// removed.
 func setup(token string) error {
-	name := os.Getenv("SUDO_USER")
-	if os.Geteuid() != 0 || name == "" {
+	name := cmp.Or(os.Getenv("SUDO_USER"), "root")
+	if os.Geteuid() != 0 {
 		return errors.New("install needs sudo: the service is root's, code runs as you")
 	}
 	u, err := user.Lookup(name)
@@ -82,7 +84,7 @@ func setup(token string) error {
 // leaves the note out.
 func done() {
 	fmt.Print(version.Installed())
-	name := os.Getenv("SUDO_USER")
+	name := cmp.Or(os.Getenv("SUDO_USER"), "root")
 	u, err := user.Lookup(name)
 	if err != nil {
 		return
@@ -105,6 +107,8 @@ func Uninstall() error {
 	// NFS mount's end tells its server, and waits for one it cannot reach.
 	// Once more after the stop, for one a last reconcile made.
 	derr := dropDrives(nil)
+	// so the worker logs out as it stops: see leave
+	_ = os.Remove(filepath.Join(stateDir, "join"))
 	if err := unregister(); err != nil {
 		return err
 	}

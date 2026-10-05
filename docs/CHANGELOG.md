@@ -8,8 +8,11 @@ The harness install also makes its machine a worker, `admin`, and the harness's 
 
 - `mainplane-server install` makes the machine a worker named `admin` while the tunnel starts, from the CLI the install line puts on PATH. It joins with a join secret named `admin` that no token shows, new at each install. `admin` is reserved like `harness`: a machine named admin joins as `admin-2`, and `mainplane-server join new admin` is refused
 - The harness's directory belongs to the user who installs: on Linux and macOS the harness runs as them, not root, and on Windows they are on its access list beside SYSTEM and Administrators. `admin`, whose code runs as them, and they without sudo, read and edit the config and keys
-- Linux and macOS: the harness install needs sudo from your own user, not a root shell
+- Linux and macOS: the operator, the user the harness and `admin` run code as, is the user who ran sudo, or root in a root shell with no sudo, as on a fresh VPS. `install.sh` needs no sudo when run as root
+- `mainplane-server install` with no config keeps an installed `config.json` exactly as it is; `mainplane-server install <config.json>` replaces it
 - `mainplane-server uninstall` removes `admin`, and the CLI with it, with the harness
+- `mainplane uninstall` logs the worker out of its harness as the worker stops, so the machine installed again joins under its own name, not `<name>-2`
+- The harness checks cloudflared against its pinned sha256 at every start, not only at download, and downloads it again when it differs
 - The worker install no longer warns that a worker on the harness's machine can read the harness secrets
 - A session's `run` on `harness` says it is not a worker, and that the worker on the harness's machine is `admin`
 - Drives: `"drives": {"proj": {"server": "linuxbox", "workers": ["admin", "laptop"]}, "sessions": {"workers": ["judge-1"]}}` in the harness config, applied within seconds of a save. A drive's server is a Linux worker, Debian or Ubuntu; `"*"` is every persistent worker, and an ephemeral one is named. `sessions` is the harness's `sessions/`, served by `admin` on a Linux harness, read-only, named workers only. A drive that cannot be served is an error in the harness log
