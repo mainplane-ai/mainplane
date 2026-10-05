@@ -38,7 +38,7 @@ if ($Token) {
 if (($env:Path -split ';') -notcontains $bin) { $env:Path += ";$bin" }
 if ($Token -eq 'server') {
   # install places mainplane-server in Program Files, runs it as a service, makes this machine the
-  # worker admin with the mainplane beside it, which places that in $bin, and logs it in
+  # worker admin with the mainplane beside it, which places that in $bin, and logs that in
   $s = Fetch mainplane-server
   & $s install
   if ($LASTEXITCODE) { exit $LASTEXITCODE }

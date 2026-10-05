@@ -39,9 +39,8 @@ get mainplane
 if [ "${1:-}" = server ]; then
   get mainplane-server
   # install places mainplane-server, runs it as a service, makes this machine the worker admin with the
-  # mainplane beside it, which places that in /usr/local/bin, and logs it in, which it finds on PATH; a
-  # shell without a profile, as over ssh, may not have /usr/local/bin there
-  PATH=/usr/local/bin:$PATH ./mainplane-server install
+  # mainplane beside it, which places that in /usr/local/bin, and logs it in
+  ./mainplane-server install
 elif [ $# -eq 1 ]; then
   ./mainplane install "$1"
 else
