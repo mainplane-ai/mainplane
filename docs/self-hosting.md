@@ -50,7 +50,7 @@ uninstall` removes `admin` with the harness.
 
 Every install prints a new join token and a new api key, both named `default`,
 in the lines that use them on any machine. The CLI on the harness's machine
-logs in with that key. The default keys from earlier installs keep working, so
+logs in with that key, except after an install from a config file. The default keys from earlier installs keep working, so
 a reinstall logs no connector out; `mainplane-server key revoke default`
 revokes them all. The default join token before it joins no more.
 
