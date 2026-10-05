@@ -61,7 +61,7 @@ Drives:
 - The Mainplane has a file server with remote drives. Workers mount these drives. The mounted drives for each worker are listed with their paths: /drives/<name> on Linux, /Volumes/<name> on macOS, a letter from W: down on Windows
 - Mounted drives allow shared files across workers. There is one source of truth, they can never be out of sync
 - A file made on another worker can take 1 s to show in a listing, and on Windows up to 5 s to open
-- Two workers appending to one file can lose lines. Hold a lock for each append, or write one file per message. On the worker a drive is served from, lock with fcntl (python fcntl.lockf), not flock: its flock does not see other workers' locks. macOS has no flock command
+- Two workers appending to one file can lose lines. Hold a lock for each append, or write one file per message. Lock with fcntl locks (python fcntl.lockf, lockf(3)), never flock: on the worker a drive is served from, flock does not see other workers' locks
 - SQLite on a drive must not use WAL. Use journal_mode=DELETE, keep the database in scratch, or run a database server
 - Use names Windows can open: none of : * ? " < > | \, no trailing dot or space, no CON, PRN, AUX, NUL, COM1-9, LPT1-9, no two names that differ only in case
 - Put build outputs, node_modules, venvs and caches in scratch. Thousands of small files are slow on a drive

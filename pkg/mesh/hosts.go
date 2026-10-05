@@ -19,7 +19,7 @@ const (
 	begin = "# mainplane begin"
 	end   = "# mainplane end"
 	// Every long name is one label under it: one wildcard covers them all.
-	domain = "mainplane.net"
+	Domain = "mainplane.net"
 	// A rename Windows refuses for a moment is tried again for up to a
 	// second; Tailscale's own hosts writer retries for the same reason.
 	renameTries = 20
@@ -39,7 +39,7 @@ func hostsPath() string {
 }
 
 // Long is the long name of the node name in project.
-func Long(name, project string) string { return name + "--" + project + "." + domain }
+func Long(name, project string) string { return name + "--" + project + "." + Domain }
 
 // block is a line for every node in nm, this one too: its address, its
 // name, and its long name.

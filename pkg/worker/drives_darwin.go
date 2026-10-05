@@ -72,10 +72,11 @@ func reconcile(want Desired, _ *user.User) []Drive {
 
 // mount puts drive m at p over NFS from its server. src is what is mounted
 // at p now, empty for nothing. A server that does not answer is waited for,
-// never worked around.
+// never worked around. By the server's name, not its address: Finder names
+// the server by what comes before the first colon.
 func mount(m Mount, p, src string) Drive {
 	d := Drive{Name: m.Name, Path: p}
-	nfs := fmt.Sprintf("[%s]:%s", m.Addr, exportPath(m.Name))
+	nfs := m.Host + ":" + exportPath(m.Name)
 	switch {
 	case src == nfs && !reach(m.Addr):
 		d.State, d.Error = Waiting, "server unreachable, the mount waits for it"
@@ -126,12 +127,10 @@ func reach(a netip.Addr) bool {
 }
 
 // ours is whether src, mounted at p, is a drive this worker mounted: NFS
-// from a mesh address and a drive server's path for that name. Anything
+// from a mesh long name and a drive server's path for that name. Anything
 // else under /Volumes is the machine's.
 func ours(p, src string) bool {
-	host, ok := strings.CutSuffix(src, ":"+exportPath(filepath.Base(p)))
-	a, err := netip.ParseAddr(strings.Trim(host, "[]"))
-	return ok && err == nil && mesh.Prefix.Contains(a)
+	return strings.HasSuffix(src, "."+mesh.Domain+":"+exportPath(filepath.Base(p)))
 }
 
 // mountpoints is every mount directly under mountsDir and its source, from

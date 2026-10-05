@@ -198,26 +198,27 @@ touch /drives/sessions/e2e 2>&1 | grep -q 'Read-only file system' && echo refuse
 	ping      = map[string]string{"linux": "ping -6 -c 3 -W 2 %s", "darwin": "ping6 -c 3 %s", "windows": "ping -6 -n 3 -w 2000 %s"}
 	status    = map[bool]string{false: "/usr/local/bin/mainplane status", true: `& "$env:ProgramFiles\mainplane\mainplane.exe" status`}
 	hostsPath = map[bool]string{false: "/etc/hosts", true: `C:\Windows\System32\drivers\etc\hosts`}
-	// Run by a worker on a drive, as its operator. A macOS flock over NFS is
-	// a lock on the server, as is a Windows byte-range lock through Samba's
-	// posix locking, so each refuses the other. A holder makes <file>.held
+	// Run by a worker on a drive, as its operator. A macOS fcntl lock over
+	// NFS is a lock on the server, as is a Windows byte-range lock through
+	// Samba's posix locking, so each refuses the other. qqlss is macOS's
+	// struct flock: start, len, pid, type, whence. A holder makes <file>.held
 	// once it has the lock and holds it 20s, past driveLag, so the other
 	// worker sees that file in time to try.
 	put      = map[bool]string{false: `printf %%s '%[2]s' > '%[1]s'`, true: `[IO.File]::WriteAllText('%[1]s', '%[2]s')`}
 	cat      = map[bool]string{false: `cat '%s'`, true: `[IO.File]::ReadAllText('%s')`}
 	exists   = map[bool]string{false: `test -e '%s' && echo yes`, true: `if (Test-Path '%s') { 'yes' }`}
 	lockHold = map[string]string{
-		"darwin":  `perl -MFcntl=:flock -e 'open(F, ">>", $ARGV[0]) or die $!; flock(F, LOCK_EX) or die $!; open(M, ">", "$ARGV[0].held") or die $!; close(M); sleep 20' '%s'`,
+		"darwin":  `perl -MFcntl -e 'open(F, ">>", $ARGV[0]) or die $!; my $l = pack("qqlss", 0, 0, 0, F_WRLCK, 0); fcntl(F, F_SETLKW, $l) or die $!; open(M, ">", "$ARGV[0].held") or die $!; close(M); sleep 20' '%s'`,
 		"windows": `$f = [IO.File]::Open('%[1]s', 'OpenOrCreate', 'ReadWrite', 'ReadWrite'); $f.Lock(0, 1); [IO.File]::WriteAllText('%[1]s.held', ''); Start-Sleep 20; $f.Close()`,
 	}
 	lockTry = map[string]string{
-		"darwin":  `perl -MFcntl=:flock -e 'open(F, ">>", $ARGV[0]) or die $!; print flock(F, LOCK_EX | LOCK_NB) ? "locked" : $!{EWOULDBLOCK} ? "refused" : "error: $!"' '%s'`,
+		"darwin":  `perl -MFcntl -e 'open(F, ">>", $ARGV[0]) or die $!; my $l = pack("qqlss", 0, 0, 0, F_WRLCK, 0); print fcntl(F, F_SETLK, $l) ? "locked" : $!{EAGAIN} ? "refused" : "error: $!"' '%s'`,
 		"windows": `$f = [IO.File]::Open('%s', 'OpenOrCreate', 'ReadWrite', 'ReadWrite'); try { $f.Lock(0, 1); 'locked' } catch [IO.IOException] { 'refused' } finally { $f.Close() }`,
 	}
 	// unmounted prints what is left of a drive on a client, from the
 	// operator's session.
 	unmounted = map[string]string{
-		"darwin":  `mount | grep fd7c`,
+		"darwin":  `mount | grep mainplane.net`,
 		"windows": `net use | Select-String mainplane.net; cmdkey /list | Select-String mainplane.net`,
 	}
 	// unserved prints what is left of serving on a server that serves nothing.

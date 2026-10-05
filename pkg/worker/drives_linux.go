@@ -3,6 +3,7 @@ package worker
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -186,6 +187,9 @@ func serve(es []Export, op *user.User) []Drive {
 		if err == nil {
 			err = smbServer(shares, users, op)
 		}
+		if err == nil {
+			err = smbClose(es)
+		}
 		if err != nil {
 			for i := range have {
 				have[i].State, have[i].Error = Failed, err.Error()
@@ -254,6 +258,44 @@ func smbServer(shares string, users map[string]string, op *user.User) error {
 		return run("systemctl", "start", smbService)
 	}
 	return nil
+}
+
+// smbClose ends at once each client's connection to a share it may no
+// longer use: smbd checks valid users only when a client connects to a
+// share, and Windows keeps that connection while the mapping lasts. A
+// client is known by its mesh address.
+func smbClose(es []Export) error {
+	ok := map[string]bool{}
+	for _, e := range es {
+		for _, c := range e.Clients {
+			if c.SMB != nil {
+				ok[e.Name+" "+c.Addr.String()] = true
+			}
+		}
+	}
+	out, err := exec.Command("smbstatus", "--configfile="+smbConf, "--shares", "--json").Output()
+	if err != nil {
+		return fmt.Errorf("smbstatus: %w", err)
+	}
+	var st struct {
+		Tcons map[string]struct {
+			Service  string `json:"service"`
+			Machine  string `json:"machine"`
+			ServerID struct {
+				Pid string `json:"pid"`
+			} `json:"server_id"`
+		} `json:"tcons"`
+	}
+	if err := json.Unmarshal(out, &st); err != nil {
+		return fmt.Errorf("smbstatus: %w", err)
+	}
+	var errs []error
+	for _, t := range st.Tcons {
+		if !ok[t.Service+" "+t.Machine] {
+			errs = append(errs, run("smbcontrol", "--configfile="+smbConf, t.ServerID.Pid, "close-share", t.Service))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // smbUsers makes users, by name, our smbd's, with their passwords, each a
