@@ -67,6 +67,7 @@ type Mesh struct {
 	health  *health.Tracker
 	unwatch context.CancelFunc
 	watched chan struct{}
+	follows chan struct{}
 	left    sync.Once
 	err     error // leaving's
 	removed chan struct{}
@@ -136,7 +137,7 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 	lb.SetVarRoot(dir)
 	log.Printf("mesh: %s up, port %d", tun, port)
 	ctx, unwatch := context.WithCancel(context.Background())
-	m := &Mesh{lb: lb, health: sys.HealthTracker.Get(), unwatch: unwatch, watched: make(chan struct{}), removed: make(chan struct{}), harness: harness}
+	m := &Mesh{lb: lb, health: sys.HealthTracker.Get(), unwatch: unwatch, watched: make(chan struct{}), follows: make(chan struct{}), removed: make(chan struct{}), harness: harness}
 	go func() {
 		defer close(m.watched)
 		// Any change may be to a name: the block is made again from the
@@ -161,7 +162,10 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 			close(m.removed)
 		}
 	}()
-	go follow(ctx, lb, m.health, harness, secret, name)
+	go func() {
+		defer close(m.follows)
+		follow(ctx, lb, m.health, harness, secret, name)
+	}()
 	// A second worker on the machine finds the socket taken and goes without.
 	if m.sock, err = safesocket.Listen(socket); err != nil {
 		log.Printf("mesh: status socket: %v", err)
@@ -208,11 +212,11 @@ func (m *Mesh) Close() error {
 }
 
 // Logout deletes this node from the harness's registry, so the name is free
-// for the next node from this machine, which has new keys. It stops
-// following the harness first, which would register the node again; Close
-// follows.
+// for the next node from this machine, which has new keys. It waits for
+// follow to end first, which would register the node again; Close follows.
 func (m *Mesh) Logout() error {
 	m.unwatch()
+	<-m.follows
 	ctx, cancel := context.WithTimeout(context.Background(), logoutWait)
 	defer cancel()
 	return m.lb.Logout(ctx, ipnauth.Self)
@@ -294,7 +298,12 @@ func run(name string, args ...string) error {
 func follow(ctx context.Context, lb *ipnlocal.LocalBackend, h *health.Tracker, harness, secret, name string) {
 	var url string
 	var wait, backoff time.Duration
-	for ; ctx.Err() == nil; time.Sleep(wait) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
 		wait = check
 		if h.GetInPollNetMap() {
 			continue

@@ -103,9 +103,10 @@ Nothing listens on that port outside the mesh.
   revoke` refuses new joins with that secret, and leaves the workers that
   joined with it.
 - `mainplane uninstall` logs the worker out of its harness, so the machine
-  installed again joins under its own name. A worker uninstalled while its
-  harness was out of reach stays registered, and the machine joins again as
-  `<name>-2`: `mainplane worker remove <name>` before the install avoids it.
+  installed again joins under its own name. A worker that could not log out,
+  because its harness was out of reach or the worker was not running, stays
+  registered, and the machine joins again as `<name>-2`:
+  `mainplane worker remove <name>` before the install avoids it.
 - Paths: two workers talk direct, UDP to UDP, when their NATs let them. This
   is usual on one LAN and common across the internet. When they cannot, their
   traffic goes through the relay in the harness, through the tunnel: it works,

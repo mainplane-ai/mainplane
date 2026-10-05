@@ -108,7 +108,9 @@ func Uninstall() error {
 	// Once more after the stop, for one a last reconcile made.
 	derr := dropDrives(nil)
 	// so the worker logs out as it stops: see leave
-	_ = os.Remove(filepath.Join(stateDir, "join"))
+	if err := os.Remove(filepath.Join(stateDir, "join")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	if err := unregister(); err != nil {
 		return err
 	}
