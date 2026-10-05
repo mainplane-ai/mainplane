@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -250,17 +251,22 @@ func Harness(ctx context.Context, path string) error {
 	return nil
 }
 
+// keyMu keeps two keys set at once from writing over each other.
+var keyMu sync.Mutex
+
 // setKey makes the body the key of provider name in the config at path,
 // beside the provider's other fields, which the watch then applies.
 func setKey(path, name string, body io.Reader) error {
-	b, err := io.ReadAll(io.LimitReader(body, maxKey))
+	b, err := io.ReadAll(io.LimitReader(body, maxKey+1))
 	if err != nil {
 		return err
 	}
 	key := strings.TrimSpace(string(b))
-	if key == "" {
-		return errors.New("no key")
+	if key == "" || len(b) > maxKey {
+		return fmt.Errorf("a key is one line of 1 to %d bytes", maxKey)
 	}
+	keyMu.Lock()
+	defer keyMu.Unlock()
 	c, err := Load(path)
 	if err != nil {
 		return err
