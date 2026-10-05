@@ -41,10 +41,13 @@ var lettersFile = filepath.Join(stateDir, "drives.json")
 // status before them is in the OS's language.
 var netUseLine = regexp.MustCompile(`(?m)\s([A-Z]:)\s+(\\\\\S+)`)
 
-// mapped is a drive this worker mapped: its letter and its server's long name.
+// mapped is a drive this worker maps: its letter, its server's long name,
+// and whether it was ever mapped. Until then, a map that fails waits: the
+// harness tells the server and this worker at once.
 type mapped struct {
 	Letter string `json:"letter"`
 	Host   string `json:"host"`
+	Mapped bool   `json:"mapped"`
 }
 
 // reconcile maps what want says in the operator's logon session, where
@@ -108,11 +111,10 @@ func mount(m Mount, ours map[string]mapped, at map[string]string, op *user.User)
 		ok = false
 	}
 	if !ok {
-		if o.Letter = free(ours, at); o.Letter == "" {
+		if o = (mapped{Letter: free(ours, at), Host: m.Host}); o.Letter == "" {
 			d.Error = fmt.Sprintf("no free drive letter from %c: to %c:", firstLetter, lastLetter)
 			return d
 		}
-		o.Host = m.Host
 		ours[m.Name] = o
 	}
 	d.Path = o.Letter + `\`
@@ -143,13 +145,17 @@ func mount(m Mount, ours map[string]mapped, at map[string]string, op *user.User)
 			d.Error = lerr.Error()
 		case strings.EqualFold(now[o.Letter], remote):
 			d.State = Mounted
-		case err != nil && !ok: // the harness tells the server and this worker at once
+		case err != nil && !o.Mapped:
 			d.State, d.Error = Waiting, "its server may not share it with this worker yet: "+err.Error()
 		case err != nil:
 			d.Error = err.Error()
 		default:
 			d.Error = fmt.Sprintf("%s is not mapped to %s", o.Letter, remote)
 		}
+	}
+	if d.State == Mounted && !o.Mapped {
+		o.Mapped = true
+		ours[m.Name] = o
 	}
 	return d
 }

@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/mainplane-ai/mainplane/pkg/mesh"
 )
 
 // A macOS worker mounts each drive over NFS at /Volumes/<name>, where Finder
@@ -125,9 +127,11 @@ func reach(a netip.Addr) bool {
 }
 
 // ours is whether src, mounted at p, is a drive this worker mounted: NFS
-// from a drive server's path for that name. Anything else under /Volumes is
-// the machine's.
-func ours(p, src string) bool { return strings.HasSuffix(src, ":"+exportPath(filepath.Base(p))) }
+// from a mesh long name and a drive server's path for that name. Anything
+// else under /Volumes is the machine's.
+func ours(p, src string) bool {
+	return strings.HasSuffix(src, "."+mesh.Domain+":"+exportPath(filepath.Base(p)))
+}
 
 // mountpoints is every mount directly under mountsDir and its source, from
 // the kernel's table without asking any file system: a stat of a mount
