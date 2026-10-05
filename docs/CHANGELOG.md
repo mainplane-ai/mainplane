@@ -11,6 +11,8 @@ The harness install also makes its machine a worker, `admin`, and the harness's 
 - Linux and macOS: the operator, the user the harness and `admin` run code as, is the user who ran sudo, or root in a root shell with no sudo, as on a fresh VPS. `install.sh` needs no sudo when run as root
 - `mainplane-server install` with no config keeps an installed `config.json` exactly as it is; `mainplane-server install <config.json>` replaces it
 - `mainplane-server uninstall` removes `admin`, and the CLI with it, with the harness
+- `mainplane-server install` prints a new api key named `default` beside the default join token, each in the `mainplane.ai/install` lines that use it on any machine, not the lines of its own version. The default keys from earlier installs stay valid until `mainplane-server key revoke default`, so a reinstall logs no connector out. The CLI on the harness's machine logs in with it, except after an install from a config file, which only prints it; no key is named after the hostname
+- Shorter output: the harness install no longer prints its URL, a quick tunnel warning or the config path, `mainplane status` no quick tunnel warning, `mainplane login` says `logged in`, and the uninstalls say only that they uninstalled
 - `mainplane uninstall` logs the worker out of its harness as the worker stops, so the machine installed again joins under its own name, not `<name>-2`
 - The harness checks cloudflared against its pinned sha256 at every start, not only at download, and downloads it again when it differs
 - The worker install no longer warns that a worker on the harness's machine can read the harness secrets

@@ -27,7 +27,6 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
 	"github.com/mainplane-ai/mainplane/pkg/release"
-	"github.com/mainplane-ai/mainplane/pkg/tunnel"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
@@ -62,7 +61,7 @@ func main() {
 		if err := worker.Uninstall(); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println("mainplane uninstalled; ~/.mainplane, the scratch folder with your login, stays")
+		fmt.Println("mainplane uninstalled")
 	case "file", "js":
 		operator(os.Args[1:])
 	case "login":
@@ -81,7 +80,7 @@ func main() {
 		if err := c.save(); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("logged in to mainplane-server at %s\n", url)
+		fmt.Println("logged in")
 	case "status":
 		status(os.Args[2:])
 	case "version":
@@ -205,9 +204,6 @@ func status(args []string) {
 		fmt.Printf("mainplane-server version: %s\nmainplane-server url: %s\n", v, c.URL)
 		if c.mesh != "" {
 			fmt.Printf("mainplane-server on the mesh: %s\n", c.mesh)
-		}
-		if tunnel.QuickURL(c.URL) {
-			fmt.Println(tunnel.QuickWarning)
 		}
 		fmt.Println()
 	} else if !errors.Is(err, fs.ErrNotExist) {

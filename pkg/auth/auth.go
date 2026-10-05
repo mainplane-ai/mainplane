@@ -101,6 +101,16 @@ func (s Store) Set(kind, name, secret string) error {
 	return s.save(t)
 }
 
+// Add makes secret an entry of kind named name, beside any before it.
+func (s Store) Add(kind, name, secret string) error {
+	t, err := s.Load()
+	if err != nil {
+		return err
+	}
+	t[kind] = append(t[kind], Entry{Name: name, Hash: Hash(secret)})
+	return s.save(t)
+}
+
 func (s Store) Revoke(kind, name string) error {
 	t, err := s.Load()
 	if err != nil {
