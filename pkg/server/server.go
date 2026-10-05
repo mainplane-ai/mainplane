@@ -188,6 +188,8 @@ func Harness(ctx context.Context, path string) error {
 	routes := http.NewServeMux()
 	routes.Handle("/", harness.Handler(ctx, h))
 	routes.HandleFunc("PUT /providers/{name}", func(w http.ResponseWriter, r *http.Request) {
+		keyMu.Lock()
+		defer keyMu.Unlock()
 		ps, err := setKey(path, r.PathValue("name"), r.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -253,12 +255,13 @@ func Harness(ctx context.Context, path string) error {
 	return nil
 }
 
-// keyMu keeps two keys set at once from writing over each other.
+// keyMu keeps two keys set at once from writing over each other, in the
+// config and in the providers served.
 var keyMu sync.Mutex
 
 // setKey makes the body the key of provider name in the config at path,
 // beside the provider's other fields, and returns the providers it makes.
-// The caller serves them at once: the README runs mainplane new right after
+// The caller holds keyMu and serves them at once: the README runs mainplane new right after
 // mainplane key, sooner than the watch rereads.
 func setKey(path, name string, body io.Reader) (map[string]provider.Provider, error) {
 	b, err := io.ReadAll(io.LimitReader(body, maxKey+1))
@@ -269,8 +272,6 @@ func setKey(path, name string, body io.Reader) (map[string]provider.Provider, er
 	if key == "" || len(b) > maxKey || strings.ContainsAny(key, "\r\n") {
 		return nil, fmt.Errorf("a key is one line of 1 to %d bytes", maxKey)
 	}
-	keyMu.Lock()
-	defer keyMu.Unlock()
 	c, err := Load(path)
 	if err != nil {
 		return nil, err
