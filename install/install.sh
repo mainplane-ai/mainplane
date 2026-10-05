@@ -1,18 +1,17 @@
 #!/bin/sh
-# Installs the mainplane CLI; with a join token it also makes this Linux or macOS machine a worker.
-# With server it makes this machine the harness instead, from the provider keys set in this shell, and
-# logs the CLI in to it. Run it without sudo so those keys reach it; it asks for sudo itself. In a root
-# shell with no sudo, both run as root, and code runs as root. The release stamps its version.
-#   curl -fsSL https://dl.mainplane.ai/@VERSION@/install.sh | sh -s -- [join token]
-#   curl -fsSL https://dl.mainplane.ai/@VERSION@/install.sh | sh -s -- server
+# Installs the mainplane CLI, unless this machine has one; with an api key it logs this user's CLI in.
+# With a join token it makes this Linux or macOS machine a worker. With server it makes this machine
+# the harness instead, from the provider keys set in this shell, and logs the CLI in to it. Run it
+# without sudo, so the login is yours and those keys reach it; it asks for sudo itself. In a root shell
+# with no sudo, all run as root, and code runs as root. The release stamps its version.
+#   curl -fsSL https://dl.mainplane.ai/@VERSION@/install.sh | sh -s -- [api key | join token | server]
 set -eu
 v=@VERSION@
 dl=https://dl.mainplane.ai/$v
-case $# in
-0 | 1) ;;
+case $#:${1:-} in
+0: | 1:mp_key_* | 1:mp_join_* | 1:server) ;;
 *)
-  echo "usage: curl -fsSL $dl/install.sh | sh -s -- [join token]" >&2
-  echo "       curl -fsSL $dl/install.sh | sh -s -- server" >&2
+  echo "usage: curl -fsSL $dl/install.sh | sh -s -- [api key | join token | server]" >&2
   exit 2
   ;;
 esac
@@ -35,19 +34,32 @@ get() {
   chmod 755 "$1-$os-$arch"
   mv "$1-$os-$arch" "$1"
 }
-get mainplane
-if [ "${1:-}" = server ]; then
+case ${1:-} in
+server)
+  get mainplane
   get mainplane-server
   # install places mainplane-server, runs it as a service, makes this machine the worker admin with the
   # mainplane beside it, which places that in /usr/local/bin, and logs it in
   ./mainplane-server install
-elif [ $# -eq 1 ]; then
+  ;;
+mp_join_*)
+  get mainplane
   ./mainplane install "$1"
-else
-  # root, as on a fresh VPS, may have no sudo
-  sudo=sudo
-  if [ "$(id -u)" -eq 0 ]; then sudo=; fi
-  $sudo mkdir -p -m 755 /usr/local/bin
-  $sudo install -m 755 mainplane /usr/local/bin/mainplane
-  echo "mainplane $v installed"
-fi
+  ;;
+*)
+  # A CLI this machine has is used: a worker's or harness's is root's to replace.
+  b=/usr/local/bin/mainplane
+  if [ ! -e $b ]; then
+    get mainplane
+    # root, as on a fresh VPS, may have no sudo
+    sudo=sudo
+    if [ "$(id -u)" -eq 0 ]; then sudo=; fi
+    $sudo mkdir -p -m 755 /usr/local/bin
+    $sudo install -m 755 mainplane $b
+    echo "mainplane $v installed"
+  elif [ $# -eq 0 ]; then
+    echo "mainplane is installed: $b"
+  fi
+  if [ $# -eq 1 ]; then $b login "$1"; fi
+  ;;
+esac
