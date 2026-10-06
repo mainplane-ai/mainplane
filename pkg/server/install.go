@@ -133,13 +133,20 @@ func Install(c *Config, keep bool) (string, error) {
 	return reached()
 }
 
-// writeAgents writes adminAgents at path unless a file is there, which is
-// the user's to edit and stays as it is. It reports whether it wrote.
+// writeAgents writes adminAgents at path unless something is there: a file is
+// the user's to edit and stays as it is, and a link, even a dangling one, is
+// never written through, since install runs as root. It reports whether it
+// wrote.
 func writeAgents(path string) (bool, error) {
-	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if errors.Is(err, fs.ErrExist) {
+		return false, nil
+	}
+	if err != nil {
 		return false, err
 	}
-	return true, os.WriteFile(path, fmt.Appendf(nil, adminAgents, Conf, logs), 0o644)
+	_, err = fmt.Fprintf(f, adminAgents, Conf, logs)
+	return true, errors.Join(err, f.Close())
 }
 
 // admin makes this machine the worker admin of the harness with key harness,

@@ -180,7 +180,7 @@ func (h *Harness) serveWorkers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var workers []statefile.Worker
-	if err := json.NewDecoder(r.Body).Decode(&workers); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, MaxPost)).Decode(&workers); err != nil {
 		fail(w, err)
 		return
 	}
