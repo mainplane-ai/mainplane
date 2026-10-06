@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -90,21 +92,11 @@ func Load(path string) (Config, error) {
 func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
 	out := map[string]provider.Provider{}
 	for name, p := range cfg {
-		key, url, region := os.ExpandEnv(p.Key), os.ExpandEnv(p.URL), os.ExpandEnv(p.Region)
-		switch name {
-		case "anthropic":
-			out[name] = provider.Anthropic(key)
-		case "openai":
-			out[name] = provider.OpenAI(key)
-		case "openai-chat":
-			out[name] = provider.OpenAIChat(url, key)
-		case "google":
-			out[name] = provider.Gemini(key)
-		case "bedrock":
-			out[name] = provider.Bedrock(region, key)
-		default:
-			return nil, fmt.Errorf("unknown provider %q", name)
+		build, ok := provider.Supported[name]
+		if !ok {
+			return nil, fmt.Errorf("unknown provider %q; supported: %s", name, strings.Join(slices.Sorted(maps.Keys(provider.Supported)), ", "))
 		}
+		out[name] = build(os.ExpandEnv(p.Key), os.ExpandEnv(p.URL), os.ExpandEnv(p.Region))
 	}
 	return out, nil
 }
