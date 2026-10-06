@@ -166,21 +166,21 @@ func login(h handover) {
 	fatal(cmd.Run())
 }
 
-// done says the harness is installed, and how to make any machine a worker
-// of it or log its CLI in.
+// done says the harness is installed, and how to make a machine a worker of
+// it or log its CLI in.
 func done(h handover) {
-	fmt.Printf("%s\non any machine:\n%s%s", version.Installed(), installLines(auth.Join, h.Join), installLines(auth.Key, auth.Token(auth.Key, h.Harness, h.Key)))
+	fmt.Printf("%s\n%s\n%s", version.Installed(), installLines(auth.Join, h.Join), installLines(auth.Key, auth.Token(auth.Key, h.Harness, h.Key)))
 }
 
-// installLines are the lines that run the latest install script with token,
-// on Linux and macOS, then on Windows: a join token makes the machine a
-// worker, an api key logs its CLI in.
+// installLines are what token does and the lines that run the latest install
+// script with it, on Linux and macOS, then on Windows: a join token makes the
+// machine a worker, an api key logs its CLI in.
 func installLines(kind, token string) string {
 	label := "log in:"
 	if kind == auth.Join {
-		label = "connect it as a worker:"
+		label = "connect a worker:"
 	}
-	return fmt.Sprintf("  %-25scurl -fsSL %s | sh -s -- %s\n  %-25s& ([scriptblock]::Create((irm %s.ps1))) %s\n", label, script, token, "", script, token)
+	return fmt.Sprintf("%s\n  linux, macos:  curl -fsSL %s | sh -s -- %s\n  windows:       & ([scriptblock]::Create((irm %s.ps1))) %s\n", label, script, token, script, token)
 }
 
 // spinner is design/ascii/spinner.json: Braille frames and the milliseconds
