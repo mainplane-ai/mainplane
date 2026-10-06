@@ -2,54 +2,56 @@
   <img src="docs/assets/mainplane-lockup.svg" alt="Mainplane" width="480">
 </p>
 
-Mainplane is an open-source agent harness built for performance at scale. Let hundreds of agents drive the devices you actually work on, while secrets and controls stay safely isolated.
+Mainplane is an open-source agent harness built for performance at scale.
+
+- Run hundreds of durable agents with computer/browser use
+- Connect your own devices, your agents can drive them remotely
+- Secrets and controls stay safely isolated
+- Chat from anywhere, everything syncs
 
 ## Quickstart
 
 **1. Install mainplane-server** on any machine.
 
-```sh
+```shell
 # Linux, macOS
 curl -fsSL https://mainplane.ai/install | sh -s -- server
-```
-```powershell
+
 # Windows
 & ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) server
 ```
 
-It prints a join token (`mp_join_...`) and an API key (`mp_key_...`), in the lines for steps 2 and 3. The machine is also your first worker, `admin`.
+It prints commands with a join token (`mp_join_...`) and an API key (`mp_key_...`), save these.
 
 **2. Optional: connect more machines.** Your agents can use them.
 
-```sh
-# Linux, macOS
+```shell
+# Linux, macOS - use join token from step 1
 curl -fsSL https://mainplane.ai/install | sh -s -- mp_join_...
-```
-```powershell
-# Windows
+
+# Windows - use join token from step 1
 & ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) mp_join_...
 ```
 
 **3. Log in from anywhere and start a session.** A logged-in machine can message agents.
 
-```sh
-# Linux, macOS
+```shell
+# Linux, macOS - use api key from step 1
 curl -fsSL https://mainplane.ai/install | sh -s -- mp_key_...
-```
-```powershell
-# Windows
+
+# Windows - use api key from step 1
 & ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) mp_key_...
 ```
 
 Add an LLM key (`openai`, `anthropic` or `google`), then start a session on `admin`:
 
-```sh
+```shell
 mainplane key openai sk-...
 echo '{"model":"openai/gpt-6.1-sol","context_limit":200000,"workers":[{"name":"admin"}],"params":{"reasoning":{"effort":"medium","summary":"auto"}}}' | mainplane new
 mainplane chat
 ```
 
-`mainplane workers` lists the names of your workers, to add to `workers`. Each step can run again: it says when a machine is already a worker or already logged in. More in [docs/self-hosting.md](docs/self-hosting.md).
+More in [docs/self-hosting.md](docs/self-hosting.md).
 
 ## FAQ
 
