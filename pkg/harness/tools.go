@@ -43,7 +43,7 @@ Tools:
 - Connected workers are listed on session start. You will be notified if the list changes
 - The run tool uses a persistent interpreter process. One process per session and interpreter
 - One run call is bounded at 10 minutes. On timeout or crash, the next run's output begins with "environment was reset"
-- A background job inherits the interpreter's stdout. Output arrives in the next run call's result. 
+- Background work should write to a log file and be checked in a later run. A pwsh job's output stays in the job until Receive-Job
 - A run result over 50 KiB or 2000 lines keeps its tail. The full output goes to a file, and the first line names its path, which will look like: <scratch>/output/<call id>
 - A read result over the same limits keeps its head. Its last line says how many lines were cut
 - A non-zero exit code goes into the first line of the run result: "exit N"
