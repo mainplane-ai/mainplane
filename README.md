@@ -4,6 +4,10 @@
 </picture>
 <br/><br/>
 Mainplane is an open-source agent harness built for performance at scale.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/architecture-dark.svg">
+  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/architecture-light.svg" alt="The Mainplane Architecture: connectors reach Mainplane Server, which holds secrets and controls, observability and the file server; the network joins the server and every worker" width="960">
+</picture>
 <br/><br/>
 
 <a>
