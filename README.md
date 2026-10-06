@@ -2,13 +2,16 @@
   <source media="(max-width: 700px), (hover: none) and (pointer: coarse)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/hero-mobile.svg">
   <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/hero-desktop.svg" alt="Mainplane, with the biplane flying over the clouds" width="960">
 </picture>
-
+<br/><br/>
 Mainplane is an open-source agent harness built for performance at scale.
+<br/><br/>
 
-- Run hundreds of durable agents with computer/browser use
-- Connect your own devices, your agents can drive them remotely
-- Secrets and controls stay safely isolated
-- Chat from anywhere, everything syncs
+<a>
+> Run hundreds of durable agents with computer/browser use <br/>
+> Connect your own devices, your agents can drive them remotely <br/>
+> Secrets and controls stay safely isolated  <br/>
+> Chat from anywhere, everything syncs  <br/>
+</a>
 
 ## Quickstart
 
@@ -23,6 +26,7 @@ curl -fsSL https://mainplane.ai/install | sh -s -- server
 ```
 
 It prints commands with a join token (`mp_join_...`) and an API key (`mp_key_...`), save these.
+<br/><br/>
 
 **2. Optional: connect more machines.** Your agents can use them.
 
@@ -33,9 +37,10 @@ curl -fsSL https://mainplane.ai/install | sh -s -- mp_join_...
 # Windows - use join token from step 1
 & ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) mp_join_...
 ```
+<br/>
 
 **3. Log in from anywhere and start a session.** A logged-in machine can message agents.
-
+ 
 ```shell
 # Linux, macOS - use api key from step 1
 curl -fsSL https://mainplane.ai/install | sh -s -- mp_key_...
@@ -53,6 +58,7 @@ mainplane chat
 ```
 
 More in [docs/self-hosting.md](docs/self-hosting.md).
+<br/><br/>
 
 ## FAQ
 
