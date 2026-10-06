@@ -41,7 +41,7 @@ const resultLines = 20
 // number.
 var arity = map[string][2]int{
 	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {0, 1}, "retry": {1, 1}, "stop": {1, 1},
-	"info": {1, 1}, "sessions": {0, 1}, "workers": {0, 0}, "worker remove": {1, 1}, "providers": {0, 0}, "key": {2, 2},
+	"info": {1, 1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "worker remove": {1, 1}, "providers": {0, 0}, "key": {2, 2},
 }
 
 // cli is the harness API as verbs: one verb, one route, its reply printed.
@@ -95,6 +95,15 @@ func cli(verb string, args []string) {
 		for _, i := range infos {
 			fmt.Printf("%s  %-11s  %-40s  n=%-5d context=%d/%d  %s\n", i.ID, i.Status, i.Config.Model, i.N, i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime))
 		}
+	case "workers set":
+		ws := make([]statefile.Worker, 0, len(args)-1)
+		for _, name := range args[1:] {
+			ws = append(ws, statefile.Worker{Name: name})
+		}
+		b, _ := json.Marshal(ws) // names are strings: it cannot fail
+		var out struct{ N int }
+		c.call("PUT", "/sessions/"+args[0]+"/workers?via="+via, "application/json", bytes.NewReader(b), &out)
+		fmt.Println(out.N)
 	case "workers":
 		var ws []harness.Listed
 		c.call("GET", "/workers", "", nil, &ws)
@@ -358,6 +367,9 @@ func render(r statefile.Record) {
 	case statefile.Start:
 		fmt.Printf("%s  %s\n", head, r.Time.Local().Format(time.DateTime))
 	case statefile.Config:
+		if r.Via != "" {
+			head += "  via=" + r.Via
+		}
 		fmt.Printf("%s  %s\n", head, r.Body)
 	case statefile.System:
 		fmt.Printf("%s  %s | %s\n", head, r.Source, skim(r.Body))

@@ -17,6 +17,7 @@ const (
 	label     = "ai.mainplane.server"
 	plistPath = "/Library/LaunchDaemons/" + label + ".plist"
 	logPath   = "/var/log/mainplane-server.log"
+	logs      = logPath
 )
 
 const plist = `<?xml version="1.0" encoding="UTF-8"?>

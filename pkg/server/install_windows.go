@@ -49,6 +49,7 @@ var (
 	Dir     = filepath.Join(os.Getenv("ProgramData"), "mainplane-server")
 	bin     = filepath.Join(os.Getenv("ProgramFiles"), "mainplane", "mainplane-server.exe")
 	logPath = filepath.Join(Dir, "mainplane-server.log")
+	logs    = logPath
 
 	sendMessageTimeout = windows.NewLazySystemDLL("user32.dll").NewProc("SendMessageTimeoutW")
 )
@@ -149,6 +150,16 @@ func prepare() error {
 		}
 		return windows.SetNamedSecurityInfo(p, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.UNPROTECTED_DACL_SECURITY_INFORMATION, nil, nil, empty, nil)
 	})
+}
+
+// agents writes admin's AGENTS.md in the operator's scratch.
+func agents() error {
+	op, err := user.Current()
+	if err != nil {
+		return err
+	}
+	_, err = writeAgents(filepath.Join(op.HomeDir, ".mainplane", "AGENTS.md"))
+	return err
 }
 
 // start runs the harness at every boot as the service mainplane-server, which

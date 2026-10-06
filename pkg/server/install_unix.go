@@ -73,6 +73,21 @@ func operator() (*user.User, error) {
 	return user.Lookup(cmp.Or(os.Getenv("SUDO_USER"), "root"))
 }
 
+// agents writes admin's AGENTS.md in the operator's scratch, as theirs, so
+// admin edits it.
+func agents() error {
+	u, err := operator()
+	if err != nil {
+		return err
+	}
+	p := filepath.Join(u.HomeDir, ".mainplane", "AGENTS.md")
+	wrote, err := writeAgents(p)
+	if err != nil || !wrote {
+		return err
+	}
+	return own(u, p)
+}
+
 // own gives path and all in it to u. The harness is stopped, so it writes
 // nothing as root behind.
 func own(u *user.User, path string) error {

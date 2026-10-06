@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -134,6 +135,40 @@ func (h *Harness) Post(ctx context.Context, id, via, key string, parts []Part) (
 	}
 	h.Kick(ctx, id)
 	return n, nil
+}
+
+// SetWorkers appends a config record that is the newest one with these
+// workers, under the lock a post takes. Nothing else in the config changes. A
+// step running keeps the config it started with; the next step lists the new
+// workers to the model as a change.
+func (h *Harness) SetWorkers(id, via string, workers []statefile.Worker) (int, error) {
+	s := h.session(id)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	chain, err := h.Sessions.Load(id)
+	if err != nil {
+		return 0, err
+	}
+	conf, err := config(chain)
+	if err != nil {
+		return 0, err
+	}
+	conf.Workers = workers
+	if conf.Workers == nil {
+		conf.Workers = []statefile.Worker{}
+	}
+	body, err := json.Marshal(conf)
+	if err != nil {
+		return 0, err
+	}
+	f := s.f
+	if f == nil {
+		if f, err = h.Sessions.Open(id); err != nil {
+			return 0, err
+		}
+		defer func() { _ = f.Close() }()
+	}
+	return h.write(s, f, statefile.Record{Header: statefile.Header{Kind: statefile.Config, Type: "application/json", Via: via}, Body: body})
 }
 
 // Kick steps a session in the background until it is not open. A kick during

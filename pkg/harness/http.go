@@ -22,7 +22,7 @@ import (
 // person. A file goes to a worker, not into the state file.
 const MaxPost = 8 << 20
 
-// Handler is the harness's HTTP surface: seven verbs on a session, three
+// Handler is the harness's HTTP surface: eight verbs on a session, three
 // reads of the environment, and removing a worker. Records go out in the
 // state file's own bytes, one after another.
 //
@@ -39,6 +39,8 @@ const MaxPost = 8 << 20
 //	POST /sessions/{id}/retry         step from the tip, whatever it is            -> {"status"}
 //	POST /sessions/{id}/stop          ?via= required. cut the step, write it       -> 204; the records
 //	                                  down                                            say what happened
+//	PUT  /sessions/{id}/workers       [{"name"}]; ?via= required. a config record  -> {"n"}
+//	                                  with these workers; the next step sees them
 //	GET  /workers                     -> connected workers' hellos, and refused
 //	                                     ones with the reason
 //	DELETE /workers/{name}            the worker leaves the mesh for good; its     -> 204
@@ -49,18 +51,6 @@ const MaxPost = 8 << 20
 // ctx outlives every request: it is what steps run under.
 func Handler(ctx context.Context, h *Harness) http.Handler {
 	mux := http.NewServeMux()
-	fail := func(w http.ResponseWriter, err error) { http.Error(w, err.Error(), http.StatusBadRequest) }
-	reply := func(w http.ResponseWriter, v any) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(v)
-	}
-	// via is who acts. The record carries it, so no one guesses it.
-	via := func(r *http.Request) (string, error) {
-		if v := r.URL.Query().Get("via"); v != "" {
-			return v, nil
-		}
-		return "", errors.New("?via= names who is acting")
-	}
 	// handle refuses an {id} that is not one of ours before it becomes a path.
 	handle := func(pattern string, fn http.HandlerFunc) {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
@@ -163,7 +153,43 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	handle("PUT /sessions/{id}/workers", h.serveWorkers)
 	return mux
+}
+
+func fail(w http.ResponseWriter, err error) { http.Error(w, err.Error(), http.StatusBadRequest) }
+
+func reply(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// via is who acts. The record carries it, so no one guesses it.
+func via(r *http.Request) (string, error) {
+	if v := r.URL.Query().Get("via"); v != "" {
+		return v, nil
+	}
+	return "", errors.New("?via= names who is acting")
+}
+
+// serveWorkers makes a JSON list of {"name"} the session's workers.
+func (h *Harness) serveWorkers(w http.ResponseWriter, r *http.Request) {
+	via, err := via(r)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	var workers []statefile.Worker
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, MaxPost)).Decode(&workers); err != nil {
+		fail(w, err)
+		return
+	}
+	n, err := h.SetWorkers(r.PathValue("id"), via, workers)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	reply(w, map[string]int{"n": n})
 }
 
 // page filters a list by status, skips through the entry named by after, and

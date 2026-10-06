@@ -65,7 +65,7 @@ type Header struct {
 	Truncated  bool   `json:"truncated,omitempty"`   // result
 	FullOutput string `json:"full_output,omitempty"` // result: path in worker scratch
 
-	Via            string `json:"via,omitempty"`             // message: connector name. error: who stopped the session
+	Via            string `json:"via,omitempty"`             // message: connector name. error: who stopped the session. config: who changed it
 	IdempotencyKey string `json:"idempotency_key,omitempty"` // message: the poster's key; a repost with it appends nothing
 	Source         string `json:"source,omitempty"`          // system: where the text came from
 
@@ -84,8 +84,8 @@ type Record struct {
 	Note string // result: text the build renders after the body, derived from the file, never written
 }
 
-// Conf is the body of the config record, record 2, fixed for the session's
-// life. Model is one provider/model string. ContextLimit is the token limit
+// Conf is the body of the config record. Record 2 is the first; a later one
+// changes only the workers, and the newest one is the session's. Model is one provider/model string. ContextLimit is the token limit
 // past which the harness refuses to step. Input is the media types read hands
 // to the model as media; text is always text, and any other file is read as text.
 // Params are fields for the model's vendor, set on every request as its

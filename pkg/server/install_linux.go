@@ -13,6 +13,7 @@ import (
 const (
 	Dir      = worker.HarnessDir
 	unitPath = "/etc/systemd/system/mainplane-server.service"
+	logs     = "journalctl -u mainplane-server"
 )
 
 const unit = `[Unit]
