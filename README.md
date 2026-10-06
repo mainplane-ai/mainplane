@@ -1,6 +1,7 @@
-<p align="center">
-  <img src="docs/assets/mainplane-lockup.svg" alt="Mainplane" width="480">
-</p>
+<picture>
+  <source media="(max-width: 700px), (hover: none) and (pointer: coarse)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/hero-mobile.svg">
+  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/hero-desktop.svg" alt="Mainplane, with the biplane flying over the clouds" width="960">
+</picture>
 
 Mainplane is an open-source agent harness built for performance at scale.
 
