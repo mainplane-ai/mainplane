@@ -40,6 +40,10 @@ func main() {
 		cli("worker remove", os.Args[3:])
 		return
 	}
+	if len(os.Args) > 2 && os.Args[1] == "workers" {
+		cli("workers set", os.Args[2:])
+		return
+	}
 	switch os.Args[1] {
 	case "worker", "install":
 		if len(os.Args) > 3 || os.Args[1] == "install" && len(os.Args) != 3 {
@@ -282,6 +286,7 @@ func usage() {
   info       <id>                    GET  /sessions/{id}
   sessions   [status]                GET  /sessions
   workers                            GET  /workers
+  workers    <id> <name>...          PUT  /sessions/{id}/workers: the session's workers are these from its next step on
   worker     remove <name>           DELETE /workers/{name}: it leaves the mesh for good; revoke its join secret too
                                      to keep that secret from joining machines again
   providers                          GET  /providers

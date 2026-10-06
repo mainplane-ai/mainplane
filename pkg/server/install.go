@@ -32,6 +32,23 @@ const (
 // Conf is the config the installed harness runs from.
 var Conf = filepath.Join(Dir, "config.json")
 
+// adminAgents is admin's root AGENTS.md, which install writes in its scratch
+// when none is there: what only the worker on the harness's machine can do.
+// Every session with admin reads it whole. Conf, then logs.
+const adminAgents = `# Admin:
+- This worker is called admin, a reserved name for workers
+- The worker is on the machine that runs mainplane-server, the Mainplane harness
+- Because you have access to admin and are reading this, you are acting as a Mainplane admin agent
+- You have full access to the config of mainplane-server, secrets, rules, and access to all connected workers
+- You must be careful and responsible with these permissions
+- If the user wants agents without admin access, their sessions should not include the admin worker
+- The mainplane CLI here is logged in to this harness with a full API key. mainplane --help lists every verb
+- You can change this session's workers: mainplane workers <session id> <name>..., the whole list, admin included
+- Harness config: %s. Providers, links and drives apply when it is saved. It holds the provider keys: never print it whole
+- Harness logs: %s
+- Remember that the mainplane-server and worker are open source and the code can be referenced
+`
+
 // envProviders are the providers Default takes from the environment, by the
 // variables each provider's own tools read.
 var envProviders = map[string]Provider{
@@ -110,7 +127,19 @@ func Install(c *Config, keep bool) (string, error) {
 	if err := admin(pointer.Encode(k)); err != nil {
 		return "", err
 	}
+	if err := agents(); err != nil {
+		return "", err
+	}
 	return reached()
+}
+
+// writeAgents writes adminAgents at path unless a file is there, which is
+// the user's to edit and stays as it is. It reports whether it wrote.
+func writeAgents(path string) (bool, error) {
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		return false, err
+	}
+	return true, os.WriteFile(path, fmt.Appendf(nil, adminAgents, Conf, logs), 0o644)
 }
 
 // admin makes this machine the worker admin of the harness with key harness,
