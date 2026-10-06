@@ -22,6 +22,16 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
+// Supported is every provider a config may name, each built from its key,
+// url and region.
+var Supported = map[string]func(key, url, region string) Provider{
+	"anthropic":   func(key, _, _ string) Provider { return Anthropic(key) },
+	"openai":      func(key, _, _ string) Provider { return OpenAI(key) },
+	"openai-chat": func(key, url, _ string) Provider { return OpenAIChat(url, key) },
+	"google":      func(key, _, _ string) Provider { return Gemini(key) },
+	"bedrock":     func(key, _, region string) Provider { return Bedrock(region, key) },
+}
+
 type Tool struct {
 	Name        string
 	Description string

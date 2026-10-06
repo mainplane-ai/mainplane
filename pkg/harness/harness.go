@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -43,12 +44,19 @@ type Harness struct {
 
 // provider splits a config's provider/model string and finds the provider.
 // The model part is what the provider is asked for; an openrouter-style id
-// with its own slash survives, because only the first is cut.
+// with its own slash survives, because only the first is cut. The model part
+// is not checked: the provider rejects one it does not know at the first step.
 func (h *Harness) provider(model string) (provider.Provider, string, error) {
 	name, m, ok := strings.Cut(model, "/")
-	p, known := h.providers()[name]
-	if !ok || !known || m == "" {
-		return provider.Provider{}, "", fmt.Errorf("model %q is not provider/model with a known provider", model)
+	if !ok || name == "" || m == "" {
+		return provider.Provider{}, "", fmt.Errorf("model %q is not provider/model", model)
+	}
+	if _, ok := provider.Supported[name]; !ok {
+		return provider.Provider{}, "", fmt.Errorf("unknown provider %q; supported: %s", name, strings.Join(slices.Sorted(maps.Keys(provider.Supported)), ", "))
+	}
+	p, ok := h.providers()[name]
+	if !ok {
+		return provider.Provider{}, "", fmt.Errorf("provider %q has no key: mainplane key %s <key>", name, name)
 	}
 	return p, m, nil
 }
