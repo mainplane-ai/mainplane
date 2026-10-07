@@ -109,7 +109,7 @@ var (
 	// is there, and back puts it back after the uninstall.
 	harnessDir = map[string]string{"linux": "/var/lib/mainplane-server", "darwin": "/Library/Application Support/mainplane-server", "windows": `$env:ProgramData\mainplane-server`}
 	aside      = map[bool]string{
-		false: `d="%s"; [ -e "$d.e2e" ] || [ ! -e "$d" ] || sudo mv "$d" "$d.e2e"; sudo rm -rf "$d"`,
+		false: `d="%s"; if [ -e "$d.e2e" ]; then sudo rm -rf "$d"; elif [ -e "$d" ]; then sudo mv "$d" "$d.e2e"; fi`,
 		true:  `$d = "%s"; if (Test-Path $d) { if (Test-Path "$d.e2e") { Remove-Item -Recurse -Force $d } else { Move-Item $d "$d.e2e" } }`,
 	}
 	back = map[bool]string{
