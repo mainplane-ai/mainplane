@@ -10,10 +10,10 @@
 // mesh, so prev must be a release whose workers do. Linux and macOS targets
 // need passwordless sudo. The Windows target must be an elevated login, with
 // the operator logged in at the console. Then each machine becomes a harness
-// and its worker admin in one line, the harness updates to prev and back, and
-// its uninstall takes both: a
-// run ends with every machine clean, and any harness it had is replaced and
-// gone, though its config and sessions stay. Each harness also runs the
+// and its worker admin in one line, a first install from no Dir, with every
+// file in Dir the operator's, the harness updates to prev and back, and its
+// uninstall takes both: a run ends with every machine clean, and any harness
+// it had is gone, though its Dir, config and sessions, is put back. Each harness also runs the
 // README quickstart with the lines its install printed, pointed at v: on its
 // own machine the worker and login lines say it is already both; the next
 // machine runs each twice, then sets an OpenAI key from OPENAI_API_KEY and
@@ -104,17 +104,31 @@ var (
 		false: `curl -fsSL %[1]s%[2]s/install.sh | sh -s -- '%[3]s'`,
 		true:  `& ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) '%[3]s'`,
 	}
+	// harnessDir is each OS's harness Dir. The harness install is a first one:
+	// aside moves a Dir there to Dir.e2e, unless one from a run that stopped
+	// is there, and back puts it back after the uninstall.
+	harnessDir = map[string]string{"linux": "/var/lib/mainplane-server", "darwin": "/Library/Application Support/mainplane-server", "windows": `$env:ProgramData\mainplane-server`}
+	aside      = map[bool]string{
+		false: `d="%s"; [ -e "$d.e2e" ] || [ ! -e "$d" ] || sudo mv "$d" "$d.e2e"; sudo rm -rf "$d"`,
+		true:  `$d = "%s"; if (Test-Path $d) { if (Test-Path "$d.e2e") { Remove-Item -Recurse -Force $d } else { Move-Item $d "$d.e2e" } }`,
+	}
+	back = map[bool]string{
+		false: `d="%s"; sudo rm -rf "$d"; [ ! -e "$d.e2e" ] || sudo mv "$d.e2e" "$d"`,
+		true:  `$d = "%s"; if (Test-Path $d) { Remove-Item -Recurse -Force $d }; if (Test-Path "$d.e2e") { Move-Item "$d.e2e" $d }`,
+	}
 	// No provider key: install works without one; the quickstart sets one.
 	// Workers reach the harness on the mesh only: /worker, with a good key, is 404.
 	// The install makes the machine the worker admin, which joins once it
-	// finds the harness through the pointer. Dir is the operator's, with
-	// sessions in it.
+	// finds the harness through the pointer. Dir and every file in it are the
+	// operator's, with sessions in it: a file root wrote is one the harness
+	// may not read.
 	serverInstall = map[bool]string{
 		false: `curl -fsSL %[1]s%[2]s/install.sh | sh -s -- server || exit 1
 /usr/local/bin/mainplane workers && echo workers-ok
 for i in $(seq 90); do /usr/local/bin/mainplane workers | grep -q '^admin ' && { echo admin-ok; break; }; sleep 1; done
 d=/var/lib/mainplane-server; [ -d $d ] || d="/Library/Application Support/mainplane-server"
-cat "$d/config.json" >/dev/null && touch "$d/config.json" "$d/sessions/e2e" && rm "$d/sessions/e2e" && echo dir-ok
+root=$(find "$d" ! -user "$(id -un)" 2>&1)
+[ -z "$root" ] && cat "$d/config.json" >/dev/null && touch "$d/config.json" "$d/sessions/e2e" && rm "$d/sessions/e2e" && echo dir-ok || echo "not the operator's: $root"
 l=~/.mainplane/login.json
 curl -s -o /dev/null -w 'worker-%%{http_code}\n' -H "Authorization: Bearer $(sed 's/.*"key":"\([^"]*\)".*/\1/' $l)" "$(sed 's/.*"url":"\([^"]*\)".*/\1/' $l)/worker"`,
 		true: `& ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) server
@@ -388,7 +402,9 @@ func run(v, prev, port string, targets []string) {
 	hostsCheck(gone, ssh[gone], "removed: hosts block gone, other lines kept", hosts[gone], 0)
 	for i, o := range oses {
 		win := o == "windows"
-		out, err := remote(o, ssh[o], fmt.Sprintf(serverInstall[win], release.DL, v))
+		out, err := remote(o, ssh[o], fmt.Sprintf(aside[win], harnessDir[o]))
+		check(o, "harness: no Dir before its first install", err == nil, out)
+		out, err = remote(o, ssh[o], fmt.Sprintf(serverInstall[win], release.DL, v))
 		check(o, "harness installed in one line, CLI logged in", err == nil && strings.Contains(out, "mainplane "+v+" installed") && strings.Contains(out, "mp_key_") && strings.Contains(out, "workers-ok"), last(out))
 		check(o, "harness: /worker is gone (404)", strings.Contains(out, "worker-404"), last(out))
 		check(o, "harness: worker admin joined", strings.Contains(out, "admin-ok"), last(out))
@@ -411,6 +427,8 @@ func run(v, prev, port string, targets []string) {
 		hostsCheck(o, ssh[o], "uninstall: hosts block gone, other lines kept", hosts[o], 0)
 		out, err = remote(o, ssh[o], tailscale[o])
 		check(o, "tailscale status works after uninstall", err == nil && strings.TrimSpace(out) == "ok", out)
+		out, err = remote(o, ssh[o], fmt.Sprintf(back[win], harnessDir[o]))
+		check(o, "harness: the Dir from before the run is back", err == nil, out)
 	}
 	if t, ok := ssh["windows"]; ok {
 		out, err := remote("windows", t, fmt.Sprintf(defender, start.Format(time.RFC3339)))
