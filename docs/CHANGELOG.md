@@ -2,6 +2,10 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.5.1
+
+- `mainplane-server install` on Linux or macOS with no harness there before makes the auth table the operator's. It was root's, so the harness refused every key and the install's own login failed with `GET /: 401 api key refused`
+
 ## v0.5.0
 
 The harness install also makes its machine a worker, `admin`, and the harness's directory is split: config, keys, auth table, nodes, mesh and tunnel stay in it, and sessions move to `sessions/` under it. The `admin` config field is gone. A harness from before keeps its files in the directory its `admin` field names (`admin/` by default), which this one does not read: to keep its key, workers and sessions, stop it, move the files in that directory into the config's directory and each `.state` file into `sessions/`, run `mainplane uninstall` if the machine is a worker, so it joins again as `admin`, then run the harness install line again.

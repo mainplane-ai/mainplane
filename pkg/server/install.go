@@ -115,6 +115,15 @@ func Install(c *Config, keep bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Root writes the auth table after start gives Dir to the operator. A file
+	// root made then would be root's and the harness could not read it, so it
+	// is made now.
+	a := Auth(Dir).Path
+	if _, err := os.Stat(a); errors.Is(err, fs.ErrNotExist) {
+		if err := os.WriteFile(a, []byte("{}"), 0o600); err != nil {
+			return "", err
+		}
+	}
 	if err := place(); err != nil {
 		return "", err
 	}
