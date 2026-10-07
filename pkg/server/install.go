@@ -115,6 +115,17 @@ func Install(c *Config, keep bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Root writes the auth table after start gives Dir to the operator. A file
+	// root made then would be root's and the harness could not read it, so it
+	// is made now. O_EXCL never writes through a link.
+	f, err := os.OpenFile(Auth(Dir).Path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err == nil {
+		_, err = f.WriteString("{}")
+		err = errors.Join(err, f.Close())
+	}
+	if err != nil && !errors.Is(err, fs.ErrExist) {
+		return "", err
+	}
 	if err := place(); err != nil {
 		return "", err
 	}
