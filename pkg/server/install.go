@@ -90,30 +90,30 @@ func (c *Config) Expand() error {
 
 // Install makes this machine run the harness at every boot, from a copy of an
 // expanded c at Conf, or with keep from the config already there, as it is,
-// which c becomes, makes it the worker admin while the tunnel starts, and
-// returns the harness's URL once it answers there. Dir is root's and the
-// operator's alone: the config holds the keys, and admin runs code as the
-// operator so that it may read and edit them.
-func Install(c *Config, keep bool) (string, error) {
+// which c becomes, and makes it the worker admin. It returns while the tunnel
+// starts: the tokens it prints name no URL, and Reached waits for one. Dir is
+// root's and the operator's alone: the config holds the keys, and admin runs
+// code as the operator so that it may read and edit them.
+func Install(c *Config, keep bool) error {
 	if err := prepare(); err != nil {
-		return "", err
+		return err
 	}
 	if _, err := os.Stat(Conf); keep && err == nil {
 		if *c, err = Load(Conf); err != nil {
-			return "", err
+			return err
 		}
 	} else {
 		b, err := json.MarshalIndent(c, "", "  ")
 		if err != nil {
-			return "", err
+			return err
 		}
 		if err := os.WriteFile(Conf, b, 0o600); err != nil {
-			return "", err
+			return err
 		}
 	}
 	k, err := Key(Dir)
 	if err != nil {
-		return "", err
+		return err
 	}
 	// Root writes the auth table after start gives Dir to the operator. A file
 	// root made then would be root's and the harness could not read it, so it
@@ -124,24 +124,21 @@ func Install(c *Config, keep bool) (string, error) {
 		err = errors.Join(err, f.Close())
 	}
 	if err != nil && !errors.Is(err, fs.ErrExist) {
-		return "", err
+		return err
 	}
 	if err := place(); err != nil {
-		return "", err
+		return err
 	}
 	if err := start(); err != nil {
-		return "", err
+		return err
 	}
 	if err := answers(c.HTTP); err != nil {
-		return "", err
+		return err
 	}
 	if err := admin(pointer.Encode(k)); err != nil {
-		return "", err
+		return err
 	}
-	if err := agents(); err != nil {
-		return "", err
-	}
-	return reached()
+	return agents()
 }
 
 // writeAgents writes adminAgents at path unless something is there: a file is
@@ -221,18 +218,18 @@ func SetTunnel(t *Tunnel) (string, error) {
 	if err := restart(); err != nil {
 		return "", err
 	}
-	return reached()
-}
-
-// reached waits for the pointer to name a URL where the harness proves its
-// key, through Cloudflare, as a worker finds it, and returns that URL.
-func reached() (string, error) {
 	k, err := Key(Dir)
 	if err != nil {
 		return "", err
 	}
+	return Reached(pointer.Encode(k))
+}
+
+// Reached waits for the pointer to name a URL where the harness with key
+// proves it, through Cloudflare, as a worker finds it, and returns that URL.
+func Reached(key string) (string, error) {
 	for end := time.Now().Add(tunnelWait); ; time.Sleep(time.Second) {
-		url, err := pointer.Find(context.Background(), pointer.Encode(k), "")
+		url, err := pointer.Find(context.Background(), key, "")
 		if err == nil {
 			return url, nil
 		}

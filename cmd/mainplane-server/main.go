@@ -61,16 +61,16 @@ func main() {
 				os.Exit(code)
 			}
 			if fresh { // the elevated install handed back; from a config file it printed itself
-				login(h)
 				done(h)
+				network(h, true)
 			}
 			return
 		}
 		stop := spin("installing mainplane-server")
 		// a plain install, the only one with a key yet, keeps the config there is
 		keep := h.Key != ""
-		_, err := server.Install(&h.Config, keep)
-		stop()
+		err := server.Install(&h.Config, keep)
+		stop("")
 		fatal(err)
 		h.Key = cmp.Or(h.Key, rand.Text())
 		// beside the default keys before it, so a reinstall logs no connector out
@@ -87,10 +87,8 @@ func main() {
 			fatal(os.WriteFile(args[1], b, 0o600))
 			return
 		}
-		if fresh {
-			login(h)
-		}
 		done(h)
+		network(h, fresh)
 	case verb == "tunnel":
 		move(args)
 	case (verb == auth.Key || verb == auth.Join) && (len(args) == 2 && args[1] == "list" || len(args) == 3 && (args[1] == "new" || args[1] == "revoke")),
@@ -159,11 +157,24 @@ func install(h handover) (handover, int) {
 	return h, 0
 }
 
-// login logs in the CLI the admin install placed, with the default api key.
-func login(h handover) {
-	cmd := exec.Command(worker.Bin, "login", auth.Token(auth.Key, h.Harness, h.Key))
-	cmd.Stderr = os.Stderr
-	fatal(cmd.Run())
+// network waits, behind the spinner, until workers can find the harness
+// through its tunnel, after the lines are printed: they name no URL, and the
+// wait is the first start's. Then, with login, it logs in the CLI the admin
+// install placed with the default api key, which needs the tunnel too.
+func network(h handover, login bool) {
+	fmt.Println()
+	stop := spin("initializing network")
+	_, err := server.Reached(h.Harness)
+	if err == nil && login {
+		if out, e := exec.Command(worker.Bin, "login", auth.Token(auth.Key, h.Harness, h.Key)).CombinedOutput(); e != nil {
+			err = fmt.Errorf("mainplane login: %w: %s", e, out)
+		}
+	}
+	if err != nil {
+		stop("")
+		fatal(err)
+	}
+	stop(" done")
 }
 
 // done says the harness is installed, and how to make a machine a worker of
@@ -190,12 +201,13 @@ var spinner = []struct {
 	ms    int
 }{{'⣀', 103}, {'⡄', 129}, {'⠆', 148}, {'⠃', 129}, {'⠋', 58}, {'⠙', 49}, {'⠸', 62}, {'⢠', 122}}
 
-// spin shows label behind the spinner on a terminal until stop is called;
-// elsewhere, as over ssh, only the label.
-func spin(label string) (stop func()) {
+// spin shows label behind the spinner on a terminal until stop, which ends
+// the line with end, or clears it when end is empty; elsewhere, as over ssh,
+// the label at once and end after it.
+func spin(label string) (stop func(end string)) {
 	if fi, err := os.Stdout.Stat(); err != nil || fi.Mode()&os.ModeCharDevice == 0 {
-		fmt.Println(label)
-		return func() {}
+		fmt.Print(label)
+		return func(end string) { fmt.Println(end) }
 	}
 	quit, finished := make(chan struct{}), make(chan struct{})
 	go func() {
@@ -211,7 +223,13 @@ func spin(label string) (stop func()) {
 			}
 		}
 	}()
-	return func() { close(quit); <-finished }
+	return func(end string) {
+		close(quit)
+		<-finished
+		if end != "" {
+			fmt.Println(label + end)
+		}
+	}
 }
 
 // move moves the installed harness to the user's own tunnel, or back to a
