@@ -2,6 +2,10 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.5.2
+
+- `mainplane-server install` prints the join and login lines as soon as the harness answers on this machine, then waits behind `initializing network`, which ends in `done`, for the tunnel and the CLI login. The tokens name no URL, so a worker installed meanwhile joins once the tunnel is up. The install waited for the tunnel before it printed anything, about 20 seconds on a first install
+
 ## v0.5.1
 
 - `mainplane-server install` on Linux or macOS with no harness there before makes the auth table the operator's. It was root's, so the harness refused every key and the install's own login failed with `GET /: 401 api key refused`
