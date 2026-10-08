@@ -205,6 +205,7 @@ type anthPart struct {
 
 type anthDelta struct {
 	Type        string `json:"type"`
+	StopReason  string `json:"stop_reason"` // message_delta
 	Text        string `json:"text"`
 	Thinking    string `json:"thinking"`
 	Signature   string `json:"signature"`
@@ -271,6 +272,7 @@ func (p *anthPart) record() (statefile.Record, bool, error) {
 func (anthropic) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
 	parts := map[int]*anthPart{}
 	var usage statefile.Usage
+	var stop string
 	var done bool
 	err := Events(resp, func(_, data string) error {
 		var e anthEvent
@@ -285,6 +287,9 @@ func (anthropic) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.
 		case "message_delta":
 			if e.Usage != nil {
 				e.Usage.apply(&usage)
+			}
+			if e.Delta != nil {
+				stop = e.Delta.StopReason
 			}
 		case "content_block_start":
 			parts[e.Index] = e.ContentBlock
@@ -307,5 +312,5 @@ func (anthropic) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.
 	if err == nil && !done {
 		err = fmt.Errorf("anthropic: stream ended before message_stop")
 	}
-	return statefile.Header{Usage: &usage}, err
+	return statefile.Header{Usage: &usage, Stop: stop}, err
 }

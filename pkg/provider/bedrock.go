@@ -235,7 +235,8 @@ type bedEvent struct {
 		CacheReadInputTokens  int `json:"cacheReadInputTokens"`
 		CacheWriteInputTokens int `json:"cacheWriteInputTokens"`
 	} `json:"usage"`
-	Message string `json:"message"` // exceptions
+	Message    string `json:"message"`    // exceptions
+	StopReason string `json:"stopReason"` // messageStop
 }
 
 type bedDelta struct {
@@ -301,6 +302,7 @@ func (p *bedPart) record() (statefile.Record, bool, error) {
 
 func (bedrock) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
 	parts := map[int]*bedPart{}
+	var stop string
 	for {
 		headers, payload, err := readFrame(resp)
 		if errors.Is(err, io.EOF) {
@@ -339,6 +341,8 @@ func (bedrock) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.He
 				emit(r)
 			}
 			delete(parts, e.ContentBlockIndex)
+		case "messageStop":
+			stop = e.StopReason
 		case "metadata": // the last event
 			var usage statefile.Usage
 			if e.Usage != nil {
@@ -347,7 +351,7 @@ func (bedrock) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.He
 					CacheRead: e.Usage.CacheReadInputTokens, CacheWrite: e.Usage.CacheWriteInputTokens,
 				}
 			}
-			return statefile.Header{Usage: &usage}, nil
+			return statefile.Header{Usage: &usage, Stop: stop}, nil
 		}
 	}
 }

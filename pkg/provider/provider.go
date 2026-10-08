@@ -32,6 +32,19 @@ var Supported = map[string]func(key, url, region string) Provider{
 	"bedrock":     func(key, _, region string) Provider { return Bedrock(region, key) },
 }
 
+// cutStop is the stop each envelope names when the output reached the
+// request's token limit, so what it said last may be cut short.
+var cutStop = map[string]string{
+	"anthropic":   "max_tokens",
+	"bedrock":     "max_tokens",
+	"openai":      "max_output_tokens",
+	"openai-chat": "length",
+	"google":      "MAX_TOKENS",
+}
+
+// Cut reports whether a step's output ended at the token limit.
+func Cut(step statefile.Header) bool { return step.Stop != "" && cutStop[step.Provider] == step.Stop }
+
 type Tool struct {
 	Name        string
 	Description string

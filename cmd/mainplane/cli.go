@@ -395,11 +395,15 @@ func render(r statefile.Record) {
 		if r.Usage != nil {
 			fmt.Printf("  in=%d out=%d", r.Usage.Input+r.Usage.CacheRead+r.Usage.CacheWrite, r.Usage.Output)
 		}
-		fmt.Println()
+		fmt.Printf("  stop=%s\n", r.Stop)
 	case statefile.Result:
 		fmt.Printf("%s  for=%s", head, r.For)
 		if r.Exit != nil {
 			fmt.Printf("  exit=%d", *r.Exit)
+		}
+		if !strings.HasPrefix(r.Type, "text/") { // raw bytes reach the terminal, which answers some on stdin
+			fmt.Printf("  %s %d bytes\n", r.Type, len(r.Body))
+			break
 		}
 		lines := strings.Split(strings.TrimRight(string(r.Body), "\n"), "\n")
 		if len(lines) > resultLines {
