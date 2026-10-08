@@ -1,6 +1,8 @@
 module github.com/mainplane-ai/mainplane
 
-go 1.27.2
+go 1.27.0
+
+toolchain go1.27.2
 
 require (
 	github.com/tailscale/wireguard-go v0.0.0-20260715223240-2e01ba5b00f0
