@@ -55,6 +55,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf16"
 
@@ -283,14 +284,35 @@ if ($p -ne 0 -and $p -ne $s.ProcessId) { 'restarted' }`
 	defender = `@(Get-MpThreatDetection | Where-Object InitialDetectionTime -gt ([datetime]::Parse('%s'))).Count`
 )
 
-var failed bool
+// failed is set by check, which goroutines call: mu holds it and keeps each
+// line whole.
+var (
+	failed bool
+	mu     sync.Mutex
+)
+
+// stamp is the wall time each line starts with, the same in the run and its
+// phases, so a log shows where the time goes.
+func stamp() string { return time.Now().Format("15:04:05") }
 
 func check(who, what string, ok bool, detail string) {
+	mu.Lock()
+	defer mu.Unlock()
 	mark := "PASS"
 	if !ok {
 		mark, failed = "FAIL", true
 	}
-	fmt.Printf("%s  %-8s %-46s %s\n", mark, who, what, strings.ReplaceAll(strings.TrimSpace(detail), "\n", " | "))
+	fmt.Printf("%s %s  %-8s %-46s %s\n", stamp(), mark, who, what, strings.ReplaceAll(strings.TrimSpace(detail), "\n", " | "))
+}
+
+// each runs f for every OS at once and waits for all: what a machine does
+// alone need not wait on the others.
+func each(oses []string, f func(o string)) {
+	var wg sync.WaitGroup
+	for _, o := range oses {
+		wg.Go(func() { f(o) })
+	}
+	wg.Wait()
 }
 
 func main() {
@@ -311,6 +333,7 @@ func main() {
 }
 
 func run(v, prev, port string, targets []string) {
+	start := time.Now()
 	ssh := map[string]string{}
 	for _, t := range targets {
 		o, host, _ := strings.Cut(t, "=")
@@ -353,22 +376,25 @@ func run(v, prev, port string, targets []string) {
 	case err := <-done:
 		log.Fatal(err)
 	}
-	fmt.Printf("== tunnel %s\n", url)
+	fmt.Printf("%s == tunnel %s\n", stamp(), url)
 	k := key()
 	if err := pointer.Publish(ctx, k, url); err != nil {
 		stop()
 		log.Fatal(err)
 	}
 	secret := rand.Text()
-	start := time.Now()
 	hosts := map[string][]string{} // each machine's hosts lines before the mesh
-	for _, o := range oses {
+	var hostsMu sync.Mutex
+	each(oses, func(o string) {
 		out, err := remote(o, ssh[o], hostsFile[o == "windows"])
-		hosts[o], _ = hostsLines(out)
+		rest, _ := hostsLines(out)
+		hostsMu.Lock()
+		hosts[o] = rest
+		hostsMu.Unlock()
 		check(o, "hosts file read before install", err == nil, fmt.Sprint(err))
 		out, err = remote(o, ssh[o], fmt.Sprintf(install[o == "windows"], release.DL, v, auth.Token(auth.Join, pointer.Encode(k), secret)))
 		check(o, "install "+v, err == nil && strings.Contains(out, v), last(out))
-	}
+	})
 	harnessAt := func(ver string, mode ...string) {
 		cmd := exec.Command(exe, append([]string{"phase", "127.0.0.1:" + port, url, secret, ver, strings.Join(oses, ",")}, mode...)...)
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
@@ -380,9 +406,7 @@ func run(v, prev, port string, targets []string) {
 		}
 	}
 	harnessAt(v, "check")
-	for _, o := range oses {
-		joined(o, ssh[o], hosts[o], len(oses)+1)
-	}
+	each(oses, func(o string) { joined(o, ssh[o], hosts[o], len(oses)+1) })
 	harnessAt(v, "restart")
 	if t, ok := ssh["windows"]; ok {
 		out, _ := remote("windows", t, service)
@@ -400,48 +424,61 @@ func run(v, prev, port string, targets []string) {
 	out, err := remote(gone, ssh[gone], meshGone[gone]+"\n"+status[gone == "windows"])
 	check(gone, "removed: interface, route, rule gone; status says so", err == nil && strings.HasSuffix(strings.TrimSpace(out), "removed from the mesh by its harness"), out)
 	hostsCheck(gone, ssh[gone], "removed: hosts block gone, other lines kept", hosts[gone], 0)
-	for i, o := range oses {
-		win := o == "windows"
-		out, err := remote(o, ssh[o], fmt.Sprintf(aside[win], harnessDir[o]))
-		check(o, "harness: no Dir before its first install", err == nil, out)
-		out, err = remote(o, ssh[o], fmt.Sprintf(serverInstall[win], release.DL, v))
-		check(o, "harness installed in one line, CLI logged in", err == nil && strings.Contains(out, "mainplane "+v+" installed") && strings.Contains(out, "mp_key_") && strings.Contains(out, "workers-ok"), last(out))
-		check(o, "harness: /worker is gone (404)", strings.Contains(out, "worker-404"), last(out))
-		check(o, "harness: worker admin joined", strings.Contains(out, "admin-ok"), last(out))
-		check(o, "harness: Dir the operator's, sessions in it", strings.Contains(out, "dir-ok"), last(out))
-		quick(ssh, oses[(i+1)%len(oses)], o, v, llm, out)
-		if o == "linux" {
-			out, err = remote(o, ssh[o], sessionsDrive)
-			check(o, "harness: sessions drive on admin, read-only", err == nil && strings.Join(strings.Fields(out), " ") == "ro listed refused", out)
-		}
-		// A harness before v0.5.0 finds its files elsewhere in Dir and stops,
-		// so prev is checked to be placed, and v to run again.
-		for _, u := range []string{prev, v} {
-			out, err = remote(o, ssh[o], fmt.Sprintf(serverUpdate[win], u))
-			f := strings.Fields(out)
-			// prev only placed: before v0.5.0 a harness stops on this Dir, so systemctl fails the script
-			check(o, "harness updated to "+u, len(f) > 0 && f[0] == u && (u == prev || err == nil && strings.Join(f, " ") == u+" active"), out)
-		}
-		out, err = remote(o, ssh[o], fmt.Sprintf(uninstall[win], meshGone[o]+"\n"+drivesGone[o]))
-		check(o, "uninstall: no service, binary, state, mesh or drive left", err == nil && strings.TrimSpace(out) == "clean", out)
-		hostsCheck(o, ssh[o], "uninstall: hosts block gone, other lines kept", hosts[o], 0)
-		out, err = remote(o, ssh[o], tailscale[o])
-		check(o, "tailscale status works after uninstall", err == nil && strings.TrimSpace(out) == "ok", out)
-		out, err = remote(o, ssh[o], fmt.Sprintf(back[win], harnessDir[o]))
-		check(o, "harness: the Dir from before the run is back", err == nil, out)
-	}
+	// Every machine but the last becomes a harness at once, and the last runs
+	// the quickstart against each in turn: one machine is one worker. Then
+	// the last becomes one, with the first, a harness no more, running it.
+	q := oses[len(oses)-1]
+	var qMu sync.Mutex
+	each(oses[:len(oses)-1], func(o string) { server(ssh, o, q, &qMu, v, prev, llm, hosts[o]) })
+	server(ssh, q, oses[0], &qMu, v, prev, llm, hosts[q])
 	if t, ok := ssh["windows"]; ok {
 		out, err := remote("windows", t, fmt.Sprintf(defender, start.Format(time.RFC3339)))
 		check("windows", "Defender: no detection since the run began", err == nil && strings.TrimSpace(out) == "0", out)
 	}
+	fmt.Printf("%s == %s in all\n", stamp(), time.Since(start).Round(time.Second))
+}
+
+// server makes o a harness in one line, a first install from no Dir, runs
+// the README quickstart against it on q, holding qMu while q is its worker,
+// then updates it to prev and back, uninstalls it and puts its Dir back.
+// before is o's hosts lines from before the run.
+func server(ssh map[string]string, o, q string, qMu *sync.Mutex, v, prev, llm string, before []string) {
+	win := o == "windows"
+	out, err := remote(o, ssh[o], fmt.Sprintf(aside[win], harnessDir[o]))
+	check(o, "harness: no Dir before its first install", err == nil, out)
+	out, err = remote(o, ssh[o], fmt.Sprintf(serverInstall[win], release.DL, v))
+	check(o, "harness installed in one line, CLI logged in", err == nil && strings.Contains(out, "mainplane "+v+" installed") && strings.Contains(out, "mp_key_") && strings.Contains(out, "workers-ok"), last(out))
+	check(o, "harness: /worker is gone (404)", strings.Contains(out, "worker-404"), last(out))
+	check(o, "harness: worker admin joined", strings.Contains(out, "admin-ok"), last(out))
+	check(o, "harness: Dir the operator's, sessions in it", strings.Contains(out, "dir-ok"), last(out))
+	if o == "linux" {
+		got, err := remote(o, ssh[o], sessionsDrive)
+		check(o, "harness: sessions drive on admin, read-only", err == nil && strings.Join(strings.Fields(got), " ") == "ro listed refused", got)
+	}
+	quick(ssh, q, o, v, llm, out, qMu)
+	// A harness before v0.5.0 finds its files elsewhere in Dir and stops,
+	// so prev is checked to be placed, and v to run again.
+	for _, u := range []string{prev, v} {
+		out, err = remote(o, ssh[o], fmt.Sprintf(serverUpdate[win], u))
+		f := strings.Fields(out)
+		// prev only placed: before v0.5.0 a harness stops on this Dir, so systemctl fails the script
+		check(o, "harness updated to "+u, len(f) > 0 && f[0] == u && (u == prev || err == nil && strings.Join(f, " ") == u+" active"), out)
+	}
+	out, err = remote(o, ssh[o], fmt.Sprintf(uninstall[win], meshGone[o]+"\n"+drivesGone[o]))
+	check(o, "uninstall: no service, binary, state, mesh or drive left", err == nil && strings.TrimSpace(out) == "clean", out)
+	hostsCheck(o, ssh[o], "uninstall: hosts block gone, other lines kept", before, 0)
+	out, err = remote(o, ssh[o], tailscale[o])
+	check(o, "tailscale status works after uninstall", err == nil && strings.TrimSpace(out) == "ok", out)
+	out, err = remote(o, ssh[o], fmt.Sprintf(back[win], harnessDir[o]))
+	check(o, "harness: the Dir from before the run is back", err == nil, out)
 }
 
 // quick runs the README quickstart against the harness just installed on o,
 // with the tokens its install printed (out) in lines pointed at v. On o the
 // worker and login lines find it already both. On q each runs twice, the
 // second time with nothing to do, then step 3 in the login line's shell, and
-// q's worker goes again.
-func quick(ssh map[string]string, q, o, v, llm, out string) {
+// q's worker goes again, all holding qMu.
+func quick(ssh map[string]string, q, o, v, llm, out string, qMu *sync.Mutex) {
 	join, key := regexp.MustCompile(`mp_join_\S+`).FindString(out), regexp.MustCompile(`mp_key_\S+`).FindString(out)
 	if o == "windows" {
 		check(o, "harness: one mainplane, in Program Files", strings.Contains(out, oneWin), last(out))
@@ -456,6 +493,8 @@ func quick(ssh map[string]string, q, o, v, llm, out string) {
 	if q == o {
 		return
 	}
+	qMu.Lock()
+	defer qMu.Unlock()
 	win := q == "windows"
 	got, err = line(q, join)
 	check(q, "quickstart: worker line joins "+o, err == nil, last(got))
@@ -622,7 +661,7 @@ func phase(listen, url, secret, v string, oses []string, mode, text string) {
 		}
 		die.Fatal(err)
 	}()
-	fmt.Printf("== harness %s: %s %s\n", v, mode, text)
+	fmt.Printf("%s == harness %s: %s %s\n", stamp(), v, mode, text)
 	start := time.Now()
 	got := map[string]harness.Listed{}
 	for len(got) < len(oses) {
@@ -649,13 +688,13 @@ func phase(listen, url, secret, v string, oses []string, mode, text string) {
 	link(coord, p, got, oses)
 	switch mode {
 	case "check":
-		for _, o := range oses {
+		each(oses, func(o string) {
 			r, ok := p.Get(got[o].Name)
 			check(o, "still connected", ok, got[o].Name)
 			if ok {
 				checks(r, o)
 			}
-		}
+		})
 		mesh(p, got, oses)
 		peers, err := ephemeral(listen, secret)
 		check("mesh", "an ephemeral node sees only the harness", err == nil && slices.Equal(peers, []string{worker.Harness}), fmt.Sprint(peers, err))
@@ -748,10 +787,11 @@ func checks(r *harness.Remote, goos string) {
 func mesh(p *harness.Pool, got map[string]harness.Listed, oses []string) {
 	ctx := context.Background()
 	var bad []string
-	for _, o := range oses {
+	var badMu sync.Mutex
+	each(oses, func(o string) {
 		r, ok := p.Get(got[o].Name)
 		if !ok {
-			continue // "still connected" failed
+			return // "still connected" failed
 		}
 		win := o == "windows"
 		sh := func(code string) string {
@@ -780,10 +820,12 @@ func mesh(p *harness.Pool, got map[string]harness.Listed, oses []string) {
 		check(o, "mesh: status lists every node, harness responsive", ok, out)
 		for _, s := range paths {
 			if a, err := netip.ParseAddrPort(s); err != nil || tailnet(a.Addr()) {
+				badMu.Lock()
 				bad = append(bad, o+" path "+s)
+				badMu.Unlock()
 			}
 		}
-	}
+	})
 	b, err := os.ReadFile(filepath.Join(dir(), "nodes.json"))
 	var st struct {
 		Nodes []struct {
@@ -876,16 +918,15 @@ func drives(coord *coordinator.Coordinator, p *harness.Pool, got map[string]harn
 		_, err := d.sh(o, fmt.Sprintf(put[o == "windows"], d.at[o]+o+".txt", "from "+o))
 		check(o, "drive: write a file", err == nil, fmt.Sprint(err))
 	}
-	for _, o := range oses {
+	each(oses, func(o string) {
 		for _, q := range oses {
 			if q != o {
 				d.read(o, q)
 			}
 		}
-	}
+	})
 	if slices.Contains(oses, "darwin") && slices.Contains(oses, "windows") {
-		d.lock("darwin", "windows")
-		d.lock("windows", "darwin")
+		each([]string{"darwin", "windows"}, func(h string) { d.lock(h, map[string]string{"darwin": "windows", "windows": "darwin"}[h]) })
 	}
 	d.kill(oses)         // nothing of ours holds the drive open
 	d.session += "-gone" // a killed session's next run begins with "environment was reset"
@@ -943,6 +984,7 @@ func (d drive) kill(oses []string) {
 	for _, o := range oses {
 		if r, ok := d.p.Get(d.got[o].Name); ok {
 			_ = r.Kill(context.Background(), d.session)
+			_ = r.Kill(context.Background(), d.session+"-hold")
 		}
 	}
 }
@@ -977,12 +1019,15 @@ func (d drive) read(o, q string) {
 }
 
 // lock checks a lock h holds refuses t's, once t sees h has it, and t
-// takes it once h let go.
+// takes it once h let go. h holds it in a session of its own, so t's lock
+// on h, checked at the same time, does not wait behind it.
 func (d drive) lock(h, t string) {
 	f := "lock-" + h
 	held := make(chan error, 1)
 	go func() {
-		_, err := d.sh(h, fmt.Sprintf(lockHold[h], d.at[h]+f))
+		hold := d
+		hold.session += "-hold"
+		_, err := hold.sh(h, fmt.Sprintf(lockHold[h], d.at[h]+f))
 		held <- err
 	}()
 	var seen string
