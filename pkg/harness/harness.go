@@ -22,12 +22,13 @@ import (
 // halted is the body of a stop's error record, with who stopped it. The model
 // reads it only when a retry or a new message steps the session again; a
 // retry adds resume as a message, so the model goes on rather than stopping.
-// cut is the error after a step that reached its output limit with no call:
-// without it the session would close on a cut-off reply or on thinking alone.
+// abnormal is the error after a step with no call that the model did not end
+// itself: without it the session would close on a cut-off, refused, or
+// filtered reply, or on thinking alone.
 const (
-	halted = "The session was stopped during the last step by %s. Running calls were cancelled."
-	cut    = "The last step reached the output token limit (stop %s, %d output tokens) without a call, so its reply may be cut short or missing. Raise max_tokens in params, or retry."
-	resume = "Continue"
+	halted   = "The session was stopped during the last step by %s. Running calls were cancelled."
+	abnormal = "The last step ended with stop %q (%d output tokens) and no call, so its reply may be cut short, refused, or missing. If the stop is the output token limit, raise max_tokens in params. Retry to continue."
+	resume   = "Continue"
 )
 
 type Harness struct {
@@ -356,8 +357,8 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 		_, err := h.append(s, errorRecord(via, fmt.Sprintf(halted, via)))
 		return statefile.StatusFailed, err
 	}
-	if len(calls) == 0 && provider.Cut(hdr) {
-		_, err := h.append(s, errorRecord("", fmt.Sprintf(cut, hdr.Stop, hdr.Usage.Output)))
+	if len(calls) == 0 && !provider.Normal(hdr) {
+		_, err := h.append(s, errorRecord("", fmt.Sprintf(abnormal, hdr.Stop, hdr.Usage.Output)))
 		return statefile.StatusFailed, err
 	}
 	if len(calls) == 0 {

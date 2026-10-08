@@ -15,6 +15,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	neturl "net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -32,18 +33,22 @@ var Supported = map[string]func(key, url, region string) Provider{
 	"bedrock":     func(key, _, region string) Provider { return Bedrock(region, key) },
 }
 
-// cutStop is the stop each envelope names when the output reached the
-// request's token limit, so what it said last may be cut short.
-var cutStop = map[string]string{
-	"anthropic":   "max_tokens",
-	"bedrock":     "max_tokens",
-	"openai":      "max_output_tokens",
-	"openai-chat": "length",
-	"google":      "MAX_TOKENS",
+// normalStops are the stops each envelope names when the model ended its turn
+// itself. Any other stop on a step with no call is the output limit, a
+// refusal, or a filter, and the reply may be cut short or missing.
+// openai-chat compatible servers may send no finish_reason.
+var normalStops = map[string][]string{
+	"anthropic":   {"end_turn", "stop_sequence"},
+	"bedrock":     {"end_turn", "stop_sequence"},
+	"openai":      {"completed"},
+	"openai-chat": {"stop", ""},
+	"google":      {"STOP"},
 }
 
-// Cut reports whether a step's output ended at the token limit.
-func Cut(step statefile.Header) bool { return step.Stop != "" && cutStop[step.Provider] == step.Stop }
+// Normal reports whether a step ended because the model ended its turn.
+func Normal(step statefile.Header) bool {
+	return slices.Contains(normalStops[step.Provider], step.Stop)
+}
 
 type Tool struct {
 	Name        string
@@ -244,10 +249,14 @@ func (b idleReader) Read(p []byte) (int, error) {
 }
 
 // callRecord builds a call record. Providers stream nothing for a tool called
-// without arguments; the body always holds an object.
+// without arguments; the body always holds an object. Arguments that are not
+// JSON were cut off, most often by the output token limit.
 func callRecord(id, name, args string) (statefile.Record, error) {
 	if args == "" {
 		args = "{}"
+	}
+	if !json.Valid([]byte(args)) {
+		return statefile.Record{}, fmt.Errorf("call %s: arguments are not complete JSON, likely cut at the output token limit: %.200s", name, args)
 	}
 	body, err := marshal(Call{Name: name, Arguments: json.RawMessage(args)})
 	return statefile.Record{Header: statefile.Header{ID: id, Kind: statefile.Call, Type: "application/json"}, Body: body}, err
