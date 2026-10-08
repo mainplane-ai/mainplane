@@ -83,8 +83,6 @@ No. mainplane-server runs on macOS, Windows and Linux.
 We welcome feedback as GitHub issues. Pull requests are open to collaborators only.
 </details>
 
-<br/><br/>
-
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/footer-dark.svg">
   <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/footer-light.svg" alt="A billboard turns through what Mainplane agents do, while the biplane tows a banner: Now you're flying!" width="960">
