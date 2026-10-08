@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
@@ -360,9 +361,12 @@ func (c client) chat(id string) {
 
 // render prints one record: number and kind, the header fields that matter
 // for its kind, then the body whole for what a person reads and a line for
-// what a person skims.
+// what a person skims. Control bytes print as dots: the terminal answers some
+// escape sequences on stdin, and chat would post the answer as a message.
 func render(r statefile.Record) {
 	head := fmt.Sprintf("%5d  %-8s", r.N, r.Kind)
+	n := len(r.Body)
+	r.Body = []byte(printable(string(r.Body)))
 	switch r.Kind {
 	case statefile.Start:
 		fmt.Printf("%s  %s\n", head, r.Time.Local().Format(time.DateTime))
@@ -377,19 +381,19 @@ func render(r statefile.Record) {
 		if strings.HasPrefix(r.Type, "text/") {
 			fmt.Printf("%s  via=%s\n%s\n", head, r.Via, r.Body)
 		} else {
-			fmt.Printf("%s  via=%s  %s %d bytes\n", head, r.Via, r.Type, len(r.Body))
+			fmt.Printf("%s  via=%s  %s %d bytes\n", head, r.Via, r.Type, n)
 		}
 	case statefile.Text:
 		fmt.Printf("%s\n%s\n", strings.TrimRight(head, " "), r.Body)
 	case statefile.Thinking:
-		fmt.Printf("%s  %d bytes\n", head, len(r.Body))
+		fmt.Printf("%s  %d bytes\n", head, n)
 	case statefile.Call:
 		var c struct {
 			Name string
 			Args struct{ Worker, Code, Path string } `json:"arguments"`
 		}
 		_ = json.Unmarshal(r.Body, &c)
-		fmt.Printf("%s  %s %s | %s\n", head, c.Name, c.Args.Worker, skim([]byte(c.Args.Code+c.Args.Path)))
+		fmt.Printf("%s  %s %s | %s\n", head, c.Name, c.Args.Worker, printable(skim([]byte(c.Args.Code+c.Args.Path))))
 	case statefile.Step:
 		fmt.Printf("%s  %s", head, r.Model)
 		if r.Usage != nil {
@@ -401,8 +405,8 @@ func render(r statefile.Record) {
 		if r.Exit != nil {
 			fmt.Printf("  exit=%d", *r.Exit)
 		}
-		if !strings.HasPrefix(r.Type, "text/") { // raw bytes reach the terminal, which answers some on stdin
-			fmt.Printf("  %s %d bytes\n", r.Type, len(r.Body))
+		if !strings.HasPrefix(r.Type, "text/") {
+			fmt.Printf("  %s %d bytes\n", r.Type, n)
 			break
 		}
 		lines := strings.Split(strings.TrimRight(string(r.Body), "\n"), "\n")
@@ -424,6 +428,18 @@ func skim(b []byte) string {
 		return first
 	}
 	return fmt.Sprintf("%s  (+%d lines)", first, strings.Count(rest, "\n")+1)
+}
+
+// printable replaces control characters other than line breaks and tabs with
+// dots, and invalid UTF-8 with U+FFFD, so no escape sequence reaches the
+// terminal.
+func printable(s string) string {
+	return strings.Map(func(c rune) rune {
+		if unicode.IsControl(c) && c != '\n' && c != '\r' && c != '\t' {
+			return '.'
+		}
+		return c
+	}, s)
 }
 
 func die(err error) {

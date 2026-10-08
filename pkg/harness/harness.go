@@ -27,7 +27,7 @@ import (
 // filtered reply, or on thinking alone.
 const (
 	halted   = "The session was stopped during the last step by %s. Running calls were cancelled."
-	abnormal = "The last step ended with stop %q (%d output tokens) and no call, so its reply may be cut short, refused, or missing. If the stop is the output token limit, raise max_tokens in params. Retry to continue."
+	abnormal = "The last step ended with stop %q (%d output tokens) and no call, so its reply may be cut short, refused, or missing. If the stop is the output token limit, raise the provider's output token limit in params. Retry to continue."
 	resume   = "Continue"
 )
 
