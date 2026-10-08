@@ -4,8 +4,8 @@
 </picture>
 <h3>Mainplane is an open-source agent harness built for performance at scale.</h3>
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/architecture-dark.svg">
-  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/architecture-light.svg" alt="The Mainplane Architecture: connectors reach Mainplane Server, which holds secrets and controls, observability and the file server; the network joins the server and every worker" width="960">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/architecture-3d-dark.svg">
+  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/architecture-3d-light.svg" alt="The Mainplane Architecture: connectors reach Mainplane Server, which holds secrets and controls, observability and the file server; the network joins the server and every worker" width="960">
 </picture>
 <br/><br/>
 
@@ -84,6 +84,6 @@ We welcome feedback as GitHub issues. Pull requests are open to collaborators on
 </details>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/footer-dark.svg">
-  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/footer-light.svg" alt="A billboard turns through what Mainplane agents do, while the biplane tows a banner: Now you're flying!" width="960">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/footer-still-dark.svg">
+  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/footer-still-light.svg" alt="A billboard turns through what Mainplane agents do, while the biplane tows a banner: Now you're flying!" width="960">
 </picture>
