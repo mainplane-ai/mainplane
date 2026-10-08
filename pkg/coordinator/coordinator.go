@@ -316,8 +316,9 @@ func (c *Coordinator) upgrade(w http.ResponseWriter, r *http.Request) {
 	mux.HandleFunc("POST /machine/map", func(w http.ResponseWriter, r *http.Request) {
 		c.serveMap(w, r, machine)
 	})
-	h2 := http2.Server{ReadIdleTimeout: pingIdle}
-	h2.ServeConn(conn, &http2.ServeConnOpts{Context: r.Context(), BaseConfig: &http.Server{Handler: http.MaxBytesHandler(mux, bodyLimit)}})
+	// x/net v0.60.0 deprecates this for net/http's own HTTP/2, a move that is
+	// its own change: this is every worker's control connection.
+	(&http2.Server{ReadIdleTimeout: pingIdle}).ServeConn(conn, &http2.ServeConnOpts{Context: r.Context(), BaseConfig: &http.Server{Handler: http.MaxBytesHandler(mux, bodyLimit)}}) //nolint:staticcheck
 }
 
 // register is headscale's handleRegister for pre-auth keys, where the key is
