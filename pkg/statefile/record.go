@@ -75,6 +75,7 @@ type Header struct {
 	Request string          `json:"request,omitempty"` // step: sha256 of the request bytes
 	Sent    time.Time       `json:"sent,omitzero"`     // step: when the request that served it went out; cache ttls count from here
 	Usage   *Usage          `json:"usage,omitempty"`   // step
+	Stop    string          `json:"stop,omitempty"`    // step: why the provider ended the output, in its own words
 	Cache   json.RawMessage `json:"cache,omitempty"`   // step: provider cache markers
 }
 

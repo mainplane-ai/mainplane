@@ -170,6 +170,7 @@ type chatChunk struct {
 				Function chatCallBody `json:"function"`
 			} `json:"tool_calls"`
 		} `json:"delta"`
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
 		PromptTokens        int `json:"prompt_tokens"`
@@ -189,6 +190,7 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 	var text strings.Builder
 	var calls []*chatToolCall
 	var usage statefile.Usage
+	var stop string
 	var done bool
 	err := Events(resp, func(_, data string) error {
 		if data == "[DONE]" {
@@ -211,6 +213,9 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 		}
 		if len(c.Choices) == 0 {
 			return nil
+		}
+		if f := c.Choices[0].FinishReason; f != "" {
+			stop = f
 		}
 		d := c.Choices[0].Delta
 		text.WriteString(d.Content)
@@ -241,5 +246,5 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 		}
 		emit(r)
 	}
-	return statefile.Header{Usage: &usage}, nil
+	return statefile.Header{Usage: &usage, Stop: stop}, nil
 }

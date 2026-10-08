@@ -172,6 +172,10 @@ type respEvent struct {
 }
 
 type respResponse struct {
+	Status            string `json:"status"`
+	IncompleteDetails *struct {
+		Reason string `json:"reason"`
+	} `json:"incomplete_details"`
 	Usage *respUsage `json:"usage"`
 }
 
@@ -219,6 +223,7 @@ func respRecord(raw json.RawMessage) (statefile.Record, bool, error) {
 
 func (openai) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
 	var usage statefile.Usage
+	var stop string
 	var done bool
 	err := Events(resp, func(_, data string) error {
 		var e respEvent
@@ -238,6 +243,10 @@ func (openai) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Hea
 			}
 		case "response.completed", "response.incomplete":
 			done = true
+			stop = e.Response.Status
+			if d := e.Response.IncompleteDetails; d != nil {
+				stop = d.Reason
+			}
 			u := e.Response.Usage
 			usage = statefile.Usage{
 				Input:     u.InputTokens - u.InputTokensDetails.CachedTokens,
@@ -250,5 +259,5 @@ func (openai) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Hea
 	if err == nil && !done {
 		err = fmt.Errorf("openai: stream ended before response.completed")
 	}
-	return statefile.Header{Usage: &usage}, err
+	return statefile.Header{Usage: &usage, Stop: stop}, err
 }
