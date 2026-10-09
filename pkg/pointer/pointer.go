@@ -1,11 +1,14 @@
 // Package pointer is how a worker or connector finds its harness from the
-// key its token carries. pointer.mainplane.ai maps the key to the harness's
-// current URL, signed by the key. Neither the pointer nor the URL is trusted:
-// the harness at the URL proves the key before any secret goes there.
+// key its token carries, or the network name a person types. pointer.mainplane.ai
+// maps the key to the harness's current URL, signed by the key, and a name to
+// the key that claimed it. Neither the pointer nor the URL is trusted: the
+// harness at the URL proves the key before any secret goes there, and a name
+// leads only to a device code exchange that a wrong key cannot finish.
 //
-//	PUT pointer.mainplane.ai/<key>  {url, seq, sig}  sig over "<key> <url> <seq>"
-//	GET <url>/id?nonce=<n>          {url, sig,       sig over "id <url> <n>"
-//	                                 noise}          noise over "noise <coordinator's Noise key>"
+//	PUT pointer.mainplane.ai/<key>         {url, seq, sig}  sig over "<key> <url> <seq>"
+//	PUT pointer.mainplane.ai/name/<name>   {key, seq, sig}  sig over "name <name> <key> <seq>"
+//	GET <url>/id?nonce=<n>                 {url, sig,       sig over "id <url> <n>"
+//	                                        noise}          noise over "noise <coordinator's Noise key>"
 package pointer
 
 import (
@@ -97,15 +100,44 @@ func idMsg(url, nonce string) string { return "id " + url + " " + nonce }
 // can finish a Noise handshake, so a replayed signature gains nothing.
 func noiseMsg(noise string) string { return "noise " + noise }
 
+var (
+	ErrTaken    = errors.New("network name is taken") // another harness holds it
+	errNotFound = errors.New("404 Not Found")
+)
+
 // Publish puts url on the pointer as the URL of k's harness. seq is the time,
 // so the harness keeps no counter.
 func Publish(ctx context.Context, k ed25519.PrivateKey, url string) error {
 	key, seq := Encode(k), time.Now().UnixMilli()
-	b, err := json.Marshal(record{URL: url, Seq: seq, Sig: sign(k, recordMsg(key, url, seq))})
+	return put(ctx, api+key, record{URL: url, Seq: seq, Sig: sign(k, recordMsg(key, url, seq))})
+}
+
+// Claim makes name the network name of k's harness, in place of the one it
+// had, which is then free. A name another harness holds is ErrTaken.
+func Claim(ctx context.Context, k ed25519.PrivateKey, name string) error {
+	key, seq := Encode(k), time.Now().UnixMilli()
+	msg := fmt.Sprintf("name %s %s %d", name, key, seq)
+	return put(ctx, api+"name/"+name, map[string]any{"key": key, "seq": seq, "sig": sign(k, msg)})
+}
+
+// Named is the key of the harness that holds network name. It is a hint, as
+// the URL is: a device code exchange with a harness that holds another key
+// fails.
+func Named(ctx context.Context, name string) (string, error) {
+	var r struct{ Key string }
+	err := get(ctx, api+"name/"+name, &r)
+	if errors.Is(err, errNotFound) {
+		return "", fmt.Errorf("no network named %s", name)
+	}
+	return r.Key, err
+}
+
+func put(ctx context.Context, url string, v any) error {
+	b, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, api+key, bytes.NewReader(b))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(b))
 	if err != nil {
 		return err
 	}
@@ -114,9 +146,14 @@ func Publish(ctx context.Context, k ed25519.PrivateKey, url string) error {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusNoContent {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("publish to %s: %s: %s", api, resp.Status, b)
+	b, _ = io.ReadAll(resp.Body)
+	switch {
+	case resp.StatusCode == http.StatusConflict && bytes.Contains(b, []byte("is taken")):
+		return ErrTaken
+	case resp.StatusCode == http.StatusBadRequest: // a name it refuses, and why
+		return errors.New(string(bytes.TrimSpace(b)))
+	case resp.StatusCode != http.StatusNoContent:
+		return fmt.Errorf("PUT %s: %s: %s", url, resp.Status, b)
 	}
 	return nil
 }
@@ -197,8 +234,12 @@ func get(ctx context.Context, url string, v any) error {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("GET %s: %w", url, errNotFound)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("GET %s: %s", url, resp.Status)
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("GET %s: %s: %s", url, resp.Status, bytes.TrimSpace(b))
 	}
 	return json.NewDecoder(resp.Body).Decode(v)
 }

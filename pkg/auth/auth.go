@@ -1,9 +1,10 @@
 // Package auth is the two credentials a harness checks. An api key lets a
-// connector call every HTTP route. A join secret lets a machine join the mesh
-// as a worker; it can add a worker and nothing else. Both kinds live hashed in one
-// table in the harness's directory. What a person pastes is a token: the kind, the
-// key of the harness its holder finds through the pointer, and the secret
-// itself.
+// connector call every HTTP route; api keys live hashed in a table in the
+// harness's directory. A join secret lets a machine join the mesh as a
+// worker; it can add a worker and nothing else. It derives from the device
+// code, which is what a person types (code.go). Both are held as a token: the
+// kind, the key of the harness its holder finds through the pointer, and the
+// secret itself.
 //
 //	mp_<kind>_<harness key>.<secret>
 package auth
@@ -42,9 +43,8 @@ const (
 )
 
 type Entry struct {
-	Name      string `json:"name"`
-	Hash      string `json:"hash"`
-	Ephemeral bool   `json:"ephemeral,omitempty"` // join: its workers leave the mesh when they go quiet
+	Name string `json:"name"`
+	Hash string `json:"hash"`
 }
 
 // Table is the live entries by kind. A revoked entry is gone, not marked.
@@ -78,7 +78,7 @@ func (s Store) save(t Table) error {
 }
 
 // Issue adds an entry and returns its secret: the one time it is in the clear.
-func (s Store) Issue(kind, name string, ephemeral bool) (string, error) {
+func (s Store) Issue(kind, name string) (string, error) {
 	t, err := s.Load()
 	if err != nil {
 		return "", err
@@ -87,18 +87,8 @@ func (s Store) Issue(kind, name string, ephemeral bool) (string, error) {
 		return "", fmt.Errorf("%s %q exists", kind, name)
 	}
 	secret := rand.Text()
-	t[kind] = append(t[kind], Entry{Name: name, Hash: Hash(secret), Ephemeral: ephemeral})
+	t[kind] = append(t[kind], Entry{Name: name, Hash: Hash(secret)})
 	return secret, s.save(t)
-}
-
-// Set makes secret the entry of kind named name, in place of any before it.
-func (s Store) Set(kind, name, secret string) error {
-	t, err := s.Load()
-	if err != nil {
-		return err
-	}
-	t[kind] = append(slices.DeleteFunc(t[kind], func(e Entry) bool { return e.Name == name }), Entry{Name: name, Hash: Hash(secret)})
-	return s.save(t)
 }
 
 // Add makes secret an entry of kind named name, beside any before it.
@@ -126,24 +116,18 @@ func (s Store) Revoke(kind, name string) error {
 
 // Check is whether secret is a live entry of kind.
 func (s Store) Check(kind, secret string) bool {
-	_, ok := s.Find(kind, secret)
-	return ok
-}
-
-// Find is the live entry of kind that secret is, if it is one.
-func (s Store) Find(kind, secret string) (Entry, bool) {
 	t, err := s.Load()
 	if err != nil {
 		log.Printf("auth: %v", err)
-		return Entry{}, false
+		return false
 	}
-	h, found, ok := []byte(Hash(secret)), Entry{}, false
+	h, ok := []byte(Hash(secret)), false
 	for _, e := range t[kind] {
 		if subtle.ConstantTimeCompare(h, []byte(e.Hash)) == 1 {
-			found, ok = e, true
+			ok = true
 		}
 	}
-	return found, ok
+	return ok
 }
 
 // Bearer refuses a request whose Authorization: Bearer is not a live api key,
@@ -168,10 +152,11 @@ func (s Store) Bearer(l *Limit, next http.Handler) http.Handler {
 	})
 }
 
-// Limit counts refused credentials of both kinds by address, and turns an
-// address away for the rest of a window once it has too many. The window is
-// one for every address, so an address may come back early. It keeps down
-// noise and log spam; a 26-character secret needs no limit against guessing.
+// Limit counts refused credentials and device code exchanges by address, and
+// turns an address away for the rest of a window once it has too many. The
+// window is one for every address, so an address may come back early. A
+// 26-character secret needs no limit against guessing; an 8-character device
+// code does, and this is it.
 type Limit struct {
 	mu    sync.Mutex
 	m     map[string]int // refusals by address since start
@@ -184,9 +169,28 @@ func (l *Limit) Wait(addr string) error {
 	n, w := l.m[addr], window-time.Since(l.start)
 	l.mu.Unlock()
 	if n >= refusals && w > 0 {
-		return fmt.Errorf("too many refused credentials from %s: try again in %s", addr, (w + time.Second - 1).Truncate(time.Second))
+		return tooMany(addr, w)
 	}
 	return nil
+}
+
+// Take counts a try from addr, or is why addr is turned away now: the check
+// and the count are one step, so tries at once cannot all pass the check.
+func (l *Limit) Take(addr string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if time.Since(l.start) > window {
+		l.start, l.m = time.Now(), map[string]int{}
+	}
+	if l.m[addr] >= refusals {
+		return tooMany(addr, window-time.Since(l.start))
+	}
+	l.m[addr]++
+	return nil
+}
+
+func tooMany(addr string, w time.Duration) error {
+	return fmt.Errorf("too many refused credentials from %s: try again in %s", addr, (w + time.Second - 1).Truncate(time.Second))
 }
 
 // Refused counts a refused credential from addr, in a new window once the

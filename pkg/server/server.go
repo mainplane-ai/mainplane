@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/hmac"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -131,6 +132,9 @@ func Harness(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
+	if err := network(dir, k); err != nil {
+		return err
+	}
 	store := Auth(dir)
 	t, err := store.Load()
 	if err != nil {
@@ -139,16 +143,26 @@ func Harness(ctx context.Context, path string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	limit := &auth.Limit{}
-	join := func(secret, addr string) (auth.Entry, error) {
+	code := func() (string, error) {
+		n, err := LoadNetwork(dir)
+		return n.Code, err
+	}
+	join := func(secret, addr string) (string, error) {
 		if err := limit.Wait(addr); err != nil {
-			return auth.Entry{}, err
+			return "", err
 		}
-		e, ok := store.Find(auth.Join, secret)
-		if !ok {
-			limit.Refused(addr)
-			return e, errors.New("join secret refused")
+		c, err := code()
+		if err != nil {
+			return "", err
 		}
-		return e, nil
+		switch {
+		case hmac.Equal([]byte(secret), []byte(adminSecret(k, c))):
+			return worker.Admin, nil
+		case hmac.Equal([]byte(secret), []byte(auth.Secret(k, c))):
+			return "", nil
+		}
+		limit.Refused(addr)
+		return "", errors.New("join secret refused: install again with the network name and the device code")
 	}
 	coord, err := coordinator.New(dir, k, join)
 	if err != nil {
@@ -170,9 +184,10 @@ func Harness(ctx context.Context, path string) error {
 	var at atomic.Value
 	at.Store("")
 	urls := make(chan string, 1)
-	go publish(ctx, k, urls)
+	go publish(ctx, dir, k, urls)
 	mux := http.NewServeMux()
 	mux.Handle("/id", pointer.ID(k, func() string { return at.Load().(string) }, coord.Public().String()))
+	mux.Handle("POST /join", auth.JoinHandler(k, pointer.Encode(k), code, limit))
 	coord.Handle(mux)
 	derp := relay.New()
 	derp.SetVerifyClientFunc(coord.Known)
@@ -201,7 +216,7 @@ func Harness(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("harness: http on %s, sessions in %s, %d api keys, %d join secrets", c.HTTP, sessions, len(t[auth.Key]), len(t[auth.Join]))
+	log.Printf("harness: http on %s, sessions in %s, %d api keys", c.HTTP, sessions, len(t[auth.Key]))
 	errs := make(chan error, 4)
 	go func() { errs <- srv.Serve(ln) }()
 	go func() {
@@ -295,9 +310,9 @@ func setDrives(coord *coordinator.Coordinator, pool *harness.Pool, ds map[string
 	pool.Resend()
 }
 
-// publish puts each URL from urls on the pointer, again daily so the record
-// does not expire, and a minute after a failure.
-func publish(ctx context.Context, k ed25519.PrivateKey, urls <-chan string) {
+// publish puts each URL from urls on the pointer, with the network name in
+// dir, again daily so neither expires, and a minute after a failure.
+func publish(ctx context.Context, dir string, k ed25519.PrivateKey, urls <-chan string) {
 	url, wait := "", republish
 	for {
 		select {
@@ -307,7 +322,14 @@ func publish(ctx context.Context, k ed25519.PrivateKey, urls <-chan string) {
 		case <-time.After(wait):
 		}
 		wait = republish
-		if err := pointer.Publish(ctx, k, url); err != nil {
+		n, err := LoadNetwork(dir)
+		if err == nil {
+			err = pointer.Claim(ctx, k, n.Name)
+		}
+		if err == nil {
+			err = pointer.Publish(ctx, k, url)
+		}
+		if err != nil {
 			log.Printf("harness: %v; again in %s", err, publishRetry)
 			wait = publishRetry
 		}

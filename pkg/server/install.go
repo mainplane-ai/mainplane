@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	"crypto/rand"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -115,6 +115,10 @@ func Install(c *Config, keep bool) error {
 	if err != nil {
 		return err
 	}
+	// before start, so it is the operator's, and before the lines that name it are printed
+	if err := network(Dir, k); err != nil {
+		return err
+	}
 	// Root writes the auth table after start gives Dir to the operator. A file
 	// root made then would be root's and the harness could not read it, so it
 	// is made now. O_EXCL never writes through a link.
@@ -135,7 +139,7 @@ func Install(c *Config, keep bool) error {
 	if err := answers(c.HTTP); err != nil {
 		return err
 	}
-	if err := admin(pointer.Encode(k)); err != nil {
+	if err := admin(k); err != nil {
 		return err
 	}
 	return agents()
@@ -157,25 +161,26 @@ func writeAgents(path string) (bool, error) {
 	return true, errors.Join(err, f.Close())
 }
 
-// admin makes this machine the worker admin of the harness with key harness,
-// through the CLI the install line put beside this binary, which the worker
-// install places as the machine's only one. A machine already a worker of
-// this harness stays as it is. admin's secret is in no token anyone sees, and
-// new at each install that joins it. Its output is shown only when it fails.
-func admin(harness string) error {
+// admin makes this machine the worker admin of the harness with k, through
+// the CLI the install line put beside this binary, which the worker install
+// places as the machine's only one. A machine already a worker of this
+// harness stays as it is. admin's token is in no line anyone sees. Its output
+// is shown only when it fails.
+func admin(k ed25519.PrivateKey) error {
+	harness := pointer.Encode(k)
 	if h, _, err := mesh.Joined(); err == nil && h == harness {
 		return nil
+	}
+	n, err := LoadNetwork(Dir)
+	if err != nil {
+		return err
 	}
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	secret := rand.Text()
-	if err := Auth(Dir).Set(auth.Join, worker.Admin, secret); err != nil {
-		return err
-	}
 	cli := filepath.Join(filepath.Dir(exe), "mainplane"+filepath.Ext(exe))
-	if out, err := exec.Command(cli, "install", auth.Token(auth.Join, harness, secret)).CombinedOutput(); err != nil {
+	if out, err := exec.Command(cli, "install", auth.Token(auth.Join, harness, adminSecret(k, n.Code))).CombinedOutput(); err != nil {
 		return fmt.Errorf("the admin worker: %w: %s", err, out)
 	}
 	return nil

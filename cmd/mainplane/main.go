@@ -1,7 +1,7 @@
 // mainplane is the device binary: the worker, and the plainest connector.
 //
-//	mainplane worker  [join token]    make this machine a worker, named by its hostname
-//	mainplane install <join token>    and again at every boot, as a service; asks for sudo or UAC, code still runs as you
+//	mainplane worker  [<network> <device code>]   make this machine a worker, named by its hostname
+//	mainplane install <network> <device code>     and again at every boot, as a service; asks for sudo or UAC, code still runs as you
 //	mainplane login   <api key>       find the harness, remember it and the key in ~/.mainplane/login.json, and become its release
 //	mainplane update  [version]       become that release, by default the logged-in harness's, else the latest stable
 //	mainplane uninstall               remove the worker service and the CLI; ~/.mainplane stays
@@ -46,7 +46,7 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "worker", "install":
-		if len(os.Args) > 3 || os.Args[1] == "install" && len(os.Args) != 3 {
+		if len(os.Args) > 4 || os.Args[1] == "install" && len(os.Args) < 3 {
 			usage()
 		}
 		work(os.Args[1] == "install", os.Args[2:])
@@ -120,19 +120,29 @@ func logIn(token string) {
 	}
 }
 
-// work installs the worker, or is the worker: with a token given, as whoever
-// runs it; without, as the service install left, whose scratch is the
-// operator's. A machine already a worker of the token's harness keeps its
-// install and its token, and the install asks for no root.
+// work installs the worker, or is the worker: with a network name and device
+// code, or the join token they trade for, as whoever runs it; with none, as
+// the service install left, whose scratch is the operator's. A machine
+// already a worker of the token's harness keeps its install and its token,
+// and the install asks for no root. A token goes to the elevated install, and
+// admin's install passes one, but no person types it.
 func work(install bool, args []string) {
 	token, op := "", (*user.User)(nil)
-	if len(args) == 1 {
-		token = args[0]
-	} else {
-		var err error
+	var err error
+	switch len(args) {
+	case 0:
 		if token, op, err = worker.Installed(); err != nil {
-			log.Fatalf("no join token: mainplane worker <join token>, or mainplane install <join token> once: %v", err)
+			log.Fatalf("not joined: mainplane worker <network> <device code>, or mainplane install <network> <device code> once: %v", err)
 		}
+	case 1:
+		token = args[0]
+	case 2:
+		if token, err = redeem(args[0], args[1]); err != nil {
+			log.Fatal(err)
+		}
+		// a worker started by hand restarts after an update with its
+		// arguments: the token, which a new code does not refuse
+		os.Args = []string{os.Args[0], os.Args[1], token}
 	}
 	key, secret, err := auth.Parse(auth.Join, token)
 	if err != nil {
@@ -162,6 +172,29 @@ func work(install bool, args []string) {
 	if err := worker.Work(key, worker.Local{Name: name, Secret: secret, Scratch: filepath.Join(dir, ".mainplane"), Interps: worker.Default[runtime.GOOS], Operator: op}); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// redeem trades device code for the join token of the harness that holds
+// network name.
+func redeem(name, code string) (string, error) {
+	code, err := auth.Code(code)
+	if err != nil {
+		return "", err
+	}
+	ctx := context.Background()
+	key, err := pointer.Named(ctx, strings.ToLower(name))
+	if err != nil {
+		return "", err
+	}
+	url, err := pointer.Find(ctx, key, "")
+	if err != nil {
+		return "", err
+	}
+	token, err := auth.Redeem(ctx, url, key, code)
+	if errors.Is(err, auth.ErrCode) {
+		return "", fmt.Errorf("wrong device code for network %s", name)
+	}
+	return token, err
 }
 
 // operator is a root worker's own work, run as the operator; not for people:
@@ -266,8 +299,9 @@ func loginPath() string { return filepath.Join(home(), ".mainplane", "login.json
 func usage() {
 	fmt.Fprint(os.Stderr, `usage: mainplane <verb> ...
 
-  worker     [join token]            make this machine a worker, named by its hostname; no token reads the installed one
-  install    <join token>            and again at every boot, as a service; asks for sudo or UAC, code still runs as you
+  worker     [<network> <code>]      make this machine a worker, named by its hostname, with the network name and
+                                     device code mainplane-server join prints; none is the installed worker's
+  install    <network> <code>        and again at every boot, as a service; asks for sudo or UAC, code still runs as you
   login      <api key>               remember the harness and the key, which every verb below uses, and become the
                                      harness's release
   update     [version]               become that release, by default the logged-in harness's, else the latest stable
@@ -287,8 +321,8 @@ func usage() {
   sessions   [status]                GET  /sessions
   workers                            GET  /workers
   workers    <id> <name>...          PUT  /sessions/{id}/workers: the session's workers are these from its next step on
-  worker     remove <name>           DELETE /workers/{name}: it leaves the mesh for good; revoke its join secret too
-                                     to keep that secret from joining machines again
+  worker     remove <name>           DELETE /workers/{name}: it leaves the mesh for good; mainplane-server join cycle
+                                     too keeps the device code it had from joining machines again
   providers                          GET  /providers
   key        <provider> <key>        PUT  /providers/{provider}: the harness saves the key in its config, and serves
                                      the provider at once

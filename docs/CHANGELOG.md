@@ -4,7 +4,14 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 
 ## v0.5.2
 
-- `mainplane-server install` prints the join and login lines as soon as the harness answers on this machine, then waits behind `initializing network`, which ends in `done`, for the tunnel and the CLI login. The tokens name no URL, so a worker installed meanwhile joins once the tunnel is up. The install waited for the tunnel before it printed anything, about 20 seconds on a first install
+A machine joins with a network name and a device code, `curl -fsSL https://mainplane.ai/install | sh -s -- sketchy-armadillo-431 K7QM-4ZTR`, short enough to type, in place of a join token. Workers joined before stay. Install the harness again to see its name and code: its join tokens, and their entries in the auth table, are no longer read.
+
+- The first `mainplane-server install` gives the harness a random network name, claimed on `pointer.mainplane.ai`, and an 8-character device code, and both stay across installs. `connect a worker:` is now `connect a device:`
+- `mainplane-server join` prints the lines; `join cycle` makes a new code, and workers that joined with the one before stay; `mainplane-server rename <name>` changes the name, and a name another harness holds is refused. `join new`, `join revoke`, `join list` and ephemeral join secrets are gone
+- The code never travels: the machine and the harness run CPace with it at `POST /join`, and the harness answers with the join secret sealed under the key they share. Every try counts against the address's 30 a minute. The join secret derives from the code, so a cycled code refuses it and no table holds it
+- `install.sh` and `install.ps1` take `<network> <device code>` and no longer take a join token. `mainplane install` and `mainplane worker` take the same two
+- A node is ephemeral when it asks to be at registration, as a `tsnet` node with `Ephemeral` does, not by its secret. The offnet workflow takes `network` and `code`, and uninstalls at the end
+- `mainplane-server install` prints the join and login lines as soon as the harness answers on this machine, then waits behind `initializing network`, which ends in `done`, for the tunnel and the CLI login. The lines name no URL, so a worker installed meanwhile joins once the tunnel is up. The install waited for the tunnel before it printed anything, about 20 seconds on a first install
 
 ## v0.5.1
 

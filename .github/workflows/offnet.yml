@@ -1,18 +1,20 @@
 name: offnet
 # A worker off the tailnet and the LAN: a GitHub runner installs a release,
-# joins a harness's mesh with an ephemeral join token, and must reach the
-# harness there and see nothing else. Make a token for one run, revoke it after:
-#   sudo mainplane-server join new offnet ephemeral
-#   gh workflow run offnet -f version=<v> -f token=<token>
-#   sudo mainplane-server join revoke offnet
+# joins a harness's mesh with its network name and device code, and must reach
+# the harness there and see nothing else, then leaves it. Cycle the code after:
+#   gh workflow run offnet -f version=<v> -f network=<name> -f code=<device code>
+#   sudo mainplane-server join cycle
 on:
   workflow_dispatch:
     inputs:
       version:
         description: release to install
         required: true
-      token:
-        description: ephemeral join token, masked
+      network:
+        description: network name
+        required: true
+      code:
+        description: device code, masked
         required: true
 permissions:
   contents: read
@@ -24,9 +26,9 @@ jobs:
     env:
       V: ${{ inputs.version }}
     steps:
-      # The token is read from the event file, so no script or log line holds it.
-      - run: echo "::add-mask::$(jq -r .inputs.token "$GITHUB_EVENT_PATH")"
-      - run: curl -fsSL "https://dl.mainplane.ai/$V/install.sh" | sudo sh -s -- "$(jq -r .inputs.token "$GITHUB_EVENT_PATH")"
+      # The code is read from the event file, so no script or log line holds it.
+      - run: echo "::add-mask::$(jq -r .inputs.code "$GITHUB_EVENT_PATH")"
+      - run: curl -fsSL "https://dl.mainplane.ai/$V/install.sh" | sudo sh -s -- "$(jq -r .inputs.network "$GITHUB_EVENT_PATH")" "$(jq -r .inputs.code "$GITHUB_EVENT_PATH")"
       - name: sees only the harness, and reaches it on the mesh
         run: |
           for i in $(seq 60); do
@@ -40,3 +42,6 @@ jobs:
           echo "$s" | grep -Eq '^harness +fd7c:\S+ +(direct|relay)'
           [ "$(echo "$s" | grep -Ec '^\S+ +fd7c:')" = 2 ]
           sudo journalctl -u mainplaned --no-pager | grep 'connected to the harness at \[fd7c:'
+      # uninstall logs out, and the harness forgets the node
+      - if: always()
+        run: sudo mainplane uninstall

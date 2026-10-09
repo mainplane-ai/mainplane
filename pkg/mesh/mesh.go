@@ -181,7 +181,7 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 			return true
 		})
 		if removed {
-			log.Printf("mesh: the harness removed this worker; leaving the mesh. To join again: mainplane uninstall, then install with a join token")
+			log.Printf("mesh: the harness removed this worker; leaving the mesh. To join again: mainplane uninstall, then install with the network name and device code")
 			unwatch()
 			if err := m.leave(); err != nil {
 				log.Printf("mesh: %v", err)

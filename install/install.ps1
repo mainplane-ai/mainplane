@@ -1,13 +1,13 @@
 # Installs the mainplane CLI for the user who runs it, on their PATH, unless this machine has one; with
-# an api key it logs that CLI in. With a join token it installs the CLI for the machine instead and
+# an api key it logs that CLI in. With a network name and device code it installs the CLI for the machine instead and
 # makes this Windows machine a worker for that user, after a UAC prompt. With server it also makes this
 # machine the harness, from the provider keys set in this shell, after a UAC prompt, and logs the CLI
 # in to it. The release stamps its version.
-#   & ([scriptblock]::Create((irm https://dl.mainplane.ai/@VERSION@/install.ps1))) [api key | join token | server]
-param([string]$Token)
+#   & ([scriptblock]::Create((irm https://dl.mainplane.ai/@VERSION@/install.ps1))) [api key | <network> <device code> | server]
+param([string]$Token, [string]$Code)
 $ErrorActionPreference = 'Stop'
-if ($args -or ($Token -and $Token -ne 'server' -and $Token -notlike 'mp_key_*' -and $Token -notlike 'mp_join_*')) {
-  throw 'usage: install.ps1 [api key | join token | server]'
+if ($args -or ($Token -and !$Code -and $Token -ne 'server' -and $Token -notlike 'mp_key_*')) {
+  throw 'usage: install.ps1 [api key | <network> <device code> | server]'
 }
 $ProgressPreference = 'SilentlyContinue'
 $dl = 'https://dl.mainplane.ai/@VERSION@'
@@ -24,15 +24,15 @@ function Fetch($name) {
   if ($want -ne (Get-FileHash $t).Hash.ToLower()) { throw "$f does not match SHA256SUMS" }
   $t
 }
-if ($Token -eq 'server') {
+if ($Token -eq 'server' -and !$Code) {
   # install places mainplane-server in Program Files, runs it as a service, makes this machine the
   # worker admin with the mainplane beside it, which places that in Program Files, and logs that in
   Fetch mainplane | Out-Null
   & (Fetch mainplane-server) install
   if ($LASTEXITCODE) { exit $LASTEXITCODE }
   $bin = "$env:ProgramFiles\mainplane"
-} elseif ($Token -like 'mp_join_*') {
-  & (Fetch mainplane) install $Token
+} elseif ($Code) {
+  & (Fetch mainplane) install $Token $Code
   if ($LASTEXITCODE) { exit $LASTEXITCODE }
   $bin = "$env:ProgramFiles\mainplane"
 } else {

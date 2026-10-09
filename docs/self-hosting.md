@@ -53,11 +53,37 @@ sudo, read and edit the config and keys. On Linux and macOS the harness runs
 as you. Sessions are in `sessions/` in that directory. `mainplane-server
 uninstall` removes `admin` with the harness.
 
-Every install prints a new join token and a new api key, both named `default`,
-in the lines that use them on any machine. The CLI on the harness's machine
+Every install prints the line that makes a machine a worker, with the
+network name and device code, and a new api key named `default`, in the lines
+that use them on any machine. The CLI on the harness's machine
 logs in with that key, except after an install from a config file. The default keys from earlier installs keep working, so
 a reinstall logs no connector out; `mainplane-server key revoke default`
-revokes them all. The default join token before it joins no more.
+revokes them all.
+
+## Network name and device code
+
+```
+curl -fsSL https://mainplane.ai/install | sh -s -- sketchy-armadillo-431 K7QM-4ZTR
+                                                   network name          device code
+```
+
+The first install gives the harness a random network name and a device code.
+Both stay the same across installs. Type them on each machine you connect;
+case does not matter, nor the hyphen in the code.
+
+- `mainplane-server join` prints the lines again.
+- `mainplane-server join cycle` makes a new device code. The one before joins
+  no more. Workers that joined with it stay.
+- `mainplane-server rename <name>` changes the network name, to your company's
+  or project's, say: a-z, 0-9 and single `-`, 3 to 40 characters. A name
+  another harness holds is refused. Workers stay.
+
+The name is public on `pointer.mainplane.ai`; the code is the secret. The code
+never leaves the machine: the machine and the harness run CPace, a password
+exchange, with it, and only a machine that typed the right code gets the join
+secret. A wrong guess learns nothing, and the harness counts every try
+against the address it came from, 30 a minute. A name that is not renewed for
+30 days is free for anyone to take; a harness renews its name every day.
 
 ## Your own domain
 
@@ -102,16 +128,16 @@ Nothing listens on that port outside the mesh.
   outside a worker's map is not in its hosts block, and WireGuard drops its
   packets at both ends. A worker that runs untrusted work reaches none of your
   other machines unless you link it.
-- A worker joined with an ephemeral secret
-  (`mainplane-server join new <name> ephemeral`), for fleets, leaves the mesh
-  3 minutes after it goes quiet.
+- A node that asks to be ephemeral when it registers, as a Tailscale
+  `tsnet` node with `Ephemeral` set does, leaves the mesh 3 minutes after it
+  goes quiet. `mainplane` never asks.
 - The CLI on a worker reaches its harness over the mesh, not through the
   tunnel, when the worker follows the harness the CLI is logged in to.
 - `mainplane worker remove <name>` takes a worker off the mesh within seconds:
   its peers lose it and its name, and the worker takes down its interface and
   hosts block. Its keys stay refused. To make it a worker again, run
   `mainplane uninstall` on it, then install again. `mainplane-server join
-  revoke` refuses new joins with that secret, and leaves the workers that
+  cycle` refuses new joins with the code it had, and leaves the workers that
   joined with it.
 - `mainplane uninstall` logs the worker out of its harness, so the machine
   installed again joins under its own name. A worker that could not log out,
@@ -141,7 +167,7 @@ Nothing listens on that port outside the mesh.
   prefers its IPv4 address, so use the long name there.
 - Windows: `mainplane install` downloads `wintun.dll`, the WireGuard project's
   signed TUN driver (the same one Tailscale ships), from wintun.net, pinned to
-  a sha256. A worker started by hand, `mainplane worker <token>`, needs
+  a sha256. A worker started by hand, `mainplane worker <network> <device code>`, needs
   `wintun.dll` beside `mainplane.exe`.
 
 ## Drives
@@ -192,12 +218,15 @@ server. Nothing is shared until the harness config names a drive:
 
 TLS ends at Cloudflare, in both modes. Cloudflare can read all traffic between
 connectors and the harness: api keys, prompts, command output, and files. It
-cannot read the mesh: a join secret goes to the coordinator inside Noise, to a
-key the harness key vouches for, and workers reach the harness and each other
+cannot read the mesh or learn the device code: the code is never sent, the
+join secret comes back sealed under a key only the CPace exchange gives, and
+goes to the coordinator inside Noise, to a key the harness key vouches for,
+and workers reach the harness and each other
 inside WireGuard, relayed through the tunnel or direct. Through the relay it
 sees how much encrypted traffic passes between which workers, and when. If
 this is not acceptable, do not self-host through a Cloudflare tunnel.
 
-The pointer stores only the harness key, the current URL, and a signature. It
-cannot redirect workers: a record needs the harness key's signature, and a
-worker sends no secret until the harness at the URL proves the key.
+The pointer stores only the harness key, the current URL, the network name,
+and signatures. It cannot redirect workers: a record needs the harness key's
+signature, a worker sends no secret until the harness at the URL proves the
+key, and a harness with another key cannot finish the device code exchange.

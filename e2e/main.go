@@ -37,7 +37,6 @@ import (
 	"cmp"
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -102,8 +101,8 @@ const (
 // Scripts for each machine, by whether it is Windows.
 var (
 	install = map[bool]string{
-		false: `curl -fsSL %[1]s%[2]s/install.sh | sh -s -- '%[3]s'`,
-		true:  `& ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) '%[3]s'`,
+		false: `curl -fsSL %[1]s%[2]s/install.sh | sh -s -- %[3]s`,
+		true:  `& ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) %[3]s`,
 	}
 	// harnessDir is each OS's harness Dir. The harness install is a first one:
 	// aside moves a Dir there to Dir.e2e, unless one from a run that stopped
@@ -378,11 +377,12 @@ func run(v, prev, port string, targets []string) {
 	}
 	fmt.Printf("%s == tunnel %s\n", stamp(), url)
 	k := key()
-	if err := pointer.Publish(ctx, k, url); err != nil {
+	// each run claims a network name of its own, which frees the last run's on the pointer
+	network, code := fmt.Sprintf("e2e-%d", time.Now().Unix()), auth.NewCode()
+	if err := errors.Join(pointer.Publish(ctx, k, url), pointer.Claim(ctx, k, network)); err != nil {
 		stop()
 		log.Fatal(err)
 	}
-	secret := rand.Text()
 	hosts := map[string][]string{} // each machine's hosts lines before the mesh
 	var hostsMu sync.Mutex
 	each(oses, func(o string) {
@@ -392,11 +392,11 @@ func run(v, prev, port string, targets []string) {
 		hosts[o] = rest
 		hostsMu.Unlock()
 		check(o, "hosts file read before install", err == nil, fmt.Sprint(err))
-		out, err = remote(o, ssh[o], fmt.Sprintf(install[o == "windows"], release.DL, v, auth.Token(auth.Join, pointer.Encode(k), secret)))
+		out, err = remote(o, ssh[o], fmt.Sprintf(install[o == "windows"], release.DL, v, network+" "+code))
 		check(o, "install "+v, err == nil && strings.Contains(out, v), last(out))
 	})
 	harnessAt := func(ver string, mode ...string) {
-		cmd := exec.Command(exe, append([]string{"phase", "127.0.0.1:" + port, url, secret, ver, strings.Join(oses, ",")}, mode...)...)
+		cmd := exec.Command(exe, append([]string{"phase", "127.0.0.1:" + port, url, code, ver, strings.Join(oses, ",")}, mode...)...)
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		// a later phase waits on the same workers, so one failed ends the run
 		if cmd.Run() != nil {
@@ -479,7 +479,7 @@ func server(ssh map[string]string, o, q string, qMu *sync.Mutex, v, prev, llm st
 // second time with nothing to do, then step 3 in the login line's shell, and
 // q's worker goes again, all holding qMu.
 func quick(ssh map[string]string, q, o, v, llm, out string, qMu *sync.Mutex) {
-	join, key := regexp.MustCompile(`mp_join_\S+`).FindString(out), regexp.MustCompile(`mp_key_\S+`).FindString(out)
+	join, key := regexp.MustCompile(`[a-z0-9-]+ [0-9A-Z]{4}-[0-9A-Z]{4}`).FindString(out), regexp.MustCompile(`mp_key_\S+`).FindString(out)
 	if o == "windows" {
 		check(o, "harness: one mainplane, in Program Files", strings.Contains(out, oneWin), last(out))
 	}
@@ -624,7 +624,7 @@ func key() ed25519.PrivateKey {
 // is check. As the real one, it coordinates and relays the mesh, and its own
 // node there, with its keys in dir, takes the workers. Its log, the mesh's
 // mostly, goes to harness.log in dir.
-func phase(listen, url, secret, v string, oses []string, mode, text string) {
+func phase(listen, url, code, v string, oses []string, mode, text string) {
 	version.V = v
 	f, err := os.OpenFile(filepath.Join(dir(), "harness.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -632,11 +632,12 @@ func phase(listen, url, secret, v string, oses []string, mode, text string) {
 	}
 	log.SetOutput(f)
 	die := log.New(os.Stderr, "", log.LstdFlags) // the gate sees why a phase ended
-	coord, err := coordinator.New(dir(), key(), func(s, _ string) (auth.Entry, error) {
-		if s != secret && s != "ephemeral-"+secret {
-			return auth.Entry{}, errors.New("join secret refused")
+	secret := auth.Secret(key(), code)
+	coord, err := coordinator.New(dir(), key(), func(s, _ string) (string, error) {
+		if s != secret {
+			return "", errors.New("join secret refused")
 		}
-		return auth.Entry{Ephemeral: s != secret}, nil
+		return "", nil
 	})
 	if err != nil {
 		die.Fatal(err)
@@ -646,6 +647,7 @@ func phase(listen, url, secret, v string, oses []string, mode, text string) {
 	derp.SetVerifyClientFunc(coord.Known)
 	mux := http.NewServeMux()
 	mux.Handle("/id", pointer.ID(key(), func() string { return url }, coord.Public().String()))
+	mux.Handle("POST /join", auth.JoinHandler(key(), pointer.Encode(key()), func() (string, error) { return code, nil }, &auth.Limit{}))
 	coord.Handle(mux)
 	relay.Handle(mux, derp)
 	ln, err := net.Listen("tcp", listen)
@@ -1057,7 +1059,7 @@ func parseStatus(out string) (listed map[string]bool, paths []string) {
 	return listed, paths
 }
 
-// ephemeral joins a node with an ephemeral secret, in userspace in this
+// ephemeral joins a node that asks to be ephemeral, in userspace in this
 // process, and returns the names of the peers it sees. Persistent workers
 // must not see it either, which each one's hosts block shows after the phase.
 func ephemeral(listen, secret string) ([]string, error) {
@@ -1067,7 +1069,7 @@ func ephemeral(listen, secret string) ([]string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	s := &tsnet.Server{Dir: d, Hostname: "e2e-ephemeral", ControlURL: "http://" + listen, AuthKey: "ephemeral-" + secret, Logf: log.Printf, UserLogf: log.Printf}
+	s := &tsnet.Server{Dir: d, Hostname: "e2e-ephemeral", ControlURL: "http://" + listen, AuthKey: secret, Ephemeral: true, Logf: log.Printf, UserLogf: log.Printf}
 	defer func() { _ = s.Close() }()
 	if _, err := s.Up(ctx); err != nil {
 		return nil, err
