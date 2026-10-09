@@ -1,14 +1,15 @@
 // mainplane-server is the server binary: the harness, and the credentials
-// that reach it. A new key or join prints its token once; the table holds
-// only hashes.
+// that reach it. A new key prints its token once; the table holds only
+// hashes. A machine joins with the network name and the device code.
 //
 //	mainplane-server up   <config.json>
 //	mainplane-server install [config.json]    and again at every boot, as a service, behind a quick tunnel; asks for sudo or admin itself;
-//	                                          with none, keeps an installed config; prints a new join token "default", the one before it refused,
-//	                                          and a new api key "default", the ones before it kept
+//	                                          with none, keeps an installed config; prints the join lines, with the network name and
+//	                                          device code made at the first install, and a new api key "default", the ones before it kept
 //	mainplane-server tunnel <url> <cloudflared token> | quick   the installed harness moves to the user's own tunnel, or back
 //	mainplane-server key  new <name> | revoke <name> | list    on the installed harness, as root
-//	mainplane-server join new <name> [ephemeral] | revoke <name> | list
+//	mainplane-server join [cycle]             the join lines, with a new device code after cycle
+//	mainplane-server rename <name>            the network name
 //	mainplane-server update [version]         the installed harness becomes release version, the latest stable by default
 //	mainplane-server uninstall                the service, binary and admin worker go; sessions and the auth table stay
 //	mainplane-server version
@@ -78,9 +79,9 @@ func main() {
 		k, err := server.Key(server.Dir)
 		fatal(err)
 		h.Harness = pointer.Encode(k)
-		secret := rand.Text()
-		fatal(server.Auth(server.Dir).Set(auth.Join, defaultName, secret))
-		h.Join = auth.Token(auth.Join, h.Harness, secret)
+		n, err := server.LoadNetwork(server.Dir)
+		fatal(err)
+		h.Join = n.String()
 		if keep && !fresh { // an unelevated install handed over; hand back what it prints
 			b, err := json.Marshal(h)
 			fatal(err)
@@ -91,20 +92,21 @@ func main() {
 		network(h, fresh)
 	case verb == "tunnel":
 		move(args)
-	case (verb == auth.Key || verb == auth.Join) && (len(args) == 2 && args[1] == "list" || len(args) == 3 && (args[1] == "new" || args[1] == "revoke")),
-		verb == auth.Join && len(args) == 4 && args[1] == "new" && args[3] == "ephemeral":
+	case verb == auth.Key && (len(args) == 2 && args[1] == "list" || len(args) == 3 && (args[1] == "new" || args[1] == "revoke")):
 		elevate.Root(args...)
 		if _, err := server.Load(server.Conf); err != nil {
 			log.Fatalf("no installed harness: %v", err)
 		}
-		table(verb, args[1:])
+		table(args[1:])
+	case verb == auth.Join || verb == "rename":
+		join(args)
 	default:
 		usage()
 	}
 }
 
-// defaultName names the api key and the join secret every install makes
-// anew, so the first connector and worker need no second command.
+// defaultName names the api key every install makes anew, so the first
+// connector needs no second command.
 const defaultName = "default"
 
 // script is the latest release's install script for Linux and macOS; with
@@ -113,7 +115,7 @@ const script = "https://mainplane.ai/install"
 
 // handover is a config and, from an install that made the config itself, the
 // secret of the api key the install prints, and then what the elevated
-// install found: the harness key and the default join token.
+// install found: the harness key, and the network name and device code.
 type handover struct {
 	server.Config
 	Key     string `json:"key,omitempty"`
@@ -184,12 +186,12 @@ func done(h handover) {
 }
 
 // installLines are what token does and the lines that run the latest install
-// script with it, on Linux and macOS, then on Windows: a join token makes the
-// machine a worker, an api key logs its CLI in.
+// script with it, on Linux and macOS, then on Windows: the network name and
+// device code make the machine a worker, an api key logs its CLI in.
 func installLines(kind, token string) string {
 	label := "log in:"
 	if kind == auth.Join {
-		label = "connect a worker:"
+		label = "connect a device:"
 	}
 	return fmt.Sprintf("%s\n  linux, macos:  curl -fsSL %s | sh -s -- %s\n  windows:       & ([scriptblock]::Create((irm %s.ps1))) %s\n", label, script, token, script, token)
 }
@@ -253,27 +255,47 @@ func move(args []string) {
 	fmt.Printf("harness reached at %s; workers follow in about a minute\n", url)
 }
 
-func table(kind string, args []string) {
+// join prints the lines that make a machine a worker, after a new device
+// code or network name.
+func join(args []string) {
+	switch {
+	case len(args) == 1 && args[0] == auth.Join, len(args) == 2 && (args[0] == auth.Join && args[1] == "cycle" || args[0] == "rename"):
+	default:
+		usage()
+	}
+	elevate.Root(args...)
+	n, err := server.LoadNetwork(server.Dir)
+	if err != nil {
+		log.Fatalf("no installed harness: %v", err)
+	}
+	switch {
+	case args[0] == "rename":
+		n, err = server.Rename(args[1])
+	case len(args) == 2:
+		n, err = server.Cycle()
+	}
+	fatal(err)
+	fmt.Print(installLines(auth.Join, n.String()))
+}
+
+func table(args []string) {
 	store := server.Auth(server.Dir)
 	switch args[0] {
 	case "new":
-		if kind == auth.Join && args[1] == worker.Admin {
-			log.Fatalf("%s is the name of the worker on this machine, which install joins", worker.Admin)
-		}
 		k, err := server.Key(server.Dir)
 		fatal(err)
-		secret, err := store.Issue(kind, args[1], len(args) == 3)
+		secret, err := store.Issue(auth.Key, args[1])
 		fatal(err)
-		token := auth.Token(kind, pointer.Encode(k), secret)
+		token := auth.Token(auth.Key, pointer.Encode(k), secret)
 		fmt.Println(token)
-		fmt.Fprintf(os.Stderr, "\n%s", installLines(kind, token)) // stderr, so stdout stays the token for scripts
+		fmt.Fprintf(os.Stderr, "\n%s", installLines(auth.Key, token)) // stderr, so stdout stays the token for scripts
 	case "revoke":
-		fatal(store.Revoke(kind, args[1]))
+		fatal(store.Revoke(auth.Key, args[1]))
 	case "list":
 		t, err := store.Load()
 		fatal(err)
-		for _, e := range t[kind] {
-			fmt.Println(e.Name + map[bool]string{true: " ephemeral"}[e.Ephemeral])
+		for _, e := range t[auth.Key] {
+			fmt.Println(e.Name)
 		}
 	}
 }
@@ -293,27 +315,25 @@ func usage() {
                                           admin and logs its CLI in. A config already installed stays as it is.
                                           Providers and links in the config apply when it is saved
   install   <config.json>                 run it at every boot from a root-only copy of the config
-                                          Either install prints a new join token named default, for any number of
-                                          machines; the default token before it joins no more. It also prints a new
-                                          api key named default; the default keys before it still work until
+                                          Either install prints the line that makes a machine a worker, with the
+                                          network name and device code the first install made, and a new api key
+                                          named default; the default keys before it still work until
                                           key revoke default
   tunnel    <url> <cloudflared token>     reach the installed harness at url, through a tunnel you made in Cloudflare
                                           that routes url to http://localhost:8080; workers follow
   tunnel    quick                         back to a quick tunnel
   key       new <name> | revoke <name> | list   api keys of the installed harness: what a connector needs to call it
-  join      new <name> [ephemeral] | revoke <name> | list
-                                          join secrets of the installed harness: what a machine needs to become a worker.
-                                          The name is the secret's, for revoke; a worker is named by its hostname.
-                                          An ephemeral one's workers leave the mesh 3 minutes after they go quiet.
-                                          Revoking refuses new joins; its workers stay until
+  join                                    the line that makes a machine a worker: the network name and device code
+  join      cycle                         a new device code; the one before joins no more. Workers stay until
                                           mainplane worker remove <worker>
+  rename    <name>                        a new network name, a-z, 0-9 and single -, 3 to 40 characters; workers stay
   update    [version]                     the installed harness becomes that release, the latest stable by default;
                                           prints the changelog between, restarts it, and workers follow
   uninstall                               remove the service, the binary and the admin worker; the config, sessions and
                                           auth table stay
   version                                 the release this binary was built from
 
-key, join, tunnel, update and uninstall ask for sudo or admin themselves.
+key, join, rename, tunnel, update and uninstall ask for sudo or admin themselves.
 `)
 	os.Exit(2)
 }

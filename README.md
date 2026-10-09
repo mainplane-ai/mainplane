@@ -28,17 +28,17 @@ curl -fsSL https://mainplane.ai/install | sh -s -- server
 & ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) server
 ```
 
-It prints commands with a join token (`mp_join_...`) and an API key (`mp_key_...`), save these.
+It prints commands with your network name and device code, and an API key (`mp_key_...`), save these.
 <br/><br/>
 
 **2. Optional: connect more machines.** Your agents can use them.
 
 ```shell
-# Linux, macOS - use join token from step 1
-curl -fsSL https://mainplane.ai/install | sh -s -- mp_join_...
+# Linux, macOS - use network name and device code from step 1
+curl -fsSL https://mainplane.ai/install | sh -s -- your-network XXXX-XXXX
 
-# Windows - use join token from step 1
-& ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) mp_join_...
+# Windows - use network name and device code from step 1
+& ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) your-network XXXX-XXXX
 ```
 <br/>
 

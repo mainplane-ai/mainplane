@@ -112,7 +112,7 @@ type Coordinator struct {
 	key    key.MachinePrivate
 	secret []byte // the harness key, which SMB passwords derive from
 	file   string
-	join   func(secret, addr string) (auth.Entry, error)
+	join   func(secret, addr string) (string, error)
 	self   string // the harness's own node registers with it; never on disk
 
 	mu     sync.Mutex
@@ -126,10 +126,9 @@ type Coordinator struct {
 
 // New loads the Noise key and the nodes from dir, made there the first time.
 // secret is the harness key. join checks a join secret sent from addr and
-// returns its entry: whether it makes ephemeral nodes, and its name, which
-// names the node when it is worker.Admin. Each ephemeral node loaded has
-// idle from now to poll again.
-func New(dir string, secret []byte, join func(secret, addr string) (auth.Entry, error)) (*Coordinator, error) {
+// returns the reserved name it gives the node, worker.Admin or none. Each
+// ephemeral node loaded has idle from now to poll again.
+func New(dir string, secret []byte, join func(secret, addr string) (string, error)) (*Coordinator, error) {
 	k, err := noiseKey(filepath.Join(dir, "noise.key"))
 	if err != nil {
 		return nil, err
@@ -348,7 +347,7 @@ func (c *Coordinator) register(machine key.MachinePublic, addr string, req tailc
 			secret = req.Auth.AuthKey
 		}
 		var err error
-		if n, err = c.admit(machine, secret, addr, req.Hostinfo); err != nil {
+		if n, err = c.admit(machine, secret, addr, req.Ephemeral, req.Hostinfo); err != nil {
 			return tailcfg.RegisterResponse{Error: err.Error()}
 		}
 		n.Key, n.Hostinfo = req.NodeKey, req.Hostinfo
@@ -366,20 +365,16 @@ func (c *Coordinator) register(machine key.MachinePublic, addr string, req tailc
 }
 
 // admit is the node machine registers a new node key as, with secret from
-// addr. A machine keeps its address and name. A new harness node or admin
-// takes its reserved name from the node that had it, as when the harness's
-// node lost its keys or admin was installed again. The caller holds mu.
-func (c *Coordinator) admit(machine key.MachinePublic, secret, addr string, hi *tailcfg.Hostinfo) (*node, error) {
-	var e auth.Entry
+// addr, ephemeral if it asks to be. A machine keeps its address and name. A
+// new harness node or admin takes its reserved name from the node that had
+// it, as when the harness's node lost its keys or admin was installed again.
+// The caller holds mu.
+func (c *Coordinator) admit(machine key.MachinePublic, secret, addr string, ephemeral bool, hi *tailcfg.Hostinfo) (*node, error) {
 	reserved := worker.Harness
 	if subtle.ConstantTimeCompare([]byte(secret), []byte(c.self)) != 1 {
 		var err error
-		if e, err = c.join(secret, addr); err != nil {
+		if reserved, err = c.join(secret, addr); err != nil {
 			return nil, err
-		}
-		reserved = ""
-		if e.Name == worker.Admin {
-			reserved = worker.Admin
 		}
 	}
 	if n := c.byMachine(machine); n != nil {
@@ -391,7 +386,7 @@ func (c *Coordinator) admit(machine key.MachinePublic, secret, addr string, hi *
 	} else {
 		c.st.Nodes = slices.DeleteFunc(c.st.Nodes, func(p *node) bool { return p.Name == name })
 	}
-	n := &node{ID: c.st.Next, Name: name, Machine: machine, Ephemeral: e.Ephemeral}
+	n := &node{ID: c.st.Next, Name: name, Machine: machine, Ephemeral: ephemeral}
 	c.st.Next++
 	c.st.Nodes = append(c.st.Nodes, n)
 	c.expire(n)

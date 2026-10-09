@@ -1,17 +1,17 @@
 #!/bin/sh
 # Installs the mainplane CLI, unless this machine has one; with an api key it logs this user's CLI in.
-# With a join token it makes this Linux or macOS machine a worker. With server it makes this machine
+# With a network name and device code it makes this Linux or macOS machine a worker. With server it makes this machine
 # the harness instead, from the provider keys set in this shell, and logs the CLI in to it. Run it
 # without sudo, so the login is yours and those keys reach it; it asks for sudo itself. In a root shell
 # with no sudo, all run as root, and code runs as root. The release stamps its version.
-#   curl -fsSL https://dl.mainplane.ai/@VERSION@/install.sh | sh -s -- [api key | join token | server]
+#   curl -fsSL https://dl.mainplane.ai/@VERSION@/install.sh | sh -s -- [api key | <network> <device code> | server]
 set -eu
 v=@VERSION@
 dl=https://dl.mainplane.ai/$v
 case $#:${1:-} in
-0: | 1:mp_key_* | 1:mp_join_* | 1:server) ;;
+0: | 1:mp_key_* | 2:* | 1:server) ;;
 *)
-  echo "usage: curl -fsSL $dl/install.sh | sh -s -- [api key | join token | server]" >&2
+  echo "usage: curl -fsSL $dl/install.sh | sh -s -- [api key | <network> <device code> | server]" >&2
   exit 2
   ;;
 esac
@@ -34,17 +34,17 @@ get() {
   chmod 755 "$1-$os-$arch"
   mv "$1-$os-$arch" "$1"
 }
-case ${1:-} in
-server)
+case $#:${1:-} in
+1:server)
   get mainplane
   get mainplane-server
   # install places mainplane-server, runs it as a service, makes this machine the worker admin with the
   # mainplane beside it, which places that in /usr/local/bin, and logs it in
   ./mainplane-server install
   ;;
-mp_join_*)
+2:*)
   get mainplane
-  ./mainplane install "$1"
+  ./mainplane install "$1" "$2"
   ;;
 *)
   # A CLI this machine has is used: a worker's or harness's is root's to replace.
