@@ -98,12 +98,10 @@ const maxJoin = 1 << 10
 // guesses a window.
 func JoinHandler(k ed25519.PrivateKey, key string, code func() (string, error), l *Limit) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		a := Addr(r)
-		if err := l.Wait(a); err != nil {
+		if err := l.Take(Addr(r)); err != nil {
 			http.Error(w, err.Error(), http.StatusTooManyRequests)
 			return
 		}
-		l.Refused(a)
 		var m joinMsg
 		if err := json.NewDecoder(io.LimitReader(r.Body, maxJoin)).Decode(&m); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)

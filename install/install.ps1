@@ -24,7 +24,7 @@ function Fetch($name) {
   if ($want -ne (Get-FileHash $t).Hash.ToLower()) { throw "$f does not match SHA256SUMS" }
   $t
 }
-if ($Token -eq 'server') {
+if ($Token -eq 'server' -and !$Code) {
   # install places mainplane-server in Program Files, runs it as a service, makes this machine the
   # worker admin with the mainplane beside it, which places that in Program Files, and logs that in
   Fetch mainplane | Out-Null

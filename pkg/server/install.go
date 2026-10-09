@@ -164,20 +164,23 @@ func writeAgents(path string) (bool, error) {
 // admin makes this machine the worker admin of the harness with k, through
 // the CLI the install line put beside this binary, which the worker install
 // places as the machine's only one. A machine already a worker of this
-// harness stays as it is. admin's token is in no line anyone sees, and its
-// secret is the join secret of the name admin, which no device code is. Its
-// output is shown only when it fails.
+// harness stays as it is. admin's token is in no line anyone sees. Its output
+// is shown only when it fails.
 func admin(k ed25519.PrivateKey) error {
 	harness := pointer.Encode(k)
 	if h, _, err := mesh.Joined(); err == nil && h == harness {
 		return nil
+	}
+	n, err := LoadNetwork(Dir)
+	if err != nil {
+		return err
 	}
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
 	cli := filepath.Join(filepath.Dir(exe), "mainplane"+filepath.Ext(exe))
-	if out, err := exec.Command(cli, "install", auth.Token(auth.Join, harness, auth.Secret(k, worker.Admin))).CombinedOutput(); err != nil {
+	if out, err := exec.Command(cli, "install", auth.Token(auth.Join, harness, adminSecret(k, n.Code))).CombinedOutput(); err != nil {
 		return fmt.Errorf("the admin worker: %w: %s", err, out)
 	}
 	return nil

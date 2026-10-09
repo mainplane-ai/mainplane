@@ -15,6 +15,7 @@ import (
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
+	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 // Network is what a person types to make a machine a worker of the harness:
@@ -35,15 +36,35 @@ func LoadNetwork(dir string) (Network, error) {
 	if err != nil {
 		return n, err
 	}
-	return n, json.Unmarshal(b, &n)
+	if err := json.Unmarshal(b, &n); err != nil {
+		return n, err
+	}
+	// an empty code would let anyone in who runs the exchange with one
+	if n.Name == "" || n.Code == "" {
+		return n, fmt.Errorf("%s has no name or no code", networkPath(dir))
+	}
+	return n, nil
 }
 
+// save writes the network in dir. join cycle and rename write it as root, in
+// the operator's dir, so a link there leads nowhere outside it.
 func (n Network) save(dir string) error {
 	b, err := json.MarshalIndent(n, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(networkPath(dir), b, 0o600)
+	r, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = r.Close() }()
+	return r.WriteFile(filepath.Base(networkPath(dir)), b, 0o600)
+}
+
+// adminSecret is admin's join secret, which no device code is: it changes
+// with the code, as admin's own secret did with each install.
+func adminSecret(k ed25519.PrivateKey, code string) string {
+	return auth.Secret(k, worker.Admin+" "+code)
 }
 
 // network gives the harness with k in dir a random name, claimed on the

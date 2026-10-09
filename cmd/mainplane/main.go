@@ -140,6 +140,9 @@ func work(install bool, args []string) {
 		if token, err = redeem(args[0], args[1]); err != nil {
 			log.Fatal(err)
 		}
+		// a worker started by hand restarts after an update with its
+		// arguments: the token, which a new code does not refuse
+		os.Args = []string{os.Args[0], os.Args[1], token}
 	}
 	key, secret, err := auth.Parse(auth.Join, token)
 	if err != nil {

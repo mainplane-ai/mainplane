@@ -169,9 +169,28 @@ func (l *Limit) Wait(addr string) error {
 	n, w := l.m[addr], window-time.Since(l.start)
 	l.mu.Unlock()
 	if n >= refusals && w > 0 {
-		return fmt.Errorf("too many refused credentials from %s: try again in %s", addr, (w + time.Second - 1).Truncate(time.Second))
+		return tooMany(addr, w)
 	}
 	return nil
+}
+
+// Take counts a try from addr, or is why addr is turned away now: the check
+// and the count are one step, so tries at once cannot all pass the check.
+func (l *Limit) Take(addr string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if time.Since(l.start) > window {
+		l.start, l.m = time.Now(), map[string]int{}
+	}
+	if l.m[addr] >= refusals {
+		return tooMany(addr, window-time.Since(l.start))
+	}
+	l.m[addr]++
+	return nil
+}
+
+func tooMany(addr string, w time.Duration) error {
+	return fmt.Errorf("too many refused credentials from %s: try again in %s", addr, (w + time.Second - 1).Truncate(time.Second))
 }
 
 // Refused counts a refused credential from addr, in a new window once the

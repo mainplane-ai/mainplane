@@ -377,7 +377,7 @@ func run(v, prev, port string, targets []string) {
 	}
 	fmt.Printf("%s == tunnel %s\n", stamp(), url)
 	k := key()
-	// a network name of its own each run, which frees the last run's
+	// each run claims a network name of its own, which frees the last run's on the pointer
 	network, code := fmt.Sprintf("e2e-%d", time.Now().Unix()), auth.NewCode()
 	if err := errors.Join(pointer.Publish(ctx, k, url), pointer.Claim(ctx, k, network)); err != nil {
 		stop()

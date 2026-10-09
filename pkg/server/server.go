@@ -156,7 +156,7 @@ func Harness(ctx context.Context, path string) error {
 			return "", err
 		}
 		switch {
-		case hmac.Equal([]byte(secret), []byte(auth.Secret(k, worker.Admin))):
+		case hmac.Equal([]byte(secret), []byte(adminSecret(k, c))):
 			return worker.Admin, nil
 		case hmac.Equal([]byte(secret), []byte(auth.Secret(k, c))):
 			return "", nil
