@@ -783,15 +783,15 @@ func checks(r *harness.Remote, goos string) {
 // other worker by the long name in its hosts block, which on Windows is the
 // name Tailscale's do not shadow, and mainplane status lists every node with
 // its harness responsive. No node offers a Tailscale or mesh address as an endpoint,
-// in the registry or as a direct path.
+// in the registry or as a direct path. One machine at a time: two peers that
+// first ping each other at once wait 5-10s for a path, past ping's deadline.
 func mesh(p *harness.Pool, got map[string]harness.Listed, oses []string) {
 	ctx := context.Background()
 	var bad []string
-	var badMu sync.Mutex
-	each(oses, func(o string) {
+	for _, o := range oses {
 		r, ok := p.Get(got[o].Name)
 		if !ok {
-			return // "still connected" failed
+			continue // "still connected" failed
 		}
 		win := o == "windows"
 		sh := func(code string) string {
@@ -820,12 +820,10 @@ func mesh(p *harness.Pool, got map[string]harness.Listed, oses []string) {
 		check(o, "mesh: status lists every node, harness responsive", ok, out)
 		for _, s := range paths {
 			if a, err := netip.ParseAddrPort(s); err != nil || tailnet(a.Addr()) {
-				badMu.Lock()
 				bad = append(bad, o+" path "+s)
-				badMu.Unlock()
 			}
 		}
-	})
+	}
 	b, err := os.ReadFile(filepath.Join(dir(), "nodes.json"))
 	var st struct {
 		Nodes []struct {
