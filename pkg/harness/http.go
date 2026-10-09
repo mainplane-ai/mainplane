@@ -44,7 +44,7 @@ const MaxPost = 8 << 20
 //	GET  /workers                     -> connected workers' hellos, and refused
 //	                                     ones with the reason
 //	DELETE /workers/{name}            the worker leaves the mesh for good; its     -> 204
-//	                                  join secret still joins new machines
+//	                                  device code still joins new machines
 //	GET  /providers                   -> names this harness can serve as provider/model
 //	GET  /                            -> {"version"}
 //
