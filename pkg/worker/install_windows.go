@@ -43,7 +43,11 @@ const (
 	// ends it on purpose, so every restart waits the same.
 	restartDelay = 2 * time.Second
 	stopWait     = 30 * time.Second
-	machineEnv   = `SYSTEM\CurrentControlSet\Control\Session Manager\Environment`
+	// The service manager never kills a service that does not stop, as
+	// systemd and launchd do. A leave that has not ended in this long, short
+	// of stopWait, is cut off, and its stacks logged.
+	leaveWait  = 20 * time.Second
+	machineEnv = `SYSTEM\CurrentControlSet\Control\Session Manager\Environment`
 	// The mesh's adapter is wintun's, the WireGuard project's signed driver,
 	// the release Tailscale ships too, so one driver serves both. A bump is
 	// a PR that changes both lines.
@@ -150,9 +154,19 @@ func (s service) Execute(_ []string, reqs <-chan svc.ChangeRequest, status chan<
 			ds.drop()
 		case svc.Stop, svc.Shutdown:
 			status <- svc.Status{State: svc.StopPending}
-			leave(m)
-			if err := m.Close(); err != nil {
-				log.Printf("leaving the mesh: %v", err)
+			left := make(chan struct{})
+			go func() {
+				defer close(left)
+				leave(m)
+				if err := m.Close(); err != nil {
+					log.Printf("leaving the mesh: %v", err)
+				}
+			}()
+			select {
+			case <-left:
+			case <-time.After(leaveWait):
+				buf := make([]byte, 1<<20)
+				log.Printf("leaving the mesh took over %s; stopping without it, and uninstall cleans up:\n%s", leaveWait, buf[:runtime.Stack(buf, true)])
 			}
 			return false, 0
 		}
