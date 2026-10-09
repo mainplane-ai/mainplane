@@ -12,6 +12,8 @@ A machine joins with a network name and a device code, `curl -fsSL https://mainp
 - `install.sh` and `install.ps1` take `<network> <device code>` and no longer take a join token. `mainplane install` and `mainplane worker` take the same two
 - A node is ephemeral when it asks to be at registration, as a `tsnet` node with `Ephemeral` does, not by its secret. The offnet workflow takes `network` and `code`, and uninstalls at the end
 - `mainplane-server install` prints the join and login lines as soon as the harness answers on this machine, then waits behind `initializing network`, which ends in `done`, for the tunnel and the CLI login. The lines name no URL, so a worker installed meanwhile joins once the tunnel is up. The install waited for the tunnel before it printed anything, about 20 seconds on a first install
+- On Windows, a worker that has not left the mesh 20 seconds after a stop logs every goroutine's stack and stops anyway, and uninstall removes what it left. Its service could stay in StopPending until killed, after its harness went away, and `mainplane uninstall` failed with `mainplaned did not stop in 30s`
+- `mainplane uninstall` on macOS and Linux removes the status socket a killed worker left
 
 ## v0.5.1
 
