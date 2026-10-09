@@ -7,6 +7,7 @@ package mesh
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -257,17 +258,20 @@ func (m *Mesh) leave() error {
 	return m.err
 }
 
-// Clean removes what a killed worker left: the hosts block, the status
-// socket off Windows, where a named pipe goes with its process, and on Linux
-// and Windows the rule. Uninstall runs it after the worker stops.
+// Clean removes what a killed worker left: the hosts block, a status socket
+// no worker answers (off Windows, where a named pipe goes with its process),
+// and on Linux and Windows the rule. Uninstall runs it after the worker stops.
 func Clean() error {
 	dropRule()
+	var err error
 	if runtime.GOOS != "windows" {
-		if err := os.Remove(socket); err != nil && !os.IsNotExist(err) {
-			return err
+		if c, derr := net.Dial("unix", socket); derr == nil {
+			_ = c.Close() // a second worker's, which serves it
+		} else if rerr := os.Remove(socket); !os.IsNotExist(rerr) {
+			err = rerr
 		}
 	}
-	return hosts("")
+	return errors.Join(err, hosts(""))
 }
 
 // osRouter is the router tailscale's engine drives in place of its own,
