@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -256,10 +257,16 @@ func (m *Mesh) leave() error {
 	return m.err
 }
 
-// Clean removes what a killed worker left: the hosts block, and on Linux
+// Clean removes what a killed worker left: the hosts block, the status
+// socket off Windows, where a named pipe goes with its process, and on Linux
 // and Windows the rule. Uninstall runs it after the worker stops.
 func Clean() error {
 	dropRule()
+	if runtime.GOOS != "windows" {
+		if err := os.Remove(socket); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
 	return hosts("")
 }
 
