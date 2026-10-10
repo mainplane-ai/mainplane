@@ -77,6 +77,9 @@ const (
 	// A phase waits for every worker to download a release and restart;
 	// longer is a failure.
 	phaseWait = 10 * time.Minute
+	// A phase listens within a second; the installs go on after this anyway,
+	// and fail with the reason.
+	listenWait = 30 * time.Second
 	// missing is a version no release has, so an update to it fails.
 	missing = "v0.0.0-e2e-missing"
 	// A harness restarted on the same URL has its workers back in about 8s
@@ -392,22 +395,38 @@ func run(v, prev, port string, targets []string) {
 		hosts[o] = rest
 		hostsMu.Unlock()
 		check(o, "hosts file read before install", err == nil, fmt.Sprint(err))
-		out, err = remote(o, ssh[o], fmt.Sprintf(install[o == "windows"], release.DL, v, network+" "+code))
-		check(o, "install "+v, err == nil && strings.Contains(out, v), last(out))
 	})
-	harnessAt := func(ver string, mode ...string) {
+	// install runs while the phase waits for every worker: a worker joins
+	// with the device code at the harness's POST /join, so the install waits
+	// until the phase listens.
+	harnessAt := func(ver string, install func(), mode ...string) {
 		cmd := exec.Command(exe, append([]string{"phase", "127.0.0.1:" + port, url, code, ver, strings.Join(oses, ",")}, mode...)...)
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		err := cmd.Start()
+		if err == nil && install != nil {
+			for t := time.Now(); time.Since(t) < listenWait; time.Sleep(200 * time.Millisecond) {
+				if c, err := net.Dial("tcp", "127.0.0.1:"+port); err == nil {
+					_ = c.Close()
+					break
+				}
+			}
+			install()
+		}
 		// a later phase waits on the same workers, so one failed ends the run
-		if cmd.Run() != nil {
+		if err != nil || cmd.Wait() != nil {
 			stop()
 			fmt.Println("FAIL")
 			os.Exit(1)
 		}
 	}
-	harnessAt(v, "check")
+	harnessAt(v, func() {
+		each(oses, func(o string) {
+			out, err := remote(o, ssh[o], fmt.Sprintf(install[o == "windows"], release.DL, v, network+" "+code))
+			check(o, "install "+v, err == nil && strings.Contains(out, v), last(out))
+		})
+	}, "check")
 	each(oses, func(o string) { joined(o, ssh[o], hosts[o], len(oses)+1) })
-	harnessAt(v, "restart")
+	harnessAt(v, nil, "restart")
 	if t, ok := ssh["windows"]; ok {
 		out, _ := remote("windows", t, service)
 		l := strings.Split(strings.TrimSpace(out), "\n")
@@ -416,11 +435,11 @@ func run(v, prev, port string, targets []string) {
 		check("windows", "service: state dir SYSTEM and Administrators", strings.TrimSpace(l[1]) == `NT AUTHORITY\SYSTEM,BUILTIN\Administrators`, l[1])
 		check("windows", "service: killed, restarted", strings.TrimSpace(l[2]) == "restarted", l[2])
 	}
-	harnessAt(prev, "connect")
-	harnessAt(v, "connect")
-	harnessAt(missing, "refused", "404")
+	harnessAt(prev, nil, "connect")
+	harnessAt(v, nil, "connect")
+	harnessAt(missing, nil, "refused", "404")
 	gone := oses[len(oses)-1]
-	harnessAt(v, "remove", gone)
+	harnessAt(v, nil, "remove", gone)
 	out, err := remote(gone, ssh[gone], meshGone[gone]+"\n"+status[gone == "windows"])
 	check(gone, "removed: interface, route, rule gone; status says so", err == nil && strings.HasSuffix(strings.TrimSpace(out), "removed from the mesh by its harness"), out)
 	hostsCheck(gone, ssh[gone], "removed: hosts block gone, other lines kept", hosts[gone], 0)
