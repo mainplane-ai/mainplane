@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"os/exec"
@@ -17,23 +18,34 @@ import (
 // much of a fast producer back.
 const chunk = 32 << 10
 
-// An interpreter is a program that reads code on stdin. done is the line the
-// worker appends after the code: it prints the mark and the exit code of what
-// ran before, so the worker knows where the output ends. pwsh's $? is a bool,
-// so its exit is 0 or 1; the text of the failure is in the output. pwsh's
-// done starts with a blank line: `-Command -` ends a statement spread over
-// lines (a here-string, a block) only at a blank line, and without one it
-// swallows the done line and waits forever. bash is a
-// login shell: the worker is a service with the service manager's bare PATH,
-// and the operator's profile is where their tools are. js is in js.go.
+// An interpreter is a program that reads code on stdin. wrap, if set, turns
+// the code into what is sent. done is the line the worker appends after the
+// code: it prints the mark and the exit code of what ran before, so the
+// worker knows where the output ends. pwsh's $? is a bool, so its exit is 0
+// or 1; the text of the failure is in the output. bash is a login shell: the
+// worker is a service with the service manager's bare PATH, and the
+// operator's profile is where their tools are. js is in js.go.
 type interp struct {
 	argv []string
+	wrap func(string) string
 	done string
 }
 
 var interps = map[string]interp{
-	"bash": {[]string{"bash", "-l"}, `echo "%s $?"`},
-	"pwsh": {[]string{"pwsh", "-NoProfile", "-NonInteractive", "-Command", "-"}, "\n" + `"%s $(if($?){0}else{1})"`},
+	"bash": {[]string{"bash", "-l"}, nil, `echo "%s $?"`},
+	"pwsh": {[]string{"pwsh", "-NoProfile", "-NonInteractive", "-Command", "-"}, pwshWrap, `"%s $(if($? -and $mainplaneOk){0}else{1})"`},
+}
+
+// pwshWrap sends the code as one line of base64 that pwsh decodes as UTF-8
+// and dot-sources as one script block. `-Command -` reads stdin in the OEM
+// code page, which garbles non-ASCII, and parses it line by line, which drops
+// blank lines in here-strings and waits forever on an unclosed block. A
+// script block keeps variables in the session's scope, and a parse error
+// fails the run. $? after the block is false only if it threw, so the
+// block's last line keeps its own $?. Output is set to UTF-8, which native
+// programs also follow.
+func pwshWrap(code string) string {
+	return "[Console]::OutputEncoding = $OutputEncoding = [Text.UTF8Encoding]::new(); $mainplaneOk = $true; . ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + base64.StdEncoding.EncodeToString([]byte(code+"\n$mainplaneOk = $?")) + "'))))"
 }
 
 // env is one running interpreter. Variables, cwd, and background jobs persist
@@ -86,6 +98,9 @@ func (e *env) kill() {
 func (e *env) run(ctx context.Context, code, mark string, emit func([]byte) error) (exit int, alive bool, err error) {
 	stop := context.AfterFunc(ctx, e.kill)
 	defer stop()
+	if e.it.wrap != nil {
+		code = e.it.wrap(code)
+	}
 	if _, err := fmt.Fprintf(e.in, "%s\n%s\n", code, fmt.Sprintf(e.it.done, mark)); err != nil {
 		_ = e.cmd.Wait()
 		return e.cmd.ProcessState.ExitCode(), false, nil
