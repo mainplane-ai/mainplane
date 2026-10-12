@@ -238,7 +238,7 @@ func (c client) version() string {
 		die(err)
 	}
 	if !version.Match(v) {
-		die(fmt.Errorf("harness is version %s, this mainplane is %s: run mainplane update", v, version.V))
+		die(fmt.Errorf("harness is version %s, this mainplane is %s: run mainplane login <api key> to become its release", v, version.V))
 	}
 	return v
 }

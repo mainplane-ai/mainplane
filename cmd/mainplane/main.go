@@ -3,7 +3,6 @@
 //	mainplane worker  [<network> <device code>]   make this machine a worker, named by its hostname
 //	mainplane install <network> <device code>     and again at every boot, as a service; asks for sudo or UAC, code still runs as you
 //	mainplane login   <api key>       find the harness, remember it and the key in ~/.mainplane/login.json, and become its release
-//	mainplane update  [version]       become that release, by default the logged-in harness's, else the latest stable
 //	mainplane uninstall               remove the worker service and the CLI; ~/.mainplane stays
 //	mainplane status                  the harness logged in to, and this worker on the mesh from its local socket
 //	mainplane version                 the release this binary was built from
@@ -50,11 +49,11 @@ func main() {
 			usage()
 		}
 		work(os.Args[1] == "install", os.Args[2:])
-	case "update":
-		if len(os.Args) > 3 {
+	case "elevated-update": // internal: update re-running itself as root
+		if len(os.Args) != 3 {
 			usage()
 		}
-		update(strings.Join(os.Args[2:], ""))
+		update(os.Args[2])
 	case "uninstall":
 		if len(os.Args) != 2 {
 			usage()
@@ -216,22 +215,11 @@ func operator(args []string) {
 	}
 }
 
-// update makes this binary release v: by default the release of the harness
-// it is logged into, or the latest stable one when logged into none. A
-// binary only root may replace, like a Linux or macOS worker's, updates
-// elevated; v goes along, since sudo may give root a home without the login.
+// update makes this binary release v, the logged-in harness's. A binary only
+// root may replace, like a Linux or macOS worker's, updates elevated through
+// the internal verb elevated-update; v goes along, since sudo may give root a
+// home without the login.
 func update(v string) {
-	if v == "" {
-		c, err := login()
-		if err == nil {
-			v, err = c.harness()
-		} else {
-			v, err = release.Latest()
-		}
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
 	if v == version.V {
 		fmt.Printf("mainplane is %s\n", v)
 		return
@@ -241,7 +229,7 @@ func update(v string) {
 		log.Fatal(err)
 	}
 	if f, err := os.CreateTemp(filepath.Dir(exe), ".update-*"); err != nil {
-		elevate.Root("update", v)
+		elevate.Root("elevated-update", v)
 	} else {
 		_ = f.Close()
 		_ = os.Remove(f.Name())
@@ -304,7 +292,6 @@ func usage() {
   install    <network> <code>        and again at every boot, as a service; asks for sudo or UAC, code still runs as you
   login      <api key>               remember the harness and the key, which every verb below uses, and become the
                                      harness's release
-  update     [version]               become that release, by default the logged-in harness's, else the latest stable
   uninstall                          remove the worker service and the CLI; asks for sudo or UAC; ~/.mainplane stays
   status                             the harness logged in to, then this worker on the mesh: its name and address,
                                      and each peer's address and path, direct or through the relay
