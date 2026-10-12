@@ -13,13 +13,21 @@ $ProgressPreference = 'SilentlyContinue'
 $dl = 'https://dl.mainplane.ai/@VERSION@'
 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
 $d = New-Item -ItemType Directory (Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid()))
-$sums = (Invoke-WebRequest "$dl/SHA256SUMS" -UseBasicParsing).Content -split "`n"
+# Download saves $url as $out, up to three tries, since one bad read would fail the whole install.
+function Download($url, $out) {
+  foreach ($n in 1..3) {
+    try { Invoke-WebRequest $url -OutFile $out -UseBasicParsing; return } catch { if ($n -eq 3) { throw } }
+    Start-Sleep $n
+  }
+}
+Download "$dl/SHA256SUMS" (Join-Path $d SHA256SUMS)
+$sums = Get-Content (Join-Path $d SHA256SUMS)
 # Fetch gets this machine's build of release binary $name into $d as $name.exe, checked against
 # SHA256SUMS. mainplane-server install finds mainplane.exe there.
 function Fetch($name) {
   $f = "$name-windows-$arch.exe"
   $t = Join-Path $d "$name.exe"
-  Invoke-WebRequest "$dl/$f" -OutFile $t -UseBasicParsing
+  Download "$dl/$f" $t
   $want = ($sums | Where-Object { $_ -match " $([regex]::Escape($f))$" }) -split ' ' | Select-Object -First 1
   if ($want -ne (Get-FileHash $t).Hash.ToLower()) { throw "$f does not match SHA256SUMS" }
   $t

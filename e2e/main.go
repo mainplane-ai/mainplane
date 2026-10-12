@@ -119,6 +119,13 @@ var (
 		false: `d="%s"; sudo rm -rf "$d"; [ ! -e "$d.e2e" ] || sudo mv "$d.e2e" "$d"`,
 		true:  `$d = "%s"; if (Test-Path $d) { Remove-Item -Recurse -Force $d }; if (Test-Path "$d.e2e") { Move-Item "$d.e2e" $d }`,
 	}
+	// adminAgents is the operator's scratch AGENTS.md. The harness install
+	// writes admin's there when there is none, and uninstall keeps it as the
+	// user's, so the run removes one its install wrote.
+	adminAgents = map[bool]string{
+		false: `f=~/.mainplane/AGENTS.md; if [ "%s" = rm ]; then rm "$f"; elif [ -e "$f" ] || [ -L "$f" ]; then echo there; fi`,
+		true:  `$f = "$HOME\.mainplane\AGENTS.md"; if ("%s" -eq 'rm') { Remove-Item $f } elseif (Test-Path $f) { 'there' }`,
+	}
 	// No provider key: install works without one; the quickstart sets one.
 	// Workers reach the harness on the mesh only: /worker, with a good key, is 404.
 	// The install makes the machine the worker admin, which joins once it
@@ -465,6 +472,8 @@ func server(ssh map[string]string, o, q string, qMu *sync.Mutex, v, prev, llm st
 	win := o == "windows"
 	out, err := remote(o, ssh[o], fmt.Sprintf(aside[win], harnessDir[o]))
 	check(o, "harness: no Dir before its first install", err == nil, out)
+	had, err := remote(o, ssh[o], fmt.Sprintf(adminAgents[win], ""))
+	check(o, "harness: AGENTS.md checked before install", err == nil, had)
 	out, err = remote(o, ssh[o], fmt.Sprintf(serverInstall[win], release.DL, v))
 	check(o, "harness installed in one line, CLI logged in", err == nil && strings.Contains(out, "mainplane "+v+" installed") && strings.Contains(out, "mp_key_") && strings.Contains(out, "workers-ok"), last(out))
 	check(o, "harness: /worker is gone (404)", strings.Contains(out, "worker-404"), last(out))
@@ -490,6 +499,10 @@ func server(ssh map[string]string, o, q string, qMu *sync.Mutex, v, prev, llm st
 	check(o, "tailscale status works after uninstall", err == nil && strings.TrimSpace(out) == "ok", out)
 	out, err = remote(o, ssh[o], fmt.Sprintf(back[win], harnessDir[o]))
 	check(o, "harness: the Dir from before the run is back", err == nil, out)
+	if strings.TrimSpace(had) != "there" {
+		out, err = remote(o, ssh[o], fmt.Sprintf(adminAgents[win], "rm"))
+		check(o, "harness: the admin AGENTS.md its install wrote is removed", err == nil, out)
+	}
 }
 
 // quick runs the README quickstart against the harness just installed on o,

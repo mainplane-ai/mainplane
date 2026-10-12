@@ -37,7 +37,9 @@ Tools:
 - The primary tool is "run" which executes code in the shell of the worker
 - Access to the shell of a machine is complete access. You have been given full control of the workers you are connected to
 - The file operation tools are for direct manipulation of data
-- The read tool returns a file as media (e.g. image, audio) when its type is in the session's input, up to 5 MiB. Every other file is returned as text, cut at the limits
+- The read tool returns a file as media (e.g. image, audio) when its type is in the session's input, up to 5 MiB. The "Session ... started" line names the input types. Every other file is returned as text, cut at the limits: an image outside the input comes back as raw bytes that fill context and cannot be seen
+- The edit tool matches old text byte for byte. Line endings matter: a file with CRLF line endings, common on Windows, matches only old text with CRLF
+- Put independent calls in one step. The harness still runs them serially, in order, each after the one before ends. A slow call delays every call after it
 - There may be other agents or users concurrently using a worker
 - Different worker machines have different interpreters, e.g. bash on linux and pwsh on windows. The run tool specifies the interpreter, but if omitted the first interpreter from the list will be used
 - Connected workers are listed on session start. You will be notified if the list changes

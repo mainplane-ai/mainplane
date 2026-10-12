@@ -5,6 +5,13 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 ## v0.5.3
 
 - A pwsh run sends its code as one line of base64, which pwsh decodes as UTF-8 and dot-sources as one script block, and its output is UTF-8. `-Command -` read the code in the OEM code page and line by line, so non-ASCII text was garbled, blank lines in here-strings were dropped, and an unclosed block waited until the run timed out. A parse error now fails the run at once
+- The system prompt says that edit matches old text byte for byte, so CRLF line endings must be in it, and that the calls of one step run serially, in order
+- The session line names the media input types, or none, and the system prompt says that an image outside them comes back as raw bytes that fill context
+- A stop answers a call that never started `not run`, where it said `stopped, effect unknown`
+- `mainplane-server tunnel <url> <token>` refuses an empty token. It wrote the config and restarted the harness, which then failed on cloudflared in a loop
+- `install.sh` and `install.ps1` try each download up to three times, so one bad read no longer fails the install
+- The release gate removes the admin AGENTS.md its harness install wrote, after the uninstall, which keeps it as the user's
+- `mainplane update` is gone: the CLI follows its harness's release, at `mainplane login` and, on a worker, with the service, and no one picks one. A CLI on another release than its harness says `run mainplane login <api key> to become its release`
 
 ## v0.5.2
 
@@ -18,7 +25,6 @@ A machine joins with a network name and a device code, `curl -fsSL https://mainp
 - `mainplane-server install` prints the join and login lines as soon as the harness answers on this machine, then waits behind `initializing network`, which ends in `done`, for the tunnel and the CLI login. The lines name no URL, so a worker installed meanwhile joins once the tunnel is up. The install waited for the tunnel before it printed anything, about 20 seconds on a first install
 - On Windows, a worker that has not left the mesh 20 seconds after a stop logs every goroutine's stack and stops anyway, and uninstall removes what it left. Its service could stay in StopPending until killed, after its harness went away, and `mainplane uninstall` failed with `mainplaned did not stop in 30s`
 - `mainplane uninstall` on macOS and Linux removes the status socket a killed worker left
-- `mainplane update` is gone: the CLI follows its harness's release, at `mainplane login` and, on a worker, with the service, and no one picks one. A CLI on another release than its harness says `run mainplane login <api key> to become its release`
 
 ## v0.5.1
 

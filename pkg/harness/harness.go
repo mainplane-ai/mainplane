@@ -309,7 +309,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 		return "", err
 	}
 	records, upto := statefile.Build(chain)
-	records = clock(records, id, chain[0].Time, conf.ContextLimit)
+	records = clock(records, id, chain[0].Time, conf.ContextLimit, conf.Input)
 	stepID := statefile.NewID()
 	var calls []statefile.Record
 	var appendErr error
@@ -342,12 +342,12 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 		return "", err
 	}
 	for _, c := range calls {
-		var r statefile.Record
+		r := result(c.ID, "not run")
 		if ctx.Err() == nil {
 			r = h.execute(ctx, id, conf, c)
-		}
-		if ctx.Err() != nil {
-			r = result(c.ID, "stopped, effect unknown")
+			if ctx.Err() != nil {
+				r = result(c.ID, "stopped, effect unknown")
+			}
 		}
 		if _, err := h.append(s, r); err != nil {
 			return "", err
@@ -373,7 +373,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 // prompt says what the notes mean. Each result ends with its time since start
 // and the prompt size of the step that made its call, fixed once the result
 // is written.
-func clock(ctx []statefile.Record, id string, start time.Time, limit int) []statefile.Record {
+func clock(ctx []statefile.Record, id string, start time.Time, limit int, input []string) []statefile.Record {
 	used := 0
 	for i, r := range ctx {
 		if r.Kind == statefile.Step {
@@ -383,7 +383,11 @@ func clock(ctx []statefile.Record, id string, start time.Time, limit int) []stat
 			ctx[i].Note = fmt.Sprintf("time %s context %d", r.Time.Sub(start).Round(time.Second), used)
 		}
 	}
-	line := fmt.Sprintf("Session %s started %s. Context limit %d", id, start.Format(time.RFC3339), limit)
+	media := "none, read returns every file as text"
+	if len(input) > 0 {
+		media = strings.Join(input, ", ") + ", read returns every other file as text"
+	}
+	line := fmt.Sprintf("Session %s started %s. Context limit %d. Media input: %s", id, start.Format(time.RFC3339), limit, media)
 	return slices.Insert(ctx, 1, system("session", line))
 }
 
