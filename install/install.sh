@@ -24,11 +24,15 @@ os=$(uname -s | tr '[:upper:]' '[:lower:]')
 t=$(mktemp -d)
 trap 'rm -rf "$t"' EXIT
 cd "$t"
-curl -fsSLO "$dl/SHA256SUMS"
+# fetch downloads URL $1 into ./, up to three tries, since one bad read would fail the whole install.
+fetch() {
+  curl -fsSLO "$1" || { sleep 1; curl -fsSLO "$1"; } || { sleep 2; curl -fsSLO "$1"; }
+}
+fetch "$dl/SHA256SUMS"
 # get fetches this machine's build of release binary $1 as ./$1, checked against SHA256SUMS. Modes are
 # set here, since root's umask may be narrower than every user running the CLI.
 get() {
-  curl -fsSLO "$dl/$1-$os-$arch"
+  fetch "$dl/$1-$os-$arch"
   grep " $1-$os-$arch\$" SHA256SUMS > sum || { echo "release $v has no $1-$os-$arch" >&2; exit 1; }
   if command -v sha256sum > /dev/null; then sha256sum --quiet -c sum; else shasum -a 256 --quiet -c sum; fi
   chmod 755 "$1-$os-$arch"

@@ -243,9 +243,9 @@ func (s *session) stoppedBy() string {
 }
 
 // Stop ends the running step now: the provider stream is cut, every call in
-// flight is killed on its worker and answered "stopped, effect unknown", and
-// the last record is an error naming via. A session that is not stepping has
-// nothing to stop.
+// flight is killed on its worker and answered "stopped, effect unknown", a
+// call not yet started is answered "not run", and the last record is an
+// error naming via. A session that is not stepping has nothing to stop.
 func (h *Harness) Stop(ctx context.Context, id, via string) error {
 	s := h.session(id)
 	h.mu.Lock()

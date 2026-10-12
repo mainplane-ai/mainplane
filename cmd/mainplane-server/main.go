@@ -245,6 +245,9 @@ func move(args []string) {
 		if err != nil || u.Scheme != "https" || u.Host == "" {
 			log.Fatalf("%s: the URL is https://<the name Cloudflare routes to the tunnel>", args[1])
 		}
+		if strings.TrimSpace(args[2]) == "" {
+			log.Fatalf("the cloudflared token is empty: copy it from the tunnel's page in Cloudflare")
+		}
 		t = &server.Tunnel{URL: strings.TrimSuffix(args[1], "/"), Token: args[2]}
 	default:
 		usage()
