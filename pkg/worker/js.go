@@ -77,7 +77,7 @@ func (s *server) interp(name string) (interp, error) {
 		return interp{}, err
 	}
 	dir := jsDir(s.Scratch)
-	return interp{[]string{bunPath(dir), filepath.Join(dir, "run.js")}, jsDone}, nil
+	return interp{[]string{bunPath(dir), filepath.Join(dir, "run.js")}, nil, jsDone}, nil
 }
 
 // startJS readies the js folder when the worker starts, so a new release's

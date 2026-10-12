@@ -2,6 +2,10 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.5.3
+
+- A pwsh run sends its code as one line of base64, which pwsh decodes as UTF-8 and dot-sources as one script block, and its output is UTF-8. `-Command -` read the code in the OEM code page and line by line, so non-ASCII text was garbled, blank lines in here-strings were dropped, and an unclosed block waited until the run timed out. A parse error now fails the run at once
+
 ## v0.5.2
 
 A machine joins with a network name and a device code, `curl -fsSL https://mainplane.ai/install | sh -s -- sketchy-armadillo-431 K7QM-4ZTR`, short enough to type, in place of a join token. Workers joined before stay. Install the harness again to see its name and code: its join tokens, and their entries in the auth table, are no longer read.
