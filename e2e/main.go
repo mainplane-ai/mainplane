@@ -123,7 +123,7 @@ var (
 	// writes admin's there when there is none, and uninstall keeps it as the
 	// user's, so the run removes one its install wrote.
 	adminAgents = map[bool]string{
-		false: `f=~/.mainplane/AGENTS.md; if [ "%s" = rm ]; then rm "$f"; elif [ -e "$f" ]; then echo there; fi`,
+		false: `f=~/.mainplane/AGENTS.md; if [ "%s" = rm ]; then rm "$f"; elif [ -e "$f" ] || [ -L "$f" ]; then echo there; fi`,
 		true:  `$f = "$HOME\.mainplane\AGENTS.md"; if ("%s" -eq 'rm') { Remove-Item $f } elseif (Test-Path $f) { 'there' }`,
 	}
 	// No provider key: install works without one; the quickstart sets one.
