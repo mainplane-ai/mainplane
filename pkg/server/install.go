@@ -246,12 +246,12 @@ func SetTunnel(t *Tunnel) (string, error) {
 // A tunnel that stops the harness fails it at once.
 func Reached(key string) (string, error) {
 	for end := time.Now().Add(tunnelWait); ; time.Sleep(time.Second) {
+		if b, err := os.ReadFile(filepath.Join(Dir, tunnelFailed)); err == nil {
+			return "", fmt.Errorf("the harness could not start its tunnel: %s", b)
+		}
 		url, err := pointer.Find(context.Background(), key, "")
 		if err == nil {
 			return url, nil
-		}
-		if b, err := os.ReadFile(filepath.Join(Dir, tunnelFailed)); err == nil {
-			return "", fmt.Errorf("the harness could not start its tunnel: %s", b)
 		}
 		if time.Now().After(end) {
 			return "", fmt.Errorf("the harness did not answer through its tunnel in %s: %w; its log says why", tunnelWait, err)
