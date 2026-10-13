@@ -680,6 +680,8 @@ func phase(listen, url, code, v string, oses []string, mode, text string) {
 	mux := http.NewServeMux()
 	mux.Handle("/id", pointer.ID(key(), func() string { return url }, coord.Public().String()))
 	mux.Handle("POST /join", auth.JoinHandler(key(), pointer.Encode(key()), func() (string, error) { return code, nil }, &auth.Limit{}))
+	p := harness.NewPool(coord.Desired)
+	coord.Gone = p.Drop
 	coord.Handle(mux)
 	relay.Handle(mux, derp)
 	ln, err := net.Listen("tcp", listen)
@@ -687,7 +689,6 @@ func phase(listen, url, code, v string, oses []string, mode, text string) {
 		die.Fatal(err)
 	}
 	go func() { die.Fatal(http.Serve(ln, mux)) }()
-	p := harness.NewPool(coord.Desired)
 	go func() {
 		ls, err := coord.Listen(context.Background(), filepath.Join(dir(), "mesh"), "http://"+listen, worker.Port)
 		if err == nil {

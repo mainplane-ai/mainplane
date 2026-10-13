@@ -169,6 +169,7 @@ func Harness(ctx context.Context, path string) error {
 		return err
 	}
 	pool := harness.NewPool(coord.Desired)
+	coord.Gone = pool.Drop
 	coord.Link(c.Links)
 	setDrives(coord, pool, c.Drives)
 	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove}

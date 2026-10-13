@@ -25,6 +25,18 @@ func leave(m *mesh.Mesh) {
 	}
 }
 
+// rejoin drops the mesh keys of a node the harness removed, which it refuses
+// for good, so the install joins as a new node, under its own name.
+func rejoin() error {
+	dir := filepath.Join(stateDir, "mesh")
+	if _, err := os.Stat(filepath.Join(dir, mesh.Removed)); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return os.RemoveAll(dir)
+}
+
 // place copies this binary to bin, the path the service runs, through a new
 // file and renames. The old one moves aside to .old first, since Windows
 // renames a running binary but will not replace it, and a CLI or file helper
