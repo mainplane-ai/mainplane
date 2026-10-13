@@ -247,11 +247,17 @@ func Harness(ctx context.Context, path string) error {
 		urls <- url
 	}
 	go func() {
+		var err error
 		if c.Tunnel != nil {
-			errs <- tunnel.Own(ctx, dir, c.Tunnel.URL, c.Tunnel.Token, "http://"+c.HTTP, up)
+			err = tunnel.Own(ctx, dir, c.Tunnel.URL, c.Tunnel.Token, "http://"+c.HTTP, up)
 		} else {
-			errs <- tunnel.Quick(ctx, dir, "http://"+c.HTTP, up)
+			err = tunnel.Quick(ctx, dir, "http://"+c.HTTP, up)
 		}
+		// for Reached, which a service's log does not reach
+		if ctx.Err() == nil {
+			_ = os.WriteFile(filepath.Join(dir, tunnelFailed), []byte(err.Error()), 0o600)
+		}
+		errs <- err
 	}()
 	if err := <-errs; ctx.Err() == nil {
 		return err

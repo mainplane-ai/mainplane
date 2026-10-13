@@ -12,6 +12,7 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 - The session line names the media input types, or none, and the system prompt says that an image outside them comes back as raw bytes that fill context
 - A stop answers a call that never started `not run`, where it said `stopped, effect unknown`
 - `mainplane-server tunnel <url> <token>` refuses an empty token. It wrote the config and restarted the harness, which then failed on cloudflared in a loop
+- `mainplane-server install` and `mainplane-server tunnel` fail at once with the tunnel's own error, such as `api.trycloudflare.com` refusing, when the harness cannot start its tunnel. Before, they waited 3 minutes and then showed a DNS error for the previous install's URL, and the real error was only in the service's log
 - `install.sh` and `install.ps1` try each download up to three times, so one bad read no longer fails the install
 - The release gate removes the admin AGENTS.md its harness install wrote, after the uninstall, which keeps it as the user's
 - `mainplane update` is gone: the CLI follows its harness's release, at `mainplane login` and, on a worker, with the service, and no one picks one. A CLI on another release than its harness says `run mainplane login <api key> to become its release`

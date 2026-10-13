@@ -29,6 +29,11 @@ const (
 	tunnelWait = 3 * time.Minute
 )
 
+// tunnelFailed, in Dir, is why the harness's tunnel last stopped it. Install
+// and SetTunnel remove it before they start the harness, and Reached fails
+// with it at once.
+const tunnelFailed = "tunnel-failed.txt"
+
 // Conf is the config the installed harness runs from.
 var Conf = filepath.Join(Dir, "config.json")
 
@@ -133,6 +138,9 @@ func Install(c *Config, keep bool) error {
 	if err := place(); err != nil {
 		return err
 	}
+	if err := os.Remove(filepath.Join(Dir, tunnelFailed)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	if err := start(); err != nil {
 		return err
 	}
@@ -220,6 +228,9 @@ func SetTunnel(t *Tunnel) (string, error) {
 	if err := os.WriteFile(Conf, b, 0o600); err != nil {
 		return "", err
 	}
+	if err := os.Remove(filepath.Join(Dir, tunnelFailed)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", err
+	}
 	if err := restart(); err != nil {
 		return "", err
 	}
@@ -232,8 +243,12 @@ func SetTunnel(t *Tunnel) (string, error) {
 
 // Reached waits for the pointer to name a URL where the harness with key
 // proves it, through Cloudflare, as a worker finds it, and returns that URL.
+// A tunnel that stops the harness fails it at once.
 func Reached(key string) (string, error) {
 	for end := time.Now().Add(tunnelWait); ; time.Sleep(time.Second) {
+		if b, err := os.ReadFile(filepath.Join(Dir, tunnelFailed)); err == nil {
+			return "", fmt.Errorf("the harness could not start its tunnel: %s", b)
+		}
 		url, err := pointer.Find(context.Background(), key, "")
 		if err == nil {
 			return url, nil
