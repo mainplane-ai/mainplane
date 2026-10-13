@@ -181,7 +181,10 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 			return true
 		})
 		if removed {
-			log.Printf("mesh: the harness removed this worker; leaving the mesh. To join again: mainplane uninstall, then install with the network name and device code")
+			log.Printf("mesh: the harness removed this worker; leaving the mesh. To join again: install with the network name and device code")
+			if err := os.WriteFile(filepath.Join(dir, Removed), nil, 0o600); err != nil {
+				log.Printf("mesh: %v", err)
+			}
 			unwatch()
 			if err := m.leave(); err != nil {
 				log.Printf("mesh: %v", err)
@@ -201,6 +204,10 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 	}
 	return m, nil
 }
+
+// Removed marks a mesh directory whose node the harness removed. Its keys
+// stay refused, so they stay too, until an install starts the node anew.
+const Removed = "removed"
 
 // Removed is closed once the harness has removed this worker and it has
 // left the mesh.

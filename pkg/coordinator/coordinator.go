@@ -115,6 +115,11 @@ type Coordinator struct {
 	join   func(secret, addr string) (string, error)
 	self   string // the harness's own node registers with it; never on disk
 
+	// Gone hangs up on the worker named name once its node left or expired:
+	// a node that logged out sends no FIN after, and the harness would hold
+	// its connection for minutes. Set before Handle.
+	Gone func(name string)
+
 	mu     sync.Mutex
 	st     state
 	host   string             // the front door's, where the relay is
@@ -259,14 +264,14 @@ func (c *Coordinator) Remove(name string) error {
 	return c.save()
 }
 
-// expire deletes ephemeral node n once it has been idle with no poll, unless
-// it was removed, which keeps its keys refused. The caller holds mu, or is
-// alone.
+// expire marks n quiet from now, and deletes it, when ephemeral, once it has
+// been idle with no poll, unless it was removed, which keeps its keys
+// refused. The caller holds mu, or is alone.
 func (c *Coordinator) expire(n *node) {
+	n.quiet = time.Now()
 	if !n.Ephemeral {
 		return
 	}
-	n.quiet = time.Now()
 	time.AfterFunc(idle, func() {
 		c.mu.Lock()
 		defer c.mu.Unlock()
@@ -279,6 +284,7 @@ func (c *Coordinator) expire(n *node) {
 			log.Printf("coordinator: %v", err)
 		}
 		log.Printf("coordinator: %s expired, no map poll for %s", n.Name, idle)
+		go c.Gone(n.Name)
 	})
 }
 
@@ -338,6 +344,7 @@ func (c *Coordinator) register(machine key.MachinePublic, addr string, req tailc
 				return tailcfg.RegisterResponse{Error: err.Error()}
 			}
 			log.Printf("coordinator: %s left", n.Name)
+			go c.Gone(n.Name)
 		}
 		return tailcfg.RegisterResponse{NodeKeyExpired: true}
 	}
@@ -383,9 +390,11 @@ func (c *Coordinator) admit(machine key.MachinePublic, secret, addr string, ephe
 	name := reserved
 	if name == "" {
 		name = c.name(hi)
-	} else {
-		c.st.Nodes = slices.DeleteFunc(c.st.Nodes, func(p *node) bool { return p.Name == name })
 	}
+	// The node that had the name gives it up: a reserved one always, any
+	// other once offline past idle (see name). A removed one keeps its keys
+	// refused.
+	c.st.Nodes = slices.DeleteFunc(c.st.Nodes, func(p *node) bool { return p.Name == name && (reserved != "" || !p.Removed) })
 	n := &node{ID: c.st.Next, Name: name, Machine: machine, Ephemeral: ephemeral}
 	c.st.Next++
 	c.st.Nodes = append(c.st.Nodes, n)
@@ -620,7 +629,9 @@ func write(w http.ResponseWriter, compress string, r *tailcfg.MapResponse) error
 }
 
 // name is the hostname's first label in lower case letters, digits and
-// single dashes, made unique with -2, -3. No name has "--", the separator of
+// single dashes, made unique with -2, -3 among nodes not removed and not
+// offline past idle: the same machine joining again with new keys, as after
+// a move to another harness and back, takes its name back. No name has "--", the separator of
 // long names, none is "xn", because a label starting "xn--" is punycode, and
 // none is the harness's or admin's.
 func (c *Coordinator) name(hi *tailcfg.Hostinfo) string {
@@ -642,7 +653,9 @@ func (c *Coordinator) name(hi *tailcfg.Hostinfo) string {
 		base = "worker"
 	}
 	name := base
-	for i := 2; name == "xn" || name == worker.Harness || name == worker.Admin || slices.ContainsFunc(c.st.Nodes, func(p *node) bool { return p.Name == name && !p.Removed }); i++ {
+	for i := 2; name == "xn" || name == worker.Harness || name == worker.Admin || slices.ContainsFunc(c.st.Nodes, func(p *node) bool {
+		return p.Name == name && !p.Removed && (p.streams > 0 || time.Since(p.quiet) < idle)
+	}); i++ {
 		name = fmt.Sprintf("%s-%d", base, i)
 	}
 	return name

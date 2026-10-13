@@ -4,6 +4,9 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 
 ## v0.5.3
 
+- A worker that logs out, as uninstall does, or expires is dropped from `mainplane workers` at once; before, the harness held its connection for minutes, since a node that logged out sends no FIN
+- `mainplane install` on a worker the harness removed joins again as a new node under its own name; before, it said installed and stayed refused
+- A machine that joins again with new keys, as after a move to another harness and back, takes back its name from its old node once that node has been offline for 3 minutes, in place of `<name>-2`
 - A pwsh run sends its code as one line of base64, which pwsh decodes as UTF-8 and dot-sources as one script block, and its output is UTF-8. `-Command -` read the code in the OEM code page and line by line, so non-ASCII text was garbled, blank lines in here-strings were dropped, and an unclosed block waited until the run timed out. A parse error now fails the run at once
 - The system prompt says that edit matches old text byte for byte, so CRLF line endings must be in it, and that the calls of one step run serially, in order
 - The session line names the media input types, or none, and the system prompt says that an image outside them comes back as raw bytes that fill context
