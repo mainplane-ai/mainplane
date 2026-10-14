@@ -19,7 +19,7 @@ type elem struct {
 	paste string
 }
 
-func (e elem) space() bool { return e.g == " " || e.g == "\n" }
+func (e elem) space() bool { return e.g == " " || e.g == "\t" || e.g == "\n" }
 
 // Input is a multi-line text input. It wraps, grows to MaxRows and then
 // scrolls. Shift+arrows select. A paste of collapseLines or more lines is one
@@ -48,7 +48,7 @@ func (s *Input) width(i int) int {
 
 // rows wraps at w less one column, where the cursor sits after a full row.
 func (s *Input) rows(w int) [][2]int {
-	return wrap(len(s.els), s.width, func(i int) bool { return s.els[i].g == " " }, func(i int) bool { return s.els[i].g == "\n" }, max(1, w-1))
+	return wrap(len(s.els), s.width, func(i int) bool { return s.els[i].space() }, func(i int) bool { return s.els[i].g == "\n" }, max(1, w-1))
 }
 
 func (s *Input) Height(w int) int { return min(max(1, len(s.rows(w))), max(1, s.MaxRows)) }

@@ -32,6 +32,8 @@ const (
 	retryIn  = 2 * time.Second
 	// escTwice is how close the two presses of Esc Esc, stop, must be.
 	escTwice = time.Second
+	// outboxSize is how many sends can wait to post before a send blocks the loop.
+	outboxSize = 64
 )
 
 // session is one session: the transcript, the input, the status line, and a
@@ -54,14 +56,15 @@ type session struct {
 	box        *Node
 	status     *Text // the app's status, else what the session is busy with
 	statusRow  *Node
-	started    bool     // a message was sent from home: show the transcript
-	creating   bool     // the session is being made
-	pending    []string // sent while the session is being made
-	stopping   bool     // a stop was asked for and the status has not changed since
+	started    bool        // a message was sent from home: show the transcript
+	creating   bool        // the session is being made
+	pending    []string    // sent while the session is being made
+	outbox     chan string // sent, to be posted in order
+	stopping   bool        // a stop was asked for and the status has not changed since
 }
 
 func newSession(a *App, c connector.Client, id string) *session {
-	s := &session{c: c, id: id, transcript: NewScrollbox(), input: NewInput(), status: &Text{}}
+	s := &session{c: c, id: id, transcript: NewScrollbox(), input: NewInput(), status: &Text{}, outbox: make(chan string, outboxSize)}
 	s.transcript.Style = a.Theme.text()
 	s.input.Placeholder, s.input.OnSubmit = "Ask anything", s.send
 	s.box = inputBox(a, s.input)
@@ -77,6 +80,7 @@ func newSession(a *App, c connector.Client, id string) *session {
 	s.title(a)
 	if id != "" {
 		s.follow(a)
+		s.postAll(a)
 	}
 	return s
 }
@@ -261,7 +265,7 @@ func raw(r statefile.Record) string {
 // the session is made in the background and the text posted when it is.
 func (s *session) send(a *App, text string) {
 	if s.id != "" {
-		s.post(a, text)
+		s.outbox <- text
 		return
 	}
 	s.started = true
@@ -271,19 +275,17 @@ func (s *session) send(a *App, text string) {
 	}
 }
 
-// post posts the texts in order. The first that fails goes back to the
-// input with the ones after it.
-func (s *session) post(a *App, texts ...string) {
+// postAll starts the one goroutine that posts what is sent, in the order it
+// was sent. A text that fails goes back to the input.
+func (s *session) postAll(a *App) {
 	id := s.id
 	a.Go(func() {
-		for i, text := range texts {
+		for text := range s.outbox {
 			ctx, cancel := context.WithTimeout(context.Background(), callTime)
 			_, err := s.c.Post(ctx, id, via, text, nil)
 			cancel()
 			if err != nil {
-				rest := strings.Join(texts[i:], "\n")
-				a.Post(func() { s.failed(a, rest, err) })
-				return
+				a.Post(func() { s.failed(a, text, err) })
 			}
 		}
 	})
@@ -317,7 +319,10 @@ func (s *session) create(a *App) {
 			s.id = id
 			s.title(a)
 			s.follow(a)
-			s.post(a, texts...)
+			s.postAll(a)
+			for _, t := range texts {
+				s.outbox <- t
+			}
 		})
 	})
 }

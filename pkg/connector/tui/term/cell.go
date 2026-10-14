@@ -154,7 +154,7 @@ func safe(s string) string {
 		return s
 	}
 	var b strings.Builder
-	prev := rune(0)
+	wide := false // the rune before is a wide emoji or an emoji presentation selector
 	for _, r := range s {
 		switch {
 		case r == '\t':
@@ -164,13 +164,13 @@ func safe(s string) string {
 		case r == 0x7f:
 			b.WriteRune(0x2421)
 		case r == 0xFE0E, r != 0x200D && unicode.Is(unicode.Cf, r):
-		case r >= 0x1F3FB && r <= 0x1F3FF && uniseg.StringWidth(string(prev)) != 2:
+		case r >= 0x1F3FB && r <= 0x1F3FF && !wide:
 		case unicode.IsGraphic(r), unicode.Is(unicode.Co, r), r == 0x200D:
 			b.WriteRune(r)
 		default:
 			b.WriteRune(utf8.RuneError)
 		}
-		prev = r
+		wide = r == 0xFE0F || uniseg.StringWidth(string(r)) == 2
 	}
 	return b.String()
 }
