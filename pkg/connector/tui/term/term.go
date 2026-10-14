@@ -75,14 +75,6 @@ func Open() (*Terminal, error) {
 		return nil, errors.New("not a terminal")
 	}
 	t := &Terminal{Events: make(chan Event, 256), in: in, out: out, w: bufio.NewWriterSize(out, 64<<10), stop: make(chan struct{}), replies: make(chan Event, 8)}
-	var err error
-	if t.raw, err = term.MakeRaw(int(in.Fd())); err != nil {
-		return nil, err
-	}
-	if t.plat, err = setup(in, out); err != nil {
-		_ = term.Restore(int(in.Fd()), t.raw)
-		return nil, err
-	}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
@@ -91,6 +83,10 @@ func Open() (*Terminal, error) {
 		fmt.Fprintln(os.Stderr, s)
 		os.Exit(1)
 	}()
+	if err := t.modes(); err != nil {
+		t.Close()
+		return nil, err
+	}
 	go t.read()
 	go t.resizes()
 	t.Write(enter + query)
@@ -117,6 +113,19 @@ func Open() (*Terminal, error) {
 		t.Flush()
 	}
 	return t, nil
+}
+
+// modes sets raw mode and the platform's console modes, under the lock Close
+// takes, so a signal in between restores what was set.
+func (t *Terminal) modes() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var err error
+	if t.raw, err = term.MakeRaw(int(t.in.Fd())); err != nil {
+		return err
+	}
+	t.plat, err = setup(t.in, t.out)
+	return err
 }
 
 // truecolor is whether the terminal takes 24-bit color. There is no reliable
@@ -168,8 +177,12 @@ func (t *Terminal) Close() {
 	}
 	_, _ = t.w.WriteString(leave)
 	_ = t.w.Flush()
-	t.plat()
-	_ = term.Restore(int(t.in.Fd()), t.raw)
+	if t.plat != nil {
+		t.plat()
+	}
+	if t.raw != nil {
+		_ = term.Restore(int(t.in.Fd()), t.raw)
+	}
 }
 
 // Recover is deferred at the top of every goroutine that may panic while the

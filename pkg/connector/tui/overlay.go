@@ -55,7 +55,7 @@ func (l *List) Key(a *App, k term.Key) bool {
 	default:
 		return false
 	}
-	l.Sel = min(max(0, l.Sel), len(l.Items)-1)
+	l.Sel = max(0, min(l.Sel, len(l.Items)-1))
 	return true
 }
 
@@ -66,7 +66,7 @@ func (l *List) Mouse(a *App, m term.Mouse, r Rect) bool {
 	case m.Button == term.WheelDown:
 		l.Sel = min(len(l.Items)-1, l.Sel+1)
 	case m.Action == term.Press && m.Button == term.Left:
-		if i := l.top + m.Y - r.Y; i < len(l.Items) {
+		if i := l.top + m.Y - r.Y; i >= 0 && i < len(l.Items) {
 			l.Sel = i
 			if l.OnPick != nil {
 				l.OnPick(a, i)

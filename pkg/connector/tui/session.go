@@ -26,7 +26,9 @@ const (
 	inputRows  = 10
 	inputShare = 40
 	// pollWait is how long one long poll of the records waits.
-	pollWait = "30s"
+	pollWait = 30 * time.Second
+	// callTime bounds every call but the long poll, which gets it on top.
+	callTime = 15 * time.Second
 	retryIn  = 2 * time.Second
 )
 
@@ -167,13 +169,15 @@ func (s *session) title(a *App) {
 func (s *session) follow(a *App) {
 	id := s.id
 	a.Go(func() {
-		ctx, after, wait := context.Background(), 0, ""
+		after, wait := 0, ""
 		for {
+			ctx, cancel := context.WithTimeout(context.Background(), pollWait+callTime)
 			recs, err := s.c.Records(ctx, id, after, wait)
 			var info harness.Info
 			if err == nil {
 				info, err = s.c.Info(ctx, id)
 			}
+			cancel()
 			if err != nil {
 				a.Post(func() { a.ToastError(err) })
 				time.Sleep(retryIn)
@@ -182,7 +186,7 @@ func (s *session) follow(a *App) {
 			if len(recs) > 0 {
 				after = recs[len(recs)-1].N
 			}
-			wait = pollWait
+			wait = pollWait.String()
 			a.Post(func() { s.add(a, recs, info) })
 		}
 	})
@@ -231,8 +235,10 @@ func (s *session) send(a *App, text string) {
 	if s.id != "" {
 		id := s.id
 		a.Go(func() {
-			if _, err := s.c.Post(context.Background(), id, via, text, nil); err != nil {
-				a.Post(func() { a.ToastError(err) })
+			ctx, cancel := context.WithTimeout(context.Background(), callTime)
+			defer cancel()
+			if _, err := s.c.Post(ctx, id, via, text, nil); err != nil {
+				a.Post(func() { s.failed(a, text, err) })
 			}
 		})
 		return
@@ -246,10 +252,9 @@ func (s *session) send(a *App, text string) {
 		a.Post(func() {
 			s.creating = false
 			if err != nil {
-				a.ToastError(err)
+				s.failed(a, text, err)
 			}
 			if id == "" {
-				s.input.Paste(a, text)
 				return
 			}
 			s.id = id
@@ -259,8 +264,18 @@ func (s *session) send(a *App, text string) {
 	})
 }
 
+// failed says why a message did not post and gives it back to the input,
+// unless something new was typed there.
+func (s *session) failed(a *App, text string, err error) {
+	a.ToastError(err)
+	if len(s.input.els) == 0 {
+		s.input.Paste(a, text)
+	}
+}
+
 func (s *session) create(text string) (string, error) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), callTime)
+	defer cancel()
 	infos, err := s.c.Sessions(ctx, "", 1)
 	if err != nil {
 		return "", err
@@ -281,7 +296,9 @@ func (s *session) stop(a *App) {
 	id := s.id
 	a.Toast("Stopping")
 	a.Go(func() {
-		if err := s.c.Stop(context.Background(), id, via); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), callTime)
+		defer cancel()
+		if err := s.c.Stop(ctx, id, via); err != nil {
 			a.Post(func() { a.ToastError(err) })
 		}
 	})

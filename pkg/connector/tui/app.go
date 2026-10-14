@@ -245,7 +245,7 @@ func (a *App) mouse(m term.Mouse) {
 func (a *App) hit(x, y int) *Node {
 	for i := len(a.layers) - 1; i >= 0; i-- {
 		l := a.layers[i]
-		if h := l.Root.Hit(x, y); h != nil {
+		if h := l.Root.Hit(x, y); h != nil && (l.Modal || takesMouse(h)) {
 			return h
 		}
 		if l.Modal {
@@ -253,6 +253,17 @@ func (a *App) hit(x, y int) *Node {
 		}
 	}
 	return a.screen.Root().Hit(x, y)
+}
+
+// takesMouse is whether n or a parent has a view that handles the mouse. A
+// layer that has none, like a toast, lets clicks through.
+func takesMouse(n *Node) bool {
+	for ; n != nil; n = n.parent {
+		if _, ok := n.View.(MouseHandler); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // Copy puts text on the clipboard and says so.

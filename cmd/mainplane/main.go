@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/connector"
@@ -34,6 +35,10 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/version"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
+
+// startTime bounds finding the harness and asking its release before the TUI
+// opens.
+const startTime = 15 * time.Second
 
 func main() {
 	if len(os.Args) == 1 || len(os.Args) == 2 && statefile.ValidID(os.Args[1]) {
@@ -111,7 +116,8 @@ func logIn(token string) {
 // is given. When this binary is not the harness's release it becomes it
 // first, in the plain terminal where sudo or UAC can ask, then runs again.
 func app(id string) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), startTime)
+	defer cancel()
 	var cp *connector.Client
 	c, err := connector.Load(ctx)
 	switch {

@@ -15,14 +15,17 @@ const isWindows = false
 
 func setup(in, out *os.File) (func(), error) { return func() {}, nil }
 
-// wait is whether stdin has bytes to read now.
+// wait is whether stdin has bytes to read within timeout. A signal, like
+// SIGWINCH, does not cut the wait short.
 func wait(f *os.File, timeout time.Duration) (bool, error) {
 	fds := []unix.PollFd{{Fd: int32(f.Fd()), Events: unix.POLLIN}}
-	n, err := unix.Poll(fds, int(timeout/time.Millisecond))
-	if errors.Is(err, unix.EINTR) {
-		return false, nil
+	end := time.Now().Add(timeout)
+	for {
+		n, err := unix.Poll(fds, int(max(0, time.Until(end))/time.Millisecond))
+		if !errors.Is(err, unix.EINTR) {
+			return n > 0, err
+		}
 	}
-	return n > 0, err
 }
 
 func (t *Terminal) resizes() {

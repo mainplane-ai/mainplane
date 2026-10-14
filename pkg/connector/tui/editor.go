@@ -272,12 +272,13 @@ func (s *Input) Mouse(a *App, m term.Mouse, r Rect) bool {
 	case m.Button == term.WheelDown:
 		s.top = min(s.top+1, max(0, len(rows)-r.H))
 	case m.Action == term.Press && m.Button == term.Left:
+		a.Select(s)
 		if i < len(s.els) && s.els[i].paste != "" {
 			s.expand(i)
 			break
 		}
 		s.cur, s.anchor = i, i
-	case m.Action == term.Motion:
+	case m.Action == term.Motion && m.Button == term.Left:
 		s.cur = i
 		if s.anchor != s.cur {
 			a.Select(s)
@@ -311,10 +312,10 @@ func (s *Input) Draw(a *App, c *Canvas, r Rect) {
 			}
 			st, g := a.Theme.text(), e.g
 			switch {
-			case e.paste != "":
-				st = term.Style{FG: a.Theme.Accent, Attr: term.Bold}
 			case s.Mask:
 				g = "•"
+			case e.paste != "":
+				st = term.Style{FG: a.Theme.Accent, Attr: term.Bold}
 			}
 			if i >= sa && i < sb {
 				st.BG = a.Theme.Selection

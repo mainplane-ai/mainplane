@@ -183,19 +183,19 @@ func (n *Node) measure(w int) int {
 		h = m.Height(in)
 	}
 	for _, k := range n.Kids {
-		if !k.Hidden && n.Dir == Row {
-			fixed += k.Fixed
+		if !k.Hidden && n.Dir == Row && k.Fixed > 0 {
+			fixed += k.clamp(k.Fixed)
 		}
 	}
 	for _, k := range n.Kids {
 		switch {
 		case k.Hidden:
 		case n.Dir == Col && k.Fixed > 0:
-			h += k.Fixed
+			h += k.clamp(k.Fixed)
 		case n.Dir == Col:
 			h += k.clamp(k.measure(in))
 		case k.Fixed > 0:
-			h = max(h, k.measure(k.Fixed))
+			h = max(h, k.measure(k.clamp(k.Fixed)))
 		default:
 			h = max(h, k.measure(in-fixed))
 		}

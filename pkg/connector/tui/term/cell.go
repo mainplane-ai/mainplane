@@ -17,7 +17,7 @@ func RGB(r, g, b uint8) Color { return rgbFlag | Color(r)<<16 | Color(g)<<8 | Co
 // Hex is a color written #rrggbb.
 func Hex(s string) Color {
 	v, err := strconv.ParseUint(strings.TrimPrefix(s, "#"), 16, 32)
-	if err != nil || len(s) != 7 {
+	if err != nil || len(s) != 7 || s[0] != '#' {
 		panic("term: bad color " + s)
 	}
 	return rgbFlag | Color(v)

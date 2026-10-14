@@ -93,7 +93,7 @@ func (s *Scrollbox) Draw(a *App, c *Canvas, r Rect) {
 		x := r.X
 		for _, g := range s.rows[ri].gs {
 			st := s.Style
-			if s.sel.on && (pos{ri, x - r.X}).in(a1, b1) {
+			if s.sel.on && s.picked(ri, x-r.X, g.w, a1, b1) {
 				st.BG = a.Theme.Selection
 			}
 			c.Set(x, r.Y+y, g.g, g.w, st)
@@ -115,6 +115,12 @@ func (s *Scrollbox) Draw(a *App, c *Canvas, r Rect) {
 
 func (p pos) in(a, b pos) bool {
 	return (p.row > a.row || p.row == a.row && p.col >= a.col) && (p.row < b.row || p.row == b.row && p.col <= b.col)
+}
+
+// picked is whether the grapheme at row ri, column x, w wide, has a cell in
+// the selection from a to b.
+func (s *Scrollbox) picked(ri, x, w int, a, b pos) bool {
+	return (pos{ri, x}).in(a, b) || w == 2 && (pos{ri, x + 1}).in(a, b)
 }
 
 func (s *Scrollbox) order() (pos, pos) {
@@ -142,11 +148,12 @@ func (s *Scrollbox) Mouse(a *App, m term.Mouse, r Rect) bool {
 			s.barTo(m.Y)
 			break
 		}
+		a.Select(s)
 		s.sel.on, s.sel.a = false, s.posAt(m.X, m.Y)
 		s.sel.b = s.sel.a
-	case m.Action == term.Motion && s.onBar:
+	case m.Action == term.Motion && m.Button == term.Left && s.onBar:
 		s.barTo(m.Y)
-	case m.Action == term.Motion:
+	case m.Action == term.Motion && m.Button == term.Left:
 		if m.Y < s.view.Y {
 			s.Scroll(-1)
 		} else if m.Y >= s.view.Y+s.view.H {
@@ -183,7 +190,7 @@ func (s *Scrollbox) Selected() string {
 	for ri := a.row; ri <= b.row && ri < len(s.rows); ri++ {
 		x := 0
 		for _, g := range s.rows[ri].gs {
-			if (pos{ri, x}).in(a, b) {
+			if s.picked(ri, x, g.w, a, b) {
 				out.WriteString(g.g)
 			}
 			x += g.w

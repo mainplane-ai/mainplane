@@ -70,6 +70,10 @@ type inputRecord struct {
 	Ctrl    uint32
 }
 
+// modifier is the virtual keys that type nothing alone: shift, ctrl, alt,
+// caps lock, the Windows keys, and their left and right forms.
+var modifier = map[uint16]bool{0x10: true, 0x11: true, 0x12: true, 0x14: true, 0x5b: true, 0x5c: true, 0xa0: true, 0xa1: true, 0xa2: true, 0xa3: true, 0xa4: true, 0xa5: true}
+
 // wait is whether ReadFile will return bytes now. The console's handle is
 // also signaled by records ReadFile skips (key ups, focus, menu); those are
 // dropped here, or ReadFile would block past the terminal's close.
@@ -85,7 +89,7 @@ func wait(f *os.File, timeout time.Duration) (bool, error) {
 		return false, err
 	}
 	for _, r := range recs[:n] {
-		if r.Type == 1 && r.KeyDown != 0 && r.Char != 0 { // KEY_EVENT
+		if r.Type == 1 && r.KeyDown != 0 && !modifier[r.VK] { // KEY_EVENT; arrows have no char until ReadFile makes them VT
 			return true, nil
 		}
 	}
