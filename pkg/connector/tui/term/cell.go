@@ -3,6 +3,8 @@ package term
 import (
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/rivo/uniseg"
 )
@@ -111,18 +113,66 @@ func (b *Buffer) Set(x, y int, g string, w int, s Style) {
 	}
 }
 
-// Graphemes calls fn with each grapheme of s and its width, 1 or 2. Zero
-// width clusters, like a lone control byte, are skipped.
+// Graphemes calls fn with each grapheme of s as it shows, and its width, 1
+// or 2. Zero width clusters, like a combining mark with no base, are
+// skipped. Where terminals disagree with the Unicode tables, the grapheme is
+// changed to one they agree on (see safe), or else given 2 cells: the
+// renderer blanks both first, so a terminal that draws it 1 wide leaves a
+// blank cell, where 1 cell drawn 2 wide would cover its neighbor.
 func Graphemes(s string, fn func(g string, w int)) {
 	state := -1
+	s = safe(s)
 	for s != "" {
 		var g string
 		var w int
 		g, s, w, state = uniseg.FirstGraphemeClusterInString(s, state)
-		if w > 0 {
-			fn(g, min(w, 2))
+		r, _ := utf8.DecodeRuneInString(g)
+		switch {
+		case w == 0:
+			continue
+		case strings.ContainsRune(g, 0xFE0F): // emoji presentation: 2 cells in Windows Terminal and tmux, even after "a" or a keycap
+			w = 2
+		case r >= 0x1FA70 && r <= 0x1FAFF: // emoji newer than uniseg's tables
+			w = 2
 		}
+		fn(g, min(w, 2))
 	}
+}
+
+// safe is s with what moves the cursor unpredictably made visible or taken
+// out. Control characters show as their Control Pictures, and C1 controls,
+// invalid bytes and unassigned code points as U+FFFD. A tab is 4 spaces.
+// Format characters go but the zero width joiner: bidi controls, zero width
+// spaces, soft hyphens, tags; terminals give them 0 or 1 cells. So do text
+// presentation selectors, and skin tones on what is not a wide emoji.
+func safe(s string) string {
+	plain := true
+	for i := 0; i < len(s) && plain; i++ {
+		plain = s[i] >= 0x20 && s[i] < 0x7f
+	}
+	if plain {
+		return s
+	}
+	var b strings.Builder
+	prev := rune(0)
+	for _, r := range s {
+		switch {
+		case r == '\t':
+			b.WriteString("    ")
+		case r < 0x20:
+			b.WriteRune(0x2400 + r)
+		case r == 0x7f:
+			b.WriteRune(0x2421)
+		case r == 0xFE0E, r != 0x200D && unicode.Is(unicode.Cf, r):
+		case r >= 0x1F3FB && r <= 0x1F3FF && uniseg.StringWidth(string(prev)) != 2:
+		case unicode.IsGraphic(r), unicode.Is(unicode.Co, r), r == 0x200D:
+			b.WriteRune(r)
+		default:
+			b.WriteRune(utf8.RuneError)
+		}
+		prev = r
+	}
+	return b.String()
 }
 
 // Width is the number of cells s takes.

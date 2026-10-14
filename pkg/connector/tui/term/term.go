@@ -31,8 +31,7 @@ const (
 	query = "\x1b[?u" + // kitty keyboard flags
 		"\x1b]11;?\x1b\\" + // background color
 		"\x1b[c" // DA1, answered by all: the end of the replies
-	leave = "\x1b]9;4;0\x07" + // no progress
-		"\x1b[?1004l\x1b[?2004l" +
+	leave = "\x1b[?1004l\x1b[?2004l" +
 		"\x1b[?1006l\x1b[?1002l\x1b[?1000l" +
 		"\x1b[0m\x1b[?7h\x1b[?25h" +
 		"\x1b[?1049l" +
@@ -46,6 +45,7 @@ type Caps struct {
 	Truecolor bool
 	Dark      bool
 	Kitty     bool
+	Progress  bool // shows OSC 9;4 progress in its tab
 }
 
 // Terminal is the open terminal. Events carries input, focus and resize. Every
@@ -99,7 +99,7 @@ func Open() (*Terminal, error) {
 	t.mu.Unlock()
 	t.Write(enter + query)
 	t.Flush()
-	t.Caps = Caps{Truecolor: truecolor(), Dark: true}
+	t.Caps = Caps{Truecolor: truecolor(), Dark: true, Progress: progress()}
 	deadline := time.After(queryWait)
 	for done := false; !done; {
 		select {
@@ -144,6 +144,13 @@ func truecolor() bool {
 	return ct == "truecolor" || ct == "24bit" || os.Getenv("WT_SESSION") != "" || isWindows
 }
 
+// progress is whether the terminal shows OSC 9;4 progress in its tab, by the
+// same convention: Windows Terminal and Ghostty. Not through tmux, which does
+// not pass it on.
+func progress() bool {
+	return os.Getenv("TMUX") == "" && (os.Getenv("WT_SESSION") != "" || os.Getenv("TERM_PROGRAM") == "ghostty")
+}
+
 // Size is the terminal's width and height in cells.
 func (t *Terminal) Size() (int, int) {
 	w, h, err := term.GetSize(int(t.out.Fd()))
@@ -184,6 +191,9 @@ func (t *Terminal) Close() {
 	if t.entered {
 		if t.Caps.Kitty {
 			_, _ = t.w.WriteString(kittyPop)
+		}
+		if t.Caps.Progress {
+			_, _ = t.w.WriteString("\x1b]9;4;0\x07")
 		}
 		_, _ = t.w.WriteString(leave)
 		_ = t.w.Flush()
@@ -267,14 +277,18 @@ func (t *Terminal) SetTitle(s string) {
 		}
 		return r
 	}, s) + "\x07")
+	t.Flush()
 }
 
 // Progress shows the busy indicator in the tab and taskbar (OSC 9;4), or
-// clears it.
+// clears it, where the terminal has one.
 func (t *Terminal) Progress(busy bool) {
-	if busy {
+	switch {
+	case !t.Caps.Progress:
+	case busy:
 		t.Write("\x1b]9;4;3\x07")
-	} else {
+	default:
 		t.Write("\x1b]9;4;0\x07")
 	}
+	t.Flush()
 }

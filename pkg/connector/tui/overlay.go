@@ -1,10 +1,6 @@
 package tui
 
-import (
-	"time"
-
-	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
-)
+import "github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
 
 // dialogWidth is the widest a dialog gets.
 const dialogWidth = 60
@@ -111,34 +107,4 @@ func (a *App) Dialog(title string, body *Node) *Layer {
 	}
 	a.Push(l)
 	return l
-}
-
-// Toast shows a short note in the top right corner for toastTime.
-func (a *App) Toast(msg string) { a.toast(msg, a.Theme.Text) }
-
-func (a *App) ToastError(err error) { a.toast(err.Error(), a.Theme.Error) }
-
-func (a *App) toast(msg string, fg term.Color) {
-	if a.toastLayer != nil {
-		a.Pop(a.toastLayer)
-	}
-	t := &Text{S: msg, Style: term.Style{FG: fg}}
-	l := &Layer{Root: Box(&Node{Dir: Row, BG: a.Theme.Panel, Pad: [4]int{0, 1, 2, 1}},
-		&Node{Fixed: 1, View: &Text{S: "┃", Style: term.Style{FG: fg}}}, &Node{Fixed: 1},
-		&Node{Grow: 1, View: t})}
-	l.Place = func(w, h int) Rect {
-		tw := min(term.Width(msg), max(1, w/2))
-		th := t.Height(tw)
-		return Rect{w - tw - 6, 1, tw + 4, th + 2}
-	}
-	a.toastLayer = l
-	a.Push(l)
-	time.AfterFunc(toastTime, func() {
-		a.Post(func() {
-			a.Pop(l)
-			if a.toastLayer == l {
-				a.toastLayer = nil
-			}
-		})
-	})
 }

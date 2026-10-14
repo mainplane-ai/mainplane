@@ -244,9 +244,9 @@ func (n *Node) Hit(x, y int) *Node {
 	return n
 }
 
-// Layer is a tree drawn over the ones below it: the screen, a dialog, a
-// toast. Place gives its rect for a screen size. A modal layer takes every
-// key and click and dims what is under it.
+// Layer is a tree drawn over the ones below it: the screen, a dialog. Place
+// gives its rect for a screen size. A modal layer takes every key and click
+// and dims what is under it.
 type Layer struct {
 	Root  *Node
 	Modal bool

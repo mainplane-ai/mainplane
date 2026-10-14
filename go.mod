@@ -7,7 +7,7 @@ toolchain go1.27.2
 require (
 	filippo.io/cpace v0.0.0-20210101143347-24d601e2e469
 	github.com/dustinkirkland/golang-petname v0.0.0-20260929120758-6e3915f1a6a8
-	github.com/rivo/uniseg v0.4.4
+	github.com/rivo/uniseg v0.4.7
 	github.com/tailscale/wireguard-go v0.0.0-20260715223240-2e01ba5b00f0
 	golang.org/x/net v0.60.0
 	golang.org/x/sys v0.48.0

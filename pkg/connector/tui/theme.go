@@ -6,7 +6,7 @@ import "github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
 // apart by shade, not by lines.
 type Theme struct {
 	BG        term.Color // the screen
-	Panel     term.Color // raised: sidebar, dialogs, toasts
+	Panel     term.Color // raised: sidebar, dialogs
 	Element   term.Color // the input
 	Text      term.Color
 	Muted     term.Color

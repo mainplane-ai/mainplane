@@ -43,13 +43,13 @@ type login struct {
 	root   *Node
 	box    *Node
 	input  *Input
-	status *Text
+	status *Text // the app's status, centered
 	busy   bool
 	frame  int
 }
 
 func newLogin(a *App) *login {
-	s := &login{input: NewInput(), status: &Text{Center: true, Style: a.Theme.muted()}}
+	s := &login{input: NewInput(), status: &Text{}}
 	s.input.Placeholder, s.input.Mask, s.input.OnSubmit = "mp_...", true, s.submit
 	s.box = inputBox(a, s.input)
 	s.root = Box(&Node{Dir: Col, BG: a.Theme.BG},
@@ -70,30 +70,32 @@ func (s *login) Root() *Node { return s.root }
 
 func (s *login) Size(a *App, w, h int) {
 	s.box.Fixed = min(boxWidth, w-2)
+	*s.status = *a.Status
+	s.status.Center = true
 }
 
 func (s *login) Key(*App, term.Key) bool { return false }
 
 func (s *login) Tick(a *App) {
 	s.frame++
-	s.status.S = spinner[s.frame%len(spinner)] + " Logging in"
+	a.Say(spinner[s.frame%len(spinner)] + " Logging in")
 }
 
 func (s *login) submit(a *App, key string) {
 	if s.busy {
 		return
 	}
-	s.busy, s.status.Style = true, a.Theme.muted()
+	s.busy = true
 	s.Tick(a)
 	a.Ticking(true)
 	a.Go(func() {
 		c, _, v, err := connector.Login(context.Background(), strings.TrimSpace(key))
 		a.Post(func() {
-			s.busy = false
+			s.busy, a.Status.S = false, ""
 			a.Ticking(false)
 			switch {
 			case err != nil:
-				s.status.S, s.status.Style = err.Error(), term.Style{FG: a.Theme.Error}
+				a.SayError(err)
 			case !version.Match(v):
 				a.Update = v
 				a.Quit()

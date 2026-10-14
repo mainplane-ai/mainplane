@@ -8,7 +8,6 @@ import (
 	"mime"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
@@ -53,20 +52,26 @@ type session struct {
 	empty      []*Node
 	inputRow   *Node
 	box        *Node
-	creating   bool
+	status     *Text // the app's status, else what the session is busy with
+	statusRow  *Node
+	started    bool     // a message was sent from home: show the transcript
+	creating   bool     // the session is being made
+	pending    []string // sent while the session is being made
+	stopping   bool     // a stop was asked for and the status has not changed since
 }
 
 func newSession(a *App, c connector.Client, id string) *session {
-	s := &session{c: c, id: id, transcript: NewScrollbox(), input: NewInput()}
+	s := &session{c: c, id: id, transcript: NewScrollbox(), input: NewInput(), status: &Text{}}
 	s.transcript.Style = a.Theme.text()
 	s.input.Placeholder, s.input.OnSubmit = "Ask anything", s.send
 	s.box = inputBox(a, s.input)
 	s.inputRow = Box(&Node{Dir: Row}, &Node{Grow: 1}, s.box, &Node{Grow: 1})
 	s.body = &Node{Grow: 1, View: s.transcript}
 	s.empty = []*Node{{Grow: 1}, {View: Wordmark{}}, {Fixed: 1}, {Grow: 1}}
+	s.statusRow = &Node{View: s.status, Min: 1, Max: 3}
 	s.sidebar = &Node{Fixed: sidebarWidth, BG: a.Theme.Panel}
 	main := Box(&Node{Dir: Col, Grow: 1},
-		s.empty[0], s.empty[1], s.empty[2], s.body, s.inputRow, s.empty[3], &Node{Fixed: 1})
+		s.empty[0], s.empty[1], s.empty[2], s.body, s.inputRow, s.statusRow, s.empty[3])
 	s.root = Box(&Node{Dir: Row, BG: a.Theme.BG}, s.sidebar, main)
 	a.Focus(s.box.Kids[1])
 	s.title(a)
@@ -83,7 +88,7 @@ func (s *session) Size(a *App, w, h int) {
 	if w < narrow {
 		pad = 1
 	}
-	empty := s.msgs == 0
+	empty := s.msgs == 0 && !s.started
 	s.sidebar.Hidden = w < sidebarFrom
 	s.body.Hidden = empty
 	for _, n := range s.empty {
@@ -102,6 +107,21 @@ func (s *session) Size(a *App, w, h int) {
 	if empty {
 		s.box.Fixed, s.box.Grow = min(boxWidth, main-2*pad), 0
 	}
+	s.statusRow.Pad = [4]int{pad + 2, 0, pad, 0} // under the input's text
+	if empty {
+		s.statusRow.Pad[0] = pad
+	}
+	*s.status = *a.Status
+	if s.status.S == "" {
+		s.status.Style = a.Theme.muted()
+		switch {
+		case s.creating:
+			s.status.S = "Making the session..."
+		case s.stopping:
+			s.status.S = "Stopping..."
+		}
+	}
+	s.status.Center = empty
 }
 
 func (s *session) stepping() bool { return s.info.Status == statefile.StatusStepping }
@@ -122,7 +142,15 @@ func (s *session) Key(a *App, k term.Key) bool {
 		case a.Again(escTwice):
 			s.stop(a)
 		default:
-			a.Toast("Esc again to stop")
+			const armed = "Esc again to stop"
+			a.Say(armed)
+			time.AfterFunc(escTwice, func() {
+				a.Post(func() {
+					if a.Status.S == armed {
+						a.Status.S = ""
+					}
+				})
+			})
 		}
 	case "f1":
 		s.keys(a)
@@ -138,6 +166,8 @@ func (s *session) keys(a *App) {
 		"enter          send",
 		"shift+enter    new line (ctrl+j)",
 		"shift+arrows   select in the input",
+		"ctrl+x         cut the selection",
+		"ctrl+delete    delete the next word",
 		"home / end     start / end of the line",
 		"pgup / pgdn    scroll the transcript",
 		"ctrl+home/end  top / bottom of the transcript",
@@ -152,7 +182,8 @@ func (s *session) Tick(a *App) {
 	s.title(a)
 }
 
-// title names the tab after the session, with a spinner while it steps.
+// title names the tab after the session, with a spinner while it steps
+// where the terminal has no progress indicator of its own.
 func (s *session) title(a *App) {
 	t := "Mainplane"
 	switch {
@@ -161,7 +192,7 @@ func (s *session) title(a *App) {
 	case s.id != "":
 		t = s.id
 	}
-	if s.stepping() {
+	if s.stepping() && !a.T.Caps.Progress {
 		t = spinner[s.frame%len(spinner)] + " " + t
 	}
 	a.T.SetTitle(t)
@@ -182,7 +213,7 @@ func (s *session) follow(a *App) {
 			}
 			cancel()
 			if err != nil {
-				a.Post(func() { a.ToastError(err) })
+				a.Post(func() { a.SayError(err) })
 				time.Sleep(retryIn)
 				continue
 			}
@@ -203,16 +234,19 @@ func (s *session) add(a *App, recs []statefile.Record, info harness.Info) {
 		}
 	}
 	was := s.stepping()
+	if info.Status != s.info.Status {
+		s.stopping = false
+	}
 	s.info = info
 	if s.stepping() != was {
 		a.T.Progress(s.stepping())
-		a.Ticking(s.stepping())
+		a.Ticking(s.stepping() && !a.T.Caps.Progress)
 	}
 	s.title(a)
 }
 
 // raw is a record as the file holds it: the header line, then the body. A
-// body that is not text is its size and type, and control bytes are dots.
+// body that is not text is its size and type.
 func raw(r statefile.Record) string {
 	h, _ := json.Marshal(r.Header) // a decoded header marshals
 	body := string(r.Body)
@@ -220,66 +254,75 @@ func raw(r statefile.Record) string {
 	if !strings.HasPrefix(mt, "text/") && mt != "application/json" && r.Type != "" {
 		body = fmt.Sprintf("<%d bytes %s>", len(r.Body), r.Type)
 	}
-	return string(h) + "\n" + printable(body)
+	return string(h) + "\n" + strings.ReplaceAll(body, "\r\n", "\n")
 }
 
-func printable(s string) string {
-	s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\t", "    ")
-	return strings.Map(func(c rune) rune {
-		if unicode.IsControl(c) && c != '\n' {
-			return '.'
-		}
-		return c
-	}, s)
-}
-
-// send posts the text. From home it first makes the session, with the
-// config of the session updated last.
+// send posts the text. From home the screen turns to the session at once;
+// the session is made in the background and the text posted when it is.
 func (s *session) send(a *App, text string) {
 	if s.id != "" {
-		id := s.id
-		a.Go(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), callTime)
-			defer cancel()
-			if _, err := s.c.Post(ctx, id, via, text, nil); err != nil {
-				a.Post(func() { s.failed(a, text, err) })
-			}
-		})
+		s.post(a, text)
 		return
 	}
-	if s.creating {
-		s.input.Paste(a, text)
-		a.Toast("Making the session")
-		return
+	s.started = true
+	s.pending = append(s.pending, text)
+	if !s.creating {
+		s.create(a)
 	}
-	s.creating = true
+}
+
+// post posts the texts in order. The first that fails goes back to the
+// input with the ones after it.
+func (s *session) post(a *App, texts ...string) {
+	id := s.id
 	a.Go(func() {
-		id, err := s.create(text)
-		a.Post(func() {
-			s.creating = false
+		for i, text := range texts {
+			ctx, cancel := context.WithTimeout(context.Background(), callTime)
+			_, err := s.c.Post(ctx, id, via, text, nil)
+			cancel()
 			if err != nil {
-				s.failed(a, text, err)
-			}
-			if id == "" {
+				rest := strings.Join(texts[i:], "\n")
+				a.Post(func() { s.failed(a, rest, err) })
 				return
 			}
-			s.id = id
-			s.title(a)
-			s.follow(a)
-		})
+		}
 	})
 }
 
 // failed says why a message did not post and gives it back to the input,
 // unless something new was typed there.
 func (s *session) failed(a *App, text string, err error) {
-	a.ToastError(err)
+	a.SayError(err)
 	if len(s.input.els) == 0 {
 		s.input.Paste(a, text)
 	}
 }
 
-func (s *session) create(text string) (string, error) {
+// create makes the session with the config of the session updated last,
+// then follows it and posts what was sent meanwhile. If it fails, the screen
+// is home again with the text in the input.
+func (s *session) create(a *App) {
+	s.creating = true
+	a.Go(func() {
+		id, err := s.open()
+		a.Post(func() {
+			s.creating = false
+			texts := s.pending
+			s.pending = nil
+			if err != nil {
+				s.started = false
+				s.failed(a, strings.Join(texts, "\n"), err)
+				return
+			}
+			s.id = id
+			s.title(a)
+			s.follow(a)
+			s.post(a, texts...)
+		})
+	})
+}
+
+func (s *session) open() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), callTime)
 	defer cancel()
 	infos, err := s.c.Sessions(ctx, "", 1)
@@ -290,22 +333,22 @@ func (s *session) create(text string) (string, error) {
 		return "", errors.New("no session to take the config from: make one with mainplane new")
 	}
 	cf := infos[0].Config
-	id, err := s.c.Create(ctx, harness.Create{Model: cf.Model, ContextLimit: cf.ContextLimit, Workers: cf.Workers, Input: cf.Input, Params: cf.Params}, via)
-	if err != nil {
-		return "", err
-	}
-	_, err = s.c.Post(ctx, id, via, text, nil)
-	return id, err
+	return s.c.Create(ctx, harness.Create{Model: cf.Model, ContextLimit: cf.ContextLimit, Workers: cf.Workers, Input: cf.Input, Params: cf.Params}, via)
 }
 
+// stop asks the harness to stop. The status line says so until the status
+// changes; the stop itself is a record in the transcript.
 func (s *session) stop(a *App) {
 	id := s.id
-	a.Toast("Stopping")
+	s.stopping = true
 	a.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), callTime)
 		defer cancel()
 		if err := s.c.Stop(ctx, id, via); err != nil {
-			a.Post(func() { a.ToastError(err) })
+			a.Post(func() {
+				s.stopping = false
+				a.SayError(err)
+			})
 		}
 	})
 }

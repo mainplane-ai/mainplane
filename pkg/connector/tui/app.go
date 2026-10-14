@@ -1,13 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
 )
 
 const (
-	toastTime = 2 * time.Second
 	// dim is how far a modal layer darkens what is under it.
 	dim = 0.4
 	// tickRate is the frame rate of animation, here the tab spinner.
@@ -37,25 +38,27 @@ type App struct {
 	Theme Theme
 	W, H  int
 
-	screen     Screen
-	layers     []*Layer // over the screen, bottom first
-	focus      *Node
-	capture    *Node // gets the mouse from a press to its release
-	sel        Selector
-	toastLayer *Layer
-	r          *term.Renderer
-	post       chan func()
-	ticker     *time.Ticker
-	lastKey    string
-	prevKey    string
-	lastAt     time.Time
-	prevAt     time.Time
-	quit       bool
-	Update     string // the release to update to, when the loop ends for it
+	screen  Screen
+	layers  []*Layer // over the screen, bottom first
+	focus   *Node
+	capture *Node // gets the mouse from a press to its release
+	sel     Selector
+	r       *term.Renderer
+	post    chan func()
+	ticker  *time.Ticker
+	lastKey string
+	prevKey string
+	lastAt  time.Time
+	prevAt  time.Time
+	quit    bool
+	Update  string // the release to update to, when the loop ends for it
+	// Status is the line under the input: what the last action did, until the
+	// next key or click replaces it.
+	Status *Text
 }
 
 func NewApp(t *term.Terminal) *App {
-	a := &App{T: t, Theme: themeFor(t.Caps.Dark), r: term.NewRenderer(t), post: make(chan func(), 64)}
+	a := &App{T: t, Theme: themeFor(t.Caps.Dark), r: term.NewRenderer(t), post: make(chan func(), 64), Status: &Text{}}
 	a.W, a.H = t.Size()
 	return a
 }
@@ -180,6 +183,7 @@ func (a *App) key(k term.Key) {
 	s := k.String()
 	a.prevKey, a.lastKey = a.lastKey, s
 	a.prevAt, a.lastAt = a.lastAt, time.Now()
+	a.Status.S = ""
 	if s == "ctrl+c" {
 		if !a.Again(0) && a.sel != nil && a.sel.Selected() != "" {
 			a.Copy(a.sel.Selected())
@@ -231,6 +235,9 @@ func (a *App) top() *Layer {
 // mouse goes to the node holding the capture, else to the node under it on
 // the top layer that takes it, and up its parents until one handles it.
 func (a *App) mouse(m term.Mouse) {
+	if m.Action == term.Press && m.Button == term.Left {
+		a.Status.S = ""
+	}
 	n := a.capture
 	if n == nil {
 		n = a.hit(m.X, m.Y)
@@ -262,7 +269,7 @@ func (a *App) hit(x, y int) *Node {
 }
 
 // takesMouse is whether n or a parent has a view that handles the mouse. A
-// layer that has none, like a toast, lets clicks through.
+// layer that has none lets clicks through.
 func takesMouse(n *Node) bool {
 	for ; n != nil; n = n.parent {
 		if _, ok := n.View.(MouseHandler); ok {
@@ -275,7 +282,19 @@ func takesMouse(n *Node) bool {
 // Copy puts text on the clipboard and says so.
 func (a *App) Copy(text string) {
 	a.T.Copy(text)
-	a.Toast("Copied")
+	n, s := utf8.RuneCountInString(text), "s"
+	if n == 1 {
+		s = ""
+	}
+	a.Say(fmt.Sprintf("Copied %d character%s", n, s))
+}
+
+// Say puts msg on the status line.
+func (a *App) Say(msg string) { *a.Status = Text{S: msg, Style: a.Theme.muted()} }
+
+// SayError puts err on the status line in the error color.
+func (a *App) SayError(err error) {
+	*a.Status = Text{S: err.Error(), Style: term.Style{FG: a.Theme.Error}}
 }
 
 func (a *App) Push(l *Layer) { a.layers = append(a.layers, l) }

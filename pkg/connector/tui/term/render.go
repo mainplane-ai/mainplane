@@ -2,6 +2,7 @@ package term
 
 import (
 	"encoding/base64"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -25,26 +26,36 @@ func (r *Renderer) Render(b *Buffer) {
 	pen, penSet := Style{}, false
 	cx, cy := -1, -1
 	for y := range b.H {
+		row, front := b.Cells[y*b.W:(y+1)*b.W], r.front.Cells[y*b.W:(y+1)*b.W]
+		// A terminal may measure a grapheme beyond ASCII other than the tables
+		// do, and draw over its neighbor. So a row that has one is drawn whole
+		// when it changes, and the cursor is placed again after each.
+		whole := !slices.Equal(row, front) && slices.ContainsFunc(row, func(c Cell) bool { return len(c.G) > 1 })
 		for x := 0; x < b.W; x++ {
-			i := y*b.W + x
-			c := b.Cells[i]
-			if c.W == 0 || c == r.front.Cells[i] && (c.W != 2 || x+1 >= b.W || b.Cells[i+1] == r.front.Cells[i+1]) {
+			c := row[x]
+			if c.W == 0 || !whole && shown(row, front, x) {
 				continue
-			}
-			if cx != x || cy != y {
-				o.WriteString("\x1b[" + strconv.Itoa(y+1) + ";" + strconv.Itoa(x+1) + "H")
 			}
 			if !penSet || c.Style != pen {
 				o.WriteString(r.sgr(c.Style))
 				pen, penSet = c.Style, true
 			}
+			if cx != x || cy != y {
+				o.WriteString(cup(x, y))
+			}
+			if c.W == 2 { // blank both cells first, for a terminal that draws it 1 wide
+				o.WriteString("  " + cup(x, y))
+			}
 			o.WriteString(c.G)
 			cx, cy = x+int(c.W), y
+			if len(c.G) > 1 {
+				cx = -1
+			}
 		}
 	}
 	changed := o.Len() > 0
 	if b.Cursor {
-		o.WriteString("\x1b[" + strconv.Itoa(b.CursorY+1) + ";" + strconv.Itoa(b.CursorX+1) + "H\x1b[?25h")
+		o.WriteString(cup(b.CursorX, b.CursorY) + "\x1b[?25h")
 	} else {
 		o.WriteString("\x1b[?25l")
 	}
@@ -56,6 +67,14 @@ func (r *Renderer) Render(b *Buffer) {
 	r.t.Write("\x1b[?2026h\x1b[?25l" + o.String() + "\x1b[?2026l")
 	r.t.Flush()
 }
+
+// shown is whether the cell at x, with the right half of a wide one, is on the
+// screen already.
+func shown(row, front []Cell, x int) bool {
+	return row[x] == front[x] && (row[x].W != 2 || x+1 >= len(row) || row[x+1] == front[x+1])
+}
+
+func cup(x, y int) string { return "\x1b[" + strconv.Itoa(y+1) + ";" + strconv.Itoa(x+1) + "H" }
 
 // Invalidate makes the next frame repaint everything.
 func (r *Renderer) Invalidate() { r.front = nil }

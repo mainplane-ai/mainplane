@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
+	"github.com/rivo/uniseg"
 )
 
 // collapseLines is the size of a paste shown as one placeholder.
@@ -130,13 +131,19 @@ func (s *Input) insert(es ...elem) {
 	s.cur += len(es)
 }
 
+// textElems is t as elements. Each keeps its grapheme as typed, so the text
+// sends as typed, and is as wide as it shows.
 func textElems(t string) []elem {
 	var es []elem
-	for i, line := range strings.Split(strings.ReplaceAll(t, "\t", "    "), "\n") {
+	for i, line := range strings.Split(t, "\n") {
 		if i > 0 {
 			es = append(es, elem{g: "\n"})
 		}
-		term.Graphemes(line, func(g string, w int) { es = append(es, elem{g: g, w: w}) })
+		for state := -1; line != ""; {
+			var g string
+			g, line, _, state = uniseg.FirstGraphemeClusterInString(line, state)
+			es = append(es, elem{g: g, w: term.Width(g)})
+		}
 	}
 	return es
 }
@@ -237,6 +244,15 @@ func (s *Input) Key(a *App, k term.Key) bool {
 		if !s.deleteSelection() && s.cur < len(s.els) {
 			s.els = append(s.els[:s.cur], s.els[s.cur+1:]...)
 		}
+	case "ctrl+delete", "alt+delete":
+		if !s.deleteSelection() {
+			s.els = append(s.els[:s.cur], s.els[s.word(1):]...)
+		}
+	case "ctrl+x":
+		if t := s.Selected(); t != "" {
+			a.Copy(t)
+			s.deleteSelection()
+		}
 	case "left":
 		s.move(a, s.cur-1, sel)
 	case "right":
@@ -320,8 +336,7 @@ func (s *Input) Draw(a *App, c *Canvas, r Rect) {
 			if i >= sa && i < sb {
 				st.BG = a.Theme.Selection
 			}
-			c.Set(x, r.Y+y, g, s.width(i), st)
-			x += s.width(i)
+			x = c.Text(x, r.Y+y, g, st)
 		}
 	}
 	if a.focusView() == View(s) {
