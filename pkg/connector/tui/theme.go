@@ -15,16 +15,20 @@ type Theme struct {
 	Error     term.Color
 }
 
+// The palette is the brand's, from design/identity: Blue #0087A4, Gray
+// #65757A, Ink #172428, Paper #F8F8F5, line #DCE1DE, all near one hue, 220.
+// Dark surfaces are Ink and lighter shades of its hue; on them the blue and
+// gray are lifted to read.
 var (
 	dark = Theme{
-		BG: term.Hex("#0a0a0a"), Panel: term.Hex("#141414"), Element: term.Hex("#1e1e1e"),
-		Text: term.Hex("#eeeeee"), Muted: term.Hex("#808080"), Accent: term.Hex("#fab283"),
-		Selection: term.Hex("#264f78"), Error: term.Hex("#e06c75"),
+		BG: term.Hex("#172428"), Panel: term.Hex("#1e2f34"), Element: term.Hex("#26393f"),
+		Text: term.Hex("#f8f8f5"), Muted: term.Hex("#8b9ca1"), Accent: term.Hex("#26a9c6"),
+		Selection: term.Hex("#1c4e5c"), Error: term.Hex("#e8787a"),
 	}
 	light = Theme{
-		BG: term.Hex("#ffffff"), Panel: term.Hex("#f3f3f3"), Element: term.Hex("#e8e8e8"),
-		Text: term.Hex("#1a1a1a"), Muted: term.Hex("#8a8a8a"), Accent: term.Hex("#c4682b"),
-		Selection: term.Hex("#add6ff"), Error: term.Hex("#d1383d"),
+		BG: term.Hex("#f8f8f5"), Panel: term.Hex("#eef1f0"), Element: term.Hex("#dce1de"),
+		Text: term.Hex("#172428"), Muted: term.Hex("#65757a"), Accent: term.Hex("#0087a4"),
+		Selection: term.Hex("#c4e3ea"), Error: term.Hex("#c4363a"),
 	}
 )
 

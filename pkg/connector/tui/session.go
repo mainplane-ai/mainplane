@@ -30,6 +30,8 @@ const (
 	// callTime bounds every call but the long poll, which gets it on top.
 	callTime = 15 * time.Second
 	retryIn  = 2 * time.Second
+	// escTwice is how close the two presses of Esc Esc, stop, must be.
+	escTwice = time.Second
 )
 
 // session is one session: the transcript, the input, the status line, and a
@@ -116,7 +118,7 @@ func (s *session) Key(a *App, k term.Key) bool {
 	case "esc":
 		switch {
 		case !s.stepping():
-		case a.Again():
+		case a.Again(escTwice):
 			s.stop(a)
 		default:
 			a.Toast("Esc again to stop")

@@ -48,6 +48,8 @@ type App struct {
 	ticker     *time.Ticker
 	lastKey    string
 	prevKey    string
+	lastAt     time.Time
+	prevAt     time.Time
 	quit       bool
 	Update     string // the release to update to, when the loop ends for it
 }
@@ -177,8 +179,9 @@ func (a *App) focusView() View {
 func (a *App) key(k term.Key) {
 	s := k.String()
 	a.prevKey, a.lastKey = a.lastKey, s
+	a.prevAt, a.lastAt = a.lastAt, time.Now()
 	if s == "ctrl+c" {
-		if !a.Again() && a.sel != nil && a.sel.Selected() != "" {
+		if !a.Again(0) && a.sel != nil && a.sel.Selected() != "" {
 			a.Copy(a.sel.Selected())
 			a.sel.ClearSelection()
 			return
@@ -198,8 +201,11 @@ func (a *App) key(k term.Key) {
 	a.screen.Key(a, k)
 }
 
-// Again is whether the key being handled is the same as the one before it.
-func (a *App) Again() bool { return a.prevKey == a.lastKey }
+// Again is whether the key being handled is the same as the one before it,
+// pressed within d; 0 is any time.
+func (a *App) Again(d time.Duration) bool {
+	return a.prevKey == a.lastKey && (d == 0 || a.lastAt.Sub(a.prevAt) < d)
+}
 
 func dispatchKey(a *App, n *Node, k term.Key) bool {
 	if h, ok := n.View.(KeyHandler); ok && h.Key(a, k) {
