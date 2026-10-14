@@ -102,7 +102,7 @@ func (h *Harness) drive(ctx context.Context, id string, conf statefile.Conf, m *
 		_ = s.Kill(context.WithoutCancel(ctx), id) // the session has no environment there to keep
 	}
 	if rec.Exit != nil && *rec.Exit == 0 && cut == 0 {
-		rec.Body = relist(rec.Body, a.Interpreter, root, interp, d.Path)
+		rec.Body = relist(rec.Body, a.Interpreter, root, interp, d.Path, m.OS == "windows")
 	} else {
 		fmt.Fprintf(&b, "listed on worker %s, which serves the drive: %s %s\n", s.Name, a.Interpreter, a.Code)
 	}
@@ -144,10 +144,12 @@ func text(tool string, a args, rec statefile.Record, cut int) string {
 
 // relist turns the output of listing in interpreter from under root into
 // the output of listing in interpreter to under toRoot. pwsh -Name prints
-// paths relative to the root with backslashes, find prints whole paths. The
-// order is pwsh's on Windows, a directory's own file before its
-// subdirectories, these by name in any case. Lines that are not paths stay.
-func relist(out []byte, from, root, to, toRoot string) []byte {
+// paths relative to the root with backslashes, find prints whole paths, and
+// on Windows lines end in CRLF. find keeps the order the serving disk gave,
+// which is the mount's order too. pwsh on Windows prints a directory's own
+// file before its subdirectories, these by name in any case. Lines that are
+// not paths stay, first.
+func relist(out []byte, from, root, to, toRoot string, windows bool) []byte {
 	var rels [][]string
 	var lines []string
 	for l := range strings.Lines(string(out)) {
@@ -162,9 +164,11 @@ func relist(out []byte, from, root, to, toRoot string) []byte {
 		}
 		rels = append(rels, strings.Split(rel, "/"))
 	}
-	slices.SortFunc(rels, func(a, b []string) int {
-		return slices.CompareFunc(a[:len(a)-1], b[:len(b)-1], func(x, y string) int { return strings.Compare(strings.ToUpper(x), strings.ToUpper(y)) })
-	})
+	if to == "pwsh" {
+		slices.SortStableFunc(rels, func(a, b []string) int {
+			return slices.CompareFunc(a[:len(a)-1], b[:len(b)-1], func(x, y string) int { return strings.Compare(strings.ToUpper(x), strings.ToUpper(y)) })
+		})
+	}
 	for _, rel := range rels {
 		if to == "pwsh" {
 			lines = append(lines, strings.Join(rel, `\`))
@@ -172,10 +176,17 @@ func relist(out []byte, from, root, to, toRoot string) []byte {
 			lines = append(lines, toRoot+"/"+strings.Join(rel, "/"))
 		}
 	}
-	return []byte(strings.Join(lines, "\n"))
-}
+	eol := "\n"
+	if windows {
+		eol = "\r\n"
+	}
+	var b strings.Builder
+	for _, l := range lines {
+		b.WriteString(l + eol)
+	}
+	return []byte(b.String())
+} // listing prints every AGENTS.md under root to agentsDepth, in the
 
-// listing prints every AGENTS.md under root to agentsDepth, in the
 // interpreter's own language so the model can rerun or deepen it. Root is
 // quoted for that language, so an apostrophe in a path stays in the path.
 func listing(interp, root string) string {
