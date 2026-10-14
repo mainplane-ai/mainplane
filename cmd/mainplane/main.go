@@ -111,8 +111,9 @@ func logIn(token string) {
 	if !version.Match(v) {
 		update(v)
 	}
-} // app opens the TUI, on login when there is none, and on session id when it
+}
 
+// app opens the TUI, on login when there is none, and on session id when it
 // is given. When this binary is not the harness's release it becomes it
 // first, in the plain terminal where sudo or UAC can ask, then runs again.
 func app(id string) {
