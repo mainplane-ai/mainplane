@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -92,6 +93,7 @@ type Create struct {
 	Workers      []statefile.Worker         `json:"workers,omitempty"`
 	Input        []string                   `json:"input,omitempty"`
 	Params       map[string]json.RawMessage `json:"params,omitempty"`
+	Name         string                     `json:"name,omitempty"`
 }
 
 func system(source, body string) statefile.Record {
@@ -102,11 +104,11 @@ func system(source, body string) statefile.Record {
 // system prompt, the AGENTS.md scan, and the worker list, so all three reach
 // the provider as system text ahead of the first message. A copy is byte for byte and gets
 // nothing appended: it already holds both.
-func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
+func (h *Harness) Create(ctx context.Context, c Create, via string) (string, error) {
 	id := statefile.NewID()
 	if c.From != "" {
-		if c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Input != nil || c.Params != nil {
-			return "", fmt.Errorf("a copy takes no config")
+		if c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Input != nil || c.Params != nil || c.Name != "" {
+			return "", fmt.Errorf("a copy takes no config and no name")
 		}
 		if err := h.cut(c.From, c.N); err != nil {
 			return "", err
@@ -123,6 +125,12 @@ func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
 	}
 	if c.ContextLimit <= 0 {
 		return "", fmt.Errorf("context_limit must be set")
+	}
+	if err := checkName(c.Name); err != nil {
+		return "", err
+	}
+	if c.Name != "" && via == "" {
+		return "", errors.New("a name needs ?via= naming who is acting")
 	}
 	for _, t := range c.Input {
 		if !p.Envelope.Accepts(t) {
@@ -154,6 +162,11 @@ func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
 	}
 	if err := f.Append(system("workers", workersFirst+h.workers(conf.Workers))); err != nil {
 		return "", err
+	}
+	if c.Name != "" {
+		if err := f.Append(name(via, c.Name)); err != nil {
+			return "", err
+		}
 	}
 	h.touch(id)
 	return id, f.Close()

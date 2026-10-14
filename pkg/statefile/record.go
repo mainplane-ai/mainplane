@@ -28,6 +28,7 @@ const (
 	Step     Kind = "step"
 	Result   Kind = "result"
 	Error    Kind = "error"
+	Name     Kind = "name" // the session's name, newest wins; empty removes it. Never in the context
 )
 
 // Usage counts tokens. Input excludes cache reads and writes on every

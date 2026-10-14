@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
@@ -169,6 +172,43 @@ func (h *Harness) SetWorkers(id, via string, workers []statefile.Worker) (int, e
 		defer func() { _ = f.Close() }()
 	}
 	return h.write(s, f, statefile.Record{Header: statefile.Header{Kind: statefile.Config, Type: "application/json", Via: via}, Body: body})
+}
+
+// MaxName bounds a session's name: a title a list shows on one line.
+const MaxName = 100
+
+func checkName(n string) error {
+	if len(n) > MaxName || !utf8.ValidString(n) || strings.ContainsFunc(n, newline) {
+		return fmt.Errorf("a name is one line of at most %d bytes of UTF-8", MaxName)
+	}
+	return nil
+}
+
+// newline is any rune that breaks or controls a line, U+2028 and U+2029 too.
+func newline(r rune) bool { return unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp) }
+
+func name(via, n string) statefile.Record {
+	return statefile.Record{Header: statefile.Header{Kind: statefile.Name, Type: "text/plain", Via: via}, Body: []byte(n)}
+}
+
+// SetName appends a name record under the lock a post takes. An empty name
+// removes the session's name. The model never sees it and status is unchanged.
+func (h *Harness) SetName(id, via, n string) (int, error) {
+	if err := checkName(n); err != nil {
+		return 0, err
+	}
+	s := h.session(id)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f := s.f
+	if f == nil {
+		var err error
+		if f, err = h.Sessions.Open(id); err != nil {
+			return 0, err
+		}
+		defer func() { _ = f.Close() }()
+	}
+	return h.write(s, f, name(via, n))
 }
 
 // Kick steps a session in the background until it is not open. A kick during

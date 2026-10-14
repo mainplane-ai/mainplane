@@ -372,7 +372,7 @@ func Turns(rest []statefile.Record) []Turn {
 			}
 		case statefile.Result, statefile.Message, statefile.System, statefile.Error:
 			push(false, r)
-		case statefile.Start, statefile.Config:
+		case statefile.Start, statefile.Config, statefile.Name:
 		}
 	}
 	return turns

@@ -42,7 +42,7 @@ const resultLines = 20
 // number.
 var arity = map[string][2]int{
 	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {0, 1}, "retry": {1, 1}, "stop": {1, 1},
-	"info": {1, 1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "worker remove": {1, 1}, "providers": {0, 0}, "key": {2, 2},
+	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "worker remove": {1, 1}, "providers": {0, 0}, "key": {2, 2},
 }
 
 // cli is the harness API as verbs: one verb, one route, its reply printed.
@@ -65,7 +65,7 @@ func cli(verb string, args []string) {
 	switch verb {
 	case "new":
 		var out struct{ ID string }
-		c.call("POST", "/sessions", "application/json", os.Stdin, &out)
+		c.call("POST", "/sessions?via="+via, "application/json", os.Stdin, &out)
 		fmt.Println(out.ID)
 	case "message":
 		fmt.Println(c.post(args[0], args[1], args[2:]))
@@ -94,8 +94,12 @@ func cli(verb string, args []string) {
 		var infos []harness.Info
 		c.call("GET", "/sessions?status="+strings.Join(args, ""), "", nil, &infos)
 		for _, i := range infos {
-			fmt.Printf("%s  %-11s  %-40s  n=%-5d context=%d/%d  %s\n", i.ID, i.Status, i.Config.Model, i.N, i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime))
+			fmt.Printf("%s  %-11s  %-40s  n=%-5d context=%d/%d  %s  %s\n", i.ID, i.Status, i.Config.Model, i.N, i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime), i.Name)
 		}
+	case "name":
+		var out struct{ N int }
+		c.call("PUT", "/sessions/"+args[0]+"/name?via="+via, "text/plain", strings.NewReader(strings.Join(args[1:], " ")), &out)
+		fmt.Println(out.N)
 	case "workers set":
 		ws := make([]statefile.Worker, 0, len(args)-1)
 		for _, name := range args[1:] {
@@ -367,6 +371,7 @@ func render(r statefile.Record) {
 	head := fmt.Sprintf("%5d  %-8s", r.N, r.Kind)
 	n := len(r.Body)
 	r.Body = []byte(printable(string(r.Body)))
+	r.Via = printable(r.Via)
 	switch r.Kind {
 	case statefile.Start:
 		fmt.Printf("%s  %s\n", head, r.Time.Local().Format(time.DateTime))
@@ -377,6 +382,8 @@ func render(r statefile.Record) {
 		fmt.Printf("%s  %s\n", head, r.Body)
 	case statefile.System:
 		fmt.Printf("%s  %s | %s\n", head, r.Source, skim(r.Body))
+	case statefile.Name:
+		fmt.Printf("%s  via=%s  %s\n", head, r.Via, r.Body)
 	case statefile.Message:
 		if strings.HasPrefix(r.Type, "text/") {
 			fmt.Printf("%s  via=%s\n%s\n", head, r.Via, r.Body)
