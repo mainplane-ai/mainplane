@@ -63,6 +63,7 @@ type Terminal struct {
 	closed  bool
 	entered bool // the enter sequence went out, so leave must
 	stop    chan struct{}
+	sig     chan os.Signal
 
 	replies chan Event // replies to the startup queries, in order
 }
@@ -76,13 +77,16 @@ func Open() (*Terminal, error) {
 		return nil, errors.New("not a terminal")
 	}
 	t := &Terminal{Events: make(chan Event, 256), in: in, out: out, w: bufio.NewWriterSize(out, 64<<10), stop: make(chan struct{}), replies: make(chan Event, 8)}
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	t.sig = make(chan os.Signal, 1)
+	signal.Notify(t.sig, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
-		s := <-sig
-		t.Close()
-		fmt.Fprintln(os.Stderr, s)
-		os.Exit(1)
+		select {
+		case s := <-t.sig:
+			t.Close()
+			fmt.Fprintln(os.Stderr, s)
+			os.Exit(1)
+		case <-t.stop:
+		}
 	}()
 	if err := t.modes(); err != nil {
 		t.Close()
@@ -176,6 +180,7 @@ func (t *Terminal) Close() {
 	}
 	t.closed = true
 	close(t.stop)
+	signal.Stop(t.sig)
 	if t.entered {
 		if t.Caps.Kitty {
 			_, _ = t.w.WriteString(kittyPop)
@@ -221,6 +226,11 @@ func (t *Terminal) read() {
 			d.timeout(t.emit)
 			continue
 		}
+		select {
+		case <-t.stop: // the input is for whoever reads after the TUI
+			return
+		default:
+		}
 		n, err := t.in.Read(buf)
 		if err != nil {
 			return
@@ -237,7 +247,15 @@ func (t *Terminal) emit(e Event) {
 		default:
 		}
 	default:
-		t.Events <- e
+		t.send(e)
+	}
+}
+
+// send hands an event to the app, unless the terminal closed.
+func (t *Terminal) send(e Event) {
+	select {
+	case t.Events <- e:
+	case <-t.stop:
 	}
 }
 

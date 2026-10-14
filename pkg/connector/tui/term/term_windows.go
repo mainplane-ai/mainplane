@@ -109,7 +109,7 @@ func (t *Terminal) resizes() {
 		case <-tick.C:
 			if nw, nh := t.Size(); nw != w || nh != h {
 				w, h = nw, nh
-				t.Events <- Resize{W: w, H: h}
+				t.send(Resize{W: w, H: h})
 			}
 		case <-t.stop:
 			return

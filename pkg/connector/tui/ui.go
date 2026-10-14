@@ -175,16 +175,20 @@ func (n *Node) Layout(r Rect) {
 }
 
 // measure is the height n needs at width w: its view's and its children's,
-// stacked in a column or side by side in a row, where a child that is not
-// Fixed gets the width the Fixed ones leave.
+// stacked in a column or side by side in a row, where a Grow child gets its
+// share of the width the Fixed ones leave, as Layout gives it.
 func (n *Node) measure(w int) int {
-	in, h, fixed := w-n.Pad[0]-n.Pad[2], 0, 0
+	in, h, fixed, grow := w-n.Pad[0]-n.Pad[2], 0, 0, 0
 	if m, ok := n.View.(Measurer); ok {
 		h = m.Height(in)
 	}
 	for _, k := range n.Kids {
-		if !k.Hidden && n.Dir == Row && k.Fixed > 0 {
+		switch {
+		case k.Hidden || n.Dir != Row:
+		case k.Fixed > 0:
 			fixed += k.clamp(k.Fixed)
+		default:
+			grow += k.Grow
 		}
 	}
 	for _, k := range n.Kids {
@@ -196,8 +200,8 @@ func (n *Node) measure(w int) int {
 			h += k.clamp(k.measure(in))
 		case k.Fixed > 0:
 			h = max(h, k.measure(k.clamp(k.Fixed)))
-		default:
-			h = max(h, k.measure(in-fixed))
+		case k.Grow > 0:
+			h = max(h, k.measure(k.clamp(max(0, in-fixed)*k.Grow/grow)))
 		}
 	}
 	return h + n.Pad[1] + n.Pad[3]

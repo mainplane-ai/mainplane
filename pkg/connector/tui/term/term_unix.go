@@ -37,7 +37,7 @@ func (t *Terminal) resizes() {
 		select {
 		case <-c:
 			w, h := t.Size()
-			t.Events <- Resize{W: w, H: h}
+			t.send(Resize{W: w, H: h})
 		case <-t.stop:
 			return
 		}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"strings"
 	"time"
 	"unicode"
@@ -215,7 +216,8 @@ func (s *session) add(a *App, recs []statefile.Record, info harness.Info) {
 func raw(r statefile.Record) string {
 	h, _ := json.Marshal(r.Header) // a decoded header marshals
 	body := string(r.Body)
-	if !strings.HasPrefix(r.Type, "text/") && r.Type != "application/json" && r.Type != "" {
+	mt, _, _ := mime.ParseMediaType(r.Type)
+	if !strings.HasPrefix(mt, "text/") && mt != "application/json" && r.Type != "" {
 		body = fmt.Sprintf("<%d bytes %s>", len(r.Body), r.Type)
 	}
 	return string(h) + "\n" + printable(body)
@@ -246,6 +248,8 @@ func (s *session) send(a *App, text string) {
 		return
 	}
 	if s.creating {
+		s.input.Paste(a, text)
+		a.Toast("Making the session")
 		return
 	}
 	s.creating = true
