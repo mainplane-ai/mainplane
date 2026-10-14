@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"slices"
 	"strings"
 	"sync"
@@ -22,6 +23,10 @@ const agentsDepth = 3
 // local listing takes milliseconds; a scan still going after this is stuck on
 // a worker or a drive, and the record says which.
 const agentsTimeout = 30 * time.Second
+
+// killTimeout bounds ending a scan's environments: the worker answers a kill
+// at once, and one that does not must not hold Create.
+const killTimeout = 5 * time.Second
 
 // agents is the body of the agents system record, written once at the start
 // of every file: for every drive, as the first worker that has it mounted
@@ -57,6 +62,12 @@ func (h *Harness) agents(ctx context.Context, id string, conf statefile.Conf) st
 		})
 	}
 	wg.Wait()
+	for name := range seen { // the session has no environment to keep on a server outside it
+		s, _, ok := h.server(name)
+		if ok && !slices.ContainsFunc(conf.Workers, func(w statefile.Worker) bool { return w.Name == s.Name }) {
+			kill(ctx, s, id)
+		}
+	}
 	return "The following read and run calls were made automatically\n" + strings.Join(out, "")
 }
 
@@ -98,9 +109,6 @@ func (h *Harness) drive(ctx context.Context, id string, conf statefile.Conf, m *
 	}
 	a := args{Interpreter: s.Interps[0], Code: listing(s.Interps[0], root)}
 	rec, cut = call(ctx, s, id, "run", a)
-	if !slices.ContainsFunc(conf.Workers, func(w statefile.Worker) bool { return w.Name == s.Name }) {
-		_ = s.Kill(context.WithoutCancel(ctx), id) // the session has no environment there to keep
-	}
 	if rec.Exit != nil && *rec.Exit == 0 && cut == 0 {
 		rec.Body = relist(rec.Body, a.Interpreter, root, interp, d.Path, m.OS == "windows")
 	} else {
@@ -115,7 +123,7 @@ func (h *Harness) drive(ctx context.Context, id string, conf statefile.Conf, m *
 func (h *Harness) server(name string) (*Remote, string, bool) {
 	for _, l := range h.Workers.List() {
 		for _, d := range l.Drives {
-			if d.Name == name && d.Serve {
+			if d.Name == name && d.Serve && d.State == worker.Serving {
 				r, ok := h.Workers.Get(l.Name)
 				return r, d.Path, ok
 			}
@@ -132,10 +140,20 @@ func call(ctx context.Context, r *Remote, id, tool string, a args) (statefile.Re
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		rec.Exit, rec.Body = nil, fmt.Appendf(nil, "error: timed out after %s on worker %s, this scan is incomplete", agentsTimeout, r.Name)
 		if tool == "run" {
-			_ = r.Kill(context.WithoutCancel(ctx), id)
+			kill(ctx, r, id)
 		}
 	}
 	return rec, cut
+}
+
+// kill ends the session's environments on r, under killTimeout even when ctx
+// is done.
+func kill(ctx context.Context, r *Remote, id string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), killTimeout)
+	defer cancel()
+	if err := r.Kill(ctx, id); err != nil {
+		log.Printf("session %s: kill on %s: %v", id, r.Name, err)
+	}
 }
 
 func text(tool string, a args, rec statefile.Record, cut int) string {
