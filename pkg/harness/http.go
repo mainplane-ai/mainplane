@@ -27,7 +27,7 @@ const MaxPost = 8 << 20
 // state file's own bytes, one after another.
 //
 //	GET  /sessions                    ?status= ?limit= ?after=<id>                 -> [Info], newest updated first
-//	POST /sessions                    Create body                                  -> {"id"}
+//	POST /sessions                    Create body; ?via= required with a name      -> {"id"}
 //	GET  /sessions/{id}               -> Info
 //	GET  /sessions/{id}/records       ?after=N  ?wait=30s to long poll             -> records
 //	POST /sessions/{id}/records       one body, or multipart; ?via= required,      -> {"n"}
@@ -100,7 +100,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 			fail(w, err)
 			return
 		}
-		id, err := h.Create(ctx, c)
+		id, err := h.Create(ctx, c, r.URL.Query().Get("via"))
 		if err != nil {
 			fail(w, err)
 			return
@@ -156,24 +156,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	handle("PUT /sessions/{id}/workers", h.serveWorkers)
-	handle("PUT /sessions/{id}/name", func(w http.ResponseWriter, r *http.Request) {
-		via, err := via(r)
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxName+1))
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		n, err := h.SetName(r.PathValue("id"), via, string(b))
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		reply(w, map[string]int{"n": n})
-	})
+	handle("PUT /sessions/{id}/name", h.serveName)
 	return mux
 }
 
@@ -205,6 +188,26 @@ func (h *Harness) serveWorkers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	n, err := h.SetWorkers(r.PathValue("id"), via, workers)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	reply(w, map[string]int{"n": n})
+}
+
+// serveName makes the text body the session's name.
+func (h *Harness) serveName(w http.ResponseWriter, r *http.Request) {
+	via, err := via(r)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxName+1))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	n, err := h.SetName(r.PathValue("id"), via, string(b))
 	if err != nil {
 		fail(w, err)
 		return

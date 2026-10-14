@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -103,7 +104,7 @@ func system(source, body string) statefile.Record {
 // system prompt, the AGENTS.md scan, and the worker list, so all three reach
 // the provider as system text ahead of the first message. A copy is byte for byte and gets
 // nothing appended: it already holds both.
-func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
+func (h *Harness) Create(ctx context.Context, c Create, via string) (string, error) {
 	id := statefile.NewID()
 	if c.From != "" {
 		if c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Input != nil || c.Params != nil || c.Name != "" {
@@ -127,6 +128,9 @@ func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
 	}
 	if err := checkName(c.Name); err != nil {
 		return "", err
+	}
+	if c.Name != "" && via == "" {
+		return "", errors.New("a name needs ?via= naming who is acting")
 	}
 	for _, t := range c.Input {
 		if !p.Envelope.Accepts(t) {
@@ -160,7 +164,7 @@ func (h *Harness) Create(ctx context.Context, c Create) (string, error) {
 		return "", err
 	}
 	if c.Name != "" {
-		if err := f.Append(name("", c.Name)); err != nil {
+		if err := f.Append(name(via, c.Name)); err != nil {
 			return "", err
 		}
 	}

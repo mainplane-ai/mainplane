@@ -178,11 +178,14 @@ func (h *Harness) SetWorkers(id, via string, workers []statefile.Worker) (int, e
 const MaxName = 100
 
 func checkName(n string) error {
-	if len(n) > MaxName || !utf8.ValidString(n) || strings.ContainsFunc(n, unicode.IsControl) {
+	if len(n) > MaxName || !utf8.ValidString(n) || strings.ContainsFunc(n, newline) {
 		return fmt.Errorf("a name is one line of at most %d bytes of UTF-8", MaxName)
 	}
 	return nil
 }
+
+// newline is any rune that breaks or controls a line, U+2028 and U+2029 too.
+func newline(r rune) bool { return unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp) }
 
 func name(via, n string) statefile.Record {
 	return statefile.Record{Header: statefile.Header{Kind: statefile.Name, Type: "text/plain", Via: via}, Body: []byte(n)}

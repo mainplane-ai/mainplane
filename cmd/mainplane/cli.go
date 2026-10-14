@@ -65,7 +65,7 @@ func cli(verb string, args []string) {
 	switch verb {
 	case "new":
 		var out struct{ ID string }
-		c.call("POST", "/sessions", "application/json", os.Stdin, &out)
+		c.call("POST", "/sessions?via="+via, "application/json", os.Stdin, &out)
 		fmt.Println(out.ID)
 	case "message":
 		fmt.Println(c.post(args[0], args[1], args[2:]))
@@ -371,6 +371,7 @@ func render(r statefile.Record) {
 	head := fmt.Sprintf("%5d  %-8s", r.N, r.Kind)
 	n := len(r.Body)
 	r.Body = []byte(printable(string(r.Body)))
+	r.Via = printable(r.Via)
 	switch r.Kind {
 	case statefile.Start:
 		fmt.Printf("%s  %s\n", head, r.Time.Local().Format(time.DateTime))
