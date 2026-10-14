@@ -1,5 +1,6 @@
 // mainplane is the device binary: the worker, and the plainest connector.
 //
+//	mainplane                         the TUI; mainplane <session id> opens on that session
 //	mainplane worker  [<network> <device code>]   make this machine a worker, named by its hostname
 //	mainplane install <network> <device code>     and again at every boot, as a service; asks for sudo or UAC, code still runs as you
 //	mainplane login   <api key>       find the harness, remember it and the key in ~/.mainplane/login.json, and become its release
@@ -11,29 +12,33 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
+	"github.com/mainplane-ai/mainplane/pkg/connector"
+	"github.com/mainplane-ai/mainplane/pkg/connector/tui"
 	"github.com/mainplane-ai/mainplane/pkg/elevate"
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
 	"github.com/mainplane-ai/mainplane/pkg/release"
+	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		usage()
+	if len(os.Args) == 1 || len(os.Args) == 2 && statefile.ValidID(os.Args[1]) {
+		app(strings.Join(os.Args[1:], ""))
+		return
 	}
 	if len(os.Args) > 2 && os.Args[1] == "worker" && os.Args[2] == "remove" {
 		cli("worker remove", os.Args[3:])
@@ -86,28 +91,12 @@ func main() {
 // remembers both, saying whether this CLI was logged in to it or to another
 // harness before. Then the CLI becomes the harness's release.
 func logIn(token string) {
-	harness, key, err := auth.Parse(auth.Key, token)
+	c, was, v, err := connector.Login(context.Background(), token)
 	if err != nil {
-		log.Fatal(err)
-	}
-	url, err := pointer.Find(context.Background(), harness, "")
-	if err != nil {
-		log.Fatal(err)
-	}
-	c := client{URL: url, Key: key, Harness: harness}
-	v, err := c.harness()
-	if err != nil {
-		log.Fatal(err)
-	}
-	var was client // a login file that does not read is written anew
-	if b, err := os.ReadFile(loginPath()); err == nil {
-		_ = json.Unmarshal(b, &was)
-	}
-	if err := c.save(); err != nil {
 		log.Fatal(err)
 	}
 	switch was.Harness {
-	case harness:
+	case c.Harness:
 		fmt.Println("already logged in to this mainplane-server")
 	case "":
 		fmt.Println("logged in")
@@ -117,6 +106,62 @@ func logIn(token string) {
 	if !version.Match(v) {
 		update(v)
 	}
+} // app opens the TUI, on login when there is none, and on session id when it
+
+// is given. When this binary is not the harness's release it becomes it
+// first, in the plain terminal where sudo or UAC can ask, then runs again.
+func app(id string) {
+	ctx := context.Background()
+	var cp *connector.Client
+	c, err := connector.Load(ctx)
+	switch {
+	case err == nil:
+		v, err := c.Version(ctx)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if !version.Match(v) {
+			rerun(v)
+		}
+		cp = &c
+	case errors.Is(err, fs.ErrNotExist) && id == "":
+	case errors.Is(err, fs.ErrNotExist):
+		log.Fatal("not logged in: mainplane login <api key>")
+	default:
+		log.Fatal(err)
+	}
+	v, err := tui.Run(cp, id)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if v != "" {
+		rerun(v)
+	}
+}
+
+// rerun updates this binary to release v through elevated-update, which asks
+// for root itself when it needs it, then runs the new binary with the same
+// arguments and exits with its code.
+func rerun(v string) {
+	fmt.Printf("Updating to match your Mainplane (%s)\n", v)
+	exe, err := os.Executable()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := attached(exe, "elevated-update", v).Run(); err != nil {
+		log.Fatalf("update to %s failed: %v", v, err)
+	}
+	cmd := attached(exe, os.Args[1:]...)
+	if err := cmd.Run(); err != nil && cmd.ProcessState == nil {
+		log.Fatal(err)
+	}
+	os.Exit(cmd.ProcessState.ExitCode())
+}
+
+func attached(exe string, args ...string) *exec.Cmd {
+	cmd := exec.Command(exe, args...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd
 }
 
 // work installs the worker, or is the worker: with a network name and device
@@ -248,16 +293,16 @@ func status(args []string) {
 	}
 	c, err := login()
 	v := ""
-	if err == nil && c.mesh != "" { // calls go over the mesh; the URL shown must still be current
-		err = c.find()
+	if err == nil && c.Mesh != "" { // calls go over the mesh; the URL shown must still be current
+		err = c.Find(context.Background())
 	}
 	if err == nil {
-		v, err = c.harness()
+		v, err = c.Version(context.Background())
 	}
 	if err == nil {
 		fmt.Printf("mainplane-server version: %s\nmainplane-server url: %s\n", v, c.URL)
-		if c.mesh != "" {
-			fmt.Printf("mainplane-server on the mesh: %s\n", c.mesh)
+		if c.Mesh != "" {
+			fmt.Printf("mainplane-server on the mesh: %s\n", c.Mesh)
 		}
 		fmt.Println()
 	} else if !errors.Is(err, fs.ErrNotExist) {
@@ -282,11 +327,10 @@ func home() string {
 	return h
 }
 
-func loginPath() string { return filepath.Join(home(), ".mainplane", "login.json") }
-
 func usage() {
-	fmt.Fprint(os.Stderr, `usage: mainplane <verb> ...
+	fmt.Fprint(os.Stderr, `usage: mainplane [<session id> | <verb> ...]
 
+                                     no verb opens the TUI: login, then the session given or a new one
   worker     [<network> <code>]      make this machine a worker, named by its hostname, with the network name and
                                      device code mainplane-server join prints; none is the installed worker's
   install    <network> <code>        and again at every boot, as a service; asks for sudo or UAC, code still runs as you

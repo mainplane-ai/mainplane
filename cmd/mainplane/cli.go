@@ -3,33 +3,24 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
-	"mime"
-	"mime/multipart"
-	"net"
-	"net/http"
-	"net/textproto"
 	"net/url"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
+	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
-	"github.com/mainplane-ai/mainplane/pkg/mesh"
-	"github.com/mainplane-ai/mainplane/pkg/pointer"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/version"
-	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 // via is what this connector writes on every record it causes.
@@ -134,94 +125,20 @@ func cli(verb string, args []string) {
 	}
 }
 
-// client is what login wrote: the harness's key, the URL it was last found
-// at, and the api key's secret. On a worker of that harness, calls go to its
-// node on the mesh, at mesh.
-type client struct {
-	URL     string `json:"url"`
-	Key     string `json:"key"`
-	Harness string `json:"harness"`
-	mesh    string
-}
+// client is the harness API with every failure the harness's own words on
+// stderr and exit 1.
+type client struct{ connector.Client }
 
-// login is what login wrote, with the harness on the mesh when the worker on
-// this machine follows the same harness key, else proved at its URL, or found
-// again through the pointer and saved.
 func login() (client, error) {
-	var c client
-	b, err := os.ReadFile(loginPath())
-	if err != nil {
-		return c, err
-	}
-	if err := json.Unmarshal(b, &c); err != nil {
-		return c, err
-	}
-	if k, a, err := mesh.Harness(worker.Harness); err == nil && k == c.Harness {
-		c.mesh = "http://" + net.JoinHostPort(a.String(), strconv.Itoa(worker.APIPort))
-		return c, nil
-	}
-	return c, c.find()
+	c, err := connector.Load(context.Background())
+	return client{c}, err
 }
 
-// find proves the harness at its URL, or finds it again through the pointer
-// and saves it.
-func (c *client) find() error {
-	url, err := pointer.Find(context.Background(), c.Harness, c.URL)
-	if err != nil || url == c.URL {
-		return err
-	}
-	c.URL = url
-	return c.save()
-}
-
-func (c client) save() error {
-	b, err := json.Marshal(c)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(loginPath()), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(loginPath(), b, 0o600)
-}
-
-// call does one request. A status outside 2xx is the harness's own words on
-// stderr and exit 1. A JSON reply lands in out when out is given.
-func (c client) call(method, path, ctype string, body io.Reader, out any) *http.Response {
-	resp, err := c.do(method, path, ctype, body)
-	if err != nil {
+// call does one request. A JSON reply lands in out when out is given.
+func (c client) call(method, path, ctype string, body io.Reader, out any) {
+	if err := c.Call(context.Background(), method, path, ctype, body, out); err != nil {
 		die(err)
 	}
-	if out != nil {
-		defer func() { _ = resp.Body.Close() }()
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-			die(err)
-		}
-	}
-	return resp
-}
-
-// do does one request; a status outside 2xx is an error in the harness's own
-// words.
-func (c client) do(method, path, ctype string, body io.Reader) (*http.Response, error) {
-	req, err := http.NewRequest(method, cmp.Or(c.mesh, c.URL)+path, body)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.Key)
-	if ctype != "" {
-		req.Header.Set("Content-Type", ctype)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode/100 != 2 {
-		b, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		return nil, fmt.Errorf("%s %s: %d %s", method, path, resp.StatusCode, strings.TrimSpace(string(b)))
-	}
-	return resp, nil
 }
 
 // raw prints a JSON reply as the harness sent it, indented.
@@ -237,7 +154,7 @@ func (c client) raw(path string) {
 
 // version refuses a harness from another release, and returns the one it runs.
 func (c client) version() string {
-	v, err := c.harness()
+	v, err := c.Version(context.Background())
 	if err != nil {
 		die(err)
 	}
@@ -247,73 +164,24 @@ func (c client) version() string {
 	return v
 }
 
-// harness is the release the harness runs.
-func (c client) harness() (string, error) {
-	resp, err := c.do("GET", "/", "", nil)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	var out struct{ Version string }
-	err = json.NewDecoder(resp.Body).Decode(&out)
-	return out.Version, err
-}
-
-// post appends text and files as one turn: a single text/plain body, or one
-// multipart part per piece, each typed by its extension. A file with no type
-// is refused, not guessed. Returns the last record's n.
+// post appends text and files as one turn. Returns the last record's n.
 func (c client) post(id, text string, files []string) int {
-	var out struct{ N int }
-	if len(files) == 0 {
-		c.call("POST", "/sessions/"+id+"/records?via="+via, "text/plain", strings.NewReader(text), &out)
-		return out.N
-	}
-	var b bytes.Buffer
-	mw := multipart.NewWriter(&b)
-	w, err := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"text/plain"}})
+	n, err := c.Post(context.Background(), id, via, text, files)
 	if err != nil {
 		die(err)
 	}
-	_, _ = w.Write([]byte(text))
-	for _, f := range files {
-		t := mime.TypeByExtension(filepath.Ext(f))
-		if t == "" {
-			die(fmt.Errorf("%s: no content type for %q", f, filepath.Ext(f)))
-		}
-		data, err := os.ReadFile(f)
-		if err != nil {
-			die(err)
-		}
-		w, err := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {t}})
-		if err != nil {
-			die(err)
-		}
-		_, _ = w.Write(data)
-	}
-	_ = mw.Close()
-	c.call("POST", "/sessions/"+id+"/records?via="+via, mw.FormDataContentType(), &b, &out)
-	return out.N
+	return n
 }
 
 // records is the file after record n; with wait, a long poll.
 func (c client) records(id string, after int, wait string) []statefile.Record {
-	resp := c.call("GET", "/sessions/"+id+"/records?after="+strconv.Itoa(after)+"&wait="+wait, "", nil, nil)
-	defer func() { _ = resp.Body.Close() }()
-	br := bufio.NewReader(resp.Body)
-	var recs []statefile.Record
-	for {
-		r, err := statefile.Decode(br)
-		if errors.Is(err, io.EOF) {
-			return recs
-		}
-		if err != nil {
-			die(err)
-		}
-		recs = append(recs, r)
+	recs, err := c.Records(context.Background(), id, after, wait)
+	if err != nil {
+		die(err)
 	}
-}
+	return recs
+} // chat is two loops and nothing between them. One long polls the records and
 
-// chat is two loops and nothing between them. One long polls the records and
 // renders each as it lands, printing a prompt when the file says the session
 // is closed or failed. The other posts every stdin line as a message. Your
 // own line comes back as a message record: that is the receipt, and it shows
