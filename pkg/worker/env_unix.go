@@ -29,16 +29,6 @@ func prepare(cmd *exec.Cmd, op *user.User) error {
 	}
 	cmd.Dir = op.HomeDir
 	cmd.Env = []string{"HOME=" + op.HomeDir, "USER=" + op.Username, "LOGNAME=" + op.Username, "PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}
-	// A root service's children are outside the operator's login session, so
-	// on macOS nothing on screen answers them: screencapture, open, and
-	// osascript fail. launchctl asuser joins the session as root, chroot to /
-	// drops to the operator, and env returns to their home, which chroot left.
-	// All three exec, so cmd's pid is the interpreter.
-	if runtime.GOOS == "darwin" {
-		cmd.Args = append([]string{"launchctl", "asuser", op.Uid, "/usr/sbin/chroot", "-u", op.Uid, "-g", op.Gid, "/", "/usr/bin/env", "-C", op.HomeDir, cmd.Path}, cmd.Args[1:]...)
-		cmd.Path = "/bin/launchctl"
-		return nil
-	}
 	ids, err := op.GroupIds()
 	if err != nil {
 		return err
@@ -51,6 +41,16 @@ func prepare(cmd *exec.Cmd, op *user.User) error {
 			return fmt.Errorf("operator %s: %w", op.Username, err)
 		}
 		nums[i] = uint32(n)
+	}
+	// A root service's children are outside the operator's login session, so
+	// on macOS nothing on screen answers them: screencapture, open, and
+	// osascript fail. launchctl asuser joins the session as root, chroot to /
+	// drops to the operator with all their groups, and env returns to their
+	// home, which chroot left. All three exec, so cmd's pid is the interpreter.
+	if runtime.GOOS == "darwin" {
+		cmd.Args = append([]string{"launchctl", "asuser", op.Uid, "/usr/sbin/chroot", "-u", op.Uid, "-g", op.Gid, "/", "/usr/bin/env", "-C", op.HomeDir, cmd.Path}, cmd.Args[1:]...)
+		cmd.Path = "/bin/launchctl"
+		return nil
 	}
 	cmd.SysProcAttr.Credential = &syscall.Credential{Uid: nums[0], Gid: nums[1], Groups: nums[2:]}
 	return nil
