@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path"
 	"slices"
 	"strings"
 	"sync"
@@ -29,11 +30,14 @@ const agentsTimeout = 30 * time.Second
 const killTimeout = 5 * time.Second
 
 // agents is the body of the agents system record, written once at the start
-// of every file: for every drive, as the first worker that has it mounted
-// sees it, and for every worker's scratch, the root AGENTS.md read and the
-// ones below it listed. It runs the model's own tools and shows the calls
-// verbatim, so the model knows what ran and how to run more. The scans run
-// at once, each under agentsTimeout, and print in a fixed order.
+// of every file: for every drive a session worker mounts, and for every
+// worker's scratch, the root AGENTS.md read and the ones below it listed. A
+// drive is scanned on the worker serving it, where a listing takes
+// milliseconds and not the seconds it takes over the mesh, and its paths
+// start at the drive's name; the workers record says where each worker
+// mounts it. The calls show verbatim with the worker they ran on, so the
+// model knows what ran and how to run more. The scans run at once, each
+// under agentsTimeout, and print in a fixed order.
 func (h *Harness) agents(ctx context.Context, id string, conf statefile.Conf) string {
 	var scans []func(context.Context) string
 	seen := map[string]bool{}
@@ -45,7 +49,7 @@ func (h *Harness) agents(ctx context.Context, id string, conf statefile.Conf) st
 		for _, d := range r.Drives() {
 			if !d.Serve && d.State == worker.Mounted && !seen[d.Name] {
 				seen[d.Name] = true
-				scans = append(scans, func(ctx context.Context) string { return h.drive(ctx, id, conf, r, d) })
+				scans = append(scans, func(ctx context.Context) string { return h.drive(ctx, id, d.Name) })
 			}
 		}
 	}
@@ -77,43 +81,37 @@ func (h *Harness) scratch(ctx context.Context, id, name string) string {
 	if !ok {
 		return fmt.Sprintf("\nworker %s, scratch: not connected\n", name)
 	}
-	var b strings.Builder
-	path := r.Scratch + "/AGENTS.md"
-	fmt.Fprintf(&b, "\nworker %s, scratch %s\nread %s\n", name, r.Scratch, path)
-	rec, cut := call(ctx, r, id, "read", args{Path: path})
-	b.WriteString(text("read", args{Path: path}, rec, cut))
-	interp, code := r.Interps[0], listing(r.Interps[0], r.Scratch)
-	fmt.Fprintf(&b, "run %s: %s\n", interp, code)
-	rec, cut = call(ctx, r, id, "run", args{Interpreter: interp, Code: code})
-	b.WriteString(text("run", args{}, rec, cut))
-	return b.String()
+	return scan(ctx, r, id, fmt.Sprintf("worker %s, scratch %s", name, r.Scratch), r.Scratch, listing(r.Interps[0], r.Scratch))
 }
 
-// drive is the section of drive d as worker m, which mounts it, sees it. The
-// listing runs on the worker serving d: over the mesh a recursive listing
-// takes seconds, on the disk milliseconds. It prints as m's own listing would,
-// under m's mount path, so the call shown is still the one to rerun. The read
-// of one file stays on m, so its result, an error too, is m's own.
-func (h *Harness) drive(ctx context.Context, id string, conf statefile.Conf, m *Remote, d worker.Drive) string {
-	var b strings.Builder
-	path := d.Path + "/AGENTS.md"
-	fmt.Fprintf(&b, "\nworker %s, drive %s %s\nread %s\n", m.Name, d.Name, d.Path, path)
-	rec, cut := call(ctx, m, id, "read", args{Path: path})
-	b.WriteString(text("read", args{Path: path}, rec, cut))
-	interp := m.Interps[0]
-	fmt.Fprintf(&b, "run %s: %s\n", interp, listing(interp, d.Path))
-	s, root, ok := h.server(d.Name)
+// drive is the section of the drive named name, scanned on the worker
+// serving it. The listing runs from the drive's parent, so it prints paths
+// that start at the drive's name: a server keeps a drive in a directory of
+// that name.
+func (h *Harness) drive(ctx context.Context, id, name string) string {
+	s, root, ok := h.server(name)
 	if !ok {
-		fmt.Fprintf(&b, "error: no connected worker serves drive %s\n", d.Name)
-		return b.String()
+		return fmt.Sprintf("\ndrive %s: no connected worker serves it\n", name)
 	}
-	a := args{Interpreter: s.Interps[0], Code: listing(s.Interps[0], root)}
-	rec, cut = call(ctx, s, id, "run", a)
-	if rec.Exit != nil && *rec.Exit == 0 && cut == 0 {
-		rec.Body = relist(rec.Body, a.Interpreter, root, interp, d.Path, m.OS == "windows")
-	} else {
-		fmt.Fprintf(&b, "listed on worker %s, which serves the drive: %s %s\n", s.Name, a.Interpreter, a.Code)
+	interp, dir := s.Interps[0], path.Dir(root)
+	code := fmt.Sprintf("(cd %s && %s)", quote(interp, dir), listing(interp, path.Base(root)))
+	if interp == "pwsh" {
+		code = fmt.Sprintf("Push-Location -LiteralPath %s; %s; Pop-Location", quote(interp, dir), listing(interp, path.Base(root)))
 	}
+	return scan(ctx, s, id, fmt.Sprintf("worker %s, which serves drive %s from %s", s.Name, name, root), root, code)
+}
+
+// scan is one section: the read of root/AGENTS.md and the listing code,
+// both on r.
+func scan(ctx context.Context, r *Remote, id, head, root, code string) string {
+	var b strings.Builder
+	file := root + "/AGENTS.md"
+	fmt.Fprintf(&b, "\n%s\nread %s\n", head, file)
+	rec, cut := call(ctx, r, id, "read", args{Path: file})
+	b.WriteString(text("read", args{Path: file}, rec, cut))
+	interp := r.Interps[0]
+	fmt.Fprintf(&b, "run %s: %s\n", interp, code)
+	rec, cut = call(ctx, r, id, "run", args{Interpreter: interp, Code: code})
 	b.WriteString(text("run", args{}, rec, cut))
 	return b.String()
 }
@@ -160,56 +158,20 @@ func text(tool string, a args, rec statefile.Record, cut int) string {
 	return string(bytes.TrimRight(finish(tool, a, rec, cut).Body, "\n")) + "\n"
 }
 
-// relist turns the output of listing in interpreter from under root into
-// the output of listing in interpreter to under toRoot. pwsh -Name prints
-// paths relative to the root with backslashes, find prints whole paths, and
-// on Windows lines end in CRLF. find keeps the order the serving disk gave,
-// which is the mount's order too. pwsh on Windows prints a directory's own
-// file before its subdirectories, these by name in any case. Lines that are
-// not paths stay, first.
-func relist(out []byte, from, root, to, toRoot string, windows bool) []byte {
-	var rels [][]string
-	var lines []string
-	for l := range strings.Lines(string(out)) {
-		l = strings.TrimRight(l, "\r\n")
-		rel, ok := strings.CutPrefix(l, root+"/")
-		if from == "pwsh" {
-			rel, ok = strings.ReplaceAll(l, `\`, "/"), strings.HasSuffix(l, "AGENTS.md")
-		}
-		if !ok {
-			lines = append(lines, l)
-			continue
-		}
-		rels = append(rels, strings.Split(rel, "/"))
-	}
-	if to == "pwsh" {
-		slices.SortStableFunc(rels, func(a, b []string) int {
-			return slices.CompareFunc(a[:len(a)-1], b[:len(b)-1], func(x, y string) int { return strings.Compare(strings.ToUpper(x), strings.ToUpper(y)) })
-		})
-	}
-	for _, rel := range rels {
-		if to == "pwsh" {
-			lines = append(lines, strings.Join(rel, `\`))
-		} else {
-			lines = append(lines, toRoot+"/"+strings.Join(rel, "/"))
-		}
-	}
-	eol := "\n"
-	if windows {
-		eol = "\r\n"
-	}
-	var b strings.Builder
-	for _, l := range lines {
-		b.WriteString(l + eol)
-	}
-	return []byte(b.String())
-} // listing prints every AGENTS.md under root to agentsDepth, in the
-
-// interpreter's own language so the model can rerun or deepen it. Root is
-// quoted for that language, so an apostrophe in a path stays in the path.
+// listing prints every AGENTS.md under root to agentsDepth, in the
+// interpreter's own language so the model can rerun or deepen it.
 func listing(interp, root string) string {
 	if interp == "pwsh" {
-		return fmt.Sprintf("Get-ChildItem -LiteralPath '%s' -Recurse -Depth %d -Filter AGENTS.md -Name", strings.ReplaceAll(root, "'", "''"), agentsDepth-1)
+		return fmt.Sprintf("Get-ChildItem -LiteralPath %s -Recurse -Depth %d -Filter AGENTS.md -Name", quote(interp, root), agentsDepth-1)
 	}
-	return fmt.Sprintf("find '%s' -maxdepth %d -name AGENTS.md", strings.ReplaceAll(root, "'", `'\''`), agentsDepth)
+	return fmt.Sprintf("find %s -maxdepth %d -name AGENTS.md", quote(interp, root), agentsDepth)
+}
+
+// quote quotes s for the interpreter's language, so an apostrophe in a path
+// stays in the path.
+func quote(interp, s string) string {
+	if interp == "pwsh" {
+		return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
