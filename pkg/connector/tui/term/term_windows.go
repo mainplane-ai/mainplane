@@ -71,8 +71,8 @@ type inputRecord struct {
 }
 
 // modifier is the virtual keys that type nothing alone: shift, ctrl, alt,
-// caps lock, the Windows keys, and their left and right forms.
-var modifier = map[uint16]bool{0x10: true, 0x11: true, 0x12: true, 0x14: true, 0x5b: true, 0x5c: true, 0xa0: true, 0xa1: true, 0xa2: true, 0xa3: true, 0xa4: true, 0xa5: true}
+// caps, num and scroll lock, the Windows keys, and their left and right forms.
+var modifier = map[uint16]bool{0x10: true, 0x11: true, 0x12: true, 0x14: true, 0x5b: true, 0x5c: true, 0xa0: true, 0xa1: true, 0xa2: true, 0xa3: true, 0xa4: true, 0xa5: true, 0x90: true, 0x91: true}
 
 // wait is whether ReadFile will return bytes now. The console's handle is
 // also signaled by records ReadFile skips (key ups, focus, menu); those are

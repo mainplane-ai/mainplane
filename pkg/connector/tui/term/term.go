@@ -61,6 +61,7 @@ type Terminal struct {
 	mu      sync.Mutex
 	w       *bufio.Writer
 	closed  bool
+	entered bool // the enter sequence went out, so leave must
 	stop    chan struct{}
 
 	replies chan Event // replies to the startup queries, in order
@@ -89,6 +90,9 @@ func Open() (*Terminal, error) {
 	}
 	go t.read()
 	go t.resizes()
+	t.mu.Lock()
+	t.entered = true
+	t.mu.Unlock()
 	t.Write(enter + query)
 	t.Flush()
 	t.Caps = Caps{Truecolor: truecolor(), Dark: true}
@@ -172,11 +176,13 @@ func (t *Terminal) Close() {
 	}
 	t.closed = true
 	close(t.stop)
-	if t.Caps.Kitty {
-		_, _ = t.w.WriteString(kittyPop)
+	if t.entered {
+		if t.Caps.Kitty {
+			_, _ = t.w.WriteString(kittyPop)
+		}
+		_, _ = t.w.WriteString(leave)
+		_ = t.w.Flush()
 	}
-	_, _ = t.w.WriteString(leave)
-	_ = t.w.Flush()
 	if t.plat != nil {
 		t.plat()
 	}
