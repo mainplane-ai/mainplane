@@ -297,7 +297,7 @@ func usage() {
                                      and each peer's address and path, direct or through the relay
   version                            the release this binary was built from
 
-  new                                POST /sessions, body from stdin: {"model","context_limit","workers","params"} or {"from","n"};
+  new                                POST /sessions, body from stdin: {"model","context_limit","workers","params","name"} or {"from","n"};
                                      params are the vendor's own request fields, max_tokens included where its API requires it
   message    <id> <text> [file...]   POST /sessions/{id}/records, one record per part
   tail       <id> [after]            GET  /sessions/{id}/records, rendered
@@ -305,6 +305,7 @@ func usage() {
   retry      <id>                    POST /sessions/{id}/retry, step a failed or idle session from its tip
   stop       <id>                    POST /sessions/{id}/stop
   info       <id>                    GET  /sessions/{id}
+  name       <id> [text]             PUT  /sessions/{id}/name: the session's name; no text removes it
   sessions   [status]                GET  /sessions
   workers                            GET  /workers
   workers    <id> <name>...          PUT  /sessions/{id}/workers: the session's workers are these from its next step on

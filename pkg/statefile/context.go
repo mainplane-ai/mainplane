@@ -32,7 +32,7 @@ func Build(chain []Record) ([]Record, int) {
 	}
 	for _, r := range chain {
 		switch {
-		case r.Kind == Start || r.Kind == Config:
+		case r.Kind == Start || r.Kind == Config || r.Kind == Name:
 		case isBlock(r.Kind):
 			blocks[r.Step] = append(blocks[r.Step], r)
 		case r.Kind == Step:
@@ -75,7 +75,7 @@ func Waiting(chain []Record) []Record {
 					break
 				}
 			}
-		case Start, Config, System, Message, Text, Thinking, Error:
+		case Start, Config, System, Message, Text, Thinking, Error, Name:
 		}
 	}
 	return waiting
@@ -104,7 +104,11 @@ func ContextUsed(chain []Record) int {
 // Derive reads status off the tip. Stepping is the lock's word, not the
 // file's, so a caller that holds the lock knows better than this.
 func Derive(chain []Record) Status {
-	if chain[len(chain)-1].Kind == Error {
+	i := len(chain) - 1
+	for chain[i].Kind == Name { // a rename leaves status as it was; record 1 is start
+		i--
+	}
+	if chain[i].Kind == Error {
 		return StatusFailed
 	}
 	if len(Waiting(chain)) > 0 {

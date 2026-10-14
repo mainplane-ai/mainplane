@@ -22,7 +22,7 @@ import (
 // person. A file goes to a worker, not into the state file.
 const MaxPost = 8 << 20
 
-// Handler is the harness's HTTP surface: eight verbs on a session, three
+// Handler is the harness's HTTP surface: nine verbs on a session, three
 // reads of the environment, and removing a worker. Records go out in the
 // state file's own bytes, one after another.
 //
@@ -41,6 +41,8 @@ const MaxPost = 8 << 20
 //	                                  down                                            say what happened
 //	PUT  /sessions/{id}/workers       [{"name"}]; ?via= required. a config record  -> {"n"}
 //	                                  with these workers; the next step sees them
+//	PUT  /sessions/{id}/name          the name as text; ?via= required. a name     -> {"n"}
+//	                                  record; empty removes the name
 //	GET  /workers                     -> connected workers' hellos, and refused
 //	                                     ones with the reason
 //	DELETE /workers/{name}            the worker leaves the mesh for good; its     -> 204
@@ -154,6 +156,24 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	handle("PUT /sessions/{id}/workers", h.serveWorkers)
+	handle("PUT /sessions/{id}/name", func(w http.ResponseWriter, r *http.Request) {
+		via, err := via(r)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxName+1))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		n, err := h.SetName(r.PathValue("id"), via, string(b))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, map[string]int{"n": n})
+	})
 	return mux
 }
 
