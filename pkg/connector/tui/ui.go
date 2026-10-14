@@ -187,7 +187,7 @@ func (n *Node) measure(w int) int {
 		case k.Hidden || n.Dir != Row:
 		case k.Fixed > 0:
 			fixed += k.clamp(k.Fixed)
-		default:
+		case k.Grow > 0:
 			grow += k.Grow
 		}
 	}
