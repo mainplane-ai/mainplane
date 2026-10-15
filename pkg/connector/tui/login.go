@@ -20,7 +20,7 @@ var spinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "
 func inputBox(a *App, in *Input) *Node {
 	return Box(&Node{Dir: Row},
 		&Node{Fixed: 1, View: &bar{}},
-		&Node{Grow: 1, Pad: [4]int{1, 1, 1, 1}, BG: a.Theme.Element, View: in})
+		&Node{Grow: 1, Pad: [4]int{1, 1, 1, 1}, BG: a.Theme.Panel, View: in})
 }
 
 // bar is a vertical accent line the height of its node.

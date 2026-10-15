@@ -104,7 +104,7 @@ func (s *Scrollbox) Draw(a *App, c *Canvas, r Rect) {
 		thumb := max(1, r.H*r.H/len(s.rows))
 		at := s.top * (r.H - thumb) / s.maxTop()
 		for y := range r.H {
-			bg := a.Theme.Element
+			bg := a.Theme.Panel
 			if y >= at && y < at+thumb {
 				bg = a.Theme.Muted
 			}

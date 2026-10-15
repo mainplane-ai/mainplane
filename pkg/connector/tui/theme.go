@@ -3,11 +3,10 @@ package tui
 import "github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
 
 // Theme is the colors every component takes its look from. Panels are set
-// apart by shade, not by lines.
+// apart by shade, not by lines, and share one shade.
 type Theme struct {
 	BG        term.Color // the screen
-	Panel     term.Color // raised: sidebar, dialogs
-	Element   term.Color // the input
+	Panel     term.Color // raised: sidebar, dialogs, the input, the scrollbar track
 	Text      term.Color
 	Muted     term.Color
 	Accent    term.Color
@@ -15,18 +14,18 @@ type Theme struct {
 	Error     term.Color
 }
 
-// The palette is the brand's, from design/identity: Blue #0087A4, Gray
-// #65757A, Ink #172428, Paper #F8F8F5, line #DCE1DE, all near one hue, 220.
-// Dark surfaces are Ink and lighter shades of its hue; on them the blue and
-// gray are lifted to read.
+// Alexander's picks in design's tui-colors tuner, near the brand's hue, 220.
+// Light is the brand's: Paper #F8F8F5, Ink #172428, Gray #65757A, Blue
+// #0087A4. Dark is near black, oklch 0.120 0.0060 220, its panel 0.035
+// lighter at the same chroma; on it the blue and gray are lifted to read.
 var (
 	dark = Theme{
-		BG: term.Hex("#172428"), Panel: term.Hex("#1e2f34"), Element: term.Hex("#26393f"),
+		BG: term.Hex("#040607"), Panel: term.Hex("#090d0e"),
 		Text: term.Hex("#f8f8f5"), Muted: term.Hex("#8b9ca1"), Accent: term.Hex("#26a9c6"),
 		Selection: term.Hex("#1c4e5c"), Error: term.Hex("#e8787a"),
 	}
 	light = Theme{
-		BG: term.Hex("#f8f8f5"), Panel: term.Hex("#eef1f0"), Element: term.Hex("#dce1de"),
+		BG: term.Hex("#f8f8f5"), Panel: term.Hex("#eef1f0"),
 		Text: term.Hex("#172428"), Muted: term.Hex("#65757a"), Accent: term.Hex("#0087a4"),
 		Selection: term.Hex("#c4e3ea"), Error: term.Hex("#c4363a"),
 	}
