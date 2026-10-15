@@ -249,3 +249,25 @@ func (c Client) Records(ctx context.Context, id string, after int, wait string) 
 		recs = append(recs, r)
 	}
 }
+
+// Worker is a worker as GET /workers lists it: connected, unless refused.
+type Worker struct {
+	Name    string `json:"name"`
+	Refused string `json:"refused,omitempty"`
+}
+
+// Workers lists the workers the harness knows.
+func (c Client) Workers(ctx context.Context) ([]Worker, error) {
+	var ws []Worker
+	err := c.Call(ctx, "GET", "/workers", "", nil, &ws)
+	return ws, err
+}
+
+// SetWorkers makes ws the session's workers from its next step on.
+func (c Client) SetWorkers(ctx context.Context, id, via string, ws []statefile.Worker) error {
+	b, err := json.Marshal(ws)
+	if err != nil {
+		return err
+	}
+	return c.Call(ctx, "PUT", "/sessions/"+id+"/workers?via="+url.QueryEscape(via), "application/json", bytes.NewReader(b), nil)
+}

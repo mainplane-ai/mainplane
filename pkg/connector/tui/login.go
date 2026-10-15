@@ -19,16 +19,16 @@ var spinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "
 // bar's cell keeps the screen background, as opencode's does.
 func inputBox(a *App, in *Input) *Node {
 	return Box(&Node{Dir: Row},
-		&Node{Fixed: 1, View: &bar{}},
+		&Node{Fixed: 1, View: bar{a.Theme.Accent}},
 		&Node{Grow: 1, Pad: [4]int{1, 1, 1, 1}, BG: a.Theme.Panel, View: in})
 }
 
-// bar is a vertical accent line the height of its node.
-type bar struct{}
+// bar is a vertical line the height of its node.
+type bar struct{ fg term.Color }
 
-func (bar) Draw(a *App, c *Canvas, r Rect) {
+func (b bar) Draw(a *App, c *Canvas, r Rect) {
 	for y := range r.H {
-		c.Set(r.X, r.Y+y, "┃", 1, term.Style{FG: a.Theme.Accent})
+		c.Set(r.X, r.Y+y, "┃", 1, term.Style{FG: b.fg})
 	}
 }
 
@@ -101,7 +101,7 @@ func (s *login) submit(a *App, key string) {
 				a.Update = v
 				a.Quit()
 			default:
-				a.SetScreen(newSession(a, c, ""))
+				a.SetScreen(newSession(a, newSessionList(a, c), ""))
 			}
 		})
 	})

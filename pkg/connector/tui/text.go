@@ -112,3 +112,16 @@ func (Wordmark) Draw(a *App, c *Canvas, r Rect) {
 		c.Text(r.X+(r.W-w)/2, r.Y+i, l, st)
 	}
 }
+
+// Glyphs is one line of styled glyphs.
+type Glyphs struct{ Gs []Glyph }
+
+func (g *Glyphs) Height(int) int { return 1 }
+
+func (g *Glyphs) Draw(a *App, c *Canvas, r Rect) {
+	x := r.X
+	for _, gl := range g.Gs {
+		c.Set(x, r.Y, gl.G, gl.W, gl.St)
+		x += gl.W
+	}
+}
