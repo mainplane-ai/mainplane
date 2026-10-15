@@ -4,6 +4,10 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 
 ## v0.5.3
 
+- `mainplane` with no verb opens the terminal app: `mainplane <id>` a session, none the home screen, and no login the login screen. A sidebar lists the sessions with their state and an unread dot, `/` above the input lists the slash commands (/new, /sessions, /continue, /workers, /help), and Ctrl+P lists every key
+- A session can have a name, a name record any connector can set with `PUT /sessions/{id}/name`; `GET /sessions` returns it
+- The AGENTS.md scan at session start runs on every worker in parallel, and a drive is scanned on the worker that serves it
+- On macOS, the worker runs operator code in the user's login session, so screencapture, open and osascript reach the screen
 - A worker that logs out, as uninstall does, or expires is dropped from `mainplane workers` at once; before, the harness held its connection for minutes, since a node that logged out sends no FIN
 - `mainplane install` on a worker the harness removed joins again as a new node under its own name; before, it said installed and stayed refused
 - A machine that joins again with new keys, as after a move to another harness and back, takes back its name from its old node once that node has been offline for 3 minutes, in place of `<name>-2`
