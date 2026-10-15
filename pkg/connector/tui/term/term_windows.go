@@ -22,9 +22,9 @@ var (
 	readConsoleInput = kernel32.NewProc("ReadConsoleInputW")
 )
 
-// setup makes the console speak VT both ways in UTF-8: keys, mouse and paste
-// arrive as escape sequences, and quick edit no longer takes the mouse.
-func setup(in, out *os.File) (func(), error) {
+// save returns what puts the console modes and code pages back as they are
+// now.
+func save(in, out *os.File) (func(), error) {
 	hin, hout := windows.Handle(in.Fd()), windows.Handle(out.Fd())
 	var inMode, outMode uint32
 	if err := windows.GetConsoleMode(hin, &inMode); err != nil {
@@ -35,13 +35,26 @@ func setup(in, out *os.File) (func(), error) {
 	}
 	icp, _ := windows.GetConsoleCP()
 	ocp, _ := windows.GetConsoleOutputCP()
-	restore := func() {
+	return func() {
 		_ = windows.SetConsoleMode(hin, inMode)
 		_ = windows.SetConsoleMode(hout, outMode)
 		_ = windows.SetConsoleCP(icp)
 		_ = windows.SetConsoleOutputCP(ocp)
+	}, nil
+}
+
+// setup makes the console speak VT both ways in UTF-8: keys, mouse and paste
+// arrive as escape sequences, and quick edit no longer takes the mouse.
+func setup(in, out *os.File) (func(), error) {
+	hin, hout := windows.Handle(in.Fd()), windows.Handle(out.Fd())
+	restore, err := save(in, out)
+	if err != nil {
+		return nil, err
 	}
-	err := windows.SetConsoleMode(hin, (inMode|windows.ENABLE_EXTENDED_FLAGS|windows.ENABLE_VIRTUAL_TERMINAL_INPUT)&^(windows.ENABLE_QUICK_EDIT_MODE|windows.ENABLE_MOUSE_INPUT|windows.ENABLE_WINDOW_INPUT))
+	var inMode, outMode uint32
+	_ = windows.GetConsoleMode(hin, &inMode)
+	_ = windows.GetConsoleMode(hout, &outMode)
+	err = windows.SetConsoleMode(hin, (inMode|windows.ENABLE_EXTENDED_FLAGS|windows.ENABLE_VIRTUAL_TERMINAL_INPUT)&^(windows.ENABLE_QUICK_EDIT_MODE|windows.ENABLE_MOUSE_INPUT|windows.ENABLE_WINDOW_INPUT))
 	if err == nil {
 		err = windows.SetConsoleMode(hout, outMode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING|windows.DISABLE_NEWLINE_AUTO_RETURN|windows.ENABLE_PROCESSED_OUTPUT)
 	}

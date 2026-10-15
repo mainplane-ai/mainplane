@@ -13,6 +13,8 @@ import (
 
 const isWindows = false
 
+func save(in, out *os.File) (func(), error) { return func() {}, nil }
+
 func setup(in, out *os.File) (func(), error) { return func() {}, nil }
 
 // wait is whether stdin has bytes to read within timeout. A signal, like
