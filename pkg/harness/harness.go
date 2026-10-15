@@ -5,6 +5,7 @@ package harness
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -308,6 +309,33 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	return h.step(ctx, s, id, conf, chain)
 }
 
+// rebuilt explains a refusal this harness can see coming: it no longer
+// compiles the last step's context to the bytes that step sent, so the
+// provider gets a prefix it never saw, and a thinking signature or the like
+// bound to the old one fails. A new version that changes what is sent ends
+// the sessions an older one built. Empty when the bytes match.
+func rebuilt(p provider.Provider, model, id string, conf statefile.Conf, chain []statefile.Record) string {
+	var last statefile.Record
+	for _, r := range chain {
+		if r.Kind == statefile.Step {
+			last = r
+		}
+	}
+	if last.Upto == 0 {
+		return ""
+	}
+	records, _ := statefile.Build(chain[:last.Upto])
+	records = clock(records, id, chain[0].Time, conf.ContextLimit, conf.Input)
+	body, _, err := p.Envelope.Compile(provider.Request{Model: model, Key: id, Tools: Tools(conf.Tools, conf.Input), Context: records, Params: conf.Params})
+	if err != nil || fmt.Sprintf("sha256:%x", sha256.Sum256(body)) == last.Request {
+		return ""
+	}
+	if last.Harness != version.V {
+		return fmt.Sprintf("\n\nThis session was built by harness %s. This harness (%s) builds the same records into a different request, so the provider sees a different conversation. A session from an incompatible harness version cannot go on. Use /continue to carry it into a new session.", last.Harness, version.V)
+	}
+	return "\n\nThis harness builds the records of the last step into a different request than the one sent, so the provider sees a different conversation. A copy of a session does this, since the request names the session. Use /continue to carry it into a new session."
+}
+
 func errorRecord(via, text string) statefile.Record {
 	return statefile.Record{Header: statefile.Header{Kind: statefile.Error, Type: "text/plain", Via: via}, Body: []byte(text)}
 }
@@ -347,7 +375,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 			_, err := h.append(s, errorRecord(via, fmt.Sprintf(halted, via)))
 			return statefile.StatusFailed, err
 		}
-		_, err := h.append(s, errorRecord("", err.Error()))
+		_, err := h.append(s, errorRecord("", err.Error()+rebuilt(p, model, id, conf, chain)))
 		return statefile.StatusFailed, err
 	}
 	hdr.Kind, hdr.ID, hdr.Upto, hdr.Harness = statefile.Step, stepID, upto, version.V
