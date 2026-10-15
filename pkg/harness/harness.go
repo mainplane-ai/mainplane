@@ -331,7 +331,7 @@ func rebuilt(p provider.Provider, model, id string, conf statefile.Conf, chain [
 		return ""
 	}
 	if last.Harness != version.V {
-		return fmt.Sprintf("\n\nThis session was built by harness %s. This harness (%s) builds the same records into a different request, so the provider sees a different conversation. A session from an incompatible older version cannot go on. Use /continue to carry it into a new session.", last.Harness, version.V)
+		return fmt.Sprintf("\n\nThis session was built by harness %s. This harness (%s) builds the same records into a different request, so the provider sees a different conversation. A session from an incompatible harness version cannot go on. Use /continue to carry it into a new session.", last.Harness, version.V)
 	}
 	return "\n\nThis harness builds the records of the last step into a different request than the one sent, so the provider sees a different conversation. A copy of a session does this, since the request names the session. Use /continue to carry it into a new session."
 }
