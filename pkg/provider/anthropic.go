@@ -24,6 +24,7 @@ func Anthropic(key string) Provider {
 		Headers: func(r *http.Request, key string) {
 			r.Header.Set("x-api-key", key)
 			r.Header.Set("anthropic-version", "2023-06-01")
+			r.Header.Set("anthropic-beta", "thinking-binding-controls-2026-08-01")
 		},
 	}
 }
@@ -44,6 +45,17 @@ type anthReq struct {
 	System   []anthBlock `json:"system,omitempty"`
 	Tools    []anthTool  `json:"tools,omitempty"`
 	Messages []anthMsg   `json:"messages"`
+	Thinking *anthThink  `json:"thinking,omitempty"`
+}
+
+// anthThink drops a replayed thinking block whose signature is bound to a
+// different prefix instead of refusing the request. A harness update that
+// changes the system prompt, or a copy, whose session line names a new id,
+// changes the prefix of every block already signed.
+type anthThink struct {
+	BlockBinding struct {
+		PrefixMismatchBehavior string `json:"prefix_mismatch_behavior"`
+	} `json:"block_binding"`
 }
 
 type anthTool struct {
@@ -102,6 +114,10 @@ func (e anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
 				return nil, nil, err
 			}
 			body.Messages = append(body.Messages, anthMsg{Role: "assistant", Content: content})
+			if body.Thinking == nil && slices.ContainsFunc(content, func(b any) bool { _, ok := b.(json.RawMessage); return ok }) {
+				body.Thinking = &anthThink{}
+				body.Thinking.BlockBinding.PrefixMismatchBehavior = "drop_block"
+			}
 			continue
 		}
 		blocks := anthUser(t.Records)
