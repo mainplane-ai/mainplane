@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,19 +53,29 @@ type session struct {
 	empty      []*Node
 	inputRow   *Node
 	box        *Node
-	status     *Text // the app's status, else what the session is busy with
+	status     *Text   // the app's status, else the model
+	meta       *Glyphs // context, cost, and the commands key
 	statusRow  *Node
-	started    bool                  // a message was sent from home: show the transcript
-	creating   bool                  // the session is being made
-	pending    []string              // sent while the session is being made
-	outbox     chan string           // sent, to be posted in order
-	stopping   bool                  // a stop was asked for and the status has not changed since
-	calls      map[string]*callBlock // by call id, to pair each result with its call
-	running    []*callBlock          // calls with no result yet
+	busy       *Glyphs // working, stopping, or making the session, over the input
+	busyRow    *Node
+	armed      bool                          // Esc was pressed once: again stops
+	turn       time.Time                     // the last message, from which the work is timed
+	usage      map[[2]string]statefile.Usage // by provider and model, from the steps
+	prices     prices                        // nil until loaded
+	started    bool                          // a message was sent from home: show the transcript
+	creating   bool                          // the session is being made
+	pending    []string                      // sent while the session is being made
+	outbox     chan string                   // sent, to be posted in order
+	stopping   bool                          // a stop was asked for and the status has not changed since
+	calls      map[string]*callBlock         // by call id, to pair each result with its call
+	running    []*callBlock                  // calls with no result yet
 }
 
 func newSession(a *App, c connector.Client, id string) *session {
-	s := &session{c: c, id: id, transcript: NewScrollbox(), input: NewInput(), status: &Text{}, outbox: make(chan string, outboxSize), calls: map[string]*callBlock{}}
+	s := &session{
+		c: c, id: id, transcript: NewScrollbox(), input: NewInput(), status: &Text{}, outbox: make(chan string, outboxSize), calls: map[string]*callBlock{},
+		meta: &Glyphs{}, busy: &Glyphs{}, usage: map[[2]string]statefile.Usage{},
+	}
 	s.transcript.Gap = func(prev, next Block) bool {
 		_, p := prev.(*callBlock)
 		_, n := next.(*callBlock)
@@ -74,10 +86,11 @@ func newSession(a *App, c connector.Client, id string) *session {
 	s.inputRow = Box(&Node{Dir: Row}, &Node{Grow: 1}, s.box, &Node{Grow: 1})
 	s.body = &Node{Grow: 1, View: s.transcript}
 	s.empty = []*Node{{Grow: 1}, {View: Wordmark{}}, {Fixed: 1}, {Grow: 1}}
-	s.statusRow = &Node{View: s.status, Min: 1, Max: 3}
+	s.statusRow = Box(&Node{Dir: Row, Min: 1, Max: 3}, &Node{Grow: 1, View: s.status}, &Node{View: s.meta})
+	s.busyRow = &Node{Fixed: 2, Pad: [4]int{0, 1, 0, 0}, View: s.busy}
 	s.sidebar = &Node{Fixed: sidebarWidth, BG: a.Theme.Panel}
 	main := Box(&Node{Dir: Col, Grow: 1},
-		s.empty[0], s.empty[1], s.empty[2], s.body, s.inputRow, s.statusRow, &Node{Fixed: 1}, s.empty[3]) // a blank row under the status, as opencode
+		s.empty[0], s.empty[1], s.empty[2], s.body, s.busyRow, s.inputRow, s.statusRow, &Node{Fixed: 1}, s.empty[3]) // a blank row under the status, as opencode
 	s.root = Box(&Node{Dir: Row, BG: a.Theme.BG}, s.sidebar, main)
 	a.Focus(s.box.Kids[1])
 	s.title(a)
@@ -85,6 +98,16 @@ func newSession(a *App, c connector.Client, id string) *session {
 		s.follow(a)
 		s.postAll(a)
 	}
+	a.Go(func() {
+		p, err := loadPrices()
+		a.Post(func() {
+			if err != nil {
+				a.SayError(err)
+				return
+			}
+			s.prices = p
+		})
+	})
 	return s
 }
 
@@ -119,18 +142,99 @@ func (s *session) Size(a *App, w, h int) {
 		s.statusRow.Pad[0] = pad
 	}
 	*s.status = *a.Status
-	if s.status.S == "" {
-		s.status.Style = a.Theme.muted()
-		switch {
-		case s.creating:
-			s.status.S = "Making the session..."
-		case s.stopping:
-			s.status.S = "Stopping..."
-		case s.stepping():
-			s.status.S = spinner[s.frame%len(spinner)] + " Working"
-		}
+	if s.status.S == "" && !empty {
+		s.status.S, s.status.Style = s.info.Config.Model, a.Theme.muted()
 	}
 	s.status.Center = empty
+	s.meta.Gs = nil
+	if !empty {
+		s.meta.Gs = s.metaLine(a, main-2*pad > hintFrom)
+	}
+	s.statusRow.Kids[1].Fixed = gwidth(s.meta.Gs)
+	s.statusRow.Kids[1].Hidden = len(s.meta.Gs) == 0
+	s.busy.Gs = s.busyLine(a)
+	s.busyRow.Hidden = len(s.busy.Gs) == 0 || empty
+	s.busyRow.Pad[0] = pad + margin
+}
+
+// hintFrom is the width of the status line from which it shows the commands key.
+const hintFrom = 60
+
+// metaLine is the right of the status line: the context used of its limit,
+// the cost when every model used has a price, and the commands key.
+func (s *session) metaLine(a *App, hint bool) []Glyph {
+	muted := a.Theme.muted()
+	key := term.Style{FG: a.Theme.Text, Attr: term.Bold}
+	var parts [][]Glyph
+	if s.id != "" {
+		c := tokens(s.info.ContextUsed)
+		if l := s.info.Config.ContextLimit; l > 0 {
+			c += "/" + tokens(l)
+		}
+		parts = append(parts, run(c, muted))
+		if c, ok := s.cost(); ok {
+			parts = append(parts, run(fmt.Sprintf("$%.2f", c), muted))
+		}
+	}
+	if hint {
+		parts = append(parts, cat(run("ctrl+p", key), run(" commands", muted)))
+	}
+	var gs []Glyph
+	for i, p := range parts {
+		if i > 0 {
+			gs = append(gs, run(" · ", muted)...)
+		}
+		gs = append(gs, p...)
+	}
+	return gs
+}
+
+// tokens is a count of tokens in thousands.
+func tokens(n int) string {
+	if n < 1000 {
+		return strconv.Itoa(n)
+	}
+	return strconv.Itoa((n+500)/1000) + "k"
+}
+
+// cost is the session's cost so far, when prices are loaded and every model
+// it used has one.
+func (s *session) cost() (float64, bool) {
+	if s.prices == nil {
+		return 0, false
+	}
+	total := 0.0
+	for k, u := range s.usage {
+		c, ok := s.prices.cost(k[0], k[1], u)
+		if !ok {
+			return 0, false
+		}
+		total += c
+	}
+	return total, true
+}
+
+// busyLine is what the session is busy with, over the input, or nothing.
+func (s *session) busyLine(a *App) []Glyph {
+	muted := a.Theme.muted()
+	key := term.Style{FG: a.Theme.Text, Attr: term.Bold}
+	switch {
+	case s.creating:
+		return run("Making the session...", muted)
+	case s.stopping:
+		return run("Stopping...", muted)
+	case !s.stepping():
+		return nil
+	}
+	gs := run(spinner[s.frame%len(spinner)]+" Working", muted)
+	if !s.turn.IsZero() {
+		gs = append(gs, run(" "+dur(time.Since(s.turn).Truncate(time.Second)), muted)...)
+	}
+	again := ""
+	if s.armed {
+		again = " again"
+	}
+	return cat(gs, run("  ", muted), run("esc", key), run(again+" to stop", muted))
 }
 
 func (s *session) stepping() bool { return s.info.Status == statefile.StatusStepping }
@@ -151,16 +255,11 @@ func (s *session) Key(a *App, k term.Key) bool {
 		case a.Again(escTwice):
 			s.stop(a)
 		default:
-			const armed = "Esc again to stop"
-			a.Say(armed)
-			time.AfterFunc(escTwice, func() {
-				a.Post(func() {
-					if a.Status.S == armed {
-						a.Status.S = ""
-					}
-				})
-			})
+			s.armed = true
+			time.AfterFunc(escTwice, func() { a.Post(func() { s.armed = false }) })
 		}
+	case "ctrl+p":
+		s.keys(a)
 	case "f1":
 		s.keys(a)
 	default:
@@ -181,6 +280,7 @@ func (s *session) keys(a *App) {
 		"pgup / pgdn    scroll the transcript",
 		"ctrl+home/end  top / bottom of the transcript",
 		"esc esc        stop the session",
+		"ctrl+p / f1    this list",
 		"ctrl+c         copy the selection, else exit",
 		"ctrl+c ctrl+c  exit",
 	}}})
@@ -266,9 +366,17 @@ func (s *session) add(a *App, recs []statefile.Record, info harness.Info) {
 // show puts a record in the transcript, or a result in its call's block.
 func (s *session) show(r statefile.Record) {
 	switch r.Kind {
-	case statefile.Start, statefile.Config, statefile.System, statefile.Name, statefile.Thinking, statefile.Step:
+	case statefile.Start, statefile.Config, statefile.System, statefile.Name, statefile.Thinking:
+	case statefile.Step:
+		k := [2]string{r.Provider, r.Model}
+		if u := r.Usage; u != nil {
+			t := s.usage[k]
+			t.Input, t.Output, t.CacheRead, t.CacheWrite = t.Input+u.Input, t.Output+u.Output, t.CacheRead+u.CacheRead, t.CacheWrite+u.CacheWrite
+			s.usage[k] = t
+		}
 	case statefile.Message:
 		s.msgs++
+		s.turn = r.Time
 		s.transcript.Append(&msgBlock{r})
 	case statefile.Text:
 		s.transcript.Append(&textBlock{string(r.Body)})
