@@ -44,6 +44,7 @@ Tools:
 - Different worker machines have different interpreters, e.g. bash on linux and pwsh on windows. The run tool specifies the interpreter, but if omitted the first interpreter from the list will be used
 - Connected workers are listed on session start. You will be notified if the list changes
 - The run tool uses a persistent interpreter process. One process per session and interpreter
+- MAINPLANE_SESSION in every interpreter process is this session's id
 - One run call is bounded at 10 minutes. On timeout or crash, the next run's output begins with "environment was reset"
 - Background work should write to a log file and be checked in a later run. A pwsh job's output stays in the job until Receive-Job
 - A run result over 50 KiB or 2000 lines keeps its tail. The full output goes to a file, and the first line names its path, which will look like: <scratch>/output/<call id>
