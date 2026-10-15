@@ -7,9 +7,11 @@ toolchain go1.27.2
 require (
 	filippo.io/cpace v0.0.0-20210101143347-24d601e2e469
 	github.com/dustinkirkland/golang-petname v0.0.0-20260929120758-6e3915f1a6a8
+	github.com/rivo/uniseg v0.4.7
 	github.com/tailscale/wireguard-go v0.0.0-20260715223240-2e01ba5b00f0
 	golang.org/x/net v0.60.0
 	golang.org/x/sys v0.48.0
+	golang.org/x/term v0.46.0
 	golang.zx2c4.com/wireguard/windows v0.5.3
 	tailscale.com v1.102.4
 )
@@ -53,7 +55,6 @@ require (
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
