@@ -16,12 +16,12 @@ const (
 	// another client starts or ends shows within a few seconds.
 	sessionsEvery = 3 * time.Second
 	sessionsMax   = 100
-	// sessionRows is one session in the sidebar: three rows and a gap.
-	sessionRows = 4
-	// listTop is the rows above the first session: New session and a gap.
-	listTop = 2
-	// hoverShade is how far a hovered session's panel goes toward the text color.
-	hoverShade = 0.06
+	// sessionRows is one session in the sidebar: two rows and a gap.
+	sessionRows = 3
+	// How far a session's panel goes toward the text color: the open one
+	// stands out more than the one under the mouse.
+	openShade  = 0.07
+	hoverShade = 0.04
 )
 
 // sessionList is the sessions, newest updated first, read every
@@ -128,22 +128,16 @@ func (l *sessionList) open(a *App, id string) {
 	}
 }
 
-// row is what the sidebar shows at screen row y: -1 New session, a
-// session's index, or -2 for none.
+// row is the session at screen row y, or -1.
 func (l *sessionList) row(y int, r Rect) int {
 	at := l.top + y - r.Y
-	switch {
-	case !r.Has(r.X, y):
-		return -2
-	case at == 0:
+	if !r.Has(r.X, y) || at%sessionRows == sessionRows-1 || at/sessionRows >= len(l.infos) {
 		return -1
-	case at >= listTop && (at-listTop)%sessionRows < sessionRows-1 && (at-listTop)/sessionRows < len(l.infos):
-		return (at - listTop) / sessionRows
 	}
-	return -2
+	return at / sessionRows
 }
 
-func (l *sessionList) maxTop(h int) int { return max(0, listTop+len(l.infos)*sessionRows-1-h) }
+func (l *sessionList) maxTop(h int) int { return max(0, len(l.infos)*sessionRows-1-h) }
 
 func (l *sessionList) Mouse(a *App, m term.Mouse, r Rect) bool {
 	switch {
@@ -152,10 +146,7 @@ func (l *sessionList) Mouse(a *App, m term.Mouse, r Rect) bool {
 	case m.Button == term.WheelDown:
 		l.top = min(l.top+sessionRows, l.maxTop(r.H))
 	case m.Action == term.Press && m.Button == term.Left:
-		switch i := l.row(m.Y, r); {
-		case i == -1:
-			l.cur.fresh(a)
-		case i >= 0:
+		if i := l.row(m.Y, r); i >= 0 {
 			l.open(a, l.infos[i].ID)
 		}
 	case m.Action == term.Motion && m.Button == term.NoButton:
@@ -165,44 +156,40 @@ func (l *sessionList) Mouse(a *App, m term.Mouse, r Rect) bool {
 	return true
 }
 
+// Draw shows each session as a title, its name or else its id, with its
+// state on the right, over the model and context. Hovering a named session
+// shows its id in place of the model.
 func (l *sessionList) Draw(a *App, c *Canvas, r Rect) {
 	if i := l.index(l.cur.id); l.reveal && i >= 0 {
-		y := listTop + i*sessionRows
+		y := i * sessionRows
 		l.top = min(max(l.top, y+sessionRows-1-r.H), y)
 		l.reveal = false
 	}
 	l.top = min(l.top, l.maxTop(r.H))
-	muted, text := a.Theme.muted(), a.Theme.text()
-	hover := -2
+	muted := a.Theme.muted()
+	hover := -1
 	if r.Has(a.MouseX, a.MouseY) {
 		hover = l.row(a.MouseY, r)
 	}
 	x, w := r.X+2, r.W-4
 	line := func(y int, gs []Glyph) { (&Glyphs{gs}).Draw(a, c, Rect{x, y, w, 1}) }
-	mark := func(y, h int, fg term.Color, shade bool) {
-		if shade {
-			c.Fill(Rect{r.X, y, r.W, h}, a.Theme.Panel.Blend(a.Theme.Text, hoverShade))
-		}
-		for i := range h {
+	mark := func(y int, fg term.Color, shade float64) {
+		c.Fill(Rect{r.X, y, r.W, sessionRows - 1}, a.Theme.Panel.Blend(a.Theme.Text, shade))
+		for i := range sessionRows - 1 {
 			c.Set(r.X, y+i, "┃", 1, term.Style{FG: fg})
 		}
 	}
-	y := r.Y - l.top
-	if hover == -1 {
-		mark(y, 1, a.Theme.Muted, true)
-	}
-	line(y, run("+ New session", text))
 	for i := range l.infos {
-		y := r.Y - l.top + listTop + i*sessionRows
+		y := r.Y - l.top + i*sessionRows
 		if y+sessionRows <= r.Y || y >= r.Y+r.H {
 			continue
 		}
 		in := l.info(i)
 		switch {
 		case in.ID == l.cur.id:
-			mark(y, sessionRows-1, a.Theme.Accent, hover == i)
+			mark(y, a.Theme.Accent, openShade)
 		case hover == i:
-			mark(y, sessionRows-1, a.Theme.Muted, true)
+			mark(y, a.Theme.Muted, hoverShade)
 		}
 		state := run(age(time.Since(in.Updated)), muted)
 		if in.Status == statefile.StatusFailed {
@@ -212,15 +199,20 @@ func (l *sessionList) Draw(a *App, c *Canvas, r Rect) {
 			state = cat(state, run(" ●", term.Style{FG: a.Theme.Accent}))
 		}
 		if in.Status == statefile.StatusStepping {
-			state = run(spinner[l.cur.frame%len(spinner)]+" Working", text)
+			state = run(spinner[l.cur.frame%len(spinner)]+" Working", a.Theme.text())
 		}
-		used := tokens(in.ContextUsed)
+		title, meta := in.Name, in.Config.Model
+		if title == "" {
+			title = in.ID
+		} else if hover == i {
+			meta = in.ID
+		}
+		used := " · " + tokens(in.ContextUsed)
 		if lim := in.Config.ContextLimit; lim > 0 {
 			used += "/" + tokens(lim)
 		}
-		line(y, spread(state, run(in.ID, muted), w))
-		line(y+1, clip(run(in.Name, term.Style{FG: a.Theme.Text, Attr: term.Bold}), w))
-		line(y+2, spread(run(in.Config.Model, muted), run(used, muted), w))
+		line(y, spread(run(title, term.Style{FG: a.Theme.Text, Attr: term.Bold}), state, w))
+		line(y+1, cat(clip(run(meta, muted), max(0, w-term.Width(used))), run(used, muted)))
 	}
 }
 

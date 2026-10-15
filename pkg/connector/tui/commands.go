@@ -172,6 +172,11 @@ func (s *session) palette(a *App) {
 	}
 	add("Session", "Previous session", "ctrl+up", func(a *App) { s.list.step(a, -1) })
 	add("Session", "Next session", "ctrl+down", func(a *App) { s.list.step(a, 1) })
+	add("Session", "Copy session id", "", func(a *App) {
+		if s.id != "" {
+			a.Copy(s.id)
+		}
+	})
 	add("Session", "Stop the session", "esc esc", func(a *App) {
 		if s.stepping() {
 			s.stop(a)
