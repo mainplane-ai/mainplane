@@ -123,14 +123,36 @@ func xterm256(r, g, b uint8) int {
 	ri, gi, bi := near(r), near(g), near(b)
 	cube := 16 + 36*ri + 6*gi + bi
 	dc := sq(int(r)-steps[ri]) + sq(int(g)-steps[gi]) + sq(int(b)-steps[bi])
-	avg := (int(r) + int(g) + int(b)) / 3
-	gi2 := min(23, max(0, (avg-8+5)/10))
+	gi2 := grayStep(r, g, b)
 	gv := 8 + 10*gi2
 	dg := sq(int(r)-gv) + sq(int(g)-gv) + sq(int(b)-gv)
 	if dg < dc {
 		return 232 + gi2
 	}
 	return cube
+}
+
+// grayStep is the nearest step of the 24-step gray ramp, 8 to 238 by 10.
+func grayStep(r, g, b uint8) int {
+	return min(23, max(0, ((int(r)+int(g)+int(b))/3-3)/10))
+}
+
+// Apart256 is c, or where c and bg share one 256-color index, the gray one
+// step from bg's toward c's lightness.
+func Apart256(c, bg Color) Color {
+	cr, cg, cb := c.rgb()
+	br, bgr, bb := bg.rgb()
+	if xterm256(cr, cg, cb) != xterm256(br, bgr, bb) {
+		return c
+	}
+	step := grayStep(br, bgr, bb)
+	if int(cr)+int(cg)+int(cb) >= int(br)+int(bgr)+int(bb) {
+		step = min(23, step+1)
+	} else {
+		step = max(0, step-1)
+	}
+	v := uint8(8 + 10*step)
+	return RGB(v, v, v)
 }
 
 func abs(v int) int { return max(v, -v) }

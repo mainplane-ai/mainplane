@@ -32,11 +32,17 @@ var (
 	}
 )
 
-func themeFor(isDark bool) Theme {
-	if isDark {
-		return dark
+// themeFor is the theme for the terminal. With 256 colors the panel keeps a
+// shade apart from the screen.
+func themeFor(c term.Caps) Theme {
+	t := light
+	if c.Dark {
+		t = dark
 	}
-	return light
+	if !c.Truecolor {
+		t.Panel = term.Apart256(t.Panel, t.BG)
+	}
+	return t
 }
 
 func (t Theme) text() term.Style  { return term.Style{FG: t.Text} }

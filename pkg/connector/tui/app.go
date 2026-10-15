@@ -58,7 +58,7 @@ type App struct {
 }
 
 func NewApp(t *term.Terminal) *App {
-	a := &App{T: t, Theme: themeFor(t.Caps.Dark), r: term.NewRenderer(t), post: make(chan func(), 64), Status: &Text{}}
+	a := &App{T: t, Theme: themeFor(t.Caps), r: term.NewRenderer(t), post: make(chan func(), 64), Status: &Text{}}
 	a.W, a.H = t.Size()
 	return a
 }
