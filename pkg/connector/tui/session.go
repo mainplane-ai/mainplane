@@ -52,6 +52,9 @@ type session struct {
 	body       *Node // the transcript's node
 	empty      []*Node
 	inputRow   *Node
+	slash      *slash
+	slashBox   *Node // the list of commands, as wide as the input box
+	slashRow   *Node // above the input row, which it takes the blank row of
 	box        *Node
 	status     *Text   // the app's status, else the model
 	meta       *Glyphs // context, cost, and the commands key
@@ -86,21 +89,19 @@ func newSession(a *App, c connector.Client, id string) *session {
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.input.Placeholder, s.input.OnSubmit = "Ask anything", s.send
-	s.input.OnKey = func(a *App) {
-		if s.input.Text() == "/" {
-			s.input.Clear()
-			s.palette(a)
-		}
-	}
+	s.slash = &slash{s: s}
+	s.input.Before = s.slash.Key
 	s.box = inputBox(a, s.input)
 	s.inputRow = Box(&Node{Dir: Row}, &Node{Grow: 1}, s.box, &Node{Grow: 1})
+	s.slashBox = Box(&Node{Dir: Row}, &Node{Fixed: 1, View: bar{a.Theme.Muted}}, &Node{Grow: 1, BG: a.Theme.Panel, View: s.slash})
+	s.slashRow = Box(&Node{Dir: Row}, &Node{Grow: 1}, s.slashBox, &Node{Grow: 1})
 	s.body = &Node{Grow: 1, View: s.transcript}
 	s.empty = []*Node{{Grow: 1}, {View: Wordmark{}}, {Fixed: 1}, {Grow: 1}}
 	s.statusRow = Box(&Node{Dir: Row, Min: 1, Max: 3}, &Node{Grow: 1, View: s.status}, &Node{View: s.meta})
 	s.busyRow = &Node{Fixed: 2, Pad: [4]int{0, 1, 0, 0}, View: s.busy}
 	s.sidebar = &Node{Fixed: sidebarWidth, BG: a.Theme.Panel}
 	main := Box(&Node{Dir: Col, Grow: 1},
-		s.empty[0], s.empty[1], s.empty[2], s.body, s.busyRow, s.inputRow, s.statusRow, &Node{Fixed: 1}, s.empty[3]) // a blank row under the status, as opencode
+		s.empty[0], s.empty[1], s.empty[2], s.body, s.busyRow, s.slashRow, s.inputRow, s.statusRow, &Node{Fixed: 1}, s.empty[3]) // a blank row under the status, as opencode
 	s.root = Box(&Node{Dir: Row, BG: a.Theme.BG}, s.sidebar, main)
 	a.Focus(s.box.Kids[1])
 	s.title(a)
@@ -146,6 +147,14 @@ func (s *session) Size(a *App, w, h int) {
 	s.box.Fixed, s.box.Grow = 0, 1
 	if empty {
 		s.box.Fixed, s.box.Grow = min(boxWidth, main-2*pad), 0
+	}
+	s.slash.update()
+	s.slashRow.Hidden = len(s.slash.cmds) == 0
+	s.slashRow.Pad = s.inputRow.Pad
+	s.slashRow.Kids[0].Hidden, s.slashRow.Kids[2].Hidden = !empty, !empty
+	s.slashBox.Fixed, s.slashBox.Grow = s.box.Fixed, s.box.Grow
+	if !s.slashRow.Hidden {
+		s.inputRow.Pad[1] = 0
 	}
 	s.statusRow.Pad = [4]int{pad + 2, 0, pad, 0} // under the input's text
 	if empty {
@@ -293,7 +302,8 @@ func (s *session) keys(a *App) {
 		"pgup / pgdn    scroll the transcript",
 		"ctrl+home/end  top / bottom of the transcript",
 		"esc esc        stop the session",
-		"ctrl+p or /    commands",
+		"/              commands, above the input",
+		"ctrl+p         commands menu",
 		"f1             this list",
 		"ctrl+c         copy the selection, else exit",
 		"ctrl+c ctrl+c  exit",

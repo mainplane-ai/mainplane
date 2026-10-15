@@ -12,24 +12,28 @@ import (
 const collapseLines = 3
 
 // elem is one grapheme of the input, a line break ("\n", width 0), or a
-// collapsed paste: its label shown, its text kept.
+// collapsed paste: its label shown, its text kept. An attached paste sends
+// on Enter instead of expanding.
 type elem struct {
-	g     string
-	w     int
-	paste string
+	g      string
+	w      int
+	paste  string
+	attach bool
 }
 
 func (e elem) space() bool { return e.g == " " || e.g == "\t" || e.g == "\n" }
 
 // Input is a multi-line text input. It wraps, grows to MaxRows and then
 // scrolls. Shift+arrows select. A paste of collapseLines or more lines is one
-// placeholder until a click or Enter on it expands it.
+// placeholder until a click or Enter on it expands it. Before sees each key
+// first and takes it by returning true.
 type Input struct {
 	Placeholder string
 	Mask        bool // show each grapheme as a dot, for a secret
 	MaxRows     int
 	OnSubmit    func(a *App, text string)
 	OnKey       func(a *App) // after each key the input takes
+	Before      func(a *App, k term.Key) bool
 
 	els    []elem
 	cur    int
@@ -149,9 +153,10 @@ func textElems(t string) []elem {
 	return es
 }
 
-// Attach puts text at the cursor collapsed under label, as a paste.
+// Attach puts text at the cursor collapsed under label, as a paste that
+// Enter sends; a click still expands it.
 func (s *Input) Attach(label, text string) {
-	s.insert(elem{g: label, w: term.Width(label), paste: text})
+	s.insert(elem{g: label, w: term.Width(label), paste: text, attach: true})
 }
 
 func (s *Input) Paste(a *App, t string) {
@@ -219,6 +224,9 @@ func (s *Input) word(dir int) int {
 }
 
 func (s *Input) Key(a *App, k term.Key) bool {
+	if s.Before != nil && s.Before(a, k) {
+		return true
+	}
 	rows := s.rows(s.view.W)
 	r, col := s.at(rows, s.cur)
 	name := k.String()
@@ -227,7 +235,7 @@ func (s *Input) Key(a *App, k term.Key) bool {
 	case "enter":
 		if sel {
 			s.insert(elem{g: "\n"})
-		} else if i := s.pasteAt(); i >= 0 {
+		} else if i := s.pasteAt(); i >= 0 && !s.els[i].attach {
 			s.expand(i)
 		} else if t := s.Text(); strings.TrimSpace(t) != "" && s.OnSubmit != nil {
 			s.Clear()

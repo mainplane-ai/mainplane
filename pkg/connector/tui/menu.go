@@ -14,6 +14,7 @@ type MenuItem struct {
 }
 
 // Menu is a list to search by typing and pick from with Enter or a click.
+// The row under the mouse is selected.
 // A menu of checks stays open and toggles with Space or Enter; any other
 // closes on a pick.
 type Menu struct {
@@ -203,6 +204,10 @@ func (m *Menu) Mouse(a *App, mo term.Mouse, r Rect) bool {
 		if row := m.top + mo.Y - r.Y - 2; mo.Y >= r.Y+2 && row < len(m.rows) {
 			m.sel = row
 			m.pick(a, row)
+		}
+	case mo.Action == term.Motion && mo.Button == term.NoButton:
+		if row := m.top + mo.Y - r.Y - 2; mo.Y >= r.Y+2 && row < len(m.rows) && m.rows[row].item >= 0 {
+			m.sel = row
 		}
 	default:
 		return false

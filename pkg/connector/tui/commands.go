@@ -5,11 +5,12 @@ import (
 	"strings"
 
 	"github.com/mainplane-ai/mainplane/pkg/connector"
+	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
-// command is a slash command: typed alone as /name or /alias, or picked
-// from the menu Ctrl+P or a lone / opens.
+// command is a slash command: typed alone as /name or /alias, picked from
+// the list a / opens above the input, or from the menu Ctrl+P opens.
 type command struct {
 	name, alias, label string
 	run                func(s *session, a *App)
@@ -40,6 +41,120 @@ func commandFor(text string) *command {
 		}
 	}
 	return nil
+}
+
+// slashRows is the most rows the list above the input shows.
+const slashRows = 10
+
+// slash is the list of commands above the input while it holds a / and the
+// start of a command's name or alias. Up and Down move, Enter, Tab or a
+// click runs, Esc closes it until the input changes.
+type slash struct {
+	s     *session
+	query string // the input that made the list
+	shut  string // the input Esc closed the list on
+	cmds  []command
+	sel   int
+	top   int
+}
+
+// update makes the list for the input: none unless it is a / and the start
+// of a command word. Names that match come before aliases that do.
+func (l *slash) update() {
+	t := l.s.input.Text()
+	if t == l.query {
+		return
+	}
+	if !strings.HasPrefix(t, "/") {
+		l.shut = ""
+	}
+	l.query, l.cmds, l.sel, l.top = t, nil, 0, 0
+	for _, e := range l.s.input.els {
+		if e.paste != "" {
+			return
+		}
+	}
+	if t == l.shut || !strings.HasPrefix(t, "/") || strings.ContainsAny(t, " \t\n") {
+		return
+	}
+	var byAlias []command
+	for _, c := range commands() {
+		switch {
+		case strings.HasPrefix(c.name, t[1:]):
+			l.cmds = append(l.cmds, c)
+		case c.alias != "" && strings.HasPrefix(c.alias, t[1:]):
+			byAlias = append(byAlias, c)
+		}
+	}
+	l.cmds = append(l.cmds, byAlias...)
+}
+
+func (l *slash) Height(int) int { return min(len(l.cmds), slashRows) }
+
+func (l *slash) run(a *App, i int) {
+	if i < 0 || i >= len(l.cmds) {
+		return
+	}
+	c := l.cmds[i]
+	l.s.input.Clear()
+	c.run(l.s, a)
+}
+
+// Key is the input's Before: it takes the keys of the list while it shows.
+func (l *slash) Key(a *App, k term.Key) bool {
+	if l.update(); len(l.cmds) == 0 {
+		return false
+	}
+	switch k.String() {
+	case "up":
+		l.sel = (l.sel + len(l.cmds) - 1) % len(l.cmds)
+	case "down":
+		l.sel = (l.sel + 1) % len(l.cmds)
+	case "enter", "tab":
+		l.run(a, l.sel)
+	case "esc":
+		l.shut, l.cmds = l.query, nil
+	default:
+		return false
+	}
+	return true
+}
+
+func (l *slash) Mouse(a *App, m term.Mouse, r Rect) bool {
+	i := l.top + m.Y - r.Y
+	switch {
+	case m.Button == term.WheelUp:
+		l.sel = max(0, l.sel-1)
+	case m.Button == term.WheelDown:
+		l.sel = min(len(l.cmds)-1, l.sel+1)
+	case m.Action == term.Motion && m.Button == term.NoButton:
+		if i < len(l.cmds) {
+			l.sel = i
+		}
+	case m.Action == term.Press && m.Button == term.Left:
+		l.run(a, i)
+	default:
+		return false
+	}
+	return true
+}
+
+func (l *slash) Draw(a *App, c *Canvas, r Rect) {
+	nameW := 0
+	for _, cmd := range commands() {
+		nameW = max(nameW, term.Width(cmd.name)+1)
+	}
+	l.top = min(max(l.top, l.sel-r.H+1), l.sel)
+	for y := 0; y < r.H && l.top+y < len(l.cmds); y++ {
+		cmd, st, desc := l.cmds[l.top+y], a.Theme.text(), a.Theme.muted()
+		if l.top+y == l.sel {
+			c.Fill(Rect{r.X, r.Y + y, r.W, 1}, a.Theme.Accent)
+			st = term.Style{FG: a.Theme.BG, BG: a.Theme.Accent}
+			desc = st
+		}
+		c.Text(r.X+1, r.Y+y, "/"+cmd.name, st)
+		c.Text(r.X+1+nameW+3, r.Y+y, cmd.label, desc)
+	}
 }
 
 // palette is the menu of every command.

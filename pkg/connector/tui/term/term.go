@@ -26,13 +26,13 @@ const (
 	enter = "\x1b[?1049h" + // alternate screen
 		"\x1b[22;0t" + // push the title, popped on exit
 		"\x1b[?25l\x1b[?7l" + // hide the cursor, no autowrap: the last column is ours
-		"\x1b[?1000h\x1b[?1002h\x1b[?1006h" + // mouse press, drag, SGR coordinates
+		"\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h" + // mouse press, drag, motion, SGR coordinates
 		"\x1b[?2004h\x1b[?1004h" // bracketed paste, focus events
 	query = "\x1b[?u" + // kitty keyboard flags
 		"\x1b]11;?\x1b\\" + // background color
 		"\x1b[c" // DA1, answered by all: the end of the replies
 	leave = "\x1b[?1004l\x1b[?2004l" +
-		"\x1b[?1006l\x1b[?1002l\x1b[?1000l" +
+		"\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l" +
 		"\x1b[0m\x1b[?7h\x1b[?25h" +
 		"\x1b[?1049l" +
 		"\x1b[23;0t"
