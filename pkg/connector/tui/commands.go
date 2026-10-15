@@ -12,19 +12,19 @@ import (
 // command is a slash command: typed alone as /name or /alias, picked from
 // the list a / opens above the input, or from the menu Ctrl+P opens.
 type command struct {
-	name, alias, label string
-	run                func(s *session, a *App)
+	name, alias, label, key string
+	run                     func(s *session, a *App)
 }
 
 // commands is a function, not a variable: the commands make sessions, whose
 // keys open the commands.
 func commands() []command {
 	return []command{
-		{"new", "clear", "New session", (*session).fresh},
-		{"sessions", "resume", "Sessions", (*session).sessions},
-		{"continue", "compact", "Continue in a new session", (*session).carryOn},
-		{"workers", "", "Workers", (*session).workers},
-		{"help", "", "Keys", (*session).keys},
+		{"new", "clear", "New session", "ctrl+n", (*session).fresh},
+		{"sessions", "resume", "Sessions", "ctrl+o", (*session).sessions},
+		{"continue", "compact", "Continue in a new session", "ctrl+k", (*session).carryOn},
+		{"workers", "", "Workers", "ctrl+e", (*session).workers},
+		{"help", "", "Commands and keys", "f1", (*session).palette},
 	}
 }
 
@@ -157,26 +157,64 @@ func (l *slash) Draw(a *App, c *Canvas, r Rect) {
 	}
 }
 
-// palette is the menu of every command.
+// palette is the menu of every key: the commands and the actions run from
+// it, the rest only list their keys.
 func (s *session) palette(a *App) {
 	m := &Menu{}
-	for _, c := range commands() {
-		run := c.run
-		m.Items = append(m.Items, MenuItem{Label: c.label, Hint: "/" + c.name, Pick: func(a *App, _ *MenuItem) { run(s, a) }})
+	add := func(section, label, key string, do func(a *App)) {
+		it := MenuItem{Label: label, Hint: key, Section: section}
+		if do != nil {
+			it.Pick = func(a *App, _ *MenuItem) { do(a) }
+		}
+		m.Items = append(m.Items, it)
 	}
+	for _, c := range commands() {
+		if c.name != "help" {
+			run := c.run
+			add("Session", c.label, c.key, func(a *App) { run(s, a) })
+		}
+	}
+	add("Session", "Previous session", "ctrl+up", func(a *App) { s.list.step(a, -1) })
+	add("Session", "Next session", "ctrl+down", func(a *App) { s.list.step(a, 1) })
+	add("Session", "Stop the session", "esc esc", func(a *App) {
+		if s.stepping() {
+			s.stop(a)
+		}
+	})
+	add("Input", "Send", "enter", nil)
+	add("Input", "New line", "shift+enter, ctrl+j", nil)
+	add("Input", "Slash commands", "/", func(a *App) {
+		s.input.Clear()
+		s.input.insert(textElems("/")...)
+	})
+	add("Input", "Select", "shift+arrows", nil)
+	add("Input", "Cut the selection", "ctrl+x", nil)
+	add("Input", "Delete the word before", "ctrl+backspace", nil)
+	add("Input", "Delete the next word", "ctrl+delete", nil)
+	add("Input", "Start or end of the line", "home, end", nil)
+	add("Transcript", "Page up", "pgup", func(a *App) { s.transcript.Scroll(-s.transcript.Page()) })
+	add("Transcript", "Page down", "pgdn", func(a *App) { s.transcript.Scroll(s.transcript.Page()) })
+	add("Transcript", "Top", "ctrl+home", func(a *App) { s.transcript.Scroll(-1 << 30) })
+	add("Transcript", "Bottom", "ctrl+end", func(a *App) { s.transcript.Scroll(1 << 30) })
+	add("Transcript", "Select and copy", "drag", nil)
+	add("App", "Commands and keys", "ctrl+p, f1", nil)
+	add("App", "Copy the selection, else exit", "ctrl+c", nil)
+	add("App", "Exit", "ctrl+c ctrl+c", func(a *App) { a.Quit() })
 	a.OpenMenu("Commands", m)
 }
 
 // switchTo leaves this session for to: its polls and posts end.
 func (s *session) switchTo(a *App, to *session) {
 	s.cancel()
-	a.Ticking(false)
+	s.list.leave()
+	s.list.cur = to
 	a.T.Progress(false)
 	a.SetScreen(to)
+	s.list.tick(a)
 }
 
 // fresh is the empty screen; the first message makes a session.
-func (s *session) fresh(a *App) { s.switchTo(a, newSession(a, s.c, "")) }
+func (s *session) fresh(a *App) { s.switchTo(a, newSession(a, s.list, "")) }
 
 // carryOn opens a blank session screen with this session's config, its
 // input holding a message to continue from this one. Sending it makes the
@@ -186,7 +224,11 @@ func (s *session) carryOn(a *App) {
 		a.Say("No session to continue yet")
 		return
 	}
-	to := newSession(a, s.c, "")
+	if s.info.Config.Model == "" {
+		a.Say("The session is still loading")
+		return
+	}
+	to := newSession(a, s.list, "")
 	cf := s.info.Config
 	to.cfg, to.started = &cf, true
 	to.input.Attach("[continue session "+s.id+"]", "You are continuing session "+s.id+". Retrieve key context from it and continue.")
@@ -200,6 +242,9 @@ func (s *session) sessions(a *App) {
 		defer cancel()
 		infos, err := s.c.Sessions(ctx, "", 200)
 		a.Post(func() {
+			if s.ctx.Err() != nil {
+				return
+			}
 			if err != nil {
 				a.SayError(err)
 				return
@@ -215,9 +260,7 @@ func (s *session) sessions(a *App) {
 					label += "  (this one)"
 				}
 				m.Items = append(m.Items, MenuItem{Label: label, Hint: string(in.Status) + " · " + stamp(in.Updated), Pick: func(a *App, _ *MenuItem) {
-					if id != s.id {
-						s.switchTo(a, newSession(a, s.c, id))
-					}
+					s.list.open(a, id)
 				}})
 			}
 			a.OpenMenu("Sessions", m)
@@ -237,6 +280,9 @@ func (s *session) workers(a *App) {
 		defer cancel()
 		listed, err := s.c.Workers(ctx)
 		a.Post(func() {
+			if s.ctx.Err() != nil {
+				return
+			}
 			if err != nil {
 				a.SayError(err)
 				return
@@ -278,8 +324,13 @@ func (s *session) workerMenu(a *App, listed []connector.Worker) {
 				ws = append(ws, w)
 			}
 		}
-		id := s.id
+		id, n := s.id, s.workerSets.Add(1)
 		a.Go(func() {
+			s.workerSet.Lock()
+			defer s.workerSet.Unlock()
+			if s.workerSets.Load() != n {
+				return // a newer toggle sends its own list
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), callTime)
 			defer cancel()
 			err := s.c.SetWorkers(ctx, id, via, ws)

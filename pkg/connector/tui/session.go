@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/connector"
@@ -40,6 +42,7 @@ const (
 // With no id it is home: the first message makes the session.
 type session struct {
 	c     connector.Client
+	list  *sessionList
 	id    string
 	info  harness.Info
 	msgs  int
@@ -75,11 +78,13 @@ type session struct {
 	stopping   bool                  // a stop was asked for and the status has not changed since
 	calls      map[string]*callBlock // by call id, to pair each result with its call
 	running    []*callBlock          // calls with no result yet
+	workerSet  sync.Mutex            // one PUT of the workers at a time
+	workerSets atomic.Int64          // the toggles so far; only the newest is sent
 }
 
-func newSession(a *App, c connector.Client, id string) *session {
+func newSession(a *App, l *sessionList, id string) *session {
 	s := &session{
-		c: c, id: id, transcript: NewScrollbox(), input: NewInput(), status: &Text{}, outbox: make(chan string, outboxSize), calls: map[string]*callBlock{},
+		c: l.c, list: l, id: id, transcript: NewScrollbox(), input: NewInput(), status: &Text{}, outbox: make(chan string, outboxSize), calls: map[string]*callBlock{},
 		meta: &Glyphs{}, busy: &Glyphs{}, usage: map[[2]string]statefile.Usage{},
 	}
 	s.transcript.Gap = func(prev, next Block) bool {
@@ -88,6 +93,9 @@ func newSession(a *App, c connector.Client, id string) *session {
 		return !p || !n
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+	if l.cur == nil {
+		l.cur = s
+	}
 	s.input.Placeholder, s.input.OnSubmit = "Ask anything", s.send
 	s.slash = &slash{s: s}
 	s.input.Before = s.slash.Key
@@ -99,7 +107,7 @@ func newSession(a *App, c connector.Client, id string) *session {
 	s.empty = []*Node{{Grow: 1}, {View: Wordmark{}}, {Fixed: 1}, {Grow: 1}}
 	s.statusRow = Box(&Node{Dir: Row, Min: 1, Max: 3}, &Node{Grow: 1, View: s.status}, &Node{View: s.meta})
 	s.busyRow = &Node{Fixed: 2, Pad: [4]int{0, 1, 0, 0}, View: s.busy}
-	s.sidebar = &Node{Fixed: sidebarWidth, BG: a.Theme.Panel}
+	s.sidebar = &Node{Fixed: sidebarWidth, BG: a.Theme.Panel, Pad: [4]int{0, 1, 0, 1}, View: l}
 	main := Box(&Node{Dir: Col, Grow: 1},
 		s.empty[0], s.empty[1], s.empty[2], s.body, s.busyRow, s.slashRow, s.inputRow, s.statusRow, &Node{Fixed: 1}, s.empty[3]) // a blank row under the status, as opencode
 	s.root = Box(&Node{Dir: Row, BG: a.Theme.BG}, s.sidebar, main)
@@ -280,34 +288,22 @@ func (s *session) Key(a *App, k term.Key) bool {
 			s.armed = true
 			time.AfterFunc(escTwice, func() { a.Post(func() { s.armed = false }) })
 		}
-	case "ctrl+p":
+	case "ctrl+p", "f1":
 		s.palette(a)
-	case "f1":
-		s.keys(a)
+	case "ctrl+up":
+		s.list.step(a, -1)
+	case "ctrl+down":
+		s.list.step(a, 1)
 	default:
+		for _, c := range commands() {
+			if c.key == k.String() {
+				c.run(s, a)
+				return true
+			}
+		}
 		return false
 	}
 	return true
-}
-
-// keys is the help dialog: every key of the session screen.
-func (s *session) keys(a *App) {
-	a.Dialog("Keys", &Node{View: &List{Items: []string{
-		"enter          send",
-		"shift+enter    new line (ctrl+j)",
-		"shift+arrows   select in the input",
-		"ctrl+x         cut the selection",
-		"ctrl+delete    delete the next word",
-		"home / end     start / end of the line",
-		"pgup / pgdn    scroll the transcript",
-		"ctrl+home/end  top / bottom of the transcript",
-		"esc esc        stop the session",
-		"/              commands, above the input",
-		"ctrl+p         commands menu",
-		"f1             this list",
-		"ctrl+c         copy the selection, else exit",
-		"ctrl+c ctrl+c  exit",
-	}}})
 }
 
 // tickSecond is how many ticks make a second, for the time a call has run.
@@ -382,7 +378,7 @@ func (s *session) add(a *App, recs []statefile.Record, info harness.Info) {
 	s.info = info
 	if s.stepping() != was {
 		a.T.Progress(s.stepping())
-		a.Ticking(s.stepping())
+		s.list.tick(a)
 		for _, b := range s.running {
 			s.transcript.Changed(b)
 		}

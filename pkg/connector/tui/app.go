@@ -51,7 +51,9 @@ type App struct {
 	lastAt  time.Time
 	prevAt  time.Time
 	quit    bool
-	Update  string // the release to update to, when the loop ends for it
+	// MouseX and MouseY are where the mouse was last reported, for hover.
+	MouseX, MouseY int
+	Update         string // the release to update to, when the loop ends for it
 	// Status is the line under the input: what the last action did, until the
 	// next key or click replaces it.
 	Status *Text
@@ -235,6 +237,7 @@ func (a *App) top() *Layer {
 // mouse goes to the node holding the capture, else to the node under it on
 // the top layer that takes it, and up its parents until one handles it.
 func (a *App) mouse(m term.Mouse) {
+	a.MouseX, a.MouseY = m.X, m.Y
 	if m.Action == term.Press && m.Button == term.Left {
 		a.Status.S = ""
 	}

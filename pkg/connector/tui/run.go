@@ -21,7 +21,7 @@ func Run(c *connector.Client, id string) (update string, err error) {
 	if c == nil {
 		a.SetScreen(newLogin(a))
 	} else {
-		a.SetScreen(newSession(a, *c, id))
+		a.SetScreen(newSession(a, newSessionList(a, *c), id))
 	}
 	a.Run()
 	return a.Update, nil

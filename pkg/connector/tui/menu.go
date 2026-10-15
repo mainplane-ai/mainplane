@@ -59,12 +59,14 @@ func (m *Menu) filter() {
 	section := ""
 	for _, i := range append(first, rest...) {
 		it := m.Items[i]
-		if it.Section != section || len(m.rows) == 0 && it.Section != "" {
+		if it.Section != section {
 			section = it.Section
 			if len(m.rows) > 0 {
 				m.rows = append(m.rows, mrow{item: -1})
 			}
-			m.rows = append(m.rows, mrow{title: section, item: -1})
+			if section != "" {
+				m.rows = append(m.rows, mrow{title: section, item: -1})
+			}
 		}
 		if m.sel < 0 {
 			m.sel = len(m.rows)
@@ -143,6 +145,22 @@ func (m *Menu) step(n int) {
 	}
 }
 
+// page moves the selection by n rows, to the nearest item on the way.
+func (m *Menu) page(n int) {
+	if len(m.rows) == 0 {
+		return
+	}
+	i := min(max(0, m.sel+n), len(m.rows)-1)
+	for d := 0; d < len(m.rows); d++ {
+		for _, j := range []int{i - d, i + d} {
+			if j >= 0 && j < len(m.rows) && m.rows[j].item >= 0 {
+				m.sel = j
+				return
+			}
+		}
+	}
+}
+
 func (m *Menu) pick(a *App, row int) {
 	if row < 0 || row >= len(m.rows) || m.rows[row].item < 0 {
 		return
@@ -165,9 +183,9 @@ func (m *Menu) Key(a *App, k term.Key) bool {
 	case "down":
 		m.step(1)
 	case "pgup":
-		m.step(-m.h)
+		m.page(-m.h)
 	case "pgdn":
-		m.step(m.h)
+		m.page(m.h)
 	case "enter":
 		m.pick(a, m.sel)
 	case "space":

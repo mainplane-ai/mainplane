@@ -101,7 +101,7 @@ func (s *login) submit(a *App, key string) {
 				a.Update = v
 				a.Quit()
 			default:
-				a.SetScreen(newSession(a, c, ""))
+				a.SetScreen(newSession(a, newSessionList(a, c), ""))
 			}
 		})
 	})
