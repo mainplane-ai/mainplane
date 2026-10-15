@@ -9,15 +9,47 @@ import (
 // wheelRows is how far one wheel notch scrolls.
 const wheelRows = 3
 
-// Scrollbox is a column of wrapped text that scrolls, with a scrollbar and
-// mouse selection. It sticks to the bottom until scrolled up.
+// Block is one item of a Scrollbox: rows laid out for a width. A block that
+// is also a Clicker takes clicks.
+type Block interface {
+	Rows(a *App, w int) []Line
+}
+
+// Clicker is a block that does something when clicked, then lays out anew.
+type Clicker interface{ Click(a *App) }
+
+// Line is one row of styled glyphs. BG fills the row from column BGFrom to the
+// right edge. Cont says the row continues the line above, so a copy joins
+// them without a line break.
+type Line struct {
+	Gs     []Glyph
+	BG     term.Color
+	BGFrom int
+	Cont   bool
+}
+
+// Glyph is one grapheme and its style. A Deco glyph is drawn but never
+// selected or copied. A Spin glyph is drawn as the spinner's frame.
+type Glyph struct {
+	G    string
+	W    int
+	St   term.Style
+	Deco bool
+	Spin bool
+}
+
+// Scrollbox is a column of blocks that scrolls, with a scrollbar, mouse
+// selection and clicks. It sticks to the bottom until scrolled up. A blank
+// row parts two blocks, unless Gap says not to.
 type Scrollbox struct {
 	Bar   bool // show the scrollbar: 1 column and 1 padding on the right
-	Style term.Style
+	Frame int  // the spinner's frame
+	Gap   func(prev, next Block) bool
 
-	lines  []string
+	items  []*item
 	rows   []srow
-	width  int // rows are wrapped for this width; 0 is not yet
+	width  int // rows are laid out for this width; 0 is not yet
+	dirty  bool
 	top    int
 	sticky bool
 	view   Rect // the text, as last drawn
@@ -29,37 +61,58 @@ type Scrollbox struct {
 	}
 }
 
+type item struct {
+	b     Block
+	rows  []Line
+	stale bool
+}
+
+// srow is a row of the whole box and the item it belongs to.
 type srow struct {
-	line int
-	gs   []glyph
-	w    int
+	Line
+	it *item
 }
 
 type pos struct{ row, col int }
 
 func NewScrollbox() *Scrollbox { return &Scrollbox{sticky: true} }
 
-// Append adds text as lines; a final line break ends the last line.
-func (s *Scrollbox) Append(text string) {
-	from := len(s.lines)
-	s.lines = append(s.lines, strings.Split(strings.TrimSuffix(text, "\n"), "\n")...)
-	if s.width > 0 {
-		s.wrapFrom(from)
+func (s *Scrollbox) Append(b Block) {
+	s.items = append(s.items, &item{b: b, stale: true})
+	s.dirty = true
+}
+
+// Changed lays b out again at the next draw.
+func (s *Scrollbox) Changed(b Block) {
+	for _, it := range s.items {
+		if it.b == b {
+			it.stale, s.dirty = true, true
+		}
 	}
 }
 
-func (s *Scrollbox) Empty() bool { return len(s.lines) == 0 }
+func (s *Scrollbox) Empty() bool { return len(s.items) == 0 }
 
-func (s *Scrollbox) wrapFrom(from int) {
-	for i, l := range s.lines[from:] {
-		gs := glyphs(l)
-		for _, r := range wrapLine(gs, s.width) {
-			w := 0
-			for _, g := range gs[r[0]:r[1]] {
-				w += g.w
-			}
-			s.rows = append(s.rows, srow{from + i, gs[r[0]:r[1]], w})
+func (s *Scrollbox) layout(a *App) {
+	if !s.dirty {
+		return
+	}
+	s.rows, s.dirty = s.rows[:0], false
+	var prev Block
+	for _, it := range s.items {
+		if it.stale {
+			it.rows, it.stale = it.b.Rows(a, s.width), false
 		}
+		if len(it.rows) == 0 {
+			continue
+		}
+		if prev != nil && (s.Gap == nil || s.Gap(prev, it.b)) {
+			s.rows = append(s.rows, srow{})
+		}
+		for _, r := range it.rows {
+			s.rows = append(s.rows, srow{r, it})
+		}
+		prev = it.b
 	}
 }
 
@@ -79,9 +132,12 @@ func (s *Scrollbox) Draw(a *App, c *Canvas, r Rect) {
 		tw = r.W - 2
 	}
 	if tw != s.width {
-		s.width, s.rows, s.sel.on = max(1, tw), nil, false
-		s.wrapFrom(0)
+		s.width, s.sel.on, s.dirty = max(1, tw), false, true
+		for _, it := range s.items {
+			it.stale = true
+		}
 	}
+	s.layout(a)
 	s.view, s.barX = Rect{r.X, r.Y, tw, r.H}, r.X+r.W-1
 	if s.sticky {
 		s.top = s.maxTop()
@@ -90,14 +146,21 @@ func (s *Scrollbox) Draw(a *App, c *Canvas, r Rect) {
 	a1, b1 := s.order()
 	for y := 0; y < r.H && s.top+y < len(s.rows); y++ {
 		ri := s.top + y
+		row := s.rows[ri]
+		if row.BG != 0 {
+			c.Fill(Rect{r.X + row.BGFrom, r.Y + y, tw - row.BGFrom, 1}, row.BG)
+		}
 		x := r.X
-		for _, g := range s.rows[ri].gs {
-			st := s.Style
-			if s.sel.on && s.picked(ri, x-r.X, g.w, a1, b1) {
+		for _, g := range row.Gs {
+			st, gs := g.St, g.G
+			if g.Spin {
+				gs = spinner[s.Frame%len(spinner)]
+			}
+			if s.sel.on && !g.Deco && s.picked(ri, x-r.X, g.W, a1, b1) {
 				st.BG = a.Theme.Selection
 			}
-			c.Set(x, r.Y+y, g.g, g.w, st)
-			x += g.w
+			c.Set(x, r.Y+y, gs, g.W, st)
+			x += g.W
 		}
 	}
 	if s.Bar && r.W > 2 && len(s.rows) > r.H {
@@ -165,8 +228,12 @@ func (s *Scrollbox) Mouse(a *App, m term.Mouse, r Rect) bool {
 			a.Select(s)
 		}
 	case m.Action == term.Release:
-		if !s.onBar && s.sel.on {
+		switch {
+		case s.onBar:
+		case s.sel.on:
 			a.Copy(s.Selected())
+		case s.view.Has(m.X, m.Y) && s.sel.a.row < len(s.rows):
+			s.click(a, s.rows[s.sel.a.row].it)
 		}
 		s.onBar = false
 	default:
@@ -175,12 +242,36 @@ func (s *Scrollbox) Mouse(a *App, m term.Mouse, r Rect) bool {
 	return true
 }
 
+// click hands a click to its block. The row clicked stays where it was on
+// the screen.
+func (s *Scrollbox) click(a *App, it *item) {
+	if it == nil {
+		return
+	}
+	c, ok := it.b.(Clicker)
+	if !ok {
+		return
+	}
+	first := 0
+	for first < len(s.rows) && s.rows[first].it != it {
+		first++
+	}
+	c.Click(a)
+	it.stale, s.dirty = true, true
+	s.layout(a)
+	if first < s.top {
+		s.top = first
+	}
+	s.top = min(s.top, s.maxTop())
+	s.sticky = s.top == s.maxTop()
+}
+
 func (s *Scrollbox) barTo(y int) {
 	s.Scroll((y-s.view.Y)*s.maxTop()/max(1, s.view.H-1) - s.top)
 }
 
-// Selected is the selected text. A row break inside a line is not a line
-// break.
+// Selected is the selected text, without decoration. A row that continues
+// the line above is joined to it.
 func (s *Scrollbox) Selected() string {
 	if !s.sel.on {
 		return ""
@@ -188,15 +279,15 @@ func (s *Scrollbox) Selected() string {
 	a, b := s.order()
 	var out strings.Builder
 	for ri := a.row; ri <= b.row && ri < len(s.rows); ri++ {
-		x := 0
-		for _, g := range s.rows[ri].gs {
-			if s.picked(ri, x, g.w, a, b) {
-				out.WriteString(g.g)
-			}
-			x += g.w
-		}
-		if ri < b.row && ri+1 < len(s.rows) && s.rows[ri+1].line != s.rows[ri].line {
+		if ri > a.row && !s.rows[ri].Cont {
 			out.WriteByte('\n')
+		}
+		x := 0
+		for _, g := range s.rows[ri].Gs {
+			if !g.Deco && !g.Spin && s.picked(ri, x, g.W, a, b) {
+				out.WriteString(g.G)
+			}
+			x += g.W
 		}
 	}
 	return out.String()

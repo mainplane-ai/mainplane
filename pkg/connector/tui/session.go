@@ -2,10 +2,7 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"mime"
 	"strings"
 	"time"
 
@@ -56,16 +53,22 @@ type session struct {
 	box        *Node
 	status     *Text // the app's status, else what the session is busy with
 	statusRow  *Node
-	started    bool        // a message was sent from home: show the transcript
-	creating   bool        // the session is being made
-	pending    []string    // sent while the session is being made
-	outbox     chan string // sent, to be posted in order
-	stopping   bool        // a stop was asked for and the status has not changed since
+	started    bool                  // a message was sent from home: show the transcript
+	creating   bool                  // the session is being made
+	pending    []string              // sent while the session is being made
+	outbox     chan string           // sent, to be posted in order
+	stopping   bool                  // a stop was asked for and the status has not changed since
+	calls      map[string]*callBlock // by call id, to pair each result with its call
+	running    []*callBlock          // calls with no result yet
 }
 
 func newSession(a *App, c connector.Client, id string) *session {
-	s := &session{c: c, id: id, transcript: NewScrollbox(), input: NewInput(), status: &Text{}, outbox: make(chan string, outboxSize)}
-	s.transcript.Style = a.Theme.text()
+	s := &session{c: c, id: id, transcript: NewScrollbox(), input: NewInput(), status: &Text{}, outbox: make(chan string, outboxSize), calls: map[string]*callBlock{}}
+	s.transcript.Gap = func(prev, next Block) bool {
+		_, p := prev.(*callBlock)
+		_, n := next.(*callBlock)
+		return !p || !n
+	}
 	s.input.Placeholder, s.input.OnSubmit = "Ask anything", s.send
 	s.box = inputBox(a, s.input)
 	s.inputRow = Box(&Node{Dir: Row}, &Node{Grow: 1}, s.box, &Node{Grow: 1})
@@ -123,6 +126,8 @@ func (s *session) Size(a *App, w, h int) {
 			s.status.S = "Making the session..."
 		case s.stopping:
 			s.status.S = "Stopping..."
+		case s.stepping():
+			s.status.S = spinner[s.frame%len(spinner)] + " Working"
 		}
 	}
 	s.status.Center = empty
@@ -181,8 +186,17 @@ func (s *session) keys(a *App) {
 	}}})
 }
 
+// tickSecond is how many ticks make a second, for the time a call has run.
+const tickSecond = int(time.Second / tickRate)
+
 func (s *session) Tick(a *App) {
 	s.frame++
+	s.transcript.Frame = s.frame
+	if s.frame%tickSecond == 0 {
+		for _, b := range s.running {
+			s.transcript.Changed(b)
+		}
+	}
 	s.title(a)
 }
 
@@ -232,10 +246,7 @@ func (s *session) follow(a *App) {
 
 func (s *session) add(a *App, recs []statefile.Record, info harness.Info) {
 	for _, r := range recs {
-		s.transcript.Append(raw(r))
-		if r.Kind == statefile.Message {
-			s.msgs++
-		}
+		s.show(r)
 	}
 	was := s.stepping()
 	if info.Status != s.info.Status {
@@ -244,21 +255,46 @@ func (s *session) add(a *App, recs []statefile.Record, info harness.Info) {
 	s.info = info
 	if s.stepping() != was {
 		a.T.Progress(s.stepping())
-		a.Ticking(s.stepping() && !a.T.Caps.Progress)
+		a.Ticking(s.stepping())
+		for _, b := range s.running {
+			s.transcript.Changed(b)
+		}
 	}
 	s.title(a)
 }
 
-// raw is a record as the file holds it: the header line, then the body. A
-// body that is not text is its size and type.
-func raw(r statefile.Record) string {
-	h, _ := json.Marshal(r.Header) // a decoded header marshals
-	body := string(r.Body)
-	mt, _, _ := mime.ParseMediaType(r.Type)
-	if !strings.HasPrefix(mt, "text/") && mt != "application/json" && r.Type != "" {
-		body = fmt.Sprintf("<%d bytes %s>", len(r.Body), r.Type)
+// show puts a record in the transcript, or a result in its call's block.
+func (s *session) show(r statefile.Record) {
+	switch r.Kind {
+	case statefile.Start, statefile.Config, statefile.System, statefile.Name, statefile.Thinking, statefile.Step:
+	case statefile.Message:
+		s.msgs++
+		s.transcript.Append(&msgBlock{r})
+	case statefile.Text:
+		s.transcript.Append(&textBlock{string(r.Body)})
+	case statefile.Error:
+		s.transcript.Append(&errBlock{string(r.Body)})
+	case statefile.Call:
+		b := newCall(s, r)
+		s.calls[r.ID] = b
+		s.running = append(s.running, b)
+		s.transcript.Append(b)
+	case statefile.Result:
+		b, ok := s.calls[r.For]
+		if !ok {
+			s.transcript.Append(&callBlock{s: s, res: &r})
+			return
+		}
+		b.res = &r
+		s.transcript.Changed(b)
+		delete(s.calls, r.For)
+		for i, x := range s.running {
+			if x == b {
+				s.running = append(s.running[:i], s.running[i+1:]...)
+				break
+			}
+		}
 	}
-	return string(h) + "\n" + strings.ReplaceAll(body, "\r\n", "\n")
 }
 
 // send posts the text. From home the screen turns to the session at once;
