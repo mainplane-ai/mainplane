@@ -249,7 +249,7 @@ func (s *Scrollbox) Mouse(a *App, m term.Mouse, r Rect) bool {
 		case s.onRow && s.view.Has(m.X, m.Y):
 			s.click(a, s.rows[s.sel.a.row].it)
 		}
-		s.onBar = false
+		s.onBar, s.onRow = false, false
 	default:
 		return false
 	}
