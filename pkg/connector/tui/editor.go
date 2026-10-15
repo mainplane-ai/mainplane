@@ -29,6 +29,7 @@ type Input struct {
 	Mask        bool // show each grapheme as a dot, for a secret
 	MaxRows     int
 	OnSubmit    func(a *App, text string)
+	OnKey       func(a *App) // after each key the input takes
 
 	els    []elem
 	cur    int
@@ -146,6 +147,11 @@ func textElems(t string) []elem {
 		}
 	}
 	return es
+}
+
+// Attach puts text at the cursor collapsed under label, as a paste.
+func (s *Input) Attach(label, text string) {
+	s.insert(elem{g: label, w: term.Width(label), paste: text})
 }
 
 func (s *Input) Paste(a *App, t string) {
@@ -275,6 +281,9 @@ func (s *Input) Key(a *App, k term.Key) bool {
 			return false
 		}
 		s.insert(textElems(t)...)
+	}
+	if s.OnKey != nil {
+		s.OnKey(a)
 	}
 	return true
 }

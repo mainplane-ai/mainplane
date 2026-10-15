@@ -62,13 +62,16 @@ type session struct {
 	turn       time.Time                     // the last message, from which the work is timed
 	usage      map[[2]string]statefile.Usage // by provider and model, from the steps
 	prices     prices                        // nil until loaded
-	started    bool                          // a message was sent from home: show the transcript
-	creating   bool                          // the session is being made
-	pending    []string                      // sent while the session is being made
-	outbox     chan string                   // sent, to be posted in order
-	stopping   bool                          // a stop was asked for and the status has not changed since
-	calls      map[string]*callBlock         // by call id, to pair each result with its call
-	running    []*callBlock                  // calls with no result yet
+	cfg        *statefile.Conf               // the config to make the session with, else the newest session's
+	ctx        context.Context               // ends when the screen leaves the session
+	cancel     context.CancelFunc
+	started    bool                  // a message was sent from home: show the transcript
+	creating   bool                  // the session is being made
+	pending    []string              // sent while the session is being made
+	outbox     chan string           // sent, to be posted in order
+	stopping   bool                  // a stop was asked for and the status has not changed since
+	calls      map[string]*callBlock // by call id, to pair each result with its call
+	running    []*callBlock          // calls with no result yet
 }
 
 func newSession(a *App, c connector.Client, id string) *session {
@@ -81,7 +84,14 @@ func newSession(a *App, c connector.Client, id string) *session {
 		_, n := next.(*callBlock)
 		return !p || !n
 	}
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.input.Placeholder, s.input.OnSubmit = "Ask anything", s.send
+	s.input.OnKey = func(a *App) {
+		if s.input.Text() == "/" {
+			s.input.Clear()
+			s.palette(a)
+		}
+	}
 	s.box = inputBox(a, s.input)
 	s.inputRow = Box(&Node{Dir: Row}, &Node{Grow: 1}, s.box, &Node{Grow: 1})
 	s.body = &Node{Grow: 1, View: s.transcript}
@@ -144,6 +154,9 @@ func (s *session) Size(a *App, w, h int) {
 	*s.status = *a.Status
 	if s.status.S == "" && !empty {
 		s.status.S, s.status.Style = s.info.Config.Model, a.Theme.muted()
+		if s.status.S == "" && s.cfg != nil {
+			s.status.S = s.cfg.Model
+		}
 	}
 	s.status.Center = empty
 	s.meta.Gs = nil
@@ -259,7 +272,7 @@ func (s *session) Key(a *App, k term.Key) bool {
 			time.AfterFunc(escTwice, func() { a.Post(func() { s.armed = false }) })
 		}
 	case "ctrl+p":
-		s.keys(a)
+		s.palette(a)
 	case "f1":
 		s.keys(a)
 	default:
@@ -280,7 +293,8 @@ func (s *session) keys(a *App) {
 		"pgup / pgdn    scroll the transcript",
 		"ctrl+home/end  top / bottom of the transcript",
 		"esc esc        stop the session",
-		"ctrl+p / f1    this list",
+		"ctrl+p or /    commands",
+		"f1             this list",
 		"ctrl+c         copy the selection, else exit",
 		"ctrl+c ctrl+c  exit",
 	}}})
@@ -322,14 +336,17 @@ func (s *session) follow(a *App) {
 	id := s.id
 	a.Go(func() {
 		after, wait := 0, ""
-		for {
-			ctx, cancel := context.WithTimeout(context.Background(), pollWait+callTime)
+		for s.ctx.Err() == nil {
+			ctx, cancel := context.WithTimeout(s.ctx, pollWait+callTime)
 			recs, err := s.c.Records(ctx, id, after, wait)
 			var info harness.Info
 			if err == nil {
 				info, err = s.c.Info(ctx, id)
 			}
 			cancel()
+			if s.ctx.Err() != nil {
+				return
+			}
 			if err != nil {
 				a.Post(func() { a.SayError(err) })
 				time.Sleep(retryIn)
@@ -408,6 +425,10 @@ func (s *session) show(r statefile.Record) {
 // send posts the text. From home the screen turns to the session at once;
 // the session is made in the background and the text posted when it is.
 func (s *session) send(a *App, text string) {
+	if c := commandFor(text); c != nil {
+		c.run(s, a)
+		return
+	}
 	if s.id != "" {
 		s.outbox <- text
 		return
@@ -424,7 +445,13 @@ func (s *session) send(a *App, text string) {
 func (s *session) postAll(a *App) {
 	id := s.id
 	a.Go(func() {
-		for text := range s.outbox {
+		for {
+			var text string
+			select {
+			case <-s.ctx.Done():
+				return
+			case text = <-s.outbox:
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), callTime)
 			_, err := s.c.Post(ctx, id, via, text, nil)
 			cancel()
@@ -474,14 +501,17 @@ func (s *session) create(a *App) {
 func (s *session) open() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), callTime)
 	defer cancel()
-	infos, err := s.c.Sessions(ctx, "", 1)
-	if err != nil {
-		return "", err
+	cf := s.cfg
+	if cf == nil {
+		infos, err := s.c.Sessions(ctx, "", 1)
+		if err != nil {
+			return "", err
+		}
+		if len(infos) == 0 {
+			return "", errors.New("no session to take the config from: make one with mainplane new")
+		}
+		cf = &infos[0].Config
 	}
-	if len(infos) == 0 {
-		return "", errors.New("no session to take the config from: make one with mainplane new")
-	}
-	cf := infos[0].Config
 	return s.c.Create(ctx, harness.Create{Model: cf.Model, ContextLimit: cf.ContextLimit, Workers: cf.Workers, Input: cf.Input, Params: cf.Params}, via)
 }
 
