@@ -116,7 +116,9 @@ func logIn(token string) {
 // app opens the TUI, on login when there is none, and on session id when it
 // is given. When this binary is not the harness's release it becomes it
 // first, in the plain terminal where sudo or UAC can ask, then runs again.
+// It runs as the child of Supervise, which outlives a crash or a hang.
 func app(id string) {
+	tui.Supervise()
 	ctx, cancel := context.WithTimeout(context.Background(), startTime)
 	defer cancel()
 	var cp *connector.Client

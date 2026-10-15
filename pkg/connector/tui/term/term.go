@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -66,6 +68,10 @@ type Terminal struct {
 	sig     chan os.Signal
 
 	replies chan Event // replies to the startup queries, in order
+
+	beat   atomic.Uint64 // counts the app loop's turns, for hung
+	ctrlC  int           // Ctrl+C presses since the loop last turned
+	ctrlAt uint64        // the beat at the first of them
 }
 
 // Open takes the terminal: raw mode, alternate screen, mouse, paste and focus
@@ -256,9 +262,67 @@ func (t *Terminal) emit(e Event) {
 		case t.replies <- e:
 		default:
 		}
+	case Mouse:
+		select { // motion floods a loop that is behind; drop it there
+		case t.Events <- e:
+		default:
+		}
 	default:
+		if k, ok := e.(Key); ok && k.String() == "ctrl+c" {
+			t.hung()
+		}
 		t.send(e)
 	}
+}
+
+// Beat says the app loop turned. The loop calls it once a turn.
+func (t *Terminal) Beat() { t.beat.Add(1) }
+
+// hung counts a Ctrl+C. Ctrl+C Ctrl+C exits, but only through the loop. Three
+// presses while the loop has not turned mean it is stuck: every goroutine's
+// stack goes to stderr and the process exits 2, as a Go crash does, for the
+// parent to restore the terminal and report it. No Close: the stuck loop may
+// hold its lock.
+func (t *Terminal) hung() {
+	if b := t.beat.Load(); t.ctrlC == 0 || b != t.ctrlAt {
+		t.ctrlC, t.ctrlAt = 0, b
+	}
+	if t.ctrlC++; t.ctrlC < 3 {
+		return
+	}
+	buf := make([]byte, 1<<20)
+	buf = buf[:runtime.Stack(buf, true)]
+	fmt.Fprintf(os.Stderr, "hang: the TUI loop did not answer Ctrl+C three times\n\n%s", buf)
+	os.Exit(2)
+}
+
+// Guard saves the terminal's modes for a parent whose child takes the
+// terminal. The restore it returns gives the terminal back when the child
+// died without doing so: a fatal error, a kill, or a hang.
+func Guard() (restore func(), err error) {
+	in, out := os.Stdin, os.Stdout
+	if !term.IsTerminal(int(in.Fd())) || !term.IsTerminal(int(out.Fd())) {
+		return nil, errors.New("not a terminal")
+	}
+	st, err := term.GetState(int(in.Fd()))
+	if err != nil {
+		return nil, err
+	}
+	plat, err := save(in, out)
+	if err != nil {
+		return nil, err
+	}
+	return func() {
+		if _, err := setup(in, out); err == nil { // VT output, for the sequences
+			s := kittyPop + leave
+			if progress() {
+				s = "\x1b]9;4;0\x07" + s
+			}
+			_, _ = out.WriteString(s)
+		}
+		plat()
+		_ = term.Restore(int(in.Fd()), st)
+	}, nil
 }
 
 // send hands an event to the app, unless the terminal closed.

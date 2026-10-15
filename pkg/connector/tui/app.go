@@ -107,6 +107,7 @@ func (a *App) Quit() { a.quit = true }
 // Run loops until Quit. Events that arrive together make one frame.
 func (a *App) Run() {
 	for !a.quit {
+		a.T.Beat()
 		a.draw()
 		var tick <-chan time.Time
 		if a.ticker != nil {
