@@ -30,6 +30,10 @@ const childEnv = "MAINPLANE_TUI_CHILD"
 // Terminal.hung writes in the same shape.
 var crashed = regexp.MustCompile(`(?m)^(panic|fatal error|hang): `)
 
+// released is the line each child writes first to stderr. After an update the
+// TUI that crashes is a newer release than the parent; the last line names it.
+var released = regexp.MustCompile(`(?m)^mainplane-tui-version: (.*)\n`)
+
 // Supervise runs this binary again with the same arguments as the TUI, and
 // waits. Only a parent survives every way the TUI can die, a fatal error and
 // a hang included: when the child crashes, the parent restores the terminal,
@@ -38,6 +42,7 @@ var crashed = regexp.MustCompile(`(?m)^(panic|fatal error|hang): `)
 func Supervise() {
 	if os.Getenv(childEnv) != "" {
 		debug.SetTraceback("all") // a crash shows every goroutine, the loop's too
+		fmt.Fprintf(os.Stderr, "mainplane-tui-version: %s\n", version.V)
 		return
 	}
 	restore, err := term.Guard()
@@ -52,32 +57,36 @@ func Supervise() {
 	cmd := exec.Command(exe, os.Args[1:]...)
 	cmd.Env = append(os.Environ(), childEnv+"=1")
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, &stderr
-	signal.Notify(make(chan os.Signal, 1), os.Interrupt) // the child gets Ctrl+C too, and decides
-	if err := cmd.Run(); cmd.ProcessState == nil {
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt) // the child gets Ctrl+C too, and decides
+	err = cmd.Run()
+	signal.Stop(sig)
+	if cmd.ProcessState == nil {
 		log.Fatal(err)
 	}
-	code, out := cmd.ProcessState.ExitCode(), stderr.String()
-	i := crashed.FindStringIndex(out)
-	if code == -1 || code == 2 && i != nil { // killed, or crashed
+	code, out, v := cmd.ProcessState.ExitCode(), stderr.String(), version.V
+	if m := released.FindAllStringSubmatch(out, -1); m != nil {
+		v = m[len(m)-1][1]
+	}
+	out = released.ReplaceAllString(out, "")
+	if code != 0 && code != 1 { // 0 and 1 are the child's own exits, after it gave the terminal back
 		restore()
 	}
+	i := crashed.FindStringIndex(out)
 	if code != 2 || i == nil {
 		fmt.Fprint(os.Stderr, out)
-		if code == -1 { // killed
-			code = 1
-		}
 		os.Exit(code)
 	}
 	fmt.Fprint(os.Stderr, out[:i[0]])
-	offer(crashReport(out[i[0]:]))
+	offer(v, crashReport(v, out[i[0]:]))
 	os.Exit(2)
 }
 
 // crashReport is what a crash report holds: the release, the platform, the
 // terminal, and the trace. Nothing of the session.
-func crashReport(trace string) string {
+func crashReport(v, trace string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Mainplane TUI crash\nversion: %s\nos: %s/%s\n", version.V, runtime.GOOS, runtime.GOARCH)
+	fmt.Fprintf(&b, "Mainplane TUI crash\nversion: %s\nos: %s/%s\n", v, runtime.GOOS, runtime.GOARCH)
 	if w, h, err := xterm.GetSize(int(os.Stdout.Fd())); err == nil {
 		fmt.Fprintf(&b, "size: %dx%d\n", w, h)
 	}
@@ -97,7 +106,7 @@ func crashReport(trace string) string {
 
 // offer saves the report, shows its start, and sends it when the user says
 // yes.
-func offer(r string) {
+func offer(v, r string) {
 	lines := strings.SplitAfter(r, "\n")
 	fmt.Fprint(os.Stderr, strings.Join(lines[:min(len(lines), 30)], ""))
 	path, err := saveCrash(r)
@@ -107,11 +116,12 @@ func offer(r string) {
 		fmt.Fprintf(os.Stderr, "\nThe Mainplane TUI crashed. The whole report is in %s\n", path)
 	}
 	fmt.Fprint(os.Stderr, "Send it to bugs.mainplane.ai? It holds the version, OS, terminal and stack trace, nothing of your sessions. [Y/n] ")
-	a, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-	if a = strings.ToLower(strings.TrimSpace(a)); a != "" && a != "y" && a != "yes" {
+	a, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if a = strings.ToLower(strings.TrimSpace(a)); err != nil || a != "" && a != "y" && a != "yes" {
+		fmt.Fprintln(os.Stderr)
 		return
 	}
-	id, err := sendCrash(r)
+	id, err := sendCrash(v, r)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Sending failed: %v\n", err)
 		return
@@ -128,19 +138,19 @@ func saveCrash(r string) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	path := filepath.Join(dir, time.Now().UTC().Format("2006-01-02T150405Z")+".txt")
+	path := filepath.Join(dir, fmt.Sprintf("%s-%d.txt", time.Now().UTC().Format("2006-01-02T150405Z"), os.Getpid()))
 	return path, os.WriteFile(path, []byte(r), 0o600)
 }
 
 // sendCrash posts the report as plain text with its own content type, so
 // triage tells crashes from bug reports. The endpoint keeps 256 KB.
-func sendCrash(r string) (int, error) {
+func sendCrash(v, r string) (int, error) {
 	req, err := http.NewRequest("POST", "https://bugs.mainplane.ai", strings.NewReader(r[:min(len(r), 256<<10)]))
 	if err != nil {
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "text/x-mainplane-crash")
-	req.Header.Set("User-Agent", fmt.Sprintf("mainplane/%s (%s/%s)", version.V, runtime.GOOS, runtime.GOARCH))
+	req.Header.Set("User-Agent", fmt.Sprintf("mainplane/%s (%s/%s)", v, runtime.GOOS, runtime.GOARCH))
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	if err != nil {
 		return 0, err
@@ -149,7 +159,7 @@ func sendCrash(r string) (int, error) {
 	if resp.StatusCode/100 != 2 {
 		return 0, fmt.Errorf("bugs.mainplane.ai: %s", resp.Status)
 	}
-	var v struct{ ID int }
-	err = json.NewDecoder(resp.Body).Decode(&v)
-	return v.ID, err
+	var id struct{ ID int }
+	err = json.NewDecoder(resp.Body).Decode(&id)
+	return id.ID, err
 }

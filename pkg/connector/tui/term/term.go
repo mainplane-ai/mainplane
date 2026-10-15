@@ -69,9 +69,10 @@ type Terminal struct {
 
 	replies chan Event // replies to the startup queries, in order
 
-	beat   atomic.Uint64 // counts the app loop's turns, for hung
-	ctrlC  int           // Ctrl+C presses since the loop last turned
-	ctrlAt uint64        // the beat at the first of them
+	backlog []Event       // input the loop has not taken yet, for flush
+	beat    atomic.Uint64 // counts the app loop's turns, for hung
+	ctrlC   int           // Ctrl+C presses since the loop last turned
+	ctrlAt  uint64        // the beat at the first of them
 }
 
 // Open takes the terminal: raw mode, alternate screen, mouse, paste and focus
@@ -234,6 +235,7 @@ func (t *Terminal) read() {
 			return
 		default:
 		}
+		t.flush()
 		ready, err := wait(t.in, d.wait())
 		if err != nil {
 			return
@@ -262,16 +264,28 @@ func (t *Terminal) emit(e Event) {
 		case t.replies <- e:
 		default:
 		}
-	case Mouse:
-		select { // motion floods a loop that is behind; drop it there
-		case t.Events <- e:
-		default:
-		}
 	default:
+		if m, ok := e.(Mouse); ok && m.Action == Motion && (len(t.backlog) > 0 || len(t.Events) == cap(t.Events)) {
+			return // motion floods a loop that is behind; drop it there
+		}
 		if k, ok := e.(Key); ok && k.String() == "ctrl+c" {
 			t.hung()
 		}
-		t.send(e)
+		t.backlog = append(t.backlog, e)
+		t.flush()
+	}
+}
+
+// flush hands the backlog to the app without blocking, so the reader goes on
+// reading, and counting Ctrl+C, while the loop is behind or stuck.
+func (t *Terminal) flush() {
+	for len(t.backlog) > 0 {
+		select {
+		case t.Events <- t.backlog[0]:
+			t.backlog = t.backlog[1:]
+		default:
+			return
+		}
 	}
 }
 
@@ -291,7 +305,13 @@ func (t *Terminal) hung() {
 		return
 	}
 	buf := make([]byte, 1<<20)
-	buf = buf[:runtime.Stack(buf, true)]
+	for n := runtime.Stack(buf, true); ; n = runtime.Stack(buf, true) {
+		if n < len(buf) {
+			buf = buf[:n]
+			break
+		}
+		buf = make([]byte, 2*len(buf))
+	}
 	fmt.Fprintf(os.Stderr, "hang: the TUI loop did not answer Ctrl+C three times\n\n%s", buf)
 	os.Exit(2)
 }
