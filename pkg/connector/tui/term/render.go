@@ -138,19 +138,21 @@ func grayStep(r, g, b uint8) int {
 }
 
 // Apart256 is c, or where c and bg share one 256-color index, the gray one
-// step from bg's toward c's lightness.
+// step from bg's toward c's lightness, or inward at an end of the ramp.
 func Apart256(c, bg Color) Color {
 	cr, cg, cb := c.rgb()
 	br, bgr, bb := bg.rgb()
 	if xterm256(cr, cg, cb) != xterm256(br, bgr, bb) {
 		return c
 	}
-	step := grayStep(br, bgr, bb)
+	step, d := grayStep(br, bgr, bb), -1
 	if int(cr)+int(cg)+int(cb) >= int(br)+int(bgr)+int(bb) {
-		step = min(23, step+1)
-	} else {
-		step = max(0, step-1)
+		d = 1
 	}
+	if step+d < 0 || step+d > 23 {
+		d = -d // at an end of the ramp: step inward
+	}
+	step += d
 	v := uint8(8 + 10*step)
 	return RGB(v, v, v)
 }
