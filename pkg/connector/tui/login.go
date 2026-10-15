@@ -15,11 +15,12 @@ const boxWidth = 80
 
 var spinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
-// inputBox is the input on a raised shade with an accent bar on its left.
+// inputBox is the input on a raised shade with an accent bar on its left. The
+// bar's cell keeps the screen background, as opencode's does.
 func inputBox(a *App, in *Input) *Node {
-	return Box(&Node{Dir: Row, BG: a.Theme.Element},
+	return Box(&Node{Dir: Row},
 		&Node{Fixed: 1, View: &bar{}},
-		&Node{Grow: 1, Pad: [4]int{1, 1, 1, 1}, View: in})
+		&Node{Grow: 1, Pad: [4]int{1, 1, 1, 1}, BG: a.Theme.Element, View: in})
 }
 
 // bar is a vertical accent line the height of its node.

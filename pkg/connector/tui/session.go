@@ -74,7 +74,7 @@ func newSession(a *App, c connector.Client, id string) *session {
 	s.statusRow = &Node{View: s.status, Min: 1, Max: 3}
 	s.sidebar = &Node{Fixed: sidebarWidth, BG: a.Theme.Panel}
 	main := Box(&Node{Dir: Col, Grow: 1},
-		s.empty[0], s.empty[1], s.empty[2], s.body, s.inputRow, s.statusRow, s.empty[3])
+		s.empty[0], s.empty[1], s.empty[2], s.body, s.inputRow, s.statusRow, &Node{Fixed: 1}, s.empty[3]) // a blank row under the status, as opencode
 	s.root = Box(&Node{Dir: Row, BG: a.Theme.BG}, s.sidebar, main)
 	a.Focus(s.box.Kids[1])
 	s.title(a)
