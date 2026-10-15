@@ -205,11 +205,11 @@ func (l *sessionList) Draw(a *App, c *Canvas, r Rect) {
 			mark(y, sessionRows-1, a.Theme.Muted, true)
 		}
 		state := run(age(time.Since(in.Updated)), muted)
-		if l.unread(in) {
-			state = cat(state, run(" ●", term.Style{FG: a.Theme.Accent}))
-		}
 		if in.Status == statefile.StatusFailed {
 			state = run("failed", term.Style{FG: a.Theme.Error})
+		}
+		if l.unread(in) {
+			state = cat(state, run(" ●", term.Style{FG: a.Theme.Accent}))
 		}
 		if in.Status == statefile.StatusStepping {
 			state = run(spinner[l.cur.frame%len(spinner)]+" Working", text)

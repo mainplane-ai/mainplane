@@ -52,7 +52,6 @@ const slashRows = 10
 type slash struct {
 	s     *session
 	query string // the input that made the list
-	shut  string // the input Esc closed the list on
 	cmds  []command
 	sel   int
 	top   int
@@ -65,16 +64,13 @@ func (l *slash) update() {
 	if t == l.query {
 		return
 	}
-	if !strings.HasPrefix(t, "/") {
-		l.shut = ""
-	}
 	l.query, l.cmds, l.sel, l.top = t, nil, 0, 0
 	for _, e := range l.s.input.els {
 		if e.paste != "" {
 			return
 		}
 	}
-	if t == l.shut || !strings.HasPrefix(t, "/") || strings.ContainsAny(t, " \t\n") {
+	if !strings.HasPrefix(t, "/") || strings.ContainsAny(t, " \t\n") {
 		return
 	}
 	var byAlias []command
@@ -113,7 +109,7 @@ func (l *slash) Key(a *App, k term.Key) bool {
 	case "enter", "tab":
 		l.run(a, l.sel)
 	case "esc":
-		l.shut, l.cmds = l.query, nil
+		l.cmds = nil // until the input changes
 	default:
 		return false
 	}
@@ -292,12 +288,9 @@ func (s *session) workers(a *App) {
 	})
 }
 
-func (s *session) workerMenu(a *App, listed []connector.Worker) {
-	m := &Menu{Checks: true}
-	have := map[string]statefile.Worker{}
-	for _, w := range s.info.Config.Workers {
-		have[w.Name] = w
-	}
+// workerStates is every worker the harness lists, then those of the
+// session it does not, each connected, refused or offline.
+func workerStates(listed []connector.Worker, own []statefile.Worker) ([]string, map[string]string) {
 	state := map[string]string{}
 	var names []string
 	for _, w := range listed {
@@ -307,13 +300,23 @@ func (s *session) workerMenu(a *App, listed []connector.Worker) {
 		}
 		names = append(names, w.Name)
 	}
-	for _, w := range s.info.Config.Workers {
+	for _, w := range own {
 		if _, ok := state[w.Name]; !ok {
 			state[w.Name] = "offline"
 			names = append(names, w.Name)
 		}
 	}
-	set := func(a *App, it *MenuItem) {
+	return names, state
+}
+
+func (s *session) workerMenu(a *App, listed []connector.Worker) {
+	m := &Menu{Checks: true}
+	have := map[string]statefile.Worker{}
+	for _, w := range s.info.Config.Workers {
+		have[w.Name] = w
+	}
+	names, state := workerStates(listed, s.info.Config.Workers)
+	set := func(a *App, _ *MenuItem) {
 		var ws []statefile.Worker
 		for _, x := range m.Items {
 			if x.On {
@@ -336,8 +339,15 @@ func (s *session) workerMenu(a *App, listed []connector.Worker) {
 			err := s.c.SetWorkers(ctx, id, via, ws)
 			a.Post(func() {
 				if err != nil {
-					it.On = !it.On
+					for i := range m.Items {
+						_, m.Items[i].On = have[m.Items[i].Label]
+					}
 					a.SayError(err)
+					return
+				}
+				have = map[string]statefile.Worker{}
+				for _, w := range ws {
+					have[w.Name] = w
 				}
 			})
 		})
