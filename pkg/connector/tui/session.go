@@ -15,8 +15,8 @@ import (
 const (
 	// via is what this connector writes on every record it causes.
 	via = "tui"
-	// Layout breakpoints and sizes, opencode's.
-	sidebarFrom  = 121 // the sidebar docks at this width and wider
+	// Layout breakpoints and sizes, opencode's, but the sidebar docks 10 columns later.
+	sidebarFrom  = 131 // the sidebar docks at this width and wider
 	sidebarWidth = 42
 	narrow       = 44 // below this width: padding 1, no scrollbar
 	// The input grows to inputRows or inputShare percent of the height.

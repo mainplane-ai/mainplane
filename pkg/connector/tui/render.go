@@ -138,15 +138,39 @@ func dur(d time.Duration) string {
 func stamp(t time.Time) string {
 	t = t.Local()
 	if y, m, d := t.Date(); y == time.Now().Year() && m == time.Now().Month() && d == time.Now().Day() {
-		return t.Format("15:04")
+		return t.Format("3:04 PM")
 	}
-	return t.Format("Jan 2 15:04")
+	return t.Format("Jan 2, 3:04 PM")
 }
 
 // textBlock is the agent's text, as markdown.
 type textBlock struct{ s string }
 
-func (b *textBlock) Rows(a *App, w int) []Line { return markdown(a, b.s, w) }
+func (b *textBlock) Rows(a *App, w int) []Line { return indent(markdown(a, b.s, w-margin-1)) }
+
+// margin is where text starts: after a bar and its padding, as in a message.
+const margin = 2
+
+// indent puts rows margin columns in, to line up with the text of a message.
+// One column stays free on the right, as in a message.
+func indent(rows []Line) []Line {
+	pad := deco(strings.Repeat(" ", margin), term.Style{})
+	for i := range rows {
+		rows[i].Gs = cat(pad, rows[i].Gs)
+		if rows[i].BG != 0 {
+			rows[i].BGFrom += margin
+		}
+	}
+	return rows
+}
+
+// mute draws gs in the muted color.
+func mute(a *App, gs []Glyph) []Glyph {
+	for i := range gs {
+		gs[i].St.FG = a.Theme.Muted
+	}
+	return gs
+}
 
 var (
 	heading  = regexp.MustCompile(`^#{1,6}\s+(.*)$`)
@@ -317,14 +341,13 @@ func inline(a *App, s string, base term.Style) []Glyph {
 }
 
 // msgBlock is a message on a panel after an accent bar, where it came from
-// and when at the top right.
+// at the top right and when at the bottom right.
 type msgBlock struct{ r statefile.Record }
 
 func (b *msgBlock) Rows(a *App, w int) []Line {
 	bar := deco("┃", term.Style{FG: a.Theme.Accent})
 	pre := cat(bar, deco(" ", term.Style{}))
-	meta := deco("via "+b.r.Via+" · "+stamp(b.r.Time)+" ", a.Theme.muted())
-	rows := []Line{{Gs: cat(bar, spread(nil, meta, w-1))}}
+	rows := []Line{{Gs: cat(bar, spread(nil, deco(b.r.Via+" ", a.Theme.muted()), w-1))}}
 	body := []string{"[" + media(b.r) + "]"}
 	if isText(b.r.Type) {
 		body = lines(string(b.r.Body))
@@ -332,7 +355,7 @@ func (b *msgBlock) Rows(a *App, w int) []Line {
 	for _, l := range body {
 		rows = append(rows, flow(run(l, a.Theme.text()), w-1, pre, pre)...)
 	}
-	rows = append(rows, Line{Gs: bar})
+	rows = append(rows, Line{Gs: cat(bar, spread(nil, deco(stamp(b.r.Time)+" ", a.Theme.muted()), w-1))})
 	for i := range rows {
 		rows[i].BG, rows[i].BGFrom = a.Theme.Panel, 1
 	}
@@ -347,13 +370,14 @@ func (b *errBlock) Rows(a *App, w int) []Line {
 	pre := deco("┃ ", st)
 	var rows []Line
 	for _, l := range lines(b.s) {
-		rows = append(rows, flow(run(l, st), w, pre, pre)...)
+		rows = append(rows, flow(run(l, st), w-1, pre, pre)...)
 	}
 	return rows
 }
 
-// callBlock is a call and its result: two rows, the call and the result's
-// line, or every line of both when open. A click opens and closes it.
+// callBlock is a call and its result: two muted rows, the call and the
+// result's line, or every line of both in color when open. A click opens and
+// closes it.
 type callBlock struct {
 	s    *session
 	call statefile.Record // zero for a result with no call
@@ -480,7 +504,9 @@ func (b *callBlock) status(a *App) []Glyph {
 	return cat(gs, run(line, muted))
 }
 
-func (b *callBlock) Rows(a *App, w int) []Line {
+func (b *callBlock) Rows(a *App, w int) []Line { return indent(b.rows(a, w-margin-1)) }
+
+func (b *callBlock) rows(a *App, w int) []Line {
 	muted := a.Theme.muted()
 	elbow := deco("└ ", muted)
 	if !b.open {
@@ -488,7 +514,7 @@ func (b *callBlock) Rows(a *App, w int) []Line {
 		if b.call.ID != "" {
 			head = cat(head, run("  "+b.summary(), a.Theme.text()))
 		}
-		return []Line{{Gs: clip(head, w)}, {Gs: cat(elbow, spread(b.status(a), b.meta(a), w-2))}}
+		return []Line{{Gs: mute(a, clip(head, w))}, {Gs: mute(a, cat(elbow, spread(b.status(a), b.meta(a), w-2)))}}
 	}
 	rows := []Line{{Gs: spread(b.head(a), b.meta(a), w)}}
 	side := deco("│ ", muted)
