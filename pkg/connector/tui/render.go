@@ -146,7 +146,7 @@ func stamp(t time.Time) string {
 // textBlock is the agent's text, as markdown.
 type textBlock struct{ s string }
 
-func (b *textBlock) Rows(a *App, w int) []Line { return indent(markdown(a, b.s, w-margin-1)) }
+func (b *textBlock) Rows(a *App, w int) []Line { return indent(markdown(a, b.s, max(1, w-margin-1))) }
 
 // margin is where text starts: after a bar and its padding, as in a message.
 const margin = 2
@@ -504,7 +504,7 @@ func (b *callBlock) status(a *App) []Glyph {
 	return cat(gs, run(line, muted))
 }
 
-func (b *callBlock) Rows(a *App, w int) []Line { return indent(b.rows(a, w-margin-1)) }
+func (b *callBlock) Rows(a *App, w int) []Line { return indent(b.rows(a, max(1, w-margin-1))) }
 
 func (b *callBlock) rows(a *App, w int) []Line {
 	muted := a.Theme.muted()

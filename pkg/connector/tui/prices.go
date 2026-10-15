@@ -33,8 +33,8 @@ type price struct {
 	CacheWrite float64 `json:"cache_creation_input_token_cost"`
 }
 
-// loadPrices is the kept list when it is fresh, else the list fetched now,
-// else the kept list however old.
+// loadPrices is the kept list when it is fresh and reads, else the list
+// fetched now, else the kept list however old.
 func loadPrices() (prices, error) {
 	h, err := os.UserHomeDir()
 	if err != nil {
@@ -43,7 +43,9 @@ func loadPrices() (prices, error) {
 	path := filepath.Join(h, ".mainplane", "prices.json")
 	kept, kerr := os.ReadFile(path)
 	if st, err := os.Stat(path); kerr == nil && err == nil && time.Since(st.ModTime()) < pricesAge {
-		return parsePrices(kept)
+		if p, err := parsePrices(kept); err == nil {
+			return p, nil
+		}
 	}
 	b, err := fetchPrices()
 	if err != nil {
