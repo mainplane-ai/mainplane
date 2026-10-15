@@ -15,9 +15,10 @@ type Theme struct {
 }
 
 // Alexander's picks in design's tui-colors tuner, near the brand's hue, 220.
-// Light is the brand's: Paper #F8F8F5, Ink #172428, Gray #65757A, Blue
-// #0087A4. Dark is near black, oklch 0.120 0.0060 220, its panel 0.035
-// lighter at the same chroma; on it the blue and gray are lifted to read.
+// Light is the brand's: Paper #F8F8F5, Ink #172428, Blue #0087A4, and Gray
+// #65757A darkened to #607075 to reach WCAG AA, 4.5:1, on the panel. Dark is
+// near black, oklch 0.120 0.0060 220, its panel 0.035 lighter at the same chroma;
+// on it the blue and gray are lifted to read.
 var (
 	dark = Theme{
 		BG: term.Hex("#040607"), Panel: term.Hex("#090d0e"),
@@ -26,7 +27,7 @@ var (
 	}
 	light = Theme{
 		BG: term.Hex("#f8f8f5"), Panel: term.Hex("#eef1f0"),
-		Text: term.Hex("#172428"), Muted: term.Hex("#65757a"), Accent: term.Hex("#0087a4"),
+		Text: term.Hex("#172428"), Muted: term.Hex("#607075"), Accent: term.Hex("#0087a4"),
 		Selection: term.Hex("#c4e3ea"), Error: term.Hex("#c4363a"),
 	}
 )
