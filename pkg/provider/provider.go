@@ -59,7 +59,7 @@ type Tool struct {
 // Params are the session's vendor fields, see encode.
 type Request struct {
 	Model   string
-	Key     string // session id, the routing key for prefix caches
+	Key     string // record 1's id, the routing key for prefix caches: a copy shares it with the session it copies, as it shares the prefix
 	Tools   []Tool
 	Context []statefile.Record // statefile.Build output
 	Params  map[string]json.RawMessage

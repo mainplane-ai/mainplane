@@ -314,7 +314,7 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 // provider gets a prefix it never saw, and a thinking signature or the like
 // bound to the old one fails. A new version that changes what is sent ends
 // the sessions an older one built. Empty when the bytes match.
-func rebuilt(p provider.Provider, model, id string, conf statefile.Conf, chain []statefile.Record) string {
+func rebuilt(p provider.Provider, model string, conf statefile.Conf, chain []statefile.Record) string {
 	var last statefile.Record
 	for _, r := range chain {
 		if r.Kind == statefile.Step {
@@ -325,15 +325,12 @@ func rebuilt(p provider.Provider, model, id string, conf statefile.Conf, chain [
 		return ""
 	}
 	records, _ := statefile.Build(chain[:last.Upto])
-	records = clock(records, id, chain[0].Time, conf.ContextLimit, conf.Input)
-	body, _, err := p.Envelope.Compile(provider.Request{Model: model, Key: id, Tools: Tools(conf.Tools, conf.Input), Context: records, Params: conf.Params})
+	records = clock(records, chain[0].Time, conf.ContextLimit, conf.Input)
+	body, _, err := p.Envelope.Compile(provider.Request{Model: model, Key: chain[0].ID, Tools: Tools(conf.Tools, conf.Input), Context: records, Params: conf.Params})
 	if err != nil || fmt.Sprintf("sha256:%x", sha256.Sum256(body)) == last.Request {
 		return ""
 	}
-	if last.Harness != version.V {
-		return fmt.Sprintf("\n\nThis session was built by harness %s. This harness (%s) builds the same records into a different request, so the provider sees a different conversation. A session from an incompatible harness version cannot go on. Use /continue to carry it into a new session.", last.Harness, version.V)
-	}
-	return "\n\nThis harness builds the records of the last step into a different request than the one sent, so the provider sees a different conversation. A copy of a session does this, since the request names the session. Use /continue to carry it into a new session."
+	return fmt.Sprintf("\n\nThis session was built by harness %s. This harness (%s) builds the same records into a different request, so the provider sees a different conversation. A session from an incompatible harness version cannot go on. Use /continue to carry it into a new session.", last.Harness, version.V)
 }
 
 func errorRecord(via, text string) statefile.Record {
@@ -350,11 +347,11 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 		return "", err
 	}
 	records, upto := statefile.Build(chain)
-	records = clock(records, id, chain[0].Time, conf.ContextLimit, conf.Input)
+	records = clock(records, chain[0].Time, conf.ContextLimit, conf.Input)
 	stepID := statefile.NewID()
 	var calls []statefile.Record
 	var appendErr error
-	req := provider.Request{Model: model, Key: id, Tools: Tools(conf.Tools, conf.Input), Context: records, Params: conf.Params}
+	req := provider.Request{Model: model, Key: chain[0].ID, Tools: Tools(conf.Tools, conf.Input), Context: records, Params: conf.Params}
 	hdr, err := p.Step(ctx, req, func(r statefile.Record) {
 		r.Step = stepID
 		if r.ID == "" {
@@ -375,7 +372,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 			_, err := h.append(s, errorRecord(via, fmt.Sprintf(halted, via)))
 			return statefile.StatusFailed, err
 		}
-		_, err := h.append(s, errorRecord("", err.Error()+rebuilt(p, model, id, conf, chain)))
+		_, err := h.append(s, errorRecord("", err.Error()+rebuilt(p, model, conf, chain)))
 		return statefile.StatusFailed, err
 	}
 	hdr.Kind, hdr.ID, hdr.Upto, hdr.Harness = statefile.Step, stepID, upto, version.V
@@ -414,7 +411,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 // prompt says what the notes mean. Each result ends with its time since start
 // and the prompt size of the step that made its call, fixed once the result
 // is written.
-func clock(ctx []statefile.Record, id string, start time.Time, limit int, input []string) []statefile.Record {
+func clock(ctx []statefile.Record, start time.Time, limit int, input []string) []statefile.Record {
 	used := 0
 	for i, r := range ctx {
 		if r.Kind == statefile.Step {
@@ -428,7 +425,7 @@ func clock(ctx []statefile.Record, id string, start time.Time, limit int, input 
 	if len(input) > 0 {
 		media = strings.Join(input, ", ") + ", read returns every other file as text"
 	}
-	line := fmt.Sprintf("Session %s started %s. Context limit %d. Media input: %s", id, start.Format(time.RFC3339), limit, media)
+	line := fmt.Sprintf("Session started %s. Context limit %d. Media input: %s", start.Format(time.RFC3339), limit, media)
 	return slices.Insert(ctx, 1, system("session", line))
 }
 
