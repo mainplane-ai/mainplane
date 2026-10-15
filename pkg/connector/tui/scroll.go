@@ -55,6 +55,7 @@ type Scrollbox struct {
 	view   Rect // the text, as last drawn
 	barX   int
 	onBar  bool
+	onRow  bool // the press was on a row, so its release may be a click
 	sel    struct {
 		on   bool
 		a, b pos
@@ -99,7 +100,11 @@ func (s *Scrollbox) layout(a *App) {
 	}
 	s.rows, s.dirty = s.rows[:0], false
 	var prev Block
+	from := -1 // the first row laid out anew
 	for _, it := range s.items {
+		if it.stale && from < 0 {
+			from = len(s.rows)
+		}
 		if it.stale {
 			it.rows, it.stale = it.b.Rows(a, s.width), false
 		}
@@ -113,6 +118,14 @@ func (s *Scrollbox) layout(a *App) {
 			s.rows = append(s.rows, srow{r, it})
 		}
 		prev = it.b
+	}
+	// rows that moved under a selection or a press would pick other text
+	lo, hi := s.order()
+	if from >= 0 && from <= hi.row {
+		s.sel.on = false
+	}
+	if from >= 0 && from <= lo.row {
+		s.onRow = false
 	}
 }
 
@@ -212,6 +225,7 @@ func (s *Scrollbox) Mouse(a *App, m term.Mouse, r Rect) bool {
 			break
 		}
 		a.Select(s)
+		s.onRow = s.top+m.Y-s.view.Y < len(s.rows)
 		s.sel.on, s.sel.a = false, s.posAt(m.X, m.Y)
 		s.sel.b = s.sel.a
 	case m.Action == term.Motion && m.Button == term.Left && s.onBar:
@@ -232,7 +246,7 @@ func (s *Scrollbox) Mouse(a *App, m term.Mouse, r Rect) bool {
 		case s.onBar:
 		case s.sel.on:
 			a.Copy(s.Selected())
-		case s.view.Has(m.X, m.Y) && s.sel.a.row < len(s.rows):
+		case s.onRow && s.view.Has(m.X, m.Y):
 			s.click(a, s.rows[s.sel.a.row].it)
 		}
 		s.onBar = false

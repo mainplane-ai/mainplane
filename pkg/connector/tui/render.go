@@ -88,6 +88,7 @@ func spread(left, right []Glyph, w int) []Glyph {
 	if len(right) == 0 {
 		return clip(left, w)
 	}
+	right = clip(right, w)
 	left = clip(left, max(0, w-gwidth(right)-2))
 	return cat(left, deco(strings.Repeat(" ", max(0, w-gwidth(left)-gwidth(right))), term.Style{}), right)
 }
