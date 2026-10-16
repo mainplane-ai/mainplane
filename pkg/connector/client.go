@@ -57,7 +57,7 @@ func Login(ctx context.Context, token string) (c Client, old Client, version str
 	}
 	u, err := pointer.Find(ctx, h, "")
 	if err != nil {
-		return c, old, "", err
+		return c, old, "", unreachable(err)
 	}
 	c = Client{URL: u, Key: key, Harness: h}
 	if version, err = c.Version(ctx); err != nil {
@@ -100,7 +100,7 @@ func Load(ctx context.Context) (Client, error) {
 func (c *Client) Find(ctx context.Context) error {
 	u, err := pointer.Find(ctx, c.Harness, c.URL)
 	if err != nil || u == c.URL {
-		return err
+		return unreachable(err)
 	}
 	c.URL = u
 	return c.Save()
@@ -121,6 +121,22 @@ func (c Client) Save() error {
 	return os.WriteFile(p, b, 0o600)
 }
 
+// unreachable says plainly that a request found no network path to its
+// host: most often this machine is offline, and the bare dial error reads
+// as a fault of Mainplane.
+func unreachable(err error) error {
+	var u *url.Error
+	var op *net.OpError
+	if !errors.As(err, &u) || !errors.As(err, &op) {
+		return err
+	}
+	host := u.URL
+	if p, perr := url.Parse(u.URL); perr == nil {
+		host = p.Host
+	}
+	return fmt.Errorf("cannot reach %s: is this machine offline? (%w)", host, op)
+}
+
 // Do does one request; a status outside 2xx is an error in the harness's own
 // words.
 func (c Client) Do(ctx context.Context, method, path, ctype string, body io.Reader) (*http.Response, error) {
@@ -134,7 +150,7 @@ func (c Client) Do(ctx context.Context, method, path, ctype string, body io.Read
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, unreachable(err)
 	}
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(resp.Body)

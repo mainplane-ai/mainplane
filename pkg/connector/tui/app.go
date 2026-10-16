@@ -8,12 +8,55 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
 )
 
-const (
-	// dim is how far a modal layer darkens what is under it.
-	dim = 0.4
-	// tickRate is the frame rate of animation, here the tab spinner.
-	tickRate = 100 * time.Millisecond
-)
+// dim is how far a modal layer darkens what is under it.
+const dim = 0.4
+
+// spinner is the design repo's, ascii/spinner.json: a loop of uneven frames
+// that swishes. Every spinner shows the wall clock's frame, so all turn
+// together, and the tick wakes only when the frame changes: ten times a
+// second on average, as a fixed 100 ms tick did.
+var spinner = []struct {
+	g string
+	d time.Duration
+}{
+	{"⣀", 103 * time.Millisecond},
+	{"⡄", 129 * time.Millisecond},
+	{"⠆", 148 * time.Millisecond},
+	{"⠃", 129 * time.Millisecond},
+	{"⠋", 58 * time.Millisecond},
+	{"⠙", 49 * time.Millisecond},
+	{"⠸", 62 * time.Millisecond},
+	{"⢠", 122 * time.Millisecond},
+}
+
+// spinAt is the spinner's frame at now and how long until the next one.
+func spinAt(now time.Time) (string, time.Duration) {
+	var loop time.Duration
+	for _, f := range spinner {
+		loop += f.d
+	}
+	t := time.Duration(now.UnixNano()) % loop
+	for i, f := range spinner {
+		if t < f.d || i == len(spinner)-1 {
+			return f.g, f.d - t
+		}
+		t -= f.d
+	}
+	return "", 0
+}
+
+// Spin is the spinner's frame now.
+func Spin() string {
+	g, _ := spinAt(time.Now())
+	return g
+}
+
+// untilSpin is how long until the spinner's next frame, a millisecond past
+// it so the frame has changed when the tick wakes.
+func untilSpin() time.Duration {
+	_, d := spinAt(time.Now())
+	return d + time.Millisecond
+}
 
 // Screen is the tree at the bottom of the layers, and its keys.
 type Screen interface {
@@ -21,7 +64,7 @@ type Screen interface {
 	// Size is called before every layout, for breakpoints and caps.
 	Size(a *App, w, h int)
 	Key(a *App, k term.Key) bool
-	// Tick is called at tickRate while the app ticks.
+	// Tick is called at each frame of the spinner while the app ticks.
 	Tick(a *App)
 }
 
@@ -45,7 +88,7 @@ type App struct {
 	sel     Selector
 	r       *term.Renderer
 	post    chan func()
-	ticker  *time.Ticker
+	ticker  *time.Timer
 	lastKey string
 	prevKey string
 	lastAt  time.Time
@@ -95,7 +138,7 @@ func (a *App) Select(s Selector) {
 func (a *App) Ticking(on bool) {
 	switch {
 	case on && a.ticker == nil:
-		a.ticker = time.NewTicker(tickRate)
+		a.ticker = time.NewTimer(untilSpin())
 	case !on && a.ticker != nil:
 		a.ticker.Stop()
 		a.ticker = nil
@@ -120,6 +163,9 @@ func (a *App) Run() {
 			f()
 		case <-tick:
 			a.screen.Tick(a)
+			if a.ticker != nil {
+				a.ticker.Reset(untilSpin())
+			}
 		}
 		for more := true; more && !a.quit; {
 			select {
@@ -181,7 +227,7 @@ func (a *App) focusView() View {
 
 // key goes to the top modal layer, else the focused node and its parents,
 // then the screen. Ctrl+C is the app's: with a selection it copies, without
-// one it exits, and twice in a row it always exits.
+// one it exits, and twice in a row it always exits. Cmd+C only copies.
 func (a *App) key(k term.Key) {
 	s := k.String()
 	a.prevKey, a.lastKey = a.lastKey, s
@@ -194,6 +240,12 @@ func (a *App) key(k term.Key) {
 			return
 		}
 		a.Quit()
+		return
+	}
+	if s == "super+c" {
+		if a.sel != nil && a.sel.Selected() != "" {
+			a.Copy(a.sel.Selected())
+		}
 		return
 	}
 	if l := a.top(); l != nil {

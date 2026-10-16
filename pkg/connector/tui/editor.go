@@ -12,21 +12,19 @@ import (
 const collapseLines = 3
 
 // elem is one grapheme of the input, a line break ("\n", width 0), or a
-// collapsed paste: its label shown, its text kept. An attached paste sends
-// on Enter instead of expanding.
+// collapsed paste: its label shown, its text kept.
 type elem struct {
-	g      string
-	w      int
-	paste  string
-	attach bool
+	g     string
+	w     int
+	paste string
 }
 
 func (e elem) space() bool { return e.g == " " || e.g == "\t" || e.g == "\n" }
 
 // Input is a multi-line text input. It wraps, grows to MaxRows and then
 // scrolls. Shift+arrows select. A paste of collapseLines or more lines is one
-// placeholder until a click or Enter on it expands it. Before sees each key
-// first and takes it by returning true.
+// placeholder until a click expands it; Enter sends it as it is. Before sees
+// each key first and takes it by returning true.
 type Input struct {
 	Placeholder string
 	Mask        bool // show each grapheme as a dot, for a secret
@@ -153,10 +151,9 @@ func textElems(t string) []elem {
 	return es
 }
 
-// Attach puts text at the cursor collapsed under label, as a paste that
-// Enter sends; a click still expands it.
+// Attach puts text at the cursor collapsed under label, as a paste.
 func (s *Input) Attach(label, text string) {
-	s.insert(elem{g: label, w: term.Width(label), paste: text, attach: true})
+	s.insert(elem{g: label, w: term.Width(label), paste: text})
 }
 
 func (s *Input) Paste(a *App, t string) {
@@ -173,17 +170,6 @@ func (s *Input) expand(i int) {
 	es := textElems(s.els[i].paste)
 	s.els = append(s.els[:i], append(es, s.els[i+1:]...)...)
 	s.cur, s.anchor = i+len(es), -1
-}
-
-// pasteAt is the index of a collapsed paste the cursor is on or just after,
-// or -1.
-func (s *Input) pasteAt() int {
-	for _, i := range []int{s.cur, s.cur - 1} {
-		if i >= 0 && i < len(s.els) && s.els[i].paste != "" {
-			return i
-		}
-	}
-	return -1
 }
 
 // move puts the cursor at i, extending the selection when select is set.
@@ -235,8 +221,6 @@ func (s *Input) Key(a *App, k term.Key) bool {
 	case "enter":
 		if sel {
 			s.insert(elem{g: "\n"})
-		} else if i := s.pasteAt(); i >= 0 && !s.els[i].attach {
-			s.expand(i)
 		} else if t := s.Text(); strings.TrimSpace(t) != "" && s.OnSubmit != nil {
 			s.Clear()
 			s.OnSubmit(a, t)
@@ -247,6 +231,12 @@ func (s *Input) Key(a *App, k term.Key) bool {
 		if !s.deleteSelection() && s.cur > 0 {
 			s.els = append(s.els[:s.cur-1], s.els[s.cur:]...)
 			s.cur--
+		}
+	case "super+backspace":
+		if !s.deleteSelection() {
+			h := s.index(rows, r, 0)
+			s.els = append(s.els[:h], s.els[s.cur:]...)
+			s.cur = h
 		}
 	case "ctrl+backspace", "alt+backspace", "ctrl+w":
 		if !s.deleteSelection() {
@@ -262,7 +252,7 @@ func (s *Input) Key(a *App, k term.Key) bool {
 		if !s.deleteSelection() {
 			s.els = append(s.els[:s.cur], s.els[s.word(1):]...)
 		}
-	case "ctrl+x":
+	case "ctrl+x", "super+x":
 		if t := s.Selected(); t != "" {
 			a.Copy(t)
 			s.deleteSelection()
@@ -279,9 +269,9 @@ func (s *Input) Key(a *App, k term.Key) bool {
 		s.move(a, s.index(rows, r-1, col), sel)
 	case "down":
 		s.move(a, s.index(rows, r+1, col), sel)
-	case "home":
+	case "home", "super+left":
 		s.move(a, s.index(rows, r, 0), sel)
-	case "end":
+	case "end", "super+right":
 		s.move(a, s.index(rows, r, 1<<30), sel)
 	default:
 		t := k.Text()
