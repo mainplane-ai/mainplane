@@ -582,45 +582,48 @@ func (s *session) infoMenu(a *App) {
 			if err != nil {
 				a.SayError(err)
 			}
-			m := &Menu{}
-			add := func(section, label, value string) {
-				if value == "" {
-					return
-				}
-				hint := value
-				if rs := []rune(value); len(rs) > infoHint {
-					hint = "…" + string(rs[len(rs)-infoHint+1:]) // the end of a URL tells more
-				}
-				m.Items = append(m.Items, MenuItem{Label: label, Hint: hint, Section: section, Pick: func(a *App, _ *MenuItem) { a.Copy(value) }})
-			}
-			in := s.info
-			if s.id != "" && in.ID == s.id {
-				add("Session", "Id", in.ID)
-				add("Session", "Name", in.Name)
-				add("Session", "Status", string(in.Status))
-				add("Session", "Model", in.Config.Model)
-				add("Session", "Context", fmt.Sprintf("%s of %s", tokens(in.ContextUsed), tokens(in.Config.ContextLimit)))
-				if c, ok := s.cost(); ok {
-					add("Session", "Cost", fmt.Sprintf("$%.2f", c))
-				}
-				add("Session", "Records", fmt.Sprint(in.N))
-				add("Session", "Created", in.Created.Local().Format(time.DateTime))
-				add("Session", "Updated", in.Updated.Local().Format(time.DateTime))
-				add("Session", "Input", strings.Join(in.Config.Input, ", "))
-				names, state := workerStates(listed, in.Config.Workers)
-				for _, n := range names {
-					if slices.ContainsFunc(in.Config.Workers, func(w statefile.Worker) bool { return w.Name == n }) {
-						add("Workers", n, state[n])
-					}
-				}
-			} else {
-				add("Session", "Model", s.base().Model)
-			}
-			add("App", "Harness", s.c.URL)
-			add("App", "Harness version", hv)
-			add("App", "App version", version.V)
-			add("App", "Terminal", fmt.Sprintf("%dx%d, kitty keys %v, truecolor %v", a.W, a.H, a.T.Caps.Kitty, a.T.Caps.Truecolor))
-			a.OpenMenu("Session info", m)
+			a.OpenMenu("Session info", s.infoItems(a, hv, listed))
 		})
 	})
+}
+
+// infoItems is the rows of /info.
+func (s *session) infoItems(a *App, harnessV string, listed []connector.Worker) *Menu {
+	m := &Menu{}
+	add := func(section, label, value string) {
+		if value == "" {
+			return
+		}
+		hint := value
+		if rs := []rune(value); len(rs) > infoHint {
+			hint = "…" + string(rs[len(rs)-infoHint+1:]) // the end of a URL tells more
+		}
+		m.Items = append(m.Items, MenuItem{Label: label, Hint: hint, Section: section, Pick: func(a *App, _ *MenuItem) { a.Copy(value) }})
+	}
+	in := s.info
+	if s.id != "" && in.ID == s.id {
+		add("Session", "Id", in.ID)
+		add("Session", "Name", in.Name)
+		add("Session", "Status", string(in.Status))
+		add("Session", "Model", in.Config.Model)
+		add("Session", "Context", fmt.Sprintf("%s of %s", tokens(in.ContextUsed), tokens(in.Config.ContextLimit)))
+		if c, ok := s.cost(); ok {
+			add("Session", "Cost", fmt.Sprintf("$%.2f", c))
+		}
+		add("Session", "Records", fmt.Sprint(in.N))
+		add("Session", "Created", in.Created.Local().Format(time.DateTime))
+		add("Session", "Updated", in.Updated.Local().Format(time.DateTime))
+		add("Session", "Input", strings.Join(in.Config.Input, ", "))
+		_, state := workerStates(listed, in.Config.Workers)
+		for _, w := range in.Config.Workers {
+			add("Workers", w.Name, state[w.Name])
+		}
+	} else {
+		add("Session", "Model", s.base().Model)
+	}
+	add("App", "Harness", s.c.URL)
+	add("App", "Harness version", harnessV)
+	add("App", "App version", version.V)
+	add("App", "Terminal", fmt.Sprintf("%dx%d, kitty keys %v, truecolor %v", a.W, a.H, a.T.Caps.Kitty, a.T.Caps.Truecolor))
+	return m
 }
