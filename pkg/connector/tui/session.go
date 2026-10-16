@@ -46,7 +46,8 @@ type session struct {
 	id     string
 	info   harness.Info
 	msgs   int
-	second int64 // the clock's second at the last tick, to redraw the times of running calls
+	asked  []statefile.Record // the messages, for /rewind
+	second int64              // the clock's second at the last tick, to redraw the times of running calls
 
 	transcript *Scrollbox
 	input      *Input
@@ -172,7 +173,7 @@ func (s *session) Size(a *App, w, h int) {
 		s.statusRow.Pad[0] = pad
 	}
 	*s.status = *a.Status
-	if s.status.S == "" && !empty {
+	if s.status.S == "" && (!empty || s.cfg != nil) {
 		s.status.S, s.status.Style = s.info.Config.Model, a.Theme.muted()
 		if s.status.S == "" && s.cfg != nil {
 			s.status.S = s.cfg.Model
@@ -398,6 +399,7 @@ func (s *session) show(r statefile.Record) {
 		}
 	case statefile.Message:
 		s.msgs++
+		s.asked = append(s.asked, r)
 		s.turn = r.Time
 		s.transcript.Append(&msgBlock{r})
 	case statefile.Text:
@@ -430,8 +432,8 @@ func (s *session) show(r statefile.Record) {
 // send posts the text. From home the screen turns to the session at once;
 // the session is made in the background and the text posted when it is.
 func (s *session) send(a *App, text string) {
-	if c := commandFor(text); c != nil {
-		c.run(s, a)
+	if c, arg := commandFor(text); c != nil {
+		c.do(s, a, arg)
 		return
 	}
 	if s.id != "" {

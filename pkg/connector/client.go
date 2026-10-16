@@ -279,6 +279,11 @@ func (c Client) Workers(ctx context.Context) ([]Worker, error) {
 	return ws, err
 }
 
+// SetName names the session; an empty name removes it.
+func (c Client) SetName(ctx context.Context, id, via, name string) error {
+	return c.Call(ctx, "PUT", "/sessions/"+id+"/name?via="+url.QueryEscape(via), "text/plain; charset=utf-8", strings.NewReader(name), nil)
+}
+
 // SetWorkers makes ws the session's workers from its next step on.
 func (c Client) SetWorkers(ctx context.Context, id, via string, ws []statefile.Worker) error {
 	b, err := json.Marshal(ws)
