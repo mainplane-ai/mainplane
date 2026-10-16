@@ -44,11 +44,14 @@ func prepare(cmd *exec.Cmd, op *user.User) error {
 	}
 	// A root service's children are outside the operator's login session, so
 	// on macOS nothing on screen answers them: screencapture, open, and
-	// osascript fail. launchctl asuser joins the session as root, chroot to /
-	// drops to the operator with all their groups, and env returns to their
-	// home, which chroot left. All three exec, so cmd's pid is the interpreter.
+	// osascript fail. launchctl asuser joins the session as root, and sudo
+	// drops to the operator with all their groups, keeping cmd's environment;
+	// env goes to their home and drops what sudo added. Not chroot: macOS 26.6
+	// kills a hardened runtime binary under chroot (bug #143). sudo forks, so
+	// cmd's pid is sudo, but all stay in its process group for killTree.
 	if runtime.GOOS == "darwin" {
-		cmd.Args = append([]string{"launchctl", "asuser", op.Uid, "/usr/sbin/chroot", "-u", op.Uid, "-g", op.Gid, "/", "/usr/bin/env", "-C", op.HomeDir, cmd.Path}, cmd.Args[1:]...)
+		cmd.Args = append([]string{"launchctl", "asuser", op.Uid, "/usr/bin/sudo", "-n", "-E", "-H", "-u", "#" + op.Uid, "--",
+			"/usr/bin/env", "-u", "SUDO_COMMAND", "-u", "SUDO_USER", "-u", "SUDO_UID", "-u", "SUDO_GID", "-u", "SUDO_HOME", "-C", op.HomeDir, cmd.Path}, cmd.Args[1:]...)
 		cmd.Path = "/bin/launchctl"
 		return nil
 	}
