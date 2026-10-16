@@ -50,8 +50,10 @@ func prepare(cmd *exec.Cmd, op *user.User) error {
 	// kills a hardened runtime binary under chroot (bug #143). sudo forks, so
 	// cmd's pid is sudo, but all stay in its process group for killTree.
 	if runtime.GOOS == "darwin" {
-		cmd.Args = append([]string{"launchctl", "asuser", op.Uid, "/usr/bin/sudo", "-n", "-E", "-H", "-u", "#" + op.Uid, "--",
-			"/usr/bin/env", "-u", "SUDO_COMMAND", "-u", "SUDO_USER", "-u", "SUDO_UID", "-u", "SUDO_GID", "-u", "SUDO_HOME", "-C", op.HomeDir, cmd.Path}, cmd.Args[1:]...)
+		cmd.Args = append([]string{
+			"launchctl", "asuser", op.Uid, "/usr/bin/sudo", "-n", "-E", "-H", "-u", "#" + op.Uid, "--",
+			"/usr/bin/env", "-u", "SUDO_COMMAND", "-u", "SUDO_USER", "-u", "SUDO_UID", "-u", "SUDO_GID", "-u", "SUDO_HOME", "-C", op.HomeDir, cmd.Path,
+		}, cmd.Args[1:]...)
 		cmd.Path = "/bin/launchctl"
 		return nil
 	}
