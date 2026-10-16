@@ -211,7 +211,9 @@ func (a *App) event(e term.Event) {
 	case term.Mouse:
 		a.mouse(e)
 	case term.Paste:
-		if p, ok := a.focusView().(PasteHandler); ok {
+		if l := a.top(); l != nil {
+			dispatchPaste(a, l.Root, e.Text)
+		} else if p, ok := a.focusView().(PasteHandler); ok {
 			p.Paste(a, e.Text)
 		}
 	case term.Focus:
@@ -272,6 +274,20 @@ func dispatchKey(a *App, n *Node, k term.Key) bool {
 	}
 	for _, c := range n.Kids {
 		if dispatchKey(a, c, k) {
+			return true
+		}
+	}
+	return false
+}
+
+// dispatchPaste gives a paste to the first view under n that takes one.
+func dispatchPaste(a *App, n *Node, text string) bool {
+	if p, ok := n.View.(PasteHandler); ok {
+		p.Paste(a, text)
+		return true
+	}
+	for _, c := range n.Kids {
+		if dispatchPaste(a, c, text) {
 			return true
 		}
 	}

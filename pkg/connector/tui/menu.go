@@ -212,6 +212,13 @@ func (m *Menu) Key(a *App, k term.Key) bool {
 	return true
 }
 
+// Paste searches for the pasted text's first line.
+func (m *Menu) Paste(_ *App, t string) {
+	line, _, _ := strings.Cut(t, "\n")
+	m.query += line
+	m.filter()
+}
+
 func (m *Menu) Mouse(a *App, mo term.Mouse, r Rect) bool {
 	switch {
 	case mo.Button == term.WheelUp:

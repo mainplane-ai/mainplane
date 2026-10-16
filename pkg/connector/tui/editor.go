@@ -28,6 +28,7 @@ func (e elem) space() bool { return e.g == " " || e.g == "\t" || e.g == "\n" }
 type Input struct {
 	Placeholder string
 	Mask        bool // show each grapheme as a dot, for a secret
+	Cursor      bool // show the cursor without focus, as in a dialog
 	MaxRows     int
 	OnSubmit    func(a *App, text string)
 	OnKey       func(a *App) // after each key the input takes
@@ -346,7 +347,7 @@ func (s *Input) Draw(a *App, c *Canvas, r Rect) {
 			x = c.Text(x, r.Y+y, g, st)
 		}
 	}
-	if a.focusView() == View(s) {
+	if s.Cursor || a.focusView() == View(s) {
 		c.Cursor(r.X+cc, r.Y+cr-s.top)
 	}
 }
