@@ -433,15 +433,16 @@ func (s *session) copyBefore(a *App, n int, input string) {
 		defer cancel()
 		to, err := s.c.Create(ctx, harness.Create{From: id, N: n}, via)
 		a.Post(func() {
-			if s.ctx.Err() != nil {
-				return
-			}
 			if err != nil {
 				a.SayError(err)
 				return
 			}
 			if input != "" {
 				s.list.drafts[to] = textElems(input)
+			}
+			if s.ctx.Err() != nil {
+				a.Say("Made session " + to) // the screen moved on: the list shows it
+				return
 			}
 			s.list.open(a, to)
 		})
@@ -541,6 +542,10 @@ func (s *session) base() statefile.Conf {
 // useModel opens a blank session screen that makes its session with the
 // model's config and this session's workers; on a blank screen, that one.
 func (s *session) useModel(a *App, m statefile.Conf) {
+	if s.id != "" && s.info.ID != s.id {
+		a.Say("The session is still loading")
+		return
+	}
 	m.Workers = s.base().Workers
 	if s.id == "" {
 		s.cfg = &m
