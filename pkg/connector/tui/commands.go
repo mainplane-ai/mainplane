@@ -232,7 +232,7 @@ func (s *session) carryOn(a *App) {
 	to := newSession(a, s.list, "")
 	cf := s.info.Config
 	to.cfg, to.started = &cf, true
-	to.input.Clear()
+	to.input.Clear() // not the home draft, which stays kept until this screen leaves
 	to.input.Attach("[continue session "+s.id+"]", "You are continuing session "+s.id+". Retrieve key context from it as you go.")
 	s.switchTo(a, to)
 }

@@ -113,8 +113,7 @@ func newSession(a *App, l *sessionList, id string) *session {
 	s.root = Box(&Node{Dir: Row, BG: a.Theme.BG}, s.sidebar, main)
 	a.Focus(s.box.Kids[1])
 	if d, ok := l.drafts[id]; ok {
-		s.input.els, s.input.cur = d, len(d)
-		delete(l.drafts, id)
+		s.input.els, s.input.cur = append([]elem(nil), d...), len(d)
 	}
 	s.title(a)
 	if id != "" {

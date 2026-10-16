@@ -90,6 +90,8 @@ func (l *sessionList) leave() {
 	}
 	if len(s.input.els) > 0 {
 		l.drafts[s.id] = s.input.els
+	} else {
+		delete(l.drafts, s.id)
 	}
 }
 
