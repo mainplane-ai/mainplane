@@ -32,6 +32,7 @@ type sessionList struct {
 	cur    *session // the screen showing now
 	infos  []harness.Info
 	seen   map[string]time.Time // per session, its update when last read here
+	drafts map[string][]elem    // per session, "" for home, the input it was left with
 	loaded bool
 	top    int  // the first row the sidebar shows
 	reveal bool // scroll the open session into view at the next draw
@@ -40,7 +41,7 @@ type sessionList struct {
 // newSessionList starts reading the sessions. A session is unread once it
 // changes after the first read, so a fresh start shows none unread.
 func newSessionList(a *App, c connector.Client) *sessionList {
-	l := &sessionList{c: c, seen: map[string]time.Time{}}
+	l := &sessionList{c: c, seen: map[string]time.Time{}, drafts: map[string][]elem{}}
 	a.Go(func() {
 		for {
 			ctx, cancel := context.WithTimeout(context.Background(), callTime)
@@ -80,10 +81,15 @@ func (l *sessionList) unread(in harness.Info) bool {
 	return in.ID != l.cur.id && in.Status != statefile.StatusStepping && in.Updated.After(l.seen[in.ID])
 }
 
-// leave marks the open session read as it is now, as its screen goes.
+// leave marks the open session read as it is now, and keeps its input, as
+// its screen goes.
 func (l *sessionList) leave() {
-	if s := l.cur; s.id != "" && s.info.ID == s.id {
+	s := l.cur
+	if s.id != "" && s.info.ID == s.id {
 		l.seen[s.id] = s.info.Updated
+	}
+	if len(s.input.els) > 0 {
+		l.drafts[s.id] = s.input.els
 	}
 }
 
@@ -157,7 +163,7 @@ func (l *sessionList) Mouse(a *App, m term.Mouse, r Rect) bool {
 }
 
 // Draw shows each session as a title, its name or else its id, with its
-// state on the right, over the model and context. Hovering a named session
+// state on the right, over the model with the context on the right. Hovering a named session
 // shows its id in place of the model.
 func (l *sessionList) Draw(a *App, c *Canvas, r Rect) {
 	if i := l.index(l.cur.id); l.reveal && i >= 0 {
@@ -199,7 +205,7 @@ func (l *sessionList) Draw(a *App, c *Canvas, r Rect) {
 			state = cat(state, run(" ●", term.Style{FG: a.Theme.Accent}))
 		}
 		if in.Status == statefile.StatusStepping {
-			state = run(spinner[l.cur.frame%len(spinner)]+" Working", a.Theme.text())
+			state = run(Spin()+" Working", a.Theme.text())
 		}
 		title, meta := in.Name, in.Config.Model
 		if title == "" {
@@ -207,12 +213,12 @@ func (l *sessionList) Draw(a *App, c *Canvas, r Rect) {
 		} else if hover == i {
 			meta = in.ID
 		}
-		used := " · " + tokens(in.ContextUsed)
+		used := tokens(in.ContextUsed)
 		if lim := in.Config.ContextLimit; lim > 0 {
 			used += "/" + tokens(lim)
 		}
 		line(y, spread(run(title, term.Style{FG: a.Theme.Text, Attr: term.Bold}), state, w))
-		line(y+1, cat(clip(run(meta, muted), max(0, w-term.Width(used))), run(used, muted)))
+		line(y+1, spread(run(meta, muted), run(used, muted), w))
 	}
 }
 

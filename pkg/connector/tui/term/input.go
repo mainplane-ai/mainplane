@@ -26,6 +26,7 @@ const (
 	Shift Mod = 1 << iota
 	Alt
 	Ctrl
+	Super // Cmd on a Mac, reported by the kitty protocol
 )
 
 // Keys that are not text have negative codes.
@@ -66,7 +67,7 @@ func (k Key) String() string {
 	for _, m := range []struct {
 		m Mod
 		s string
-	}{{Ctrl, "ctrl+"}, {Alt, "alt+"}, {Shift, "shift+"}} {
+	}{{Ctrl, "ctrl+"}, {Alt, "alt+"}, {Super, "super+"}, {Shift, "shift+"}} {
 		if k.Mod&m.m != 0 {
 			b.WriteString(m.s)
 		}
@@ -81,7 +82,7 @@ func (k Key) String() string {
 
 // Text is the text the key types, or "" when it types none.
 func (k Key) Text() string {
-	if k.Code < ' ' || k.Mod&(Ctrl|Alt) != 0 {
+	if k.Code < ' ' || k.Mod&(Ctrl|Alt|Super) != 0 {
 		return ""
 	}
 	return string(k.Code)
@@ -295,7 +296,7 @@ func csi(p string, f byte) Event {
 		}
 		return def
 	}
-	mod := Mod(arg(1, 1)-1) & (Shift | Alt | Ctrl)
+	mod := Mod(arg(1, 1)-1) & (Shift | Alt | Ctrl | Super)
 	switch {
 	case prefix == '<' && (f == 'M' || f == 'm'):
 		return mouse(arg(0, 0), arg(1, 1)-1, arg(2, 1)-1, f == 'm')
@@ -314,7 +315,7 @@ func csi(p string, f byte) Event {
 		if k, ok := kittyCode[code]; ok {
 			return Key{Code: k, Mod: mod}
 		}
-		if mod&(Ctrl|Alt) != 0 && code >= 'A' && code <= 'Z' {
+		if mod&(Ctrl|Alt|Super) != 0 && code >= 'A' && code <= 'Z' {
 			code += 'a' - 'A'
 		}
 		return Key{Code: rune(code), Mod: mod}

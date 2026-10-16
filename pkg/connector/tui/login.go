@@ -13,8 +13,6 @@ import (
 // empty session screens.
 const boxWidth = 80
 
-var spinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-
 // inputBox is the input on a raised shade with an accent bar on its left. The
 // bar's cell keeps the screen background, as opencode's does.
 func inputBox(a *App, in *Input) *Node {
@@ -46,7 +44,6 @@ type login struct {
 	input  *Input
 	status *Text // the app's status, centered
 	busy   bool
-	frame  int
 }
 
 func newLogin(a *App) *login {
@@ -78,8 +75,7 @@ func (s *login) Size(a *App, w, h int) {
 func (s *login) Key(*App, term.Key) bool { return false }
 
 func (s *login) Tick(a *App) {
-	s.frame++
-	a.Say(spinner[s.frame%len(spinner)] + " Logging in")
+	a.Say(Spin() + " Logging in")
 }
 
 func (s *login) submit(a *App, key string) {

@@ -42,9 +42,8 @@ type Glyph struct {
 // selection and clicks. It sticks to the bottom until scrolled up. A blank
 // row parts two blocks, unless Gap says not to.
 type Scrollbox struct {
-	Bar   bool // show the scrollbar: 1 column and 1 padding on the right
-	Frame int  // the spinner's frame
-	Gap   func(prev, next Block) bool
+	Bar bool // show the scrollbar: 1 column and 1 padding on the right
+	Gap func(prev, next Block) bool
 
 	items  []*item
 	rows   []srow
@@ -167,7 +166,7 @@ func (s *Scrollbox) Draw(a *App, c *Canvas, r Rect) {
 		for _, g := range row.Gs {
 			st, gs := g.St, g.G
 			if g.Spin {
-				gs = spinner[s.Frame%len(spinner)]
+				gs = Spin()
 			}
 			if s.sel.on && !g.Deco && s.picked(ri, x-r.X, g.W, a1, b1) {
 				st.BG = a.Theme.Selection

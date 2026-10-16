@@ -41,12 +41,12 @@ const (
 // sidebar when wide. With no message yet it is the wordmark above the input.
 // With no id it is home: the first message makes the session.
 type session struct {
-	c     connector.Client
-	list  *sessionList
-	id    string
-	info  harness.Info
-	msgs  int
-	frame int
+	c      connector.Client
+	list   *sessionList
+	id     string
+	info   harness.Info
+	msgs   int
+	second int64 // the clock's second at the last tick, to redraw the times of running calls
 
 	transcript *Scrollbox
 	input      *Input
@@ -112,6 +112,10 @@ func newSession(a *App, l *sessionList, id string) *session {
 		s.empty[0], s.empty[1], s.empty[2], s.body, s.busyRow, s.slashRow, s.inputRow, s.statusRow, &Node{Fixed: 1}, s.empty[3]) // a blank row under the status, as opencode
 	s.root = Box(&Node{Dir: Row, BG: a.Theme.BG}, s.sidebar, main)
 	a.Focus(s.box.Kids[1])
+	if d, ok := l.drafts[id]; ok {
+		s.input.els, s.input.cur = d, len(d)
+		delete(l.drafts, id)
+	}
 	s.title(a)
 	if id != "" {
 		s.follow(a)
@@ -256,7 +260,7 @@ func (s *session) busyLine(a *App) []Glyph {
 	case !s.stepping():
 		return nil
 	}
-	gs := run(spinner[s.frame%len(spinner)]+" Working", muted)
+	gs := run(Spin()+" Working", muted)
 	if !s.turn.IsZero() {
 		gs = append(gs, run(" "+dur(time.Since(s.turn).Truncate(time.Second)), muted)...)
 	}
@@ -306,13 +310,9 @@ func (s *session) Key(a *App, k term.Key) bool {
 	return true
 }
 
-// tickSecond is how many ticks make a second, for the time a call has run.
-const tickSecond = int(time.Second / tickRate)
-
 func (s *session) Tick(a *App) {
-	s.frame++
-	s.transcript.Frame = s.frame
-	if s.frame%tickSecond == 0 {
+	if sec := time.Now().Unix(); sec != s.second {
+		s.second = sec
 		for _, b := range s.running {
 			s.transcript.Changed(b)
 		}
@@ -331,7 +331,7 @@ func (s *session) title(a *App) {
 		t = s.id
 	}
 	if s.stepping() && !a.T.Caps.Progress {
-		t = spinner[s.frame%len(spinner)] + " " + t
+		t = Spin() + " " + t
 	}
 	a.T.SetTitle(t)
 }
