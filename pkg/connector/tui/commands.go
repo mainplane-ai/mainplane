@@ -504,11 +504,17 @@ func (s *session) models(a *App) {
 	a.OpenMenu("Model for a new session", m)
 }
 
+// modelConfs is the current model's config, then each other model's from
+// its newest listed session.
 func (s *session) modelConfs() []statefile.Conf {
-	var confs []statefile.Conf
+	all := []statefile.Conf{s.base()}
 	for _, in := range s.list.infos {
-		if in.Config.Model != "" && !slices.ContainsFunc(confs, func(c statefile.Conf) bool { return c.Model == in.Config.Model }) {
-			confs = append(confs, in.Config)
+		all = append(all, in.Config)
+	}
+	var confs []statefile.Conf
+	for _, cf := range all {
+		if cf.Model != "" && !slices.ContainsFunc(confs, func(c statefile.Conf) bool { return c.Model == cf.Model }) {
+			confs = append(confs, cf)
 		}
 	}
 	return confs
