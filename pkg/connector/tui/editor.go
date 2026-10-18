@@ -167,6 +167,7 @@ func (s *Input) deleteSelection() bool {
 }
 
 func (s *Input) insert(es ...elem) {
+	s.redo = nil // a change: what was undone stays undone
 	s.deleteSelection()
 	s.els = append(s.els[:s.cur], append(es, s.els[s.cur:]...)...)
 	s.cur += len(es)
