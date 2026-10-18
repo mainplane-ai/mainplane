@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -754,9 +755,11 @@ func (s *session) infoMenu(a *App) {
 				m.Items = append(m.Items, MenuItem{Label: "This machine", Hint: "not a worker", Section: "Network"})
 			}
 			for _, l := range strings.Split(strings.TrimSpace(network), "\n") {
-				if f := strings.Fields(l); len(f) > 1 {
-					value := strings.Join(f[1:], " ")
-					m.Items = append(m.Items, MenuItem{Label: f[0], Hint: value, Section: "Network", Pick: func(a *App, _ *MenuItem) { a.Copy(value) }})
+				// a row is columns two spaces apart: a name, then its value; other lines are said whole
+				label, value, _ := strings.Cut(strings.TrimSpace(l), "  ")
+				value = strings.Join(strings.Fields(value), " ")
+				if label != "" {
+					m.Items = append(m.Items, MenuItem{Label: label, Hint: value, Section: "Network", Pick: func(a *App, _ *MenuItem) { a.Copy(cmp.Or(value, label)) }})
 				}
 			}
 			a.OpenMenu("Session info", m)

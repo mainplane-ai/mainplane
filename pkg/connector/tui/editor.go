@@ -110,7 +110,21 @@ func (s *Input) Text() string {
 	return b.String()
 }
 
-func (s *Input) Clear() { s.els, s.cur, s.anchor, s.top, s.undo = nil, 0, -1, 0, nil }
+func (s *Input) Clear() {
+	s.els, s.cur, s.anchor, s.top, s.undo, s.typing = nil, 0, -1, 0, nil, false
+}
+
+// undoMax is how many changes Ctrl+Z goes back: each keeps a copy of the
+// input, which a paste can make large.
+const undoMax = 100
+
+// remember keeps the input before a change for Ctrl+Z.
+func (s *Input) remember(before snap) {
+	s.undo = append(s.undo, before)
+	if len(s.undo) > undoMax {
+		s.undo = s.undo[1:]
+	}
+}
 
 func (s *Input) span() (int, int) {
 	if s.anchor < 0 {
@@ -167,7 +181,8 @@ func (s *Input) Attach(label, text string) {
 }
 
 func (s *Input) Paste(a *App, t string) {
-	s.undo, s.typing = append(s.undo, snap{slices.Clone(s.els), s.cur}), false
+	s.remember(snap{slices.Clone(s.els), s.cur})
+	s.typing = false
 	if n := strings.Count(t, "\n") + 1; n >= collapseLines {
 		label := fmt.Sprintf("[Pasted %d lines]", n)
 		s.insert(elem{g: label, w: term.Width(label), paste: t})
@@ -236,13 +251,17 @@ func (s *Input) Key(a *App, k term.Key) bool {
 		}
 		return true
 	}
-	before := snap{slices.Clone(s.els), s.cur}
+	before, selected := snap{slices.Clone(s.els), s.cur}, s.anchor >= 0
 	took := s.edit(a, k)
-	if !slices.Equal(before.els, s.els) && s.els != nil { // nil: sent, and Clear forgot the undo
+	switch {
+	case slices.Equal(before.els, s.els):
+		s.typing = false // a move: what is typed next is a change of its own
+	case s.els == nil: // sent, and Clear forgot the undo
+	default:
 		t := k.Text() // a space joins the word before it, and the next word starts anew
 		typed := t != "" && !strings.Contains(t, "\n")
-		if !typed || !s.typing {
-			s.undo = append(s.undo, before)
+		if !typed || !s.typing || selected {
+			s.remember(before)
 		}
 		s.typing = typed && strings.TrimSpace(t) == t
 	}
@@ -333,7 +352,9 @@ func (s *Input) Mouse(a *App, m term.Mouse, r Rect) bool {
 		s.top = min(s.top+1, max(0, len(rows)-r.H))
 	case m.Action == term.Press && m.Button == term.Left:
 		a.Select(s)
+		s.typing = false
 		if i < len(s.els) && s.els[i].paste != "" {
+			s.remember(snap{slices.Clone(s.els), s.cur})
 			s.expand(i)
 			break
 		}

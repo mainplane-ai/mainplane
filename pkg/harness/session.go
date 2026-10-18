@@ -236,9 +236,13 @@ func (h *Harness) Delete(id, via string) error {
 	h.lockIndex()
 	delete(h.index, id)
 	delete(h.dirty, id)
+	h.gone[id] = true
 	h.imu.Unlock()
 	close(s.changed) // long polls end, and read that it is gone
 	s.changed = make(chan struct{})
+	h.mu.Lock()
+	delete(h.s, id)
+	h.mu.Unlock()
 	log.Printf("session %s: deleted by %s", id, via)
 	return nil
 }

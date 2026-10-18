@@ -51,7 +51,9 @@ func (h *Harness) Info(id string) (Info, error) {
 		}
 	}
 	h.lockIndex()
-	h.index[id] = info
+	if !h.gone[id] { // a read that began before a delete does not bring it back
+		h.index[id] = info
+	}
 	h.imu.Unlock()
 	return info, nil
 }
@@ -60,7 +62,7 @@ func (h *Harness) Info(id string) (Info, error) {
 func (h *Harness) lockIndex() {
 	h.imu.Lock()
 	if h.index == nil {
-		h.index, h.dirty = map[string]Info{}, map[string]bool{}
+		h.index, h.dirty, h.gone = map[string]Info{}, map[string]bool{}, map[string]bool{}
 	}
 }
 
@@ -93,8 +95,13 @@ func (h *Harness) List() ([]Info, error) {
 	infos := make([]Info, 0, len(ids))
 	for _, id := range ids {
 		h.imu.Lock()
-		info, stale := h.index[id], h.dirty[id]
+		info, ok := h.index[id]
+		stale := h.dirty[id]
 		delete(h.dirty, id)
+		if !ok && !stale || h.gone[id] {
+			h.imu.Unlock()
+			continue // deleted since the ids were taken
+		}
 		h.imu.Unlock()
 		if stale {
 			var err error

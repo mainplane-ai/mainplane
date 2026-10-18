@@ -80,7 +80,9 @@ func cli(verb string, args []string) {
 	case "stop":
 		c.call("POST", "/sessions/"+args[0]+"/stop?via="+via, "", nil, nil)
 	case "delete":
-		c.call("DELETE", "/sessions/"+args[0]+"?via="+via, "", nil, nil)
+		if err := c.Delete(context.Background(), args[0], via); err != nil {
+			die(err)
+		}
 	case "info":
 		c.raw("/sessions/" + args[0])
 	case "sessions":
