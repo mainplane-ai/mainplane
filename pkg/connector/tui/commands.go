@@ -16,90 +16,65 @@ import (
 
 // command is a slash command: typed as /name or an alias, picked from the
 // list a / opens above the input, or from the menu Ctrl+P opens. Each one
-// costs a place in that list, so a command earns it or is not one.
+// costs a place in that list, so a command earns it or is not one. A
+// command takes no text: the text after it stays in the input, and a
+// command that opens a new session takes it there.
 type command struct {
 	name    string
 	aliases []string
 	label   string
 	key     string // shown in Ctrl+P; a key of one press also runs it
 	run     func(s *session, a *App)
-	withArg func(s *session, a *App, arg string) // when set, /name text runs it
 }
 
 // commands is a function, not a variable: the commands make sessions, whose
-// keys open the commands.
+// keys open the commands. Where names share a start, the one used more
+// comes first, and the list shows names before aliases: /re is /rename.
 func commands() []command {
 	return []command{
-		{"new", []string{"clear"}, "New session", "ctrl+n", (*session).fresh, nil},
-		{"sessions", []string{"resume"}, "Sessions", "ctrl+o", (*session).sessions, nil},
-		{"continue", []string{"compact"}, "Continue in a new session", "ctrl+k", (*session).carryOn, nil},
-		{"fork", nil, "Fork into a new session", "", (*session).fork, nil},
-		{"rewind", []string{"revert"}, "Rewind to before a message", "", (*session).rewind, nil},
-		{"rename", nil, "Rename the session", "", (*session).renameDialog, (*session).rename},
-		{"model", nil, "Model for a new session", "", (*session).models, (*session).model},
-		{"workers", nil, "Workers", "ctrl+e", (*session).workers, nil},
-		{"stop", nil, "Stop the session", "esc esc", (*session).halt, nil},
-		{"info", []string{"debug", "id"}, "Session info", "", (*session).infoMenu, nil},
-		{"help", nil, "Commands and keys", "f1", (*session).palette, nil},
-		{"exit", []string{"quit"}, "Exit", "ctrl+c ctrl+c", func(_ *session, a *App) { a.Quit() }, nil},
+		{"new", []string{"clear"}, "New session", "ctrl+n", (*session).fresh},
+		{"sessions", []string{"resume"}, "Sessions", "ctrl+o", (*session).sessions},
+		{"continue", []string{"compact"}, "Continue in a new session", "ctrl+k", (*session).carryOn},
+		{"rename", nil, "Rename the session", "", (*session).renameDialog},
+		{"model", nil, "Model for a new session", "", (*session).models},
+		{"fork", nil, "Fork into a new session", "", (*session).fork},
+		{"rollback", []string{"revert", "rewind"}, "Roll back to before a message", "", (*session).rollback},
+		{"workers", nil, "Workers", "ctrl+e", (*session).workers},
+		{"stop", nil, "Stop the session", "esc esc", (*session).halt},
+		{"info", []string{"debug", "id"}, "Session info", "", (*session).infoMenu},
+		{"help", nil, "Commands and keys", "f1", (*session).palette},
+		{"exit", []string{"quit"}, "Exit", "ctrl+c ctrl+c", func(_ *session, a *App) { a.Quit() }},
 	}
 }
 
 func (c command) is(word string) bool { return word == c.name || slices.Contains(c.aliases, word) }
 
-// commandFor is the command text names, and the text after it: one line,
-// /word and, for a command that takes it, more.
-func commandFor(text string) (*command, string) {
-	t := strings.TrimSpace(text)
-	if !strings.HasPrefix(t, "/") || strings.Contains(t, "\n") {
-		return nil, ""
-	}
-	word, arg, _ := strings.Cut(t[1:], " ")
-	arg = strings.TrimSpace(arg)
-	for _, c := range commands() {
-		if c.is(word) && (arg == "" || c.withArg != nil) {
-			return &c, arg
-		}
-	}
-	return nil, ""
-}
-
-func (c command) do(s *session, a *App, arg string) {
-	if arg != "" {
-		c.withArg(s, a, arg)
-		return
-	}
-	c.run(s, a)
-}
-
 // slashRows is the most rows the list above the input shows.
 const slashRows = 10
 
-// slash is the list of commands above the input while it holds a / and the
-// start of a command's name or alias. Up and Down move, Enter, Tab or a
-// click runs, Esc closes it until the input changes.
+// slash is the list of commands above the input while the input up to the
+// cursor is a / and the start of a command's name or alias. Up and Down
+// move, Enter, Tab or a click runs, Esc closes it until that text changes.
+// The text after the cursor stays in the input.
 type slash struct {
 	s     *session
-	query string // the input that made the list
+	query string // the input up to the cursor that made the list
 	cmds  []command
 	sel   int
 	top   int
 }
 
-// update makes the list for the input: none unless it is a / and the start
-// of a command word. Names that match come before aliases that do.
+// update makes the list for the input up to the cursor. Names that match
+// come before aliases that do.
 func (l *slash) update() {
-	t := l.s.input.Text()
+	in := l.s.input
+	before := Input{els: in.els[:in.cur]}
+	t := before.Text()
 	if t == l.query {
 		return
 	}
 	l.query, l.cmds, l.sel, l.top = t, nil, 0, 0
-	for _, e := range l.s.input.els {
-		if e.paste != "" {
-			return
-		}
-	}
-	if !strings.HasPrefix(t, "/") || strings.ContainsAny(t, " \t\n") {
+	if !strings.HasPrefix(t, "/") || slices.ContainsFunc(before.els, func(e elem) bool { return e.paste != "" || e.space() }) {
 		return
 	}
 	var byAlias []command
@@ -120,14 +95,51 @@ func (l *slash) run(a *App, i int) {
 	if i < 0 || i >= len(l.cmds) {
 		return
 	}
-	c := l.cmds[i]
-	l.s.input.Clear()
-	c.run(l.s, a)
+	l.s.runCommand(a, l.cmds[i], l.s.input.cur)
 }
 
-// Key is the input's Before: it takes the keys of the list while it shows.
+// runCommand runs c, typed in the input's first end elements, which leave it.
+func (s *session) runCommand(a *App, c command, end int) {
+	in := s.input
+	rest := in.els[end:]
+	for len(rest) > 0 && rest[0].space() {
+		rest = rest[1:]
+	}
+	in.Clear()
+	in.els = append([]elem(nil), rest...)
+	in.cur = len(in.els)
+	c.run(s, a)
+}
+
+// typed is the command the input's first word names, and the word's end:
+// Enter runs it when the list is closed.
+func (s *session) typed() (*command, int) {
+	els := s.input.els
+	end := slices.IndexFunc(els, func(e elem) bool { return e.space() || e.paste != "" })
+	if end < 0 {
+		end = len(els)
+	}
+	word := Input{els: els[:end]}
+	t := word.Text()
+	if !strings.HasPrefix(t, "/") {
+		return nil, 0
+	}
+	for _, c := range commands() {
+		if c.is(t[1:]) {
+			return &c, end
+		}
+	}
+	return nil, 0
+}
+
+// Key is the input's Before: it takes the keys of the list while it shows,
+// and Enter on a typed command.
 func (l *slash) Key(a *App, k term.Key) bool {
 	if l.update(); len(l.cmds) == 0 {
+		if c, end := l.s.typed(); c != nil && k.String() == "enter" {
+			l.s.runCommand(a, *c, end)
+			return true
+		}
 		return false
 	}
 	switch k.String() {
@@ -209,7 +221,7 @@ func (s *session) palette(a *App) {
 	add("Input", "Send", "enter", nil)
 	add("Input", "New line", "shift+enter, ctrl+j", nil)
 	add("Input", "Slash commands", "/", func(a *App) {
-		s.input.Clear()
+		s.input.cur, s.input.anchor = 0, -1
 		s.input.insert(textElems("/")...)
 	})
 	add("Input", "Select", "shift+arrows", nil)
@@ -239,7 +251,22 @@ func (s *session) switchTo(a *App, to *session) {
 }
 
 // fresh is the empty screen; the first message makes a session.
-func (s *session) fresh(a *App) { s.switchTo(a, newSession(a, s.list, "")) }
+func (s *session) fresh(a *App) {
+	to := newSession(a, s.list, "")
+	s.carry(to)
+	s.switchTo(a, to)
+}
+
+// carry moves the text in the input to the new session screen to, in place
+// of its draft: a command that opens a new session takes it along.
+func (s *session) carry(to *session) {
+	if len(s.input.els) == 0 {
+		return
+	}
+	to.input.Clear()
+	to.input.insert(s.input.els...)
+	s.input.Clear()
+}
 
 // carryOn opens a blank session screen with this session's config, its
 // input holding a message to continue from this one. Sending it makes the
@@ -258,6 +285,11 @@ func (s *session) carryOn(a *App) {
 	to.cfg, to.started = &cf, true
 	to.input.Clear() // not the home draft, which stays kept until this screen leaves
 	to.input.Attach("[continue session "+s.id+"]", "You are continuing session "+s.id+". Retrieve key context from it as you go.")
+	if len(s.input.els) > 0 {
+		to.input.insert(elem{g: "\n"})
+		to.input.insert(s.input.els...)
+		s.input.Clear()
+	}
 	s.switchTo(a, to)
 }
 
@@ -400,15 +432,17 @@ func (s *session) fork(a *App) {
 	case s.stepping():
 		a.Say("Fork when the session is done: wait, or /stop it")
 	default:
-		s.copyBefore(a, s.info.N+1, "")
+		els := s.input.els
+		s.input.Clear()
+		s.copyBefore(a, s.info.N+1, els, true)
 	}
 }
 
-// rewind is the menu of the messages sent, newest first. Picking one opens
-// a copy of the session from before it, with the message in the input.
-func (s *session) rewind(a *App) {
+// rollback is the menu of the messages sent, newest first. Picking one
+// opens a copy of the session from before it, with the message in the input.
+func (s *session) rollback(a *App) {
 	if len(s.asked) == 0 {
-		a.Say("No message to rewind to")
+		a.Say("No message to roll back to")
 		return
 	}
 	m := &Menu{}
@@ -419,14 +453,15 @@ func (s *session) rewind(a *App) {
 			label = strings.TrimSpace(lines(text)[0])
 		}
 		n := r.N
-		m.Items = append(m.Items, MenuItem{Label: label, Hint: stamp(r.Time), Pick: func(a *App, _ *MenuItem) { s.copyBefore(a, n, text) }})
+		m.Items = append(m.Items, MenuItem{Label: label, Hint: stamp(r.Time), Pick: func(a *App, _ *MenuItem) { s.copyBefore(a, n, textElems(text), false) }})
 	}
-	a.OpenMenu("Rewind to before", m)
+	a.OpenMenu("Roll back to before", m)
 }
 
 // copyBefore makes a session of this one's records before record n, then
-// opens it with input in its input.
-func (s *session) copyBefore(a *App, n int, input string) {
+// opens it with input in its input. When the input was taken from this
+// session's, a failure gives it back.
+func (s *session) copyBefore(a *App, n int, input []elem, taken bool) {
 	id := s.id
 	a.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), callTime)
@@ -435,10 +470,13 @@ func (s *session) copyBefore(a *App, n int, input string) {
 		a.Post(func() {
 			if err != nil {
 				a.SayError(err)
+				if taken && s.ctx.Err() == nil && len(s.input.els) == 0 {
+					s.input.insert(input...)
+				}
 				return
 			}
-			if input != "" {
-				s.list.drafts[to] = textElems(input)
+			if len(input) > 0 {
+				s.list.drafts[to] = input
 			}
 			if s.ctx.Err() != nil {
 				a.Say("Made session " + to) // the screen moved on: the list shows it
@@ -520,17 +558,6 @@ func (s *session) modelConfs() []statefile.Conf {
 	return confs
 }
 
-// model is /model name: the model whose id is name, or ends in /name.
-func (s *session) model(a *App, name string) {
-	for _, cf := range s.modelConfs() {
-		if cf.Model == name || strings.HasSuffix(cf.Model, "/"+name) {
-			s.useModel(a, cf)
-			return
-		}
-	}
-	a.Say("No session uses " + name + ": /model lists those that do")
-}
-
 // base is the config a new session starts from: this session's, the one
 // chosen for this screen, else the newest session's.
 func (s *session) base() statefile.Conf {
@@ -559,6 +586,7 @@ func (s *session) useModel(a *App, m statefile.Conf) {
 	}
 	to := newSession(a, s.list, "")
 	to.cfg = &m
+	s.carry(to)
 	s.switchTo(a, to)
 }
 

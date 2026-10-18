@@ -5,7 +5,7 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 ## v0.5.4
 
 - On macOS 26.6, every run, read and write on a worker was killed at once (`signal: killed`, `exit -1`): the worker dropped to the operator with `chroot -u`, and macOS kills a hardened runtime binary under chroot. It now drops with `sudo -n -u` inside `launchctl asuser`
-- The terminal app restores the terminal after a crash or hang and offers the report to bugs.mainplane.ai. Cmd+C copies without typing c, Enter sends a paste, drafts survive switching sessions, and the sidebar shows context used. New slash commands: /fork, /rewind (/revert), /rename, /model, /stop, /info (/debug, /id), /exit (/quit)
+- The terminal app restores the terminal after a crash or hang and offers the report to bugs.mainplane.ai. Cmd+C copies without typing c, Enter sends a paste, drafts survive switching sessions, and the sidebar shows context used. New slash commands: /fork, /rollback (/revert, /rewind), /rename, /model, /stop, /info (/debug, /id), /exit (/quit). A command typed before text in the input runs, and the text stays; /new, /continue, /model and /fork take it to the new session. Ctrl+C with a selection copies, also after an earlier copy, and a session opening from the sidebar no longer flashes the home screen
 - The session id is `MAINPLANE_SESSION` in each interpreter process, not in the prompt, and the prompt cache key is record 1's id, so a copied session builds the same request
 - A session from an incompatible harness version says so and points to /continue
 
