@@ -470,8 +470,12 @@ func (s *session) copyBefore(a *App, n int, input []elem, taken bool) {
 		a.Post(func() {
 			if err != nil {
 				a.SayError(err)
-				if taken && s.ctx.Err() == nil && len(s.input.els) == 0 {
+				switch _, kept := s.list.drafts[id]; {
+				case !taken:
+				case s.ctx.Err() == nil && len(s.input.els) == 0:
 					s.input.insert(input...)
+				case s.ctx.Err() != nil && !kept:
+					s.list.drafts[id] = input // the screen moved on: back in its draft
 				}
 				return
 			}

@@ -229,8 +229,8 @@ func (a *App) focusView() View {
 
 // key goes to the top modal layer, else the focused node and its parents,
 // then the screen. Ctrl+C is the app's: with a selection it copies and
-// clears it, without one it exits, so twice in a row always exits. Cmd+C
-// only copies.
+// clears it, without one it exits, so a second Ctrl+C with no selection
+// made between exits. Cmd+C only copies.
 func (a *App) key(k term.Key) {
 	s := k.String()
 	a.prevKey, a.lastKey = a.lastKey, s

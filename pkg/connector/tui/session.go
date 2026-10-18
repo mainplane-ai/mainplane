@@ -140,7 +140,8 @@ func (s *session) Size(a *App, w, h int) {
 	if w < narrow {
 		pad = 1
 	}
-	empty := s.id == "" && !s.started // a session that loads shows its blank transcript, not home
+	loaded := s.id != "" && s.info.ID == s.id
+	empty := !s.started && (s.id == "" || loaded && len(s.asked) == 0) // a session that loads shows its blank transcript, not home
 	s.sidebar.Hidden = w < sidebarFrom
 	s.body.Hidden = empty
 	for _, n := range s.empty {
