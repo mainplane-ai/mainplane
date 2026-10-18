@@ -38,6 +38,7 @@ type Input struct {
 	els    []elem
 	cur    int
 	undo   []snap // the input before each change, newest last
+	redo   []snap // the input before each undo, newest last; a change clears it
 	typing bool   // the last change typed a word's character: the next typed joins it
 	anchor int    // the other end of the selection; -1 is none
 	top    int
@@ -111,7 +112,7 @@ func (s *Input) Text() string {
 }
 
 func (s *Input) Clear() {
-	s.els, s.cur, s.anchor, s.top, s.undo, s.typing = nil, 0, -1, 0, nil, false
+	s.els, s.cur, s.anchor, s.top, s.undo, s.redo, s.typing = nil, 0, -1, 0, nil, nil, false
 }
 
 // undoMax is how many changes Ctrl+Z goes back: each keeps a copy of the
@@ -120,10 +121,23 @@ const undoMax = 100
 
 // remember keeps the input before a change for Ctrl+Z.
 func (s *Input) remember(before snap) {
-	s.undo = append(s.undo, before)
+	s.undo, s.redo = append(s.undo, before), nil
 	if len(s.undo) > undoMax {
 		s.undo = s.undo[1:]
 	}
+}
+
+// restore puts back the newest input of from, keeping the input it replaces
+// in to: an undo, or with the stacks swapped a redo.
+func (s *Input) restore(from, to *[]snap) {
+	n := len(*from)
+	if n == 0 {
+		return
+	}
+	*to = append(*to, snap{slices.Clone(s.els), s.cur})
+	last := (*from)[n-1]
+	*from = (*from)[:n-1]
+	s.els, s.cur, s.anchor, s.typing = last.els, last.cur, -1, false
 }
 
 func (s *Input) span() (int, int) {
@@ -153,6 +167,7 @@ func (s *Input) deleteSelection() bool {
 }
 
 func (s *Input) insert(es ...elem) {
+	s.redo = nil // a change: what was undone stays undone
 	s.deleteSelection()
 	s.els = append(s.els[:s.cur], append(es, s.els[s.cur:]...)...)
 	s.cur += len(es)
@@ -236,15 +251,18 @@ func (s *Input) word(dir int) int {
 }
 
 // Key edits the input. Ctrl+Z undoes a change; a word typed, with the space
-// after it, is one change.
+// after it, is one change. Ctrl+Y redoes, and Ctrl+Shift+Z where the
+// terminal tells it from Ctrl+Z: with the kitty protocol, not in Windows
+// Terminal, whose console sends both as the same byte.
 func (s *Input) Key(a *App, k term.Key) bool {
 	if s.Before != nil && s.Before(a, k) {
 		return true
 	}
-	if k.String() == "ctrl+z" {
-		if n := len(s.undo); n > 0 {
-			s.els, s.cur, s.anchor, s.typing = s.undo[n-1].els, s.undo[n-1].cur, -1, false
-			s.undo = s.undo[:n-1]
+	if k := k.String(); k == "ctrl+z" || k == "ctrl+shift+z" || k == "ctrl+y" {
+		if k == "ctrl+z" {
+			s.restore(&s.undo, &s.redo)
+		} else {
+			s.restore(&s.redo, &s.undo)
 		}
 		if s.OnKey != nil {
 			s.OnKey(a)
