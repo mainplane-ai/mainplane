@@ -234,6 +234,7 @@ func (s *session) palette(a *App) {
 	})
 	add("Input", "Select", "shift+arrows", nil)
 	add("Input", "Undo", "ctrl+z", nil)
+	add("Input", "Redo", "ctrl+y, ctrl+shift+z", nil)
 	add("Input", "Cut the selection", "ctrl+x", nil)
 	add("Input", "Delete the word before", "ctrl+backspace", nil)
 	add("Input", "Delete the next word", "ctrl+delete", nil)
