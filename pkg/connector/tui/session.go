@@ -431,11 +431,11 @@ func (s *session) show(r statefile.Record) {
 // send posts the text. From home the screen turns to the session at once;
 // the session is made in the background and the text posted when it is.
 func (s *session) send(a *App, text string) {
+	s.started = true
 	if s.id != "" {
 		s.outbox <- text
 		return
 	}
-	s.started = true
 	s.pending = append(s.pending, text)
 	if !s.creating {
 		s.create(a)
