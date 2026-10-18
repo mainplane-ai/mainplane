@@ -45,8 +45,8 @@ type session struct {
 	list   *sessionList
 	id     string
 	info   harness.Info
-	asked  []statefile.Record // the messages, for /rollback
-	second int64              // the clock's second at the last tick, to redraw the times of running calls
+	asked  []*msgBlock // the messages, for /rollback and /goto
+	second int64       // the clock's second at the last tick, to redraw the times of running calls
 
 	transcript *Scrollbox
 	input      *Input
@@ -398,9 +398,10 @@ func (s *session) show(r statefile.Record) {
 			s.usage[k] = t
 		}
 	case statefile.Message:
-		s.asked = append(s.asked, r)
+		b := &msgBlock{r}
+		s.asked = append(s.asked, b)
 		s.turn = r.Time
-		s.transcript.Append(&msgBlock{r})
+		s.transcript.Append(b)
 	case statefile.Text:
 		s.transcript.Append(&textBlock{string(r.Body)})
 	case statefile.Error:

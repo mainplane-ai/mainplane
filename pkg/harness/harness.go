@@ -46,6 +46,7 @@ type Harness struct {
 	imu   sync.Mutex
 	index map[string]Info
 	dirty map[string]bool
+	gone  map[string]bool // deleted; ids are never reused
 }
 
 // provider splits a config's provider/model string and finds the provider.

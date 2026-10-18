@@ -3,8 +3,11 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"unicode"
@@ -209,6 +212,39 @@ func (h *Harness) SetName(id, via, n string) (int, error) {
 		defer func() { _ = f.Close() }()
 	}
 	return h.write(s, f, name(via, n))
+}
+
+// Delete removes the session's file for good. Append-only is of records:
+// none is ever changed, and a session goes whole. A stepping session is
+// refused, so no step writes to a file that is gone; under the lock a post
+// takes, so no post does. Copies keep their own files, workers their logs.
+func (h *Harness) Delete(id, via string) error {
+	s := h.session(id)
+	h.mu.Lock()
+	if s.running {
+		h.mu.Unlock()
+		return fmt.Errorf("session %s is stepping: stop it first", id)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	h.mu.Unlock()
+	if err := os.Remove(h.Sessions.Path(id)); errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("no session %s", id)
+	} else if err != nil {
+		return err
+	}
+	h.lockIndex()
+	delete(h.index, id)
+	delete(h.dirty, id)
+	h.gone[id] = true
+	h.imu.Unlock()
+	close(s.changed) // long polls end, and read that it is gone
+	s.changed = make(chan struct{})
+	h.mu.Lock()
+	delete(h.s, id)
+	h.mu.Unlock()
+	log.Printf("session %s: deleted by %s", id, via)
+	return nil
 }
 
 // Kick steps a session in the background until it is not open. A kick during

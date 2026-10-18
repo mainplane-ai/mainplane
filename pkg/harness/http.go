@@ -22,7 +22,7 @@ import (
 // person. A file goes to a worker, not into the state file.
 const MaxPost = 8 << 20
 
-// Handler is the harness's HTTP surface: nine verbs on a session, three
+// Handler is the harness's HTTP surface: ten verbs on a session, three
 // reads of the environment, and removing a worker. Records go out in the
 // state file's own bytes, one after another.
 //
@@ -43,6 +43,8 @@ const MaxPost = 8 << 20
 //	                                  with these workers; the next step sees them
 //	PUT  /sessions/{id}/name          the name as text; ?via= required. a name     -> {"n"}
 //	                                  record; empty removes the name
+//	DELETE /sessions/{id}             ?via= required. the file is gone for good;   -> 204
+//	                                  a stepping session is refused
 //	GET  /workers                     -> connected workers' hellos, and refused
 //	                                     ones with the reason
 //	DELETE /workers/{name}            the worker leaves the mesh for good; its     -> 204
@@ -155,6 +157,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	handle("DELETE /sessions/{id}", h.serveDelete)
 	handle("PUT /sessions/{id}/workers", h.serveWorkers)
 	handle("PUT /sessions/{id}/name", h.serveName)
 	return mux
@@ -193,6 +196,19 @@ func (h *Harness) serveWorkers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reply(w, map[string]int{"n": n})
+}
+
+func (h *Harness) serveDelete(w http.ResponseWriter, r *http.Request) {
+	via, err := via(r)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	if err := h.Delete(r.PathValue("id"), via); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // serveName makes the text body the session's name.

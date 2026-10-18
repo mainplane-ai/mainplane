@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
@@ -51,7 +52,8 @@ type Scrollbox struct {
 	dirty  bool
 	top    int
 	sticky bool
-	view   Rect // the text, as last drawn
+	show   Block // scrolled to the top at the next draw
+	view   Rect  // the text, as last drawn
 	barX   int
 	onBar  bool
 	onRow  bool // the press was on a row, so its release may be a click
@@ -138,6 +140,26 @@ func (s *Scrollbox) Scroll(n int) {
 
 func (s *Scrollbox) Page() int { return max(1, s.view.H-1) }
 
+// place sets the top row: the bottom while it sticks, a block Show asked
+// for, else where it was, within the rows.
+func (s *Scrollbox) place() {
+	if s.sticky {
+		s.top = s.maxTop()
+	}
+	if s.show != nil {
+		if i := slices.IndexFunc(s.rows, func(r srow) bool { return r.it != nil && r.it.b == s.show }); i >= 0 {
+			s.top = min(i, s.maxTop())
+			s.sticky = s.top == s.maxTop()
+		}
+		s.show = nil
+	}
+	s.top = min(s.top, s.maxTop())
+}
+
+// Show puts b's first row at the top of the view, or as near as the end
+// lets it, at the next draw.
+func (s *Scrollbox) Show(b Block) { s.show = b }
+
 func (s *Scrollbox) Draw(a *App, c *Canvas, r Rect) {
 	tw := r.W
 	if s.Bar && r.W > 2 {
@@ -151,10 +173,7 @@ func (s *Scrollbox) Draw(a *App, c *Canvas, r Rect) {
 	}
 	s.layout(a)
 	s.view, s.barX = Rect{r.X, r.Y, tw, r.H}, r.X+r.W-1
-	if s.sticky {
-		s.top = s.maxTop()
-	}
-	s.top = min(s.top, s.maxTop())
+	s.place()
 	a1, b1 := s.order()
 	for y := 0; y < r.H && s.top+y < len(s.rows); y++ {
 		ri := s.top + y
