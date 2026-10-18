@@ -228,15 +228,16 @@ func (a *App) focusView() View {
 }
 
 // key goes to the top modal layer, else the focused node and its parents,
-// then the screen. Ctrl+C is the app's: with a selection it copies, without
-// one it exits, and twice in a row it always exits. Cmd+C only copies.
+// then the screen. Ctrl+C is the app's: with a selection it copies and
+// clears it, without one it exits, so a second Ctrl+C with no selection
+// made between exits. Cmd+C only copies.
 func (a *App) key(k term.Key) {
 	s := k.String()
 	a.prevKey, a.lastKey = a.lastKey, s
 	a.prevAt, a.lastAt = a.lastAt, time.Now()
 	a.Status.S = ""
 	if s == "ctrl+c" {
-		if !a.Again(0) && a.sel != nil && a.sel.Selected() != "" {
+		if a.sel != nil && a.sel.Selected() != "" {
 			a.Copy(a.sel.Selected())
 			a.sel.ClearSelection()
 			return

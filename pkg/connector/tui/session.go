@@ -45,8 +45,7 @@ type session struct {
 	list   *sessionList
 	id     string
 	info   harness.Info
-	msgs   int
-	asked  []statefile.Record // the messages, for /rewind
+	asked  []statefile.Record // the messages, for /rollback
 	second int64              // the clock's second at the last tick, to redraw the times of running calls
 
 	transcript *Scrollbox
@@ -141,7 +140,8 @@ func (s *session) Size(a *App, w, h int) {
 	if w < narrow {
 		pad = 1
 	}
-	empty := s.msgs == 0 && !s.started
+	loaded := s.id != "" && s.info.ID == s.id
+	empty := !s.started && (s.id == "" || loaded && len(s.asked) == 0) // a session that loads shows its blank transcript, not home
 	s.sidebar.Hidden = w < sidebarFrom
 	s.body.Hidden = empty
 	for _, n := range s.empty {
@@ -200,7 +200,7 @@ func (s *session) metaLine(a *App, hint bool) []Glyph {
 	muted := a.Theme.muted()
 	key := term.Style{FG: a.Theme.Text, Attr: term.Bold}
 	var parts [][]Glyph
-	if s.id != "" {
+	if s.id != "" && s.info.ID == s.id {
 		c := tokens(s.info.ContextUsed)
 		if l := s.info.Config.ContextLimit; l > 0 {
 			c += "/" + tokens(l)
@@ -398,7 +398,6 @@ func (s *session) show(r statefile.Record) {
 			s.usage[k] = t
 		}
 	case statefile.Message:
-		s.msgs++
 		s.asked = append(s.asked, r)
 		s.turn = r.Time
 		s.transcript.Append(&msgBlock{r})
@@ -432,15 +431,11 @@ func (s *session) show(r statefile.Record) {
 // send posts the text. From home the screen turns to the session at once;
 // the session is made in the background and the text posted when it is.
 func (s *session) send(a *App, text string) {
-	if c, arg := commandFor(text); c != nil {
-		c.do(s, a, arg)
-		return
-	}
+	s.started = true
 	if s.id != "" {
 		s.outbox <- text
 		return
 	}
-	s.started = true
 	s.pending = append(s.pending, text)
 	if !s.creating {
 		s.create(a)
