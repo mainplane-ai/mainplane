@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"runtime"
@@ -250,6 +251,11 @@ func (t *Terminal) read() {
 		default:
 		}
 		n, err := t.in.Read(buf)
+		if isWindows && n == 0 && errors.Is(err, io.EOF) {
+			// Go's console read ends at Ctrl+Z, a cooked line's end of file,
+			// and says io.EOF; raw, it is a key, and the next read goes on.
+			n, err = copy(buf, "\x1a"), nil
+		}
 		if err != nil {
 			return
 		}

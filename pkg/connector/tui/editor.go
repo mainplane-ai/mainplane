@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
@@ -36,9 +37,17 @@ type Input struct {
 
 	els    []elem
 	cur    int
-	anchor int // the other end of the selection; -1 is none
+	undo   []snap // the input before each change, newest last
+	typing bool   // the last change typed a word's character: the next typed joins it
+	anchor int    // the other end of the selection; -1 is none
 	top    int
 	view   Rect
+}
+
+// snap is the input at one moment, for Ctrl+Z.
+type snap struct {
+	els []elem
+	cur int
 }
 
 func NewInput() *Input { return &Input{anchor: -1, MaxRows: 1} }
@@ -101,7 +110,7 @@ func (s *Input) Text() string {
 	return b.String()
 }
 
-func (s *Input) Clear() { s.els, s.cur, s.anchor, s.top = nil, 0, -1, 0 }
+func (s *Input) Clear() { s.els, s.cur, s.anchor, s.top, s.undo = nil, 0, -1, 0, nil }
 
 func (s *Input) span() (int, int) {
 	if s.anchor < 0 {
@@ -158,6 +167,7 @@ func (s *Input) Attach(label, text string) {
 }
 
 func (s *Input) Paste(a *App, t string) {
+	s.undo, s.typing = append(s.undo, snap{slices.Clone(s.els), s.cur}), false
 	if n := strings.Count(t, "\n") + 1; n >= collapseLines {
 		label := fmt.Sprintf("[Pasted %d lines]", n)
 		s.insert(elem{g: label, w: term.Width(label), paste: t})
@@ -210,10 +220,36 @@ func (s *Input) word(dir int) int {
 	return i
 }
 
+// Key edits the input. Ctrl+Z undoes a change; a word typed, with the space
+// after it, is one change.
 func (s *Input) Key(a *App, k term.Key) bool {
 	if s.Before != nil && s.Before(a, k) {
 		return true
 	}
+	if k.String() == "ctrl+z" {
+		if n := len(s.undo); n > 0 {
+			s.els, s.cur, s.anchor, s.typing = s.undo[n-1].els, s.undo[n-1].cur, -1, false
+			s.undo = s.undo[:n-1]
+		}
+		if s.OnKey != nil {
+			s.OnKey(a)
+		}
+		return true
+	}
+	before := snap{slices.Clone(s.els), s.cur}
+	took := s.edit(a, k)
+	if !slices.Equal(before.els, s.els) && s.els != nil { // nil: sent, and Clear forgot the undo
+		t := k.Text() // a space joins the word before it, and the next word starts anew
+		typed := t != "" && !strings.Contains(t, "\n")
+		if !typed || !s.typing {
+			s.undo = append(s.undo, before)
+		}
+		s.typing = typed && strings.TrimSpace(t) == t
+	}
+	return took
+}
+
+func (s *Input) edit(a *App, k term.Key) bool {
 	rows := s.rows(s.view.W)
 	r, col := s.at(rows, s.cur)
 	name := k.String()

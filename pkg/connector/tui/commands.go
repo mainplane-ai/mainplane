@@ -2,7 +2,10 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -10,6 +13,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
+	"github.com/mainplane-ai/mainplane/pkg/mesh"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 )
@@ -37,11 +41,14 @@ func commands() []command {
 		{"continue", []string{"compact"}, "Continue in a new session", "ctrl+k", (*session).carryOn},
 		{"rename", nil, "Rename the session", "", (*session).renameDialog},
 		{"model", nil, "Model for a new session", "", (*session).models},
+		{"goto", []string{"jump", "timeline"}, "Go to a message", "", (*session).goTo},
 		{"fork", nil, "Fork into a new session", "", (*session).fork},
 		{"rollback", []string{"revert", "rewind"}, "Roll back to before a message", "", (*session).rollback},
 		{"workers", nil, "Workers", "ctrl+e", (*session).workers},
 		{"stop", nil, "Stop the session", "esc esc", (*session).halt},
 		{"info", []string{"debug", "id"}, "Session info", "", (*session).infoMenu},
+		{"log", nil, "Save the session's log file", "", (*session).saveLog},
+		{"delete", nil, "Delete the session", "", (*session).deleteMenu},
 		{"help", nil, "Commands and keys", "f1", (*session).palette},
 		{"exit", []string{"quit"}, "Exit", "ctrl+c ctrl+c", func(_ *session, a *App) { a.Quit() }},
 	}
@@ -225,6 +232,7 @@ func (s *session) palette(a *App) {
 		s.input.insert(textElems("/")...)
 	})
 	add("Input", "Select", "shift+arrows", nil)
+	add("Input", "Undo", "ctrl+z", nil)
 	add("Input", "Cut the selection", "ctrl+x", nil)
 	add("Input", "Delete the word before", "ctrl+backspace", nil)
 	add("Input", "Delete the next word", "ctrl+delete", nil)
@@ -445,17 +453,125 @@ func (s *session) rollback(a *App) {
 		a.Say("No message to roll back to")
 		return
 	}
+	m := s.askedMenu(func(a *App, b *msgBlock, text string) { s.copyBefore(a, b.r.N, textElems(text), false) })
+	a.OpenMenu("Roll back to before", m)
+}
+
+// goTo is the menu of the messages sent, newest first. Picking one scrolls
+// the transcript to it.
+func (s *session) goTo(a *App) {
+	if len(s.asked) == 0 {
+		a.Say("No message to go to")
+		return
+	}
+	a.OpenMenu("Go to", s.askedMenu(func(_ *App, b *msgBlock, _ string) { s.transcript.Show(b) }))
+}
+
+// askedMenu is the messages sent, newest first, each its first line.
+func (s *session) askedMenu(pick func(a *App, b *msgBlock, text string)) *Menu {
 	m := &Menu{}
-	for _, r := range slices.Backward(s.asked) {
-		text, label := "", "["+media(r)+"]"
-		if isText(r.Type) {
-			text = string(r.Body)
+	for _, b := range slices.Backward(s.asked) {
+		text, label := "", "["+media(b.r)+"]"
+		if isText(b.r.Type) {
+			text = string(b.r.Body)
 			label = strings.TrimSpace(lines(text)[0])
 		}
-		n := r.N
-		m.Items = append(m.Items, MenuItem{Label: label, Hint: stamp(r.Time), Pick: func(a *App, _ *MenuItem) { s.copyBefore(a, n, textElems(text), false) }})
+		m.Items = append(m.Items, MenuItem{Label: label, Hint: stamp(b.r.Time), Pick: func(a *App, _ *MenuItem) { pick(a, b, text) }})
 	}
-	a.OpenMenu("Roll back to before", m)
+	return m
+}
+
+// saveLog writes the session as its .log file to ~/.mainplane/logs on this
+// machine, where a worker gets the copies the harness sends, and copies the
+// path. As the harness's copy, a body that is not text is left out, so rg
+// reads the file.
+func (s *session) saveLog(a *App) {
+	if s.id == "" {
+		a.Say("No session to save yet")
+		return
+	}
+	id := s.id
+	a.Go(func() {
+		path, err := func() (string, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), callTime)
+			defer cancel()
+			recs, err := s.c.Records(ctx, id, 0, "")
+			if err != nil {
+				return "", err
+			}
+			var b []byte
+			for _, r := range recs {
+				if !isText(r.Type) {
+					r.Body = nil
+				}
+				enc, err := statefile.Encode(r)
+				if err != nil {
+					return "", err
+				}
+				b = append(b, enc...)
+			}
+			h, err := os.UserHomeDir()
+			if err != nil {
+				return "", err
+			}
+			dir := filepath.Join(h, ".mainplane", "logs")
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return "", err
+			}
+			path := filepath.Join(dir, id+".log")
+			return path, os.WriteFile(path, b, 0o600)
+		}()
+		a.Post(func() {
+			if err != nil {
+				a.SayError(err)
+				return
+			}
+			a.T.Copy(path)
+			a.Say("Saved " + path + " (path copied)")
+		})
+	})
+}
+
+// deleteMenu asks before the session is gone for good.
+func (s *session) deleteMenu(a *App) {
+	switch {
+	case s.id == "":
+		a.Say("No session to delete yet")
+		return
+	case s.stepping():
+		a.Say("Delete when the session is done: wait, or /stop it")
+		return
+	}
+	id, name := s.id, s.id
+	if s.info.Name != "" {
+		name = s.info.Name
+	}
+	m := &Menu{Items: []MenuItem{
+		{Label: "Keep it", Pick: func(*App, *MenuItem) {}},
+		{Label: "Delete " + name, Hint: "for good", Pick: func(a *App, _ *MenuItem) { s.remove(a, id) }},
+	}}
+	a.OpenMenu("Delete the session?", m)
+}
+
+// remove deletes the session, then opens a new session screen.
+func (s *session) remove(a *App, id string) {
+	a.Go(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), callTime)
+		defer cancel()
+		err := s.c.Delete(ctx, id, via)
+		a.Post(func() {
+			if err != nil {
+				a.SayError(err)
+				return
+			}
+			delete(s.list.drafts, id)
+			s.list.infos = slices.DeleteFunc(s.list.infos, func(in harness.Info) bool { return in.ID == id })
+			a.Say("Deleted session " + id)
+			if s.ctx.Err() == nil {
+				s.fresh(a)
+			}
+		})
+	})
 }
 
 // copyBefore makes a session of this one's records before record n, then
@@ -618,14 +734,32 @@ func (s *session) infoMenu(a *App) {
 		if err == nil {
 			listed, err = s.c.Workers(ctx)
 		}
+		network, nerr := mesh.Status()
+		worker := !errors.Is(nerr, mesh.ErrNoWorker)
+		if !worker {
+			nerr = nil
+		}
 		a.Post(func() {
 			if s.ctx.Err() != nil {
 				return
 			}
-			if err != nil {
+			if err = errors.Join(err, nerr); err != nil {
 				a.SayError(err)
 			}
-			a.OpenMenu("Session info", s.infoItems(a, hv, listed))
+			m := s.infoItems(a, hv, listed)
+			if s.c.Mesh != "" {
+				m.Items = append(m.Items, MenuItem{Label: "Harness on the mesh", Hint: s.c.Mesh, Section: "Network", Pick: func(a *App, _ *MenuItem) { a.Copy(s.c.Mesh) }})
+			}
+			if !worker {
+				m.Items = append(m.Items, MenuItem{Label: "This machine", Hint: "not a worker", Section: "Network"})
+			}
+			for _, l := range strings.Split(strings.TrimSpace(network), "\n") {
+				if f := strings.Fields(l); len(f) > 1 {
+					value := strings.Join(f[1:], " ")
+					m.Items = append(m.Items, MenuItem{Label: f[0], Hint: value, Section: "Network", Pick: func(a *App, _ *MenuItem) { a.Copy(value) }})
+				}
+			}
+			a.OpenMenu("Session info", m)
 		})
 	})
 }

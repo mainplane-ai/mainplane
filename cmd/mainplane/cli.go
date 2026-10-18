@@ -32,7 +32,7 @@ const resultLines = 20
 // arity is how many arguments each verb takes, least and most; -1 is any
 // number.
 var arity = map[string][2]int{
-	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {0, 1}, "retry": {1, 1}, "stop": {1, 1},
+	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {0, 1}, "retry": {1, 1}, "stop": {1, 1}, "delete": {1, 1},
 	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "worker remove": {1, 1}, "providers": {0, 0}, "key": {2, 2},
 }
 
@@ -79,6 +79,8 @@ func cli(verb string, args []string) {
 		fmt.Println(out.Status)
 	case "stop":
 		c.call("POST", "/sessions/"+args[0]+"/stop?via="+via, "", nil, nil)
+	case "delete":
+		c.call("DELETE", "/sessions/"+args[0]+"?via="+via, "", nil, nil)
 	case "info":
 		c.raw("/sessions/" + args[0])
 	case "sessions":
