@@ -759,12 +759,21 @@ func (s *session) infoMenu(a *App) {
 				label, value, _ := strings.Cut(strings.TrimSpace(l), "  ")
 				value = strings.Join(strings.Fields(value), " ")
 				if label != "" {
-					m.Items = append(m.Items, MenuItem{Label: label, Hint: value, Section: "Network", Pick: func(a *App, _ *MenuItem) { a.Copy(cmp.Or(value, label)) }})
+					m.Items = append(m.Items, MenuItem{Label: label, Hint: cut(value), Section: "Network", Pick: func(a *App, _ *MenuItem) { a.Copy(cmp.Or(value, label)) }})
 				}
 			}
 			a.OpenMenu("Session info", m)
 		})
 	})
+}
+
+// cut is a value as /info shows it: its end, when it is long, as the end
+// of a URL tells more.
+func cut(value string) string {
+	if rs := []rune(value); len(rs) > infoHint {
+		return "…" + string(rs[len(rs)-infoHint+1:])
+	}
+	return value
 }
 
 // infoItems is the rows of /info.
@@ -774,11 +783,7 @@ func (s *session) infoItems(a *App, harnessV string, listed []connector.Worker) 
 		if value == "" {
 			return
 		}
-		hint := value
-		if rs := []rune(value); len(rs) > infoHint {
-			hint = "…" + string(rs[len(rs)-infoHint+1:]) // the end of a URL tells more
-		}
-		m.Items = append(m.Items, MenuItem{Label: label, Hint: hint, Section: section, Pick: func(a *App, _ *MenuItem) { a.Copy(value) }})
+		m.Items = append(m.Items, MenuItem{Label: label, Hint: cut(value), Section: section, Pick: func(a *App, _ *MenuItem) { a.Copy(value) }})
 	}
 	in := s.info
 	if s.id != "" && in.ID == s.id {
