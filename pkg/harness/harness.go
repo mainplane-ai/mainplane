@@ -58,12 +58,10 @@ func (h *Harness) provider(model string) (provider.Provider, string, error) {
 	if !ok || name == "" || m == "" {
 		return provider.Provider{}, "", fmt.Errorf("model %q is not provider/model", model)
 	}
-	if _, ok := provider.Supported[name]; !ok {
-		return provider.Provider{}, "", fmt.Errorf("unknown provider %q; supported: %s", name, strings.Join(slices.Sorted(maps.Keys(provider.Supported)), ", "))
-	}
-	p, ok := h.providers()[name]
+	ps := h.providers()
+	p, ok := ps[name]
 	if !ok {
-		return provider.Provider{}, "", fmt.Errorf("provider %q has no key: mainplane key %s <key>", name, name)
+		return provider.Provider{}, "", fmt.Errorf("unknown provider %q; this harness has: %s", name, strings.Join(slices.Sorted(maps.Keys(ps)), ", "))
 	}
 	return p, m, nil
 }
@@ -93,8 +91,10 @@ type Create struct {
 	Model        string                     `json:"model,omitempty"`
 	ContextLimit int                        `json:"context_limit,omitempty"`
 	Workers      []statefile.Worker         `json:"workers,omitempty"`
+	Tools        string                     `json:"tools,omitempty"`
 	Input        []string                   `json:"input,omitempty"`
 	Params       map[string]json.RawMessage `json:"params,omitempty"`
+	Preset       string                     `json:"preset,omitempty"`
 	Name         string                     `json:"name,omitempty"`
 }
 
@@ -144,7 +144,13 @@ func (h *Harness) Create(ctx context.Context, c Create, via string) (string, err
 			return "", fmt.Errorf("%s builds %s from the session, a param cannot set it", p.Envelope.Name(), k)
 		}
 	}
-	conf := statefile.Conf{Model: c.Model, Tools: ToolSet(model), Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params}
+	if c.Tools == "" {
+		c.Tools = "default"
+	}
+	if Tools(c.Tools, nil) == nil {
+		return "", fmt.Errorf("unknown tools %q; sets: default, patch", c.Tools)
+	}
+	conf := statefile.Conf{Model: c.Model, Tools: c.Tools, Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params, Preset: c.Preset}
 	if conf.Workers == nil {
 		conf.Workers = []statefile.Worker{}
 	}

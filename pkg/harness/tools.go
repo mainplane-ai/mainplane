@@ -170,15 +170,6 @@ type Output struct {
 	Full string
 }
 
-// ToolSet picks the set a model family was trained on. GPT-5 and GPT-6
-// families edit with patches; everyone else with read, write, edit.
-func ToolSet(model string) string {
-	if strings.HasPrefix(model, "gpt-5") || strings.HasPrefix(model, "gpt-6") {
-		return "patch"
-	}
-	return "default"
-}
-
 // Tools is the tool set a config record names. Every tool takes a worker. The
 // read description names the media types the session's input lists.
 func Tools(name string, input []string) []provider.Tool {

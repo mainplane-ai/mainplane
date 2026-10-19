@@ -34,13 +34,17 @@ keeps the config there as it is; `mainplane-server install <config.json>`
 replaces it. Add keys there:
 
 ```
-"providers": {"anthropic": {"key": "sk-ant-..."}}
+"providers": {"anthropic": {"shape": "anthropic", "key": "sk-ant-..."}}
 ```
 
 or from any machine whose CLI is logged in: `mainplane key anthropic sk-ant-...`.
-The providers are `anthropic`, `openai`, `google` (Gemini, from
-`GEMINI_API_KEY` at install), `openai-chat` (with `url`) and `bedrock` (with
-`region`).
+A provider's name is free; its `shape` is the API it speaks: `anthropic`,
+`openai`, `google` (Gemini), `openai-chat` (Chat Completions, with `url`, such as
+`https://openrouter.ai/api`) or `bedrock` (with `region`). Connectors offer the
+models of the providers in the [catalog](https://dl.mainplane.ai/catalog/v1.json)
+by its ids: `anthropic`, `openai`, `google`, `bedrock`, `openrouter`. Install
+takes keys from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`,
+`AWS_BEARER_TOKEN_BEDROCK` with `AWS_REGION`, and `OPENROUTER_API_KEY`.
 
 The harness applies providers, links and drives within seconds of a save; any other
 change applies at its next start.

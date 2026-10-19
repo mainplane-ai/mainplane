@@ -56,7 +56,7 @@ Add an LLM key (`openai`, `anthropic` or `google`), then start a session on `adm
 
 ```shell
 mainplane key openai sk-...
-echo '{"model":"openai/gpt-6.1-sol","context_limit":200000,"workers":[{"name":"admin"}],"params":{"reasoning":{"effort":"medium","summary":"auto"}}}' | mainplane new
+echo '{"model":"openai/gpt-6.1-sol","tools":"patch","context_limit":250000,"workers":[{"name":"admin"}],"params":{"reasoning":{"effort":"medium","summary":"auto"}}}' | mainplane new
 mainplane chat
 ```
 

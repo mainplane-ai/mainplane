@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/mainplane-ai/mainplane/pkg/catalog"
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
@@ -125,7 +126,15 @@ func cli(verb string, args []string) {
 	case "providers":
 		c.raw("/providers")
 	case "key":
-		c.call("PUT", "/providers/"+url.PathEscape(args[0]), "text/plain", strings.NewReader(args[1]), nil)
+		// The catalog says what shape and url a provider it knows has; a
+		// provider the harness config has already keeps its own.
+		cat, err := catalog.Fetch(context.Background())
+		if err != nil {
+			die(err)
+		}
+		p := cat.Providers[args[0]]
+		body, _ := json.Marshal(map[string]string{"shape": p.Shape, "url": p.URL, "key": args[1]})
+		c.call("PUT", "/providers/"+url.PathEscape(args[0]), "application/json", bytes.NewReader(body), nil)
 	}
 }
 

@@ -99,6 +99,7 @@ type Conf struct {
 	ContextLimit int                        `json:"context_limit"`
 	Input        []string                   `json:"input,omitempty"`
 	Params       map[string]json.RawMessage `json:"params,omitempty"`
+	Preset       string                     `json:"preset,omitempty"` // the catalog preset a connector began from; display only
 }
 
 // Worker is one worker the session may use. Its drives are the harness
