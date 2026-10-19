@@ -13,6 +13,7 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 - Providers have a free name and a `shape`, the API they speak, so one harness can have several of a shape, such as OpenRouter and a vLLM server both `openai-chat`. A config's `openai-chat` provider needs `"shape": "openai-chat"`, and the others their own; OpenRouter's catalog id is `openrouter`. `GET /providers` returns each one's name, shape and url, and `PUT /providers/{name}` takes `{"shape","url","region","key"}`; `mainplane key` fills shape and url in from the catalog
 - The catalog, at dl.mainplane.ai/catalog/v1.json, lists the providers and a preset per model: a full session config with prices, input types and effort levels, for connectors to offer
 - `POST /sessions` takes `tools` (`default` or `patch`) and `preset`; the harness no longer picks the tool set from the model's name
+- Terminal app on the catalog: /model lists the catalog's models of the connected providers, by provider; /providers (/connect) connects one with its key; /config sets effort or edits the next session's full config as JSON, and on an open session continues in a new one. A new session with nothing chosen takes its preset from the newest session, else Claude Opus 5.5, else the first connected model. Session cost comes from the catalog's prices, not LiteLLM's; an unknown model costs $0. The catalog is fetched at every start and kept in ~/.mainplane/catalog.json
 
 ## v0.5.3
 

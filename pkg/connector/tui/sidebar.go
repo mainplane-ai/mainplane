@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/catalog"
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
@@ -29,7 +30,8 @@ const (
 // Ctrl+Up/Down step through it.
 type sessionList struct {
 	c      connector.Client
-	cur    *session // the screen showing now
+	cat    *catalog.Catalog // nil until loaded
+	cur    *session         // the screen showing now
 	infos  []harness.Info
 	seen   map[string]time.Time // per session, its update when last read here
 	drafts map[string][]elem    // per session, "" for home, the input it was left with
@@ -38,10 +40,11 @@ type sessionList struct {
 	reveal bool // scroll the open session into view at the next draw
 }
 
-// newSessionList starts reading the sessions. A session is unread once it
+// newSessionList starts reading the sessions and loads the catalog. A session is unread once it
 // changes after the first read, so a fresh start shows none unread.
 func newSessionList(a *App, c connector.Client) *sessionList {
 	l := &sessionList{c: c, seen: map[string]time.Time{}, drafts: map[string][]elem{}}
+	loadCatalog(a, l)
 	a.Go(func() {
 		for {
 			ctx, cancel := context.WithTimeout(context.Background(), callTime)

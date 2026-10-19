@@ -16,10 +16,12 @@ type MenuItem struct {
 // Menu is a list to search by typing and pick from with Enter or a click.
 // The row under the mouse is selected.
 // A menu of checks stays open and toggles with Space or Enter; any other
-// closes on a pick.
+// closes on a pick. One that is Single too checks one item per section, and
+// an item with no section in it is no check but an action that closes it.
 type Menu struct {
 	Items  []MenuItem
 	Checks bool
+	Single bool
 
 	query string
 	sel   int // index into rows
@@ -109,7 +111,7 @@ func (m *Menu) Draw(a *App, c *Canvas, r Rect) {
 			hint = st
 		}
 		label := it.Label
-		if m.Checks {
+		if m.Checks && (!m.Single || it.Section != "") {
 			mark := "  "
 			if it.On {
 				mark = "✓ "
@@ -166,9 +168,16 @@ func (m *Menu) pick(a *App, row int) {
 		return
 	}
 	it := &m.Items[m.rows[row].item]
-	if m.Checks {
+	switch {
+	case m.Single && it.Section != "":
+		for i := range m.Items {
+			if m.Items[i].Section == it.Section {
+				m.Items[i].On = &m.Items[i] == it
+			}
+		}
+	case m.Checks && !m.Single:
 		it.On = !it.On
-	} else {
+	default:
 		a.Pop(m.layer)
 	}
 	if it.Pick != nil {

@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/catalog"
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
@@ -64,12 +65,11 @@ type session struct {
 	statusRow  *Node
 	busy       *Glyphs // working, stopping, or making the session, over the input
 	busyRow    *Node
-	armed      bool                          // Esc was pressed once: again stops
-	turn       time.Time                     // the last message, from which the work is timed
-	usage      map[[2]string]statefile.Usage // by provider and model, from the steps
-	prices     prices                        // nil until loaded
-	cfg        *statefile.Conf               // the config to make the session with, else the newest session's
-	ctx        context.Context               // ends when the screen leaves the session
+	armed      bool            // Esc was pressed once: again stops
+	turn       time.Time       // the last message, from which the work is timed
+	cfg        *statefile.Conf // the config to make the session with, else the default
+	price      *catalog.Cost   // the price set in the config's JSON, else the catalog's
+	ctx        context.Context // ends when the screen leaves the session
 	cancel     context.CancelFunc
 	started    bool                  // a message was sent from home: show the transcript
 	creating   bool                  // the session is being made
@@ -85,7 +85,7 @@ type session struct {
 func newSession(a *App, l *sessionList, id string) *session {
 	s := &session{
 		c: l.c, list: l, id: id, transcript: NewScrollbox(), input: NewInput(), status: &Text{}, outbox: make(chan string, outboxSize), calls: map[string]*callBlock{},
-		meta: &Glyphs{}, busy: &Glyphs{}, usage: map[[2]string]statefile.Usage{},
+		meta: &Glyphs{}, busy: &Glyphs{},
 	}
 	s.transcript.Gap = func(prev, next Block) bool {
 		_, p := prev.(*callBlock)
@@ -120,16 +120,6 @@ func newSession(a *App, l *sessionList, id string) *session {
 		s.follow(a)
 		s.postAll(a)
 	}
-	a.Go(func() {
-		p, err := loadPrices()
-		a.Post(func() {
-			if err != nil {
-				a.SayError(err)
-				return
-			}
-			s.prices = p
-		})
-	})
 	return s
 }
 
@@ -195,7 +185,7 @@ func (s *session) Size(a *App, w, h int) {
 const hintFrom = 60
 
 // metaLine is the right of the status line: the context used of its limit,
-// the cost when every model used has a price, and the commands key.
+// the cost once the catalog is loaded, and the commands key.
 func (s *session) metaLine(a *App, hint bool) []Glyph {
 	muted := a.Theme.muted()
 	key := term.Style{FG: a.Theme.Text, Attr: term.Bold}
@@ -231,21 +221,15 @@ func tokens(n int) string {
 	return strconv.Itoa((n+500)/1000) + "k"
 }
 
-// cost is the session's cost so far, when prices are loaded and every model
-// it used has one.
+// cost is the session's cost so far, once the catalog is loaded.
 func (s *session) cost() (float64, bool) {
-	if s.prices == nil {
+	switch {
+	case s.price != nil:
+		return costOf(*s.price, s.info.Usage), true
+	case s.list.cat == nil:
 		return 0, false
 	}
-	total := 0.0
-	for k, u := range s.usage {
-		c, ok := s.prices.cost(k[0], k[1], u)
-		if !ok {
-			return 0, false
-		}
-		total += c
-	}
-	return total, true
+	return costOf(price(s.list.cat, s.info.Config), s.info.Usage), true
 }
 
 // busyLine is what the session is busy with, over the input, or nothing.
@@ -389,14 +373,7 @@ func (s *session) add(a *App, recs []statefile.Record, info harness.Info) {
 // show puts a record in the transcript, or a result in its call's block.
 func (s *session) show(r statefile.Record) {
 	switch r.Kind {
-	case statefile.Start, statefile.Config, statefile.System, statefile.Name, statefile.Thinking:
-	case statefile.Step:
-		k := [2]string{r.Provider, r.Model}
-		if u := r.Usage; u != nil {
-			t := s.usage[k]
-			t.Input, t.Output, t.CacheRead, t.CacheWrite = t.Input+u.Input, t.Output+u.Output, t.CacheRead+u.CacheRead, t.CacheWrite+u.CacheWrite
-			s.usage[k] = t
-		}
+	case statefile.Start, statefile.Config, statefile.System, statefile.Name, statefile.Thinking, statefile.Step:
 	case statefile.Message:
 		b := &msgBlock{r}
 		s.asked = append(s.asked, b)
@@ -474,13 +451,14 @@ func (s *session) failed(a *App, text string, err error) {
 	}
 }
 
-// create makes the session with the config of the session updated last,
+// create makes the session with the config chosen, else the default one,
 // then follows it and posts what was sent meanwhile. If it fails, the screen
 // is home again with the text in the input.
 func (s *session) create(a *App) {
 	s.creating = true
+	cf, cat := s.cfg, s.list.cat
 	a.Go(func() {
-		id, err := s.open()
+		id, err := s.open(cf, cat)
 		a.Post(func() {
 			s.creating = false
 			texts := s.pending
@@ -501,21 +479,29 @@ func (s *session) create(a *App) {
 	})
 }
 
-func (s *session) open() (string, error) {
+// open makes the session with cf, else with defaultConf.
+func (s *session) open(cf *statefile.Conf, cat *catalog.Catalog) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), callTime)
 	defer cancel()
-	cf := s.cfg
 	if cf == nil {
+		if cat == nil {
+			return "", errors.New("the catalog is not loaded")
+		}
 		infos, err := s.c.Sessions(ctx, "", 1)
 		if err != nil {
 			return "", err
 		}
-		if len(infos) == 0 {
-			return "", errors.New("no session to take the config from: make one with mainplane new")
+		ps, err := s.c.Providers(ctx)
+		if err != nil {
+			return "", err
 		}
-		cf = &infos[0].Config
+		d, err := defaultConf(cat, ps, infos)
+		if err != nil {
+			return "", err
+		}
+		cf = &d
 	}
-	return s.c.Create(ctx, harness.Create{Model: cf.Model, ContextLimit: cf.ContextLimit, Workers: cf.Workers, Tools: cf.Tools, Input: cf.Input, Params: cf.Params, Preset: cf.Preset}, via)
+	return s.c.Create(ctx, harness.Create{Model: cf.Model, Tools: cf.Tools, ContextLimit: cf.ContextLimit, Workers: cf.Workers, Input: cf.Input, Params: cf.Params, Preset: cf.Preset}, via)
 }
 
 // stop asks the harness to stop. The status line says so until the status
