@@ -55,12 +55,15 @@ const adminAgents = `# Admin:
 `
 
 // envProviders are the providers Default takes from the environment, by the
-// variables each provider's own tools read.
+// variables each provider's own tools read. Their names, shapes and urls are
+// the catalog's, in pkg/catalog/build/source.json: install runs before any
+// network is sure.
 var envProviders = map[string]Provider{
-	"anthropic": {Key: "$ANTHROPIC_API_KEY"},
-	"openai":    {Key: "$OPENAI_API_KEY"},
-	"google":    {Key: "$GEMINI_API_KEY"},
-	"bedrock":   {Key: "$AWS_BEARER_TOKEN_BEDROCK", Region: "$AWS_REGION"},
+	"anthropic":  {Shape: "anthropic", Key: "$ANTHROPIC_API_KEY"},
+	"openai":     {Shape: "openai", Key: "$OPENAI_API_KEY"},
+	"google":     {Shape: "google", Key: "$GEMINI_API_KEY"},
+	"bedrock":    {Shape: "bedrock", Key: "$AWS_BEARER_TOKEN_BEDROCK", Region: "$AWS_REGION"},
+	"openrouter": {Shape: "openai-chat", Key: "$OPENROUTER_API_KEY", URL: "https://openrouter.ai/api"},
 }
 
 // Default is the config install writes when given none and none is

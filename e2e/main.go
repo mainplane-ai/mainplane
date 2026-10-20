@@ -272,7 +272,7 @@ for ($i = 0; $i -lt 180 -and (mainplane info $id | Out-String) -notmatch '"statu
 mainplane tail $id`,
 	}
 	// The README's session, and a line whose answer runs a command on admin.
-	session = `{"model":"openai/gpt-6.1-sol","context_limit":200000,"workers":[{"name":"admin"}],"params":{"reasoning":{"effort":"medium","summary":"auto"}}}`
+	session = `{"model":"openai/gpt-6.1-sol","tools":"patch","context_limit":250000,"workers":[{"name":"admin"}],"params":{"reasoning":{"effort":"medium","summary":"auto"}}}`
 	ask     = `With the run tool on worker admin, print 6*7 using its shell. Then reply with only the number.`
 	// oneCLI prints every mainplane on a Windows machine: the PATH's and this
 	// user's own copy. oneWin is its line when the only one is the machine's.

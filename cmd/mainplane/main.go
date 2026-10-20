@@ -350,7 +350,8 @@ func usage() {
                                      and each peer's address and path, direct or through the relay
   version                            the release this binary was built from
 
-  new                                POST /sessions, body from stdin: {"model","context_limit","workers","params","name"} or {"from","n"};
+  new                                POST /sessions, body from stdin: {"model","context_limit","workers","tools","input","params",
+                                     "preset","name"} or {"from","n"};
                                      params are the vendor's own request fields, max_tokens included where its API requires it
   message    <id> <text> [file...]   POST /sessions/{id}/records, one record per part
   tail       <id> [after]            GET  /sessions/{id}/records, rendered
@@ -365,9 +366,9 @@ func usage() {
   workers    <id> <name>...          PUT  /sessions/{id}/workers: the session's workers are these from its next step on
   worker     remove <name>           DELETE /workers/{name}: it leaves the mesh for good; mainplane-server join cycle
                                      too keeps the device code it had from joining machines again
-  providers                          GET  /providers
-  key        <provider> <key>        PUT  /providers/{provider}: the harness saves the key in its config, and serves
-                                     the provider at once
+  providers                          GET  /providers: each one's name, shape and url
+  key        <provider> <key>        PUT  /providers/{provider}: the harness saves the key, with the shape and url
+                                     the catalog gives the provider, in its config, and serves it at once
 `)
 	os.Exit(2)
 }

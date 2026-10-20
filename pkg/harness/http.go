@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -49,7 +51,8 @@ const MaxPost = 8 << 20
 //	                                     ones with the reason
 //	DELETE /workers/{name}            the worker leaves the mesh for good; its     -> 204
 //	                                  device code still joins new machines
-//	GET  /providers                   -> names this harness can serve as provider/model
+//	GET  /providers                   -> [{"name","shape","url"}]: what this harness
+//	                                     serves as name/model; no secrets
 //	GET  /                            -> {"version"}
 //
 // ctx outlives every request: it is what steps run under.
@@ -81,12 +84,17 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 	})
 	mux.HandleFunc("GET /providers", func(w http.ResponseWriter, r *http.Request) {
 		ps := h.providers()
-		names := make([]string, 0, len(ps))
-		for name := range ps {
-			names = append(names, name)
+		out := []ProviderInfo{}
+		for _, name := range slices.Sorted(maps.Keys(ps)) {
+			u, err := url.Parse(ps[name].URL)
+			if err != nil {
+				fail(w, err)
+				return
+			}
+			u.User, u.RawQuery = nil, "" // where a URL may carry a secret
+			out = append(out, ProviderInfo{name, ps[name].Envelope.Name(), u.String()})
 		}
-		slices.Sort(names)
-		reply(w, names)
+		reply(w, out)
 	})
 	mux.HandleFunc("GET /sessions", func(w http.ResponseWriter, r *http.Request) {
 		infos, err := h.List()
@@ -164,6 +172,13 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 }
 
 func fail(w http.ResponseWriter, err error) { http.Error(w, err.Error(), http.StatusBadRequest) }
+
+// ProviderInfo is a provider as GET /providers shows it: no key.
+type ProviderInfo struct {
+	Name  string `json:"name"`
+	Shape string `json:"shape"`
+	URL   string `json:"url"`
+}
 
 func reply(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")

@@ -12,11 +12,13 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
+	"github.com/mainplane-ai/mainplane/pkg/catalog"
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
@@ -125,8 +127,25 @@ func cli(verb string, args []string) {
 	case "providers":
 		c.raw("/providers")
 	case "key":
-		c.call("PUT", "/providers/"+url.PathEscape(args[0]), "text/plain", strings.NewReader(args[1]), nil)
+		c.key(args[0], args[1])
 	}
+}
+
+// key sets a provider's key. A provider the harness has keeps its shape and
+// url; a new one gets the catalog's.
+func (c client) key(name, key string) {
+	var have []harness.ProviderInfo
+	c.call("GET", "/providers", "", nil, &have)
+	p := catalog.Provider{}
+	if !slices.ContainsFunc(have, func(h harness.ProviderInfo) bool { return h.Name == name }) {
+		cat, err := catalog.Fetch(context.Background())
+		if err != nil {
+			die(err)
+		}
+		p = cat.Providers[name]
+	}
+	body, _ := json.Marshal(map[string]string{"shape": p.Shape, "url": p.URL, "key": key})
+	c.call("PUT", "/providers/"+url.PathEscape(name), "application/json", bytes.NewReader(body), nil)
 }
 
 // client is the harness API with every failure the harness's own words on

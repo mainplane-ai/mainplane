@@ -10,6 +10,9 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 - `DELETE /sessions/{id}` and `mainplane delete <id>` delete a session's file for good; a stepping session is refused
 - The session id is `MAINPLANE_SESSION` in each interpreter process, not in the prompt, and the prompt cache key is record 1's id, so a copied session builds the same request
 - A session from an incompatible harness version says so and points to /continue
+- Providers have a free name and a `shape`, the API they speak, so one harness can have several of a shape, such as OpenRouter and a vLLM server both `openai-chat`. A config's `openai-chat` provider needs `"shape": "openai-chat"`, and the others their own; OpenRouter's catalog id is `openrouter`. `GET /providers` returns each one's name, shape and url, and `PUT /providers/{name}` takes `{"shape","url","region","key"}`; `mainplane key` fills shape and url in from the catalog
+- The catalog, at dl.mainplane.ai/catalog/v1.json, lists the providers and a preset per model: a full session config with prices, input types and effort levels, for connectors to offer
+- `POST /sessions` takes `tools` (`default` or `patch`) and `preset`; the harness no longer picks the tool set from the model's name
 
 ## v0.5.3
 

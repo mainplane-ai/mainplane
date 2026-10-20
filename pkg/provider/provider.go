@@ -23,9 +23,9 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
-// Supported is every provider a config may name, each built from its key,
-// url and region.
-var Supported = map[string]func(key, url, region string) Provider{
+// Shapes is every wire format a provider in the config may have, each built
+// from the provider's key, url and region.
+var Shapes = map[string]func(key, url, region string) Provider{
 	"anthropic":   func(key, _, _ string) Provider { return Anthropic(key) },
 	"openai":      func(key, _, _ string) Provider { return OpenAI(key) },
 	"openai-chat": func(key, url, _ string) Provider { return OpenAIChat(url, key) },

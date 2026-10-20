@@ -44,7 +44,7 @@ const (
 // A person who saves the config sees it applied within this.
 const reread = 2 * time.Second
 
-// A provider key is one line, far shorter than this.
+// A provider body, a key and a URL, is far shorter than this.
 const maxKey = 4 << 10
 
 // Config is the self-hosted config file. Provider values are expanded from
@@ -75,7 +75,10 @@ func Key(dir string) (ed25519.PrivateKey, error) {
 	return pointer.Key(filepath.Join(dir, "harness.key"))
 }
 
+// Provider is one the config names. Its name is free, and the catalog's ids
+// are the names connectors know; its shape picks the code.
 type Provider struct {
+	Shape  string `json:"shape"`
 	Key    string `json:"key"`
 	URL    string `json:"url,omitempty"`    // openai-chat
 	Region string `json:"region,omitempty"` // bedrock
@@ -93,9 +96,12 @@ func Load(path string) (Config, error) {
 func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
 	out := map[string]provider.Provider{}
 	for name, p := range cfg {
-		build, ok := provider.Supported[name]
+		build, ok := provider.Shapes[p.Shape]
 		if !ok {
-			return nil, fmt.Errorf("unknown provider %q; supported: %s", name, strings.Join(slices.Sorted(maps.Keys(provider.Supported)), ", "))
+			return nil, fmt.Errorf("provider %s: unknown shape %q; shapes: %s", name, p.Shape, strings.Join(slices.Sorted(maps.Keys(provider.Shapes)), ", "))
+		}
+		if p.Shape == "openai-chat" && os.ExpandEnv(p.URL) == "" || p.Shape == "bedrock" && os.ExpandEnv(p.Region) == "" {
+			return nil, fmt.Errorf("provider %s: an openai-chat provider needs url, a bedrock one region", name)
 		}
 		out[name] = build(os.ExpandEnv(p.Key), os.ExpandEnv(p.URL), os.ExpandEnv(p.Region))
 	}
@@ -196,7 +202,7 @@ func Harness(ctx context.Context, path string) error {
 	routes := http.NewServeMux()
 	routes.Handle("/", harness.Handler(ctx, h))
 	routes.HandleFunc("PUT /providers/{name}", func(w http.ResponseWriter, r *http.Request) {
-		if err := setKey(path, r.PathValue("name"), r.Body, h.SetProviders); err != nil {
+		if err := setProvider(path, r.PathValue("name"), r.Body, h.SetProviders); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -265,21 +271,26 @@ func Harness(ctx context.Context, path string) error {
 	return nil
 }
 
-// keyMu keeps two keys set at once from writing over each other.
+// keyMu keeps two providers set at once from writing over each other.
 var keyMu sync.Mutex
 
-// setKey makes the body the key of provider name in the config at path,
-// beside the provider's other fields, and serves the providers it makes at
+// setProvider makes the body, a Provider, the provider name in the config at
+// path: the fields it sets replace the ones there, so a key alone renews the
+// key of a provider the config has. It serves the providers it makes at
 // once: the README runs mainplane new right after mainplane key, sooner than
 // the watch rereads. The lock holds the write and serve in one order.
-func setKey(path, name string, body io.Reader, serve func(map[string]provider.Provider)) error {
+func setProvider(path, name string, body io.Reader, serve func(map[string]provider.Provider)) error {
 	b, err := io.ReadAll(io.LimitReader(body, maxKey+1))
 	if err != nil {
 		return err
 	}
-	key := strings.TrimSpace(string(b))
-	if key == "" || len(b) > maxKey || strings.ContainsAny(key, "\r\n") {
-		return fmt.Errorf("a key is one line of 1 to %d bytes", maxKey)
+	var in Provider
+	if len(b) > maxKey || json.Unmarshal(b, &in) != nil {
+		return fmt.Errorf("the body is a provider of at most %d bytes: {\"shape\",\"key\",\"url\",\"region\"}", maxKey)
+	}
+	in.Key = strings.TrimSpace(in.Key)
+	if in.Key == "" || strings.ContainsAny(in.Key, "\r\n") {
+		return errors.New("a key is one line")
 	}
 	keyMu.Lock()
 	defer keyMu.Unlock()
@@ -291,7 +302,12 @@ func setKey(path, name string, body io.Reader, serve func(map[string]provider.Pr
 		c.Providers = map[string]Provider{}
 	}
 	p := c.Providers[name]
-	p.Key = key
+	p.Key = in.Key
+	for _, f := range [][2]*string{{&p.Shape, &in.Shape}, {&p.URL, &in.URL}, {&p.Region, &in.Region}} {
+		if *f[1] != "" {
+			*f[0] = *f[1]
+		}
+	}
 	c.Providers[name] = p
 	ps, err := providers(c.Providers)
 	if err != nil {

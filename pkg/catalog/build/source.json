@@ -1,0 +1,54 @@
+{
+  "providers": {
+    "anthropic": {"name": "Anthropic", "shape": "anthropic", "models_dev": "anthropic"},
+    "openai": {"name": "OpenAI", "shape": "openai", "models_dev": "openai"},
+    "google": {"name": "Google", "shape": "google", "models_dev": "google"},
+    "bedrock": {"name": "Amazon Bedrock", "shape": "bedrock", "models_dev": "amazon-bedrock"},
+    "openrouter": {"name": "OpenRouter", "shape": "openai-chat", "url": "https://openrouter.ai/api", "models_dev": "openrouter"}
+  },
+  "params": {
+    "anthropic": {"max_tokens": 32000},
+    "bedrock": {"inferenceConfig": {"maxTokens": 32000}},
+    "openai": {"reasoning": {"summary": "auto"}}
+  },
+  "effort": {
+    "anthropic": {"output_config": {"effort": "$"}},
+    "bedrock": {"additionalModelRequestFields": {"output_config": {"effort": "$"}}},
+    "openai": {"reasoning": {"effort": "$"}},
+    "openai-chat": {"reasoning": {"effort": "$"}},
+    "google": {"generationConfig": {"thinkingConfig": {"thinkingLevel": "$"}}}
+  },
+  "presets": [
+    {"provider": "anthropic", "model": "claude-fable-5-1", "effort": "high"},
+    {"provider": "anthropic", "model": "claude-opus-5-5", "effort": "medium"},
+    {"provider": "anthropic", "model": "claude-sonnet-5-5", "effort": "high"},
+    {"provider": "anthropic", "model": "claude-haiku-5-5", "effort": "medium"},
+    {"provider": "openai", "model": "gpt-6-astra", "effort": "medium", "tools": "patch"},
+    {"provider": "openai", "model": "gpt-6.1-sol", "effort": "medium", "tools": "patch"},
+    {"provider": "openai", "model": "gpt-6-luna", "effort": "medium", "tools": "patch"},
+    {"provider": "google", "model": "gemini-4-argon", "effort": "medium"},
+    {"provider": "google", "model": "gemini-3.8-flash", "effort": "medium"},
+    {"provider": "google", "model": "gemini-3.5-flash-lite", "effort": "minimal"},
+    {"provider": "bedrock", "model": "global.anthropic.claude-fable-5-1", "effort": "high"},
+    {"provider": "bedrock", "model": "global.anthropic.claude-opus-5-5", "effort": "medium"},
+    {"provider": "bedrock", "model": "global.anthropic.claude-sonnet-5-5", "effort": "high"},
+    {"provider": "bedrock", "model": "global.anthropic.claude-haiku-5-5", "effort": "medium"},
+    {"provider": "openrouter", "model": "anthropic/claude-fable-5.1", "effort": "high"},
+    {"provider": "openrouter", "model": "anthropic/claude-opus-5.5", "effort": "high"},
+    {"provider": "openrouter", "model": "anthropic/claude-sonnet-5.5", "effort": "high"},
+    {"provider": "openrouter", "model": "anthropic/claude-haiku-5.5", "effort": "medium"},
+    {"provider": "openrouter", "model": "openai/gpt-6-astra", "effort": "medium", "tools": "patch"},
+    {"provider": "openrouter", "model": "openai/gpt-6.1-sol", "effort": "medium", "tools": "patch"},
+    {"provider": "openrouter", "model": "openai/gpt-6-luna", "effort": "medium", "tools": "patch"},
+    {"provider": "openrouter", "model": "google/gemini-4-argon", "effort": "medium"},
+    {"provider": "openrouter", "model": "google/gemini-3.8-flash", "effort": "medium"},
+    {"provider": "openrouter", "model": "x-ai/grok-4.7", "effort": "high"},
+    {"provider": "openrouter", "model": "deepseek/deepseek-v4-pro-0813", "effort": "high"},
+    {"provider": "openrouter", "model": "moonshotai/kimi-k3", "effort": "max"},
+    {"provider": "openrouter", "model": "z-ai/glm-5.3", "effort": "max"},
+    {"provider": "openrouter", "model": "qwen/qwen3.8-max-0902", "effort": "xhigh"},
+    {"provider": "openrouter", "model": "meta/muse-spark-1.3", "effort": "medium"},
+    {"provider": "openrouter", "model": "mistralai/mistral-large-4-0", "effort": "high"},
+    {"provider": "openrouter", "model": "minimax/minimax-m3"}
+  ]
+}

@@ -515,7 +515,7 @@ func (s *session) open() (string, error) {
 		}
 		cf = &infos[0].Config
 	}
-	return s.c.Create(ctx, harness.Create{Model: cf.Model, ContextLimit: cf.ContextLimit, Workers: cf.Workers, Input: cf.Input, Params: cf.Params}, via)
+	return s.c.Create(ctx, harness.Create{Model: cf.Model, ContextLimit: cf.ContextLimit, Workers: cf.Workers, Tools: cf.Tools, Input: cf.Input, Params: cf.Params, Preset: cf.Preset}, via)
 }
 
 // stop asks the harness to stop. The status line says so until the status
