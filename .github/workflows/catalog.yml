@@ -12,7 +12,7 @@ permissions:
   contents: read
 # One at a time, so an older checkout never overwrites a newer catalog.
 concurrency:
-  group: catalog
+  group: catalog-${{ github.ref }}
 jobs:
   publish:
     if: github.ref == 'refs/heads/main'

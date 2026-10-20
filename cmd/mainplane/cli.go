@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -130,14 +131,19 @@ func cli(verb string, args []string) {
 	}
 }
 
-// key sets a provider's key, with the shape and url the catalog gives a
-// provider it knows; a provider the harness config has already keeps its own.
+// key sets a provider's key. A provider the harness has keeps its shape and
+// url; a new one gets the catalog's.
 func (c client) key(name, key string) {
-	cat, err := catalog.Fetch(context.Background())
-	if err != nil {
-		die(err)
+	var have []harness.ProviderInfo
+	c.call("GET", "/providers", "", nil, &have)
+	p := catalog.Provider{}
+	if !slices.ContainsFunc(have, func(h harness.ProviderInfo) bool { return h.Name == name }) {
+		cat, err := catalog.Fetch(context.Background())
+		if err != nil {
+			die(err)
+		}
+		p = cat.Providers[name]
 	}
-	p := cat.Providers[name]
 	body, _ := json.Marshal(map[string]string{"shape": p.Shape, "url": p.URL, "key": key})
 	c.call("PUT", "/providers/"+url.PathEscape(name), "application/json", bytes.NewReader(body), nil)
 }

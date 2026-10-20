@@ -55,7 +55,9 @@ const adminAgents = `# Admin:
 `
 
 // envProviders are the providers Default takes from the environment, by the
-// variables each provider's own tools read.
+// variables each provider's own tools read. Their names, shapes and urls are
+// the catalog's, in pkg/catalog/build/source.json: install runs before any
+// network is sure.
 var envProviders = map[string]Provider{
 	"anthropic":  {Shape: "anthropic", Key: "$ANTHROPIC_API_KEY"},
 	"openai":     {Shape: "openai", Key: "$OPENAI_API_KEY"},
