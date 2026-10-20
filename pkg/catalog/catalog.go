@@ -9,12 +9,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"time"
 )
 
 // URL is the published catalog. v1 changes only with a change that breaks
 // readers.
 const URL = "https://dl.mainplane.ai/catalog/v1.json"
+
+const (
+	fetchTime = 30 * time.Second // the whole fetch; the file is tens of KiB
+	maxSize   = 16 << 20         // a catalog of every model there is stays far below this
+)
 
 type Catalog struct {
 	Version   string              `json:"version"`
@@ -70,7 +77,7 @@ func Fetch(ctx context.Context) (Catalog, error) {
 	if err != nil {
 		return c, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := (&http.Client{Timeout: fetchTime}).Do(req)
 	if err != nil {
 		return c, err
 	}
@@ -78,5 +85,6 @@ func Fetch(ctx context.Context) (Catalog, error) {
 	if resp.StatusCode != http.StatusOK {
 		return c, fmt.Errorf("catalog: %s", resp.Status)
 	}
-	return c, json.NewDecoder(resp.Body).Decode(&c)
+	err = json.NewDecoder(io.LimitReader(resp.Body, maxSize)).Decode(&c)
+	return c, err
 }

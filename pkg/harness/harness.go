@@ -109,7 +109,7 @@ func system(source, body string) statefile.Record {
 func (h *Harness) Create(ctx context.Context, c Create, via string) (string, error) {
 	id := statefile.NewID()
 	if c.From != "" {
-		if c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Input != nil || c.Params != nil || c.Name != "" {
+		if c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Tools != "" || c.Input != nil || c.Params != nil || c.Preset != "" || c.Name != "" {
 			return "", fmt.Errorf("a copy takes no config and no name")
 		}
 		if err := h.cut(c.From, c.N); err != nil {

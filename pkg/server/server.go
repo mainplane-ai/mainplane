@@ -100,6 +100,9 @@ func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
 		if !ok {
 			return nil, fmt.Errorf("provider %s: unknown shape %q; shapes: %s", name, p.Shape, strings.Join(slices.Sorted(maps.Keys(provider.Shapes)), ", "))
 		}
+		if p.Shape == "openai-chat" && os.ExpandEnv(p.URL) == "" || p.Shape == "bedrock" && os.ExpandEnv(p.Region) == "" {
+			return nil, fmt.Errorf("provider %s: an openai-chat provider needs url, a bedrock one region", name)
+		}
 		out[name] = build(os.ExpandEnv(p.Key), os.ExpandEnv(p.URL), os.ExpandEnv(p.Region))
 	}
 	return out, nil

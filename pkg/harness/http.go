@@ -10,6 +10,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -85,7 +86,13 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		ps := h.providers()
 		out := []ProviderInfo{}
 		for _, name := range slices.Sorted(maps.Keys(ps)) {
-			out = append(out, ProviderInfo{name, ps[name].Envelope.Name(), ps[name].URL})
+			u, err := url.Parse(ps[name].URL)
+			if err != nil {
+				fail(w, err)
+				return
+			}
+			u.User, u.RawQuery = nil, "" // where a URL may carry a secret
+			out = append(out, ProviderInfo{name, ps[name].Envelope.Name(), u.String()})
 		}
 		reply(w, out)
 	})
