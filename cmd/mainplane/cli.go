@@ -126,16 +126,20 @@ func cli(verb string, args []string) {
 	case "providers":
 		c.raw("/providers")
 	case "key":
-		// The catalog says what shape and url a provider it knows has; a
-		// provider the harness config has already keeps its own.
-		cat, err := catalog.Fetch(context.Background())
-		if err != nil {
-			die(err)
-		}
-		p := cat.Providers[args[0]]
-		body, _ := json.Marshal(map[string]string{"shape": p.Shape, "url": p.URL, "key": args[1]})
-		c.call("PUT", "/providers/"+url.PathEscape(args[0]), "application/json", bytes.NewReader(body), nil)
+		c.key(args[0], args[1])
 	}
+}
+
+// key sets a provider's key, with the shape and url the catalog gives a
+// provider it knows; a provider the harness config has already keeps its own.
+func (c client) key(name, key string) {
+	cat, err := catalog.Fetch(context.Background())
+	if err != nil {
+		die(err)
+	}
+	p := cat.Providers[name]
+	body, _ := json.Marshal(map[string]string{"shape": p.Shape, "url": p.URL, "key": key})
+	c.call("PUT", "/providers/"+url.PathEscape(name), "application/json", bytes.NewReader(body), nil)
 }
 
 // client is the harness API with every failure the harness's own words on

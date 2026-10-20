@@ -44,12 +44,18 @@ type source struct {
 	} `json:"providers"`
 	Params  map[string]map[string]any `json:"params"` // by shape: what every preset of it sends
 	Effort  map[string]map[string]any `json:"effort"` // by shape: the params an effort is, "$" the value
-	Presets []struct {
-		Provider string `json:"provider"`
-		Model    string `json:"model"`
-		Effort   string `json:"effort"` // the one the provider uses when none is sent
-		Tools    string `json:"tools"`
-	} `json:"presets"`
+	Presets []sourcePreset            `json:"presets"`
+}
+
+type sourcePreset struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	Effort   string `json:"effort"` // the one the provider uses when none is sent
+	Tools    string `json:"tools"`
+}
+
+type devProvider struct {
+	Models map[string]model `json:"models"`
 }
 
 type model struct {
@@ -84,9 +90,7 @@ func run() error {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	var dev map[string]struct {
-		Models map[string]model `json:"models"`
-	}
+	var dev map[string]devProvider
 	if err := json.NewDecoder(resp.Body).Decode(&dev); err != nil {
 		return err
 	}
@@ -95,51 +99,10 @@ func run() error {
 		c.Providers[id] = p.Provider
 	}
 	for _, s := range src.Presets {
-		p, ok := src.Providers[s.Provider]
-		if !ok {
-			return fmt.Errorf("%s/%s: no provider %s", s.Provider, s.Model, s.Provider)
+		pr, err := preset(src, dev, s)
+		if err != nil {
+			return err
 		}
-		m, ok := dev[p.ModelsDev].Models[s.Model]
-		if !ok {
-			return fmt.Errorf("%s/%s: not in models.dev %s", s.Provider, s.Model, p.ModelsDev)
-		}
-		envelope := provider.Shapes[p.Shape]("", "", "").Envelope
-		pr := catalog.Preset{Name: m.Name, Provider: s.Provider, Model: s.Model, Tools: s.Tools, ContextLimit: min(contextLimit, m.Limit.Context), Input: []string{}, Cost: m.Cost}
-		if pr.Tools == "" {
-			pr.Tools = "default"
-		}
-		for _, mod := range m.Modalities.Input {
-			for _, t := range media[mod] {
-				if envelope.Accepts(t) {
-					pr.Input = append(pr.Input, t)
-				}
-			}
-		}
-		params := merge(map[string]any{}, src.Params[p.Shape])
-		if s.Effort != "" {
-			var levels []string
-			for _, r := range m.Reasoning {
-				if r.Type == "effort" {
-					levels = r.Values
-				}
-			}
-			if !slices.Contains(levels, s.Effort) {
-				return fmt.Errorf("%s/%s: effort %q is not one of %v", s.Provider, s.Model, s.Effort, levels)
-			}
-			set := catalog.Setting{Name: "effort"}
-			for _, l := range levels {
-				v, err := effort(src.Effort[p.Shape], l)
-				if err != nil {
-					return err
-				}
-				set.Values = append(set.Values, catalog.Value{Name: l, Params: raw(v)})
-				if l == s.Effort {
-					params = merge(params, v)
-				}
-			}
-			pr.Settings = []catalog.Setting{set}
-		}
-		pr.Params = raw(params)
 		id := s.Provider + "/" + s.Model
 		c.Presets[id] = pr
 		c.Groups["self-hosted-all"] = append(c.Groups["self-hosted-all"], id)
@@ -147,6 +110,56 @@ func run() error {
 	out := json.NewEncoder(os.Stdout)
 	out.SetIndent("", "  ")
 	return out.Encode(c)
+}
+
+// preset is the catalog's preset for one in source.json.
+func preset(src source, dev map[string]devProvider, s sourcePreset) (catalog.Preset, error) {
+	p, ok := src.Providers[s.Provider]
+	if !ok {
+		return catalog.Preset{}, fmt.Errorf("%s/%s: no provider %s", s.Provider, s.Model, s.Provider)
+	}
+	m, ok := dev[p.ModelsDev].Models[s.Model]
+	if !ok {
+		return catalog.Preset{}, fmt.Errorf("%s/%s: not in models.dev %s", s.Provider, s.Model, p.ModelsDev)
+	}
+	envelope := provider.Shapes[p.Shape]("", "", "").Envelope
+	pr := catalog.Preset{Name: m.Name, Provider: s.Provider, Model: s.Model, Tools: s.Tools, ContextLimit: min(contextLimit, m.Limit.Context), Input: []string{}, Cost: m.Cost}
+	if pr.Tools == "" {
+		pr.Tools = "default"
+	}
+	for _, mod := range m.Modalities.Input {
+		for _, t := range media[mod] {
+			if envelope.Accepts(t) {
+				pr.Input = append(pr.Input, t)
+			}
+		}
+	}
+	params := merge(map[string]any{}, src.Params[p.Shape])
+	if s.Effort != "" {
+		var levels []string
+		for _, r := range m.Reasoning {
+			if r.Type == "effort" {
+				levels = r.Values
+			}
+		}
+		if !slices.Contains(levels, s.Effort) {
+			return catalog.Preset{}, fmt.Errorf("%s/%s: effort %q is not one of %v", s.Provider, s.Model, s.Effort, levels)
+		}
+		set := catalog.Setting{Name: "effort"}
+		for _, l := range levels {
+			v, err := effort(src.Effort[p.Shape], l)
+			if err != nil {
+				return catalog.Preset{}, err
+			}
+			set.Values = append(set.Values, catalog.Value{Name: l, Params: raw(v)})
+			if l == s.Effort {
+				params = merge(params, v)
+			}
+		}
+		pr.Settings = []catalog.Setting{set}
+	}
+	pr.Params = raw(params)
+	return pr, nil
 }
 
 // effort is the shape's effort params with "$" made the level.
