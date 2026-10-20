@@ -297,3 +297,21 @@ func (c Client) SetWorkers(ctx context.Context, id, via string, ws []statefile.W
 	}
 	return c.Call(ctx, "PUT", "/sessions/"+id+"/workers?via="+url.QueryEscape(via), "application/json", bytes.NewReader(b), nil)
 }
+
+// Providers lists the providers the harness serves, by the name a model
+// starts with.
+func (c Client) Providers(ctx context.Context) ([]harness.ProviderInfo, error) {
+	var ps []harness.ProviderInfo
+	err := c.Call(ctx, "GET", "/providers", "", nil, &ps)
+	return ps, err
+}
+
+// SetProvider makes the harness serve provider name with this shape, url,
+// region and key, at once.
+func (c Client) SetProvider(ctx context.Context, name, shape, u, region, key string) error {
+	b, err := json.Marshal(map[string]string{"shape": shape, "url": u, "region": region, "key": key})
+	if err != nil {
+		return err
+	}
+	return c.Call(ctx, "PUT", "/providers/"+url.PathEscape(name), "application/json", bytes.NewReader(b), nil)
+}

@@ -3,14 +3,17 @@ package tui
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/catalog"
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
@@ -40,8 +43,10 @@ func commands() []command {
 		{"new", []string{"clear"}, "New session", "ctrl+n", (*session).fresh},
 		{"sessions", []string{"resume"}, "Sessions", "ctrl+o", (*session).sessions},
 		{"continue", []string{"compact"}, "Continue in a new session", "ctrl+k", (*session).carryOn},
+		{"config", nil, "Config for a new session", "", (*session).config},
 		{"rename", nil, "Rename the session", "", (*session).renameDialog},
 		{"model", nil, "Model for a new session", "", (*session).models},
+		{"providers", []string{"connect"}, "Connect a provider", "", (*session).providers},
 		{"goto", []string{"jump", "timeline"}, "Go to a message", "", (*session).goTo},
 		{"fork", nil, "Fork into a new session", "", (*session).fork},
 		{"rollback", []string{"revert", "rewind"}, "Roll back to before a message", "", (*session).rollback},
@@ -290,9 +295,13 @@ func (s *session) carryOn(a *App) {
 		a.Say("The session is still loading")
 		return
 	}
+	s.continueAs(a, s.info.Config, s.price)
+}
+
+// continueAs is carryOn with the config cf at price p.
+func (s *session) continueAs(a *App, cf statefile.Conf, p *catalog.Cost) {
 	to := newSession(a, s.list, "")
-	cf := s.info.Config
-	to.cfg, to.started = &cf, true
+	to.cfg, to.price, to.started = &cf, p, true
 	to.input.Clear() // not the home draft, which stays kept until this screen leaves
 	to.input.Attach("[continue session "+s.id+"]", "You are continuing session "+s.id+". Retrieve key context from it as you go.")
 	if len(s.input.els) > 0 {
@@ -644,44 +653,206 @@ func (s *session) rename(a *App, name string) {
 	})
 }
 
-// models is the menu of the models the listed sessions use, newest first.
-// A model's context limit, params and input come from its newest session:
-// they belong to the model, and the harness lists no models of its own.
-func (s *session) models(a *App) {
-	m := &Menu{}
-	cur := s.base().Model
-	for _, cf := range s.modelConfs() {
-		hint := tokens(cf.ContextLimit)
-		if cf.Model == cur {
-			hint = "current · " + hint
-		}
-		m.Items = append(m.Items, MenuItem{Label: cf.Model, Hint: hint, Pick: func(a *App, _ *MenuItem) { s.useModel(a, cf) }})
-	}
-	if len(m.Items) == 0 {
-		a.Say("No session lists a model yet")
+// withProviders runs then with the catalog and the providers the harness
+// serves.
+func (s *session) withProviders(a *App, then func(cat *catalog.Catalog, ps []harness.ProviderInfo)) {
+	cat := s.list.cat
+	if cat == nil {
+		a.SayError(errors.New("the catalog is not loaded"))
 		return
 	}
-	a.OpenMenu("Model for a new session", m)
+	a.Go(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), callTime)
+		defer cancel()
+		ps, err := s.c.Providers(ctx)
+		a.Post(func() {
+			if s.ctx.Err() != nil {
+				return
+			}
+			if err != nil {
+				a.SayError(err)
+				return
+			}
+			then(cat, ps)
+		})
+	})
 }
 
-// modelConfs is the current model's config, then each other model's from
-// its newest listed session.
-func (s *session) modelConfs() []statefile.Conf {
-	all := []statefile.Conf{s.base()}
-	for _, in := range s.list.infos {
-		all = append(all, in.Config)
-	}
-	var confs []statefile.Conf
-	for _, cf := range all {
-		if cf.Model != "" && !slices.ContainsFunc(confs, func(c statefile.Conf) bool { return c.Model == cf.Model }) {
-			confs = append(confs, cf)
+// models is the menu of the catalog's models whose provider the harness
+// serves, by provider. Picking one makes the next session from its preset.
+func (s *session) models(a *App) {
+	s.withProviders(a, func(cat *catalog.Catalog, ps []harness.ProviderInfo) {
+		m := &Menu{}
+		cur := s.base().Preset
+		for _, id := range connected(cat, ps) {
+			p := cat.Presets[id]
+			hint := tokens(p.ContextLimit)
+			if id == cur {
+				hint = "current · " + hint
+			}
+			m.Items = append(m.Items, MenuItem{Label: p.Name, Hint: hint, Section: cat.Providers[p.Provider].Name, Pick: func(a *App, _ *MenuItem) { s.useModel(a, presetConf(id, p)) }})
 		}
+		if len(m.Items) == 0 {
+			a.Say("No provider is connected: /providers")
+			return
+		}
+		a.OpenMenu("Model for a new session", m)
+	})
+}
+
+// providers is the menu of the catalog's providers. Picking one asks for its
+// key, and the harness serves it with the catalog's shape and url.
+func (s *session) providers(a *App) {
+	s.withProviders(a, func(cat *catalog.Catalog, ps []harness.ProviderInfo) {
+		m := &Menu{}
+		for _, id := range slices.Sorted(maps.Keys(cat.Providers)) {
+			p, hint := cat.Providers[id], ""
+			if slices.ContainsFunc(ps, func(x harness.ProviderInfo) bool { return x.Name == id }) {
+				hint = "connected"
+			}
+			m.Items = append(m.Items, MenuItem{Label: p.Name, Hint: hint, Pick: func(a *App, _ *MenuItem) { s.keyDialog(a, id, p) }})
+		}
+		a.OpenMenu("Providers", m)
+	})
+}
+
+// keyDialog asks for the provider's key, and a bedrock provider's region,
+// which its endpoint is built from.
+func (s *session) keyDialog(a *App, id string, p catalog.Provider) {
+	ask(a, "Key for "+p.Name, "API key", true, func(a *App, key string) {
+		if p.Shape != "bedrock" {
+			s.connect(a, id, p, "", key)
+			return
+		}
+		ask(a, "Region for "+p.Name, "us-east-1", false, func(a *App, region string) { s.connect(a, id, p, region, key) })
+	})
+}
+
+// ask is a dialog of one line of text.
+func ask(a *App, title, placeholder string, mask bool, then func(a *App, text string)) {
+	in := NewInput()
+	in.Placeholder, in.Cursor, in.Mask = placeholder, true, mask
+	var l *Layer
+	in.OnSubmit = func(a *App, text string) {
+		a.Pop(l)
+		then(a, strings.TrimSpace(text))
 	}
-	return confs
+	l = a.Dialog(title, &Node{View: in})
+}
+
+func (s *session) connect(a *App, id string, p catalog.Provider, region, key string) {
+	a.Go(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), callTime)
+		defer cancel()
+		err := s.c.SetProvider(ctx, id, p.Shape, p.URL, region, key)
+		a.Post(func() {
+			if err != nil {
+				a.SayError(err)
+				return
+			}
+			a.Say("Connected " + p.Name)
+		})
+	})
+}
+
+// config is the menu of the next session's settings, a section each, and
+// the full config as JSON. A change makes the next session: on a session,
+// it continues in a new one.
+func (s *session) config(a *App) {
+	if s.id != "" && s.info.ID != s.id {
+		a.Say("The session is still loading")
+		return
+	}
+	s.withProviders(a, func(cat *catalog.Catalog, ps []harness.ProviderInfo) {
+		cf := s.base()
+		if s.id == "" && s.cfg == nil {
+			d, err := defaultConf(cat, ps, s.list.infos)
+			if err != nil {
+				a.SayError(err)
+				return
+			}
+			cf = d
+		}
+		m := &Menu{Checks: true, Single: true}
+		pr, ok := cat.Presets[cf.Preset]
+		for _, st := range pr.Settings {
+			section := strings.ToUpper(st.Name[:1]) + st.Name[1:] // effort is Effort
+			for _, v := range st.Values {
+				m.Items = append(m.Items, MenuItem{Label: v.Name, Section: section, On: holds(cf.Params, v.Params), Pick: func(a *App, _ *MenuItem) {
+					cf.Params = merge(cf.Params, v.Params)
+					if s.id != "" {
+						a.Pop(m.layer)
+					}
+					s.reconfig(a, cf, s.price)
+				}})
+			}
+		}
+		m.Items = append(m.Items, MenuItem{Label: "Edit full JSON", Pick: func(a *App, _ *MenuItem) { s.configJSON(a, cat, cf) }})
+		title := cf.Model
+		if ok {
+			title = pr.Name
+		}
+		a.OpenMenu("Config: "+title, m)
+	})
+}
+
+// fullConf is the config as /config's JSON shows it: all of it but the
+// workers, which /workers sets, and with the price, which the user keeps
+// right when editing it.
+type fullConf struct {
+	*statefile.Conf
+	Workers []statefile.Worker `json:"workers,omitempty"` // hides the config's: never shown, ignored if typed
+	Cost    catalog.Cost       `json:"cost"`
+}
+
+// configJSON edits the next session's config as JSON.
+func (s *session) configJSON(a *App, cat *catalog.Catalog, cf statefile.Conf) {
+	p := price(cat, cf)
+	if s.price != nil {
+		p = *s.price
+	}
+	b, err := json.MarshalIndent(fullConf{Conf: &cf, Cost: p}, "", "  ")
+	if err != nil {
+		a.SayError(err)
+		return
+	}
+	in := NewInput()
+	in.Cursor, in.MaxRows = true, max(1, a.H-8)
+	in.insert(textElems(string(b))...)
+	var l *Layer
+	in.OnSubmit = func(a *App, text string) {
+		next := statefile.Conf{Workers: cf.Workers}
+		fc := fullConf{Conf: &next}
+		dec := json.NewDecoder(strings.NewReader(text))
+		dec.DisallowUnknownFields()
+		err := dec.Decode(&fc)
+		if err == nil && dec.More() {
+			err = errors.New("the config is one JSON object, with nothing after it")
+		}
+		if err != nil {
+			in.insert(textElems(text)...) // back to fix: a submit clears the input
+			a.SayError(err)
+			return
+		}
+		a.Pop(l)
+		s.reconfig(a, next, &fc.Cost)
+	}
+	l = a.Dialog("Config JSON · enter saves, shift+enter new line", &Node{View: in})
+}
+
+// reconfig makes cf at price p the next session's config: this screen's
+// when it has no session yet, else a new screen's that continues this one.
+func (s *session) reconfig(a *App, cf statefile.Conf, p *catalog.Cost) {
+	if s.id == "" {
+		s.cfg, s.price = &cf, p
+		return
+	}
+	s.continueAs(a, cf, p)
 }
 
 // base is the config a new session starts from: this session's, the one
-// chosen for this screen, else the newest session's.
+// chosen for this screen, else the newest session's, which the default
+// takes its preset from.
 func (s *session) base() statefile.Conf {
 	switch {
 	case s.id != "":
@@ -703,7 +874,7 @@ func (s *session) useModel(a *App, m statefile.Conf) {
 	}
 	m.Workers = s.base().Workers
 	if s.id == "" {
-		s.cfg = &m
+		s.cfg, s.price = &m, nil
 		return
 	}
 	to := newSession(a, s.list, "")
