@@ -716,26 +716,43 @@ func (s *session) providers(a *App) {
 	})
 }
 
+// keyDialog asks for the provider's key, and a bedrock provider's region,
+// which its endpoint is built from.
 func (s *session) keyDialog(a *App, id string, p catalog.Provider) {
+	ask(a, "Key for "+p.Name, "API key", true, func(a *App, key string) {
+		if p.Shape != "bedrock" {
+			s.connect(a, id, p, "", key)
+			return
+		}
+		ask(a, "Region for "+p.Name, "us-east-1", false, func(a *App, region string) { s.connect(a, id, p, region, key) })
+	})
+}
+
+// ask is a dialog of one line of text.
+func ask(a *App, title, placeholder string, mask bool, then func(a *App, text string)) {
 	in := NewInput()
-	in.Placeholder, in.Cursor = "API key", true
+	in.Placeholder, in.Cursor, in.Mask = placeholder, true, mask
 	var l *Layer
-	in.OnSubmit = func(a *App, key string) {
+	in.OnSubmit = func(a *App, text string) {
 		a.Pop(l)
-		a.Go(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), callTime)
-			defer cancel()
-			err := s.c.SetProvider(ctx, id, p.Shape, p.URL, strings.TrimSpace(key))
-			a.Post(func() {
-				if err != nil {
-					a.SayError(err)
-					return
-				}
-				a.Say("Connected " + p.Name)
-			})
-		})
+		then(a, strings.TrimSpace(text))
 	}
-	l = a.Dialog("Key for "+p.Name, &Node{View: in})
+	l = a.Dialog(title, &Node{View: in})
+}
+
+func (s *session) connect(a *App, id string, p catalog.Provider, region, key string) {
+	a.Go(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), callTime)
+		defer cancel()
+		err := s.c.SetProvider(ctx, id, p.Shape, p.URL, region, key)
+		a.Post(func() {
+			if err != nil {
+				a.SayError(err)
+				return
+			}
+			a.Say("Connected " + p.Name)
+		})
+	})
 }
 
 // config is the menu of the next session's settings, a section each, and
@@ -808,7 +825,11 @@ func (s *session) configJSON(a *App, cat *catalog.Catalog, cf statefile.Conf) {
 		fc := fullConf{Conf: &next}
 		dec := json.NewDecoder(strings.NewReader(text))
 		dec.DisallowUnknownFields()
-		if err := dec.Decode(&fc); err != nil {
+		err := dec.Decode(&fc)
+		if err == nil && dec.More() {
+			err = errors.New("the config is one JSON object, with nothing after it")
+		}
+		if err != nil {
 			in.insert(textElems(text)...) // back to fix: a submit clears the input
 			a.SayError(err)
 			return

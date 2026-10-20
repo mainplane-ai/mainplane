@@ -44,20 +44,29 @@ func loadCatalog(a *App, l *sessionList) {
 		ctx, cancel := context.WithTimeout(context.Background(), catalogGet)
 		defer cancel()
 		c, err := catalog.Fetch(ctx)
-		if err == nil {
-			var b []byte
-			if b, err = json.Marshal(c); err == nil {
-				err = os.WriteFile(path, b, 0o644)
-			}
+		if err != nil {
+			a.Post(func() { a.SayError(fmt.Errorf("catalog: %w", err)) })
+			return
 		}
-		a.Post(func() {
-			if err != nil {
-				a.SayError(fmt.Errorf("catalog: %w", err))
-				return
-			}
-			l.cat = &c
-		})
+		a.Post(func() { l.cat = &c })
+		if err := keep(path, c); err != nil {
+			a.Post(func() { a.SayError(fmt.Errorf("catalog: %w", err)) })
+		}
 	})
+}
+
+// keep writes c to path whole or not at all: a write cut short leaves the
+// copy kept before.
+func keep(path string, c catalog.Catalog) error {
+	b, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+	tmp := path + ".new"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // presetConf is the config a session made from preset id has, but its

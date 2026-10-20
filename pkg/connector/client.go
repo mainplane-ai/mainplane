@@ -306,10 +306,10 @@ func (c Client) Providers(ctx context.Context) ([]harness.ProviderInfo, error) {
 	return ps, err
 }
 
-// SetProvider makes the harness serve provider name with this shape, url
-// and key, at once.
-func (c Client) SetProvider(ctx context.Context, name, shape, u, key string) error {
-	b, err := json.Marshal(map[string]string{"shape": shape, "url": u, "key": key})
+// SetProvider makes the harness serve provider name with this shape, url,
+// region and key, at once.
+func (c Client) SetProvider(ctx context.Context, name, shape, u, region, key string) error {
+	b, err := json.Marshal(map[string]string{"shape": shape, "url": u, "region": region, "key": key})
 	if err != nil {
 		return err
 	}
