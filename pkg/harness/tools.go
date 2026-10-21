@@ -45,7 +45,7 @@ Tools:
 - Connected workers are listed on session start. You will be notified if the list changes
 - The run tool uses a persistent interpreter process. One process per session and interpreter
 - MAINPLANE_SESSION in every interpreter process is this session's id
-- One run call is bounded at 10 minutes. On timeout or crash, the next run's output begins with "environment was reset"
+- One run call is bounded at 10 minutes, or at its timeout argument in seconds. On timeout or crash, the next run's output begins with "environment was reset"
 - Background work should write to a log file and be checked in a later run. A pwsh job's output stays in the job until Receive-Job
 - A run result over 50 KiB or 2000 lines keeps its tail. The full output goes to a file, and the first line names its path, which will look like: <scratch>/output/<call id>
 - A read result over the same limits keeps its head. Its last line says how many lines were cut
@@ -154,7 +154,7 @@ func System(model string) string {
 // persists per session and interpreter until Kill; the harness decides when
 // a session's environments stop being worth keeping.
 type Worker interface {
-	Run(ctx context.Context, session, interpreter, code string) (Output, error)
+	Run(ctx context.Context, session, interpreter, code string, timeout int) (Output, error)
 	Read(ctx context.Context, path string) ([]byte, error)
 	Write(ctx context.Context, path string, data []byte) error
 	Kill(ctx context.Context, session string) error
@@ -183,7 +183,7 @@ func Tools(name string, input []string) []provider.Tool {
 func schema(s string) json.RawMessage { return json.RawMessage(s) }
 
 var (
-	run   = provider.Tool{Name: "run", Description: "Execute code on a worker in the specified interpreter", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"code":{"type":"string"},"interpreter":{"type":"string"}},"required":["worker","code"]}`)}
+	run   = provider.Tool{Name: "run", Description: "Execute code on a worker in the specified interpreter", Schema: schema(fmt.Sprintf(`{"type":"object","properties":{"worker":{"type":"string"},"code":{"type":"string"},"interpreter":{"type":"string"},"timeout":{"type":"integer","description":"seconds, default %d"}},"required":["worker","code"]}`, int(runTimeout.Seconds())))}
 	write = provider.Tool{Name: "write", Description: "Write a file on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"},"content":{"type":"string"}},"required":["worker","path","content"]}`)}
 	edit  = provider.Tool{Name: "edit", Description: "Edit a file with replacement on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"},"old":{"type":"string"},"new":{"type":"string"}},"required":["worker","path","old","new"]}`)}
 	patch = provider.Tool{Name: "patch", Description: "Apply a patch in the apply_patch format on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"input":{"type":"string"}},"required":["worker","input"]}`)}
@@ -191,6 +191,7 @@ var (
 
 type args struct {
 	Worker, Code, Interpreter, Path, Content, Old, New, Input string
+	Timeout                                                   int
 }
 
 // maxMedia bounds a file read as media. Anthropic's per-image limit, the
@@ -207,7 +208,10 @@ func execute(ctx context.Context, w Worker, session, tool string, a args, input 
 	fail := func(err error) (statefile.Record, int) { return ok("error: " + err.Error()) }
 	switch tool {
 	case "run":
-		o, err := w.Run(ctx, session, a.Interpreter, a.Code)
+		if a.Timeout < 0 || a.Timeout > int(maxTimeout.Seconds()) {
+			return fail(fmt.Errorf("timeout is %d, it must be 1 to %d seconds", a.Timeout, int(maxTimeout.Seconds())))
+		}
+		o, err := w.Run(ctx, session, a.Interpreter, a.Code, a.Timeout)
 		if err != nil {
 			return fail(err)
 		}
