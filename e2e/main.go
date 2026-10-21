@@ -400,6 +400,8 @@ func run(v, prev, port string, targets []string) {
 		ssh[o] = host
 	}
 	oses := slices.Sorted(maps.Keys(ssh))
+	// each phase reads hosts files over ssh too
+	os.Setenv("E2E_TARGETS", strings.Join(targets, " "))
 	llm := os.Getenv("OPENAI_API_KEY")
 	if llm == "" {
 		log.Fatal("OPENAI_API_KEY is not set: infisical run --env=dev --path=/llm -- task e2e -- ...")
@@ -964,7 +966,9 @@ func unlinked(p *harness.Pool, got map[string]harness.Listed, oses []string) {
 }
 
 // link makes every worker see every other, as links in a config do, and
-// waits until each one's hosts block lists every node.
+// waits until each one's hosts block lists every node. It reads the block over
+// ssh, not through the worker: a prev worker may be one that cannot read files
+// as its operator, as v0.5.3 on macOS 26.6 cannot (#122).
 func link(coord *coordinator.Coordinator, p *harness.Pool, got map[string]harness.Listed, oses []string) {
 	var pairs [][2]string
 	for _, a := range oses {
@@ -975,17 +979,20 @@ func link(coord *coordinator.Coordinator, p *harness.Pool, got map[string]harnes
 		}
 	}
 	coord.Link(pairs)
+	ssh := map[string]string{}
+	for _, t := range strings.Fields(os.Getenv("E2E_TARGETS")) {
+		o, host, _ := strings.Cut(t, "=")
+		ssh[o] = host
+	}
 	for _, o := range oses {
-		r, ok := p.Get(got[o].Name)
-		if !ok {
-			continue
-		}
 		var block []string
+		var err error
 		for start := time.Now(); len(block) != len(oses)+1 && time.Since(start) < removeWait; time.Sleep(200 * time.Millisecond) {
-			b, _ := r.Read(context.Background(), hostsPath[o == "windows"])
-			_, block = hostsLines(string(b))
+			var out string
+			out, err = remote(o, ssh[o], hostsFile[o == "windows"])
+			_, block = hostsLines(out)
 		}
-		check(o, "mesh: linked, sees every node", len(block) == len(oses)+1, fmt.Sprint(block))
+		check(o, "mesh: linked, sees every node", len(block) == len(oses)+1, fmt.Sprint(block, err))
 	}
 }
 
