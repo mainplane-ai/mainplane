@@ -907,7 +907,7 @@ func (s *session) halt(a *App) {
 				a.SayError(err)
 				return
 			}
-			a.Say("Killed the session's environments")
+			a.Say("Stopped: the session's connected workers were told to kill its environments")
 		})
 	})
 }
