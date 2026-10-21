@@ -401,7 +401,9 @@ func run(v, prev, port string, targets []string) {
 	}
 	oses := slices.Sorted(maps.Keys(ssh))
 	// each phase reads hosts files over ssh too
-	os.Setenv("E2E_TARGETS", strings.Join(targets, " "))
+	if err := os.Setenv("E2E_TARGETS", strings.Join(targets, " ")); err != nil {
+		log.Fatal(err)
+	}
 	llm := os.Getenv("OPENAI_API_KEY")
 	if llm == "" {
 		log.Fatal("OPENAI_API_KEY is not set: infisical run --env=dev --path=/llm -- task e2e -- ...")
