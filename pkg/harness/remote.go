@@ -23,6 +23,10 @@ import (
 // install, and the most a hung command costs before its environment is reset.
 const runTimeout = 10 * time.Minute
 
+// maxTimeout bounds the timeout a run may name: a day is past any build, and
+// work longer than that is a background job.
+const maxTimeout = 24 * time.Hour
+
 // updateTimeout bounds a worker's answer to an update, which it gives after
 // three downloads of up to five minutes each.
 const updateTimeout = 20 * time.Minute
@@ -214,14 +218,14 @@ func (r *Remote) call(ctx context.Context, h worker.Header, body []byte, on func
 // Run streams the output and keeps a tail within the result limits. Past twice
 // the byte limit the front is dropped at a line start and the lines counted,
 // a line cut in the middle counting as one; the worker has the whole in the
-// file the result names. A zero timeout is runTimeout.
-func (r *Remote) Run(ctx context.Context, session, interpreter, code string, timeout time.Duration) (Output, error) {
+// file the result names. timeout is in seconds, and zero is runTimeout.
+func (r *Remote) Run(ctx context.Context, session, interpreter, code string, timeout int) (Output, error) {
 	if timeout == 0 {
-		timeout = runTimeout
+		timeout = int(runTimeout.Seconds())
 	}
 	var o Output
 	mid := false // the tail starts inside a line already counted
-	err := r.call(ctx, worker.Header{Kind: worker.Run, Session: session, Interp: interpreter, Timeout: int(timeout.Seconds())}, []byte(code), func(f worker.Frame) {
+	err := r.call(ctx, worker.Header{Kind: worker.Run, Session: session, Interp: interpreter, Timeout: timeout}, []byte(code), func(f worker.Frame) {
 		if f.Kind == worker.Result {
 			o.Exit, o.Full = f.Exit, f.Full
 			return

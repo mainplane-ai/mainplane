@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
@@ -155,7 +154,7 @@ func System(model string) string {
 // persists per session and interpreter until Kill; the harness decides when
 // a session's environments stop being worth keeping.
 type Worker interface {
-	Run(ctx context.Context, session, interpreter, code string, timeout time.Duration) (Output, error)
+	Run(ctx context.Context, session, interpreter, code string, timeout int) (Output, error)
 	Read(ctx context.Context, path string) ([]byte, error)
 	Write(ctx context.Context, path string, data []byte) error
 	Kill(ctx context.Context, session string) error
@@ -209,10 +208,10 @@ func execute(ctx context.Context, w Worker, session, tool string, a args, input 
 	fail := func(err error) (statefile.Record, int) { return ok("error: " + err.Error()) }
 	switch tool {
 	case "run":
-		if a.Timeout < 0 {
-			return fail(fmt.Errorf("timeout is %d, it must be positive seconds", a.Timeout))
+		if a.Timeout < 0 || a.Timeout > int(maxTimeout.Seconds()) {
+			return fail(fmt.Errorf("timeout is %d, it must be 1 to %d seconds", a.Timeout, int(maxTimeout.Seconds())))
 		}
-		o, err := w.Run(ctx, session, a.Interpreter, a.Code, time.Duration(a.Timeout)*time.Second)
+		o, err := w.Run(ctx, session, a.Interpreter, a.Code, a.Timeout)
 		if err != nil {
 			return fail(err)
 		}
