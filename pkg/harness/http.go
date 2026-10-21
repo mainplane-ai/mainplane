@@ -40,7 +40,7 @@ const MaxPost = 8 << 20
 //	                                  under that key and returns the post's n
 //	POST /sessions/{id}/retry         step from the tip, whatever it is            -> {"status"}
 //	POST /sessions/{id}/stop          ?via= required. cut a running step, write    -> 204; the records
-//	                                  it down; kill the session's environments        say what happened
+//	                                  it down; kill its environments and jobs        say what happened
 //	PUT  /sessions/{id}/workers       [{"name"}]; ?via= required. a config record  -> {"n"}
 //	                                  with these workers; the next step sees them
 //	PUT  /sessions/{id}/name          the name as text; ?via= required. a name     -> {"n"}

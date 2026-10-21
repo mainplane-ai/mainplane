@@ -884,7 +884,7 @@ func (s *session) useModel(a *App, m statefile.Conf) {
 }
 
 // halt is /stop: Esc Esc, for whoever looks for it by name. A session that
-// is not working still has its environments killed.
+// is not working still has its environments and jobs killed.
 func (s *session) halt(a *App) {
 	if s.stepping() {
 		s.stop(a)
@@ -907,7 +907,7 @@ func (s *session) halt(a *App) {
 				a.SayError(err)
 				return
 			}
-			a.Say("Stopped: the session's connected workers were told to kill its environments")
+			a.Say("Stopped: the session's connected workers were told to kill its environments and jobs")
 		})
 	})
 }

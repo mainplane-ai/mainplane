@@ -41,17 +41,18 @@ const (
 	Run    = "run"
 	Read   = "read"
 	Write  = "write"
-	Kill   = "kill"   // end a session's environments
+	Kill   = "kill"   // end a session's environments and jobs
 	Update = "update" // become release Version, then restart
 	Drives = "drives" // no id, no answer: the body is the Desired drives, whole
 
-	Hello  = "hello"  // first frame on a connection: what the worker is
-	Output = "output" // run: one chunk, in order
-	Result = "result" // run: exit code, path of the whole output when spilled
-	Bytes  = "bytes"  // read: the file
-	Done   = "done"   // write, kill, update
-	Error  = "error"  // any request: text the model reads
-	Status = "status" // no id: the worker's drives changed
+	Hello   = "hello"   // first frame on a connection: what the worker is
+	Output  = "output"  // run: one chunk, in order
+	Result  = "result"  // run: exit code, path of the whole output when spilled; a job's: its log and tail
+	Started = "started" // run of a job: it runs, as pid, its output in path
+	Bytes   = "bytes"   // read: the file
+	Done    = "done"    // write, kill, update; a job a kill ended
+	Error   = "error"   // any request: text the model reads
+	Status  = "status"  // no id: the worker's drives changed
 )
 
 type Header struct {
@@ -62,7 +63,9 @@ type Header struct {
 	Session string `json:"session,omitempty"` // run, kill: environments live per session
 	Interp  string `json:"interp,omitempty"`  // run: empty means the worker's first
 	Timeout int    `json:"timeout,omitempty"` // run: seconds before the environment is killed
-	Path    string `json:"path,omitempty"`    // read, write
+	Job     string `json:"job,omitempty"`     // run: a background job of this id, in an interpreter of its own
+	Path    string `json:"path,omitempty"`    // read, write; started, result: a job's log
+	Pid     int    `json:"pid,omitempty"`     // started
 
 	Exit int    `json:"exit,omitempty"` // result
 	Full string `json:"full,omitempty"` // result: file holding all the output, when over the limits

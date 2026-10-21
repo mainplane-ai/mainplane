@@ -13,6 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
@@ -347,12 +348,14 @@ func (s *session) stoppedBy() string {
 // Stop ends everything the session is doing. A running step is cut now: the
 // provider stream is cut, every call in flight is answered "stopped, effect
 // unknown", a call of a recorded step not yet started is answered "not run",
-// and the last record is an error naming via. Stepping or not, every
-// environment the session has on its workers is killed.
+// and the last record is an error naming via; a session not stepping gets a
+// system record from stop instead. Either way every environment and job the
+// session has on its connected workers is killed.
 func (h *Harness) Stop(ctx context.Context, id, via string) error {
 	s := h.session(id)
 	h.mu.Lock()
-	if s.running {
+	running := s.running
+	if running {
 		s.mu.Lock()
 		s.stopped = via
 		s.mu.Unlock()
@@ -367,8 +370,29 @@ func (h *Harness) Stop(ctx context.Context, id, via string) error {
 	if err != nil {
 		return err
 	}
+	if !running {
+		if err := h.note(s, id, system("stop", fmt.Sprintf(idleStop, via))); err != nil {
+			return err
+		}
+	}
 	h.killAll(ctx, id, conf)
 	return nil
+}
+
+// note appends r whether or not a step holds the file, as a post does.
+func (h *Harness) note(s *session, id string, r statefile.Record) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f := s.f
+	if f == nil {
+		var err error
+		if f, err = h.Sessions.Open(id); err != nil {
+			return err
+		}
+		defer func() { _ = f.Close() }()
+	}
+	_, err := h.write(s, f, r)
+	return err
 }
 
 // killAll ends the session's environments on every connected worker its
@@ -400,7 +424,43 @@ func (h *Harness) Resume(ctx context.Context) error {
 			h.Kick(ctx, id)
 		}
 	}
+	go h.lostJobs(ctx, ids)
 	return nil
+}
+
+// lostJobs tells each session of the jobs a harness before this one started
+// and never heard the end of: their calls ended with that harness, so no
+// message will come. A job's message is keyed by its call's id.
+func (h *Harness) lostJobs(ctx context.Context, ids []string) {
+	for _, id := range ids {
+		chain, err := h.Sessions.Load(id)
+		if err != nil {
+			log.Printf("session %s: %v", id, err)
+			continue
+		}
+		background, told := map[string]bool{}, map[string]bool{}
+		for _, r := range chain {
+			var c provider.Call
+			var a args
+			switch {
+			case r.Kind == statefile.Message && r.Via == "job":
+				told[r.IdempotencyKey] = true
+			case r.Kind == statefile.Call && json.Unmarshal(r.Body, &c) == nil && c.Name == "run" && json.Unmarshal(c.Arguments, &a) == nil:
+				background[r.ID] = a.Background
+			case r.Kind == statefile.Error && r.Via != "" || r.Kind == statefile.System && r.Source == "stop":
+				clear(background) // a stop killed every job before it
+			}
+		}
+		for _, r := range chain {
+			if r.Kind != statefile.Result || !background[r.For] || told[r.For] || !strings.HasPrefix(string(r.Body), "started job ") {
+				continue
+			}
+			text := fmt.Sprintf("[%s: the harness restarted, so it lost contact. It may or may not still be running: check the pid and the log, whose last line is [exit N] once it ended]", r.Body)
+			if _, err := h.Post(ctx, id, "job", r.For, []Part{{Type: "text/plain", Body: []byte(text)}}); err != nil {
+				log.Printf("session %s: job %s: %v", id, r.For, err)
+			}
+		}
+	}
 }
 
 // status is the file's word, or stepping while a runner holds the session.

@@ -41,7 +41,7 @@ type server struct {
 }
 
 // Serve answers one harness until the connection ends, then kills every
-// environment. Each request runs in its own goroutine; runs that share an
+// environment. Jobs keep running. Each request runs in its own goroutine; runs that share an
 // environment queue on it. An error frame with no id is the harness ending
 // the connection on purpose, and its text is the error. The drives go to d,
 // which reports on the connection while it lasts.
@@ -129,6 +129,13 @@ func (s *server) run(f Frame) (Frame, error) {
 	if !slices.Contains(s.Interps, name) {
 		return Frame{}, fmt.Errorf("unknown interpreter %q, this worker runs: %s", name, strings.Join(s.Interps, ", "))
 	}
+	if f.Job != "" {
+		it, err := s.interp(name)
+		if err != nil {
+			return Frame{}, err
+		}
+		return s.job(f, it)
+	}
 	key := f.Session + "/" + name
 	e, reset, err := s.acquire(key, f.Session, name)
 	if err != nil {
@@ -212,9 +219,10 @@ func (s *server) release(key string, e *env, alive bool) {
 	e.mu.Unlock()
 }
 
-// kill ends every environment of a session. The harness decides when a
-// session's environments stop being worth keeping; the worker only obeys.
+// kill ends every environment and job of a session. The harness decides when
+// a session's environments stop being worth keeping; the worker only obeys.
 func (s *server) kill(session string) {
+	killJobs(session)
 	s.emu.Lock()
 	defer s.emu.Unlock()
 	for key, e := range s.envs {

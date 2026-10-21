@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"maps"
 	"slices"
 	"strings"
@@ -28,7 +29,8 @@ import (
 // itself: without it the session would close on a cut-off, refused, or
 // filtered reply, or on thinking alone.
 const (
-	halted   = "The session was stopped during the last step by %s. Running calls were cancelled."
+	halted   = "The session was stopped during the last step by %s. Running calls were cancelled. Every job and environment of the session on a connected worker was killed; a worker that was not connected keeps its jobs."
+	idleStop = "The session was stopped by %s while it was not stepping. Every job and environment of the session on a connected worker was killed; a worker that was not connected keeps its jobs."
 	abnormal = "The last step ended with stop %q (%d output tokens) and no call, so its reply may be cut short, refused, or missing. If the stop is the output token limit, raise the provider's output token limit in params. Retry to continue."
 	resume   = "Continue"
 )
@@ -458,6 +460,44 @@ func (h *Harness) Run(ctx context.Context, id string) (statefile.Status, error) 
 	}
 }
 
+// job starts a background run and answers its call at once. The job's end
+// comes later as a message from job, keyed by the call's id so it is posted
+// once. Neither the job nor its message ends with the step that started it.
+func (h *Harness) job(ctx context.Context, id, call string, w Worker, a args) statefile.Record {
+	if a.Timeout != 0 {
+		return result(call, "error: a background run has no timeout; cancel it by its pid")
+	}
+	step := ctx // a stop cancels it
+	if step.Err() != nil {
+		return result(call, "error: stopped before the job started")
+	}
+	ctx = context.WithoutCancel(ctx)
+	start, ready := time.Now(), make(chan struct{}) // done reads pid and path once Job set them
+	var pid int
+	var path string
+	pid, path, err := w.Job(ctx, id, a.Interpreter, a.Code, call, func(o Output, err error) {
+		<-ready
+		text := fmt.Sprintf("[job %s on %s: %v. It may or may not still be running: check pid %d and the log %s, whose last line is [exit N] once it ended]", call, a.Worker, err, pid, path)
+		if err == nil {
+			tail, _ := clip(o.Body, true)
+			text = fmt.Sprintf("[job %s on %s exited %d after %s. Log: %s]\n%s", call, a.Worker, o.Exit, time.Since(start).Round(time.Second), o.Full, tail)
+		}
+		if _, err := h.Post(ctx, id, "job", call, []Part{{Type: "text/plain", Body: []byte(text)}}); err != nil {
+			log.Printf("session %s: job %s: %v", id, call, err)
+		}
+	})
+	close(ready)
+	if err != nil {
+		return result(call, "error: "+err.Error())
+	}
+	if step.Err() != nil { // a stop's kill may have reached the worker before the job registered
+		if err := w.Kill(ctx, id); err != nil {
+			log.Printf("session %s: kill after stop: %v", id, err)
+		}
+	}
+	return result(call, fmt.Sprintf("started job %s on %s, pid %d, log %s", call, a.Worker, pid, path))
+}
+
 func result(call, text string) statefile.Record {
 	return statefile.Record{Header: statefile.Header{Kind: statefile.Result, For: call, Type: "text/plain"}, Body: []byte(text)}
 }
@@ -482,6 +522,9 @@ func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, c
 	w, ok := h.Workers.Get(a.Worker)
 	if !ok {
 		return result(call.ID, "error: worker "+a.Worker+" is not connected")
+	}
+	if c.Name == "run" && a.Background {
+		return h.job(ctx, id, call.ID, w, a)
 	}
 	r, dropped := execute(ctx, w, id, c.Name, a, conf.Input)
 	r = finish(c.Name, a, r, dropped)
