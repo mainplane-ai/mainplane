@@ -357,8 +357,8 @@ func usage() {
   tail       <id> [after]            GET  /sessions/{id}/records, rendered
   chat       [id]                    tail that follows; every stdin line is a message. No id: the session updated last
   retry      <id>                    POST /sessions/{id}/retry, step a failed or idle session from its tip
-  stop       <id>                    POST /sessions/{id}/stop
-  delete     <id>                    DELETE /sessions/{id}: the session is gone for good; a stepping one is refused
+  stop       <id>                    POST /sessions/{id}/stop: cut a running step, kill its environments
+  delete     <id>                    DELETE /sessions/{id}: stop the session, then it is gone for good
   info       <id>                    GET  /sessions/{id}
   name       <id> [text]             PUT  /sessions/{id}/name: the session's name; no text removes it
   sessions   [status]                GET  /sessions
