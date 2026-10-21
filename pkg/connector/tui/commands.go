@@ -883,13 +883,33 @@ func (s *session) useModel(a *App, m statefile.Conf) {
 	s.switchTo(a, to)
 }
 
-// halt is /stop: Esc Esc, for whoever looks for it by name.
+// halt is /stop: Esc Esc, for whoever looks for it by name. A session that
+// is not working still has its environments killed.
 func (s *session) halt(a *App) {
-	if !s.stepping() {
-		a.Say("The session is not working")
+	if s.stepping() {
+		s.stop(a)
 		return
 	}
-	s.stop(a)
+	if s.id == "" {
+		a.Say("No session to stop yet")
+		return
+	}
+	id := s.id
+	a.Go(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), callTime)
+		defer cancel()
+		err := s.c.Stop(ctx, id, via)
+		a.Post(func() {
+			if s.ctx.Err() != nil { // the screen left the session
+				return
+			}
+			if err != nil {
+				a.SayError(err)
+				return
+			}
+			a.Say("Stopped: the session's connected workers were told to kill its environments")
+		})
+	})
 }
 
 // infoHint is the most characters of a value /info shows, so its label fits

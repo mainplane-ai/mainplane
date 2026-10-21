@@ -258,7 +258,8 @@ func (h *Harness) workers(workers []statefile.Worker) string {
 // stepped only when a run asked for it; every step spends the ask, so a run
 // on a closed session does not carry over to a later failure. Interrupted sessions get a result for
 // every orphan call and become open; the next cycle steps. Past the context
-// limit nothing is called: the error says so and the session is failed. A
+// limit nothing is called: the session's environments are killed, the error
+// says so, and the session is failed. A
 // retry of a failed session adds resume as a message from retry. The worker
 // list enters as a system record whenever it differs from the last one the
 // model saw.
@@ -293,6 +294,7 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 		return "", err
 	}
 	if p := statefile.ContextUsed(chain); p > conf.ContextLimit {
+		h.killAll(ctx, id, conf)
 		_, err := h.append(s, errorRecord("", fmt.Sprintf("context %d exceeds limit %d", p, conf.ContextLimit)))
 		return statefile.StatusFailed, err
 	}
