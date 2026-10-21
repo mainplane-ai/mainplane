@@ -42,7 +42,10 @@ func hostsPath() string {
 func Long(name, project string) string { return name + "--" + project + "." + Domain }
 
 // block is a line for every node in nm, this one too: its address, its
-// name, and its long name.
+// long name, and its name. The long name comes first: the first name is the
+// canonical one, and macOS 26.6 resolves a name through its canonical one,
+// so a short name that DNS also knows, such as a Tailscale MagicDNS name,
+// would give the long name that address too.
 func block(nm *netmap.NetworkMap) string {
 	if nm == nil {
 		return ""
@@ -50,7 +53,7 @@ func block(nm *netmap.NetworkMap) string {
 	var b strings.Builder
 	for _, n := range append([]tailcfg.NodeView{nm.SelfNode}, nm.Peers...) {
 		if n.Valid() && n.Addresses().Len() > 0 {
-			fmt.Fprintf(&b, "%s %s %s\n", n.Addresses().At(0).Addr(), n.Name(), Long(n.Name(), nm.Domain))
+			fmt.Fprintf(&b, "%s %s %s\n", n.Addresses().At(0).Addr(), Long(n.Name(), nm.Domain), n.Name())
 		}
 	}
 	return begin + "\n" + b.String() + end + "\n"
