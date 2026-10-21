@@ -345,8 +345,8 @@ func Split(ctx []statefile.Record) (system, rest []statefile.Record) {
 // Turns groups the non-system context into alternating turns in API order:
 // user turns hold results, messages, later system records, summaries, and
 // errors; assistant turns hold the blocks one step closed. A message begins
-// with a line naming its via, so the model knows who sent it; an image gets
-// that line as a text record before it. The step record
+// with a line naming its via, so the model knows who sent it; media (image,
+// pdf, audio, video) gets that line as a text record before it. The step record
 // ends its assistant turn. A step that closed no blocks, a model that said
 // nothing, is no turn at all: every provider rejects an empty assistant turn,
 // and every provider merges the user turns around it.
@@ -374,7 +374,7 @@ func Turns(rest []statefile.Record) []Turn {
 			}
 		case statefile.Message:
 			line := "via " + r.Via + "\n"
-			if slices.Contains(images, r.Type) {
+			if !strings.HasPrefix(r.Type, "text/") {
 				push(false, statefile.Record{Header: statefile.Header{Kind: statefile.Message, Type: "text/plain"}, Body: []byte(line)})
 			} else {
 				r.Body = append([]byte(line), r.Body...)
