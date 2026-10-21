@@ -206,12 +206,57 @@ func (r *Remote) call(ctx context.Context, h worker.Header, body []byte, on func
 				return errors.New(string(f.Body))
 			}
 			on(f)
-			if f.Kind != worker.Output {
+			if f.Kind != worker.Output && f.Kind != worker.Started {
 				return nil
 			}
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+	}
+}
+
+// Job starts code as a background job named job and returns its pid and log
+// once the worker runs it. The call stays open until the job ends: done gets
+// the log's tail and exit, or the error that ended the call, such as a lost
+// connection. A job a kill ended answers done, and done is not called: a stop
+// ended it on purpose.
+func (r *Remote) Job(ctx context.Context, session, interpreter, code, job string, done func(Output, error)) (int, string, error) {
+	started, ended := make(chan worker.Frame, 1), make(chan error, 1)
+	var o Output
+	stopped := false
+	go func() {
+		ended <- r.call(ctx, worker.Header{Kind: worker.Run, Session: session, Interp: interpreter, Job: job}, []byte(code), func(f worker.Frame) {
+			switch f.Kind {
+			case worker.Started:
+				started <- f
+			case worker.Result:
+				o.Body, o.Exit, o.Full = f.Body, f.Exit, f.Path
+			case worker.Done:
+				stopped = true
+			}
+		})
+	}()
+	select {
+	case f := <-started:
+		go func() {
+			if err := <-ended; err != nil || !stopped {
+				done(o, err)
+			}
+		}()
+		return f.Pid, f.Path, nil
+	case err := <-ended:
+		select {
+		case f := <-started: // it started and ended before this select looked
+			if err != nil || !stopped {
+				go done(o, err)
+			}
+			return f.Pid, f.Path, nil
+		default:
+		}
+		if err == nil {
+			err = fmt.Errorf("worker %s answered without starting the job: it may be from before background runs", r.Name)
+		}
+		return 0, "", err
 	}
 }
 
