@@ -748,7 +748,7 @@ func checks(r *harness.Remote, goos string) {
 	ctx := context.Background()
 	defer func() { _ = r.Kill(ctx, "e2e") }()
 	sh := func(code string) (string, error) {
-		o, err := r.Run(ctx, "e2e", "", code)
+		o, err := r.Run(ctx, "e2e", "", code, 0)
 		if err == nil && o.Exit != 0 {
 			err = fmt.Errorf("exit %d", o.Exit)
 		}
@@ -788,12 +788,12 @@ func checks(r *harness.Remote, goos string) {
 	check(goos, "write to scratch", err == nil, fmt.Sprint(err))
 	b, err := r.Read(ctx, file)
 	check(goos, "read it back", err == nil && string(b) == "hi from the harness\n", fmt.Sprintf("%q %v", b, err))
-	o, err := r.Run(ctx, "e2e", "", big)
+	o, err := r.Run(ctx, "e2e", "", big, 0)
 	check(goos, "big output spills to a file", err == nil && o.Full != "", o.Full)
 	b, err = r.Read(ctx, o.Full)
 	check(goos, "spill file readable", err == nil && strings.Count(string(b), "\n") >= 60000, fmt.Sprintf("%d bytes %v", len(b), err))
 	js := func(code string) (string, error) {
-		o, err := r.Run(ctx, "e2e", "js", code)
+		o, err := r.Run(ctx, "e2e", "js", code, 0)
 		if err == nil && o.Exit != 0 {
 			err = fmt.Errorf("exit %d", o.Exit)
 		}
@@ -830,7 +830,7 @@ func mesh(p *harness.Pool, got map[string]harness.Listed, oses []string) {
 		}
 		win := o == "windows"
 		sh := func(code string) string {
-			out, _ := r.Run(ctx, "e2e-mesh", "", code)
+			out, _ := r.Run(ctx, "e2e-mesh", "", code, 0)
 			return strings.ReplaceAll(string(out.Body), "\r", "")
 		}
 		b, err := r.Read(ctx, hostsPath[win])
@@ -1006,7 +1006,7 @@ func (d drive) sh(o, code string) (string, error) {
 	if !ok {
 		return "", errors.New("not connected")
 	}
-	out, err := r.Run(context.Background(), d.session, "", code)
+	out, err := r.Run(context.Background(), d.session, "", code, 0)
 	if err == nil && out.Exit != 0 {
 		err = fmt.Errorf("exit %d", out.Exit)
 	}
