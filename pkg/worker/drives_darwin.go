@@ -39,8 +39,11 @@ const (
 // intr: a run that is stopped can still be killed while it waits, as on
 // Linux. actimeo=1: a change on another worker shows within a second, as on
 // Linux. resvport: a Linux export takes only a port below 1024, which the
-// Linux client uses and the macOS one only when asked.
-const mountOpts = "vers=4.0,hard,intr,actimeo=1,resvport"
+// Linux client uses and the macOS one only when asked. inet6: only the
+// mesh address, never another the server's name resolves to, such as its
+// Tailscale IPv4 address. An address the server does not export to makes
+// the macOS 26 kernel panic when the client then moves on to the next one.
+const mountOpts = "vers=4.0,hard,intr,actimeo=1,resvport,inet6"
 
 // reconcile mounts what want says, unmounts what it no longer says, and
 // returns each drive as it is now.

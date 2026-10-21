@@ -626,7 +626,7 @@ func names(block []string) map[string]string {
 	m := map[string]string{}
 	for _, l := range block {
 		if f := strings.Fields(l); len(f) == 3 {
-			m[f[1]] = f[2]
+			m[f[2]] = f[1]
 		}
 	}
 	return m
