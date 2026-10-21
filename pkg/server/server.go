@@ -85,22 +85,24 @@ type Provider struct {
 	Region string `json:"region,omitempty"` // bedrock
 }
 
-// Load reads the config at path. A provider with no shape takes its name
-// as its shape, as each did in v0.5.3, so a config from then still loads.
 func Load(path string) (Config, error) {
 	var c Config
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return c, err
 	}
-	if err := json.Unmarshal(b, &c); err != nil {
-		return c, err
-	}
+	err = json.Unmarshal(b, &c)
+	c.named()
+	return c, err
+}
+
+// named gives a provider with no shape its name as its shape, as each had in
+// v0.5.3, so a config from then still loads.
+func (c Config) named() {
 	for name, p := range c.Providers {
 		p.Shape = cmp.Or(p.Shape, name)
 		c.Providers[name] = p
 	}
-	return c, nil
 }
 
 func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
