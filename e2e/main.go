@@ -248,7 +248,7 @@ Get-Item "$env:ProgramData\mainplane" -ErrorAction SilentlyContinue | ForEach-Ob
 		"darwin": `mount | grep fd7c`,
 		"windows": `$f = "$env:ProgramData\mainplane-e2e.txt"
 $a = New-ScheduledTaskAction -Execute cmd.exe -Argument "/c (net use & cmdkey /list) | findstr /i mainplane.net > $f"
-Register-ScheduledTask mainplane-e2e -Action $a -Principal (New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited) -Force | Out-Null
+Register-ScheduledTask mainplane-e2e -Action $a -Principal (New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited) -Settings (New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries) -Force | Out-Null
 Start-ScheduledTask mainplane-e2e
 for ($i = 0; $i -lt 50 -and !((Test-Path $f) -and (Get-ScheduledTask mainplane-e2e).State -eq 'Ready'); $i++) { Start-Sleep -Milliseconds 200 }
 Unregister-ScheduledTask mainplane-e2e -Confirm:$false
