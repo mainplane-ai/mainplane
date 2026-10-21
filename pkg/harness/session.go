@@ -30,9 +30,11 @@ type session struct {
 	stopped string          // who asked for the stop, while one is in flight
 
 	// under Harness.mu
-	running bool               // a runner goroutine is stepping this session
-	kicked  bool               // a kick arrived while running: look again before stopping
-	cancel  context.CancelFunc // ends the running step
+	running  bool               // a runner goroutine is stepping this session
+	kicked   bool               // a kick arrived while running: look again before stopping
+	cancel   context.CancelFunc // ends the running step
+	done     chan struct{}      // closed when the runner goroutine ends
+	deleting bool               // no kick starts or continues a runner
 }
 
 func (h *Harness) session(id string) *session {
@@ -214,17 +216,36 @@ func (h *Harness) SetName(id, via, n string) (int, error) {
 	return h.write(s, f, name(via, n))
 }
 
-// Delete removes the session's file for good. Append-only is of records:
-// none is ever changed, and a session goes whole. A stepping session is
-// refused, so no step writes to a file that is gone; under the lock a post
-// takes, so no post does. Copies keep their own files, workers their logs.
-func (h *Harness) Delete(id, via string) error {
+// Delete stops the session, then removes its file for good. Append-only is
+// of records: none is ever changed, and a session goes whole. It waits for
+// the stopped step to end, so no step writes to a file that is gone; under
+// the lock a post takes, so no post does. Copies keep their own files,
+// workers their logs.
+func (h *Harness) Delete(ctx context.Context, id, via string) error {
 	s := h.session(id)
 	h.mu.Lock()
-	if s.running {
+	s.deleting = true
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		s.deleting = false
 		h.mu.Unlock()
-		return fmt.Errorf("session %s is stepping: stop it first", id)
+	}()
+	if err := h.Stop(ctx, id, via); err != nil {
+		log.Printf("session %s: stop before delete: %v", id, err) // a broken file still goes
 	}
+	h.mu.Lock()
+	if s.running {
+		done := s.done
+		h.mu.Unlock()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		h.mu.Lock()
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	h.mu.Unlock()
@@ -256,11 +277,15 @@ func (h *Harness) Kick(ctx context.Context, id string) {
 	s := h.session(id)
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if s.deleting {
+		return
+	}
 	if s.running {
 		s.kicked = true
 		return
 	}
-	s.running = true
+	s.running, s.done = true, make(chan struct{})
+	done := s.done
 	rctx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
 	go func() {
@@ -276,13 +301,14 @@ func (h *Harness) Kick(ctx context.Context, id string) {
 			s.stopped = ""
 			s.mu.Unlock()
 			h.mu.Lock()
-			if !s.kicked {
-				s.running, s.cancel = false, nil
+			if !s.kicked || s.deleting {
+				s.running, s.cancel, s.kicked = false, nil, false
 				h.mu.Unlock()
 				h.touch(id)
 				if st == statefile.StatusClosed || st == statefile.StatusFailed {
 					h.copyLogs(ctx, id)
 				}
+				close(done)
 				return
 			}
 			s.kicked = false
@@ -318,23 +344,21 @@ func (s *session) stoppedBy() string {
 	return s.stopped
 }
 
-// Stop ends the running step now: the provider stream is cut, every call in
-// flight is killed on its worker and answered "stopped, effect unknown", a
-// call of a recorded step not yet started is answered "not run", and the last
-// record is an error naming via. A session that is not stepping has nothing to stop.
+// Stop ends everything the session is doing. A running step is cut now: the
+// provider stream is cut, every call in flight is answered "stopped, effect
+// unknown", a call of a recorded step not yet started is answered "not run",
+// and the last record is an error naming via. Stepping or not, every
+// environment the session has on its workers is killed.
 func (h *Harness) Stop(ctx context.Context, id, via string) error {
 	s := h.session(id)
 	h.mu.Lock()
-	if !s.running {
-		h.mu.Unlock()
-		return fmt.Errorf("session %s is not stepping", id)
+	if s.running {
+		s.mu.Lock()
+		s.stopped = via
+		s.mu.Unlock()
+		s.cancel()
 	}
-	s.mu.Lock()
-	s.stopped = via
-	s.mu.Unlock()
-	cancel := s.cancel
 	h.mu.Unlock()
-	cancel()
 	chain, err := h.Sessions.Load(id)
 	if err != nil {
 		return err
@@ -343,14 +367,18 @@ func (h *Harness) Stop(ctx context.Context, id, via string) error {
 	if err != nil {
 		return err
 	}
+	h.killAll(ctx, id, conf)
+	return nil
+}
+
+// killAll ends the session's environments on every connected worker its
+// config lists.
+func (h *Harness) killAll(ctx context.Context, id string, conf statefile.Conf) {
 	for _, w := range conf.Workers {
 		if r, ok := h.Workers.Get(w.Name); ok {
-			if err := r.Kill(ctx, id); err != nil {
-				log.Printf("session %s: kill on %s: %v", id, w.Name, err)
-			}
+			kill(ctx, r, id)
 		}
 	}
-	return nil
 }
 
 // Resume kicks every session that needs a step. This is the open-files index,

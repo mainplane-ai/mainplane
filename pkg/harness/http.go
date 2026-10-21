@@ -39,14 +39,14 @@ const MaxPost = 8 << 20
 //	                                  appends only the parts not yet held
 //	                                  under that key and returns the post's n
 //	POST /sessions/{id}/retry         step from the tip, whatever it is            -> {"status"}
-//	POST /sessions/{id}/stop          ?via= required. cut the step, write it       -> 204; the records
-//	                                  down                                            say what happened
+//	POST /sessions/{id}/stop          ?via= required. cut a running step, write    -> 204; the records
+//	                                  it down; kill the session's environments        say what happened
 //	PUT  /sessions/{id}/workers       [{"name"}]; ?via= required. a config record  -> {"n"}
 //	                                  with these workers; the next step sees them
 //	PUT  /sessions/{id}/name          the name as text; ?via= required. a name     -> {"n"}
 //	                                  record; empty removes the name
 //	DELETE /sessions/{id}             ?via= required. the file is gone for good;   -> 204
-//	                                  a stepping session is refused
+//	                                  a running step is stopped first
 //	GET  /workers                     -> connected workers' hellos, and refused
 //	                                     ones with the reason
 //	DELETE /workers/{name}            the worker leaves the mesh for good; its     -> 204
@@ -219,7 +219,7 @@ func (h *Harness) serveDelete(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	if err := h.Delete(r.PathValue("id"), via); err != nil {
+	if err := h.Delete(r.Context(), r.PathValue("id"), via); err != nil {
 		fail(w, err)
 		return
 	}
