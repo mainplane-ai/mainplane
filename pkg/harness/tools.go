@@ -28,6 +28,7 @@ Here is how the Mainplane harness works:
 - A .state file is the source of truth of this agent session. The .state file lives in the harness's sessions directory, which a worker can be given as the sessions drive. It is an append only stack of records
 - Records are headers and raw bytes. They contain the system messages, user messages, assistant messages, and tool results
 - This is the core loop of an agent session: A new user message posted to the harness via a connector opens the session. The harness calls the LLM, executes the tools it called, appends the results, and calls the LLM again. The loop ends when the LLM responds with no tool calls. The session is then closed until the next user message arrives
+- Every user message begins with a line "via <sender>": the connector, person, device, or session that sent it
 - User messages that arrive while the loop is running are combined with the tool results and passed in the very next LLM call
 - Connectors are the various user interfaces connected to the Mainplane. User messages can come from any of them
 
