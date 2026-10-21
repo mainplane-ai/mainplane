@@ -9,11 +9,14 @@
 // loopback, as they reach an installed harness, and dial the harness on its
 // mesh, so prev must be a release whose workers do. Linux and macOS targets
 // need passwordless sudo. The Windows target must be an elevated login, with
-// the operator logged in at the console. Then each machine becomes a harness
-// and its worker admin in one line, a first install from no Dir, with every
-// file in Dir the operator's, the harness updates to prev and back, and its
-// uninstall takes both: a run ends with every machine clean, and any harness
-// it had is gone, though its Dir, config and sessions, is put back. Each harness also runs the
+// the operator logged in at the console. The machines are the gate's alone:
+// a run begins by wiping every trace of mainplane from each. Each machine
+// becomes a harness at prev in one line, with a user's data: two providers and
+// a session that ran a command. It updates to v, which must keep that data and
+// step the session again, and then goes. Then each becomes a harness and its
+// worker admin at v in one line, a first install from no Dir, with every file
+// in Dir the operator's, the harness updates to prev and back, and its
+// uninstall takes both: a run ends with every machine clean. Each harness also runs the
 // README quickstart with the lines its install printed, pointed at v: on its
 // own machine the worker and login lines say it is already both; the next
 // machine runs each twice, then sets an OpenAI key from OPENAI_API_KEY and
@@ -107,24 +110,68 @@ var (
 		false: `curl -fsSL %[1]s%[2]s/install.sh | sh -s -- %[3]s`,
 		true:  `& ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) %[3]s`,
 	}
-	// harnessDir is each OS's harness Dir. The harness install is a first one:
-	// aside moves a Dir there to Dir.e2e, unless one from a run that stopped
-	// is there, and back puts it back after the uninstall.
-	harnessDir = map[string]string{"linux": "/var/lib/mainplane-server", "darwin": "/Library/Application Support/mainplane-server", "windows": `$env:ProgramData\mainplane-server`}
-	aside      = map[bool]string{
-		false: `d="%s"; if [ -e "$d.e2e" ]; then sudo rm -rf "$d"; elif [ -e "$d" ]; then sudo mv "$d" "$d.e2e"; fi`,
-		true:  `$d = "%s"; if (Test-Path $d) { if (Test-Path "$d.e2e") { Remove-Item -Recurse -Force $d } else { Move-Item $d "$d.e2e" } }`,
+	// wipe takes every trace of mainplane off a machine, the gate's alone: the
+	// harness and the worker by their uninstalls, then what a run that stopped
+	// left, Dirs, scratch and a hosts block included.
+	wipe = map[bool]string{
+		false: `for b in mainplane-server mainplane; do [ ! -x /usr/local/bin/$b ] || sudo /usr/local/bin/$b uninstall >/dev/null 2>&1; done
+sudo rm -rf /usr/local/bin/mainplane* /var/lib/mainplane /var/lib/mainplane-server "/Library/Application Support/mainplane" "/Library/Application Support/mainplane-server" ~/.mainplane
+! grep -qx '# mainplane begin' /etc/hosts || { sudo sed -i.e2e '/^# mainplane begin$/,/^# mainplane end$/d' /etc/hosts && sudo rm -f /etc/hosts.e2e; }
+ls -d /usr/local/bin/mainplane* /var/lib/mainplane* "/Library/Application Support/mainplane"* ~/.mainplane /etc/systemd/system/mainplane* /Library/LaunchDaemons/ai.mainplane.* 2>/dev/null
+echo wiped`,
+		true: `foreach ($b in 'mainplane-server', 'mainplane') { $f = "$env:ProgramFiles\mainplane\$b.exe"; if (Test-Path $f) { & $f uninstall *> $null } }
+Get-Process mainplane* -ErrorAction SilentlyContinue | Stop-Process -Force
+$d = "$env:ProgramFiles\mainplane", "$env:ProgramData\mainplane", "$env:ProgramData\mainplane-server", "$env:LOCALAPPDATA\Programs\mainplane", "$HOME\.mainplane"
+Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue
+$h = "$env:SystemRoot\System32\drivers\etc\hosts"; $t = [IO.File]::ReadAllText($h); $n = $t -replace '(?ms)^# mainplane begin\r?$.*?^# mainplane end\r?(\n|$)', ''; if ($n -ne $t) { [IO.File]::WriteAllText($h, $n) }
+Get-Item $d -ErrorAction SilentlyContinue | ForEach-Object FullName
+Get-Service mainplane* -ErrorAction SilentlyContinue | ForEach-Object Name
+'wiped'`,
 	}
-	back = map[bool]string{
-		false: `d="%s"; sudo rm -rf "$d"; [ ! -e "$d.e2e" ] || sudo mv "$d.e2e" "$d"`,
-		true:  `$d = "%s"; if (Test-Path $d) { Remove-Item -Recurse -Force $d }; if (Test-Path "$d.e2e") { Move-Item "$d.e2e" $d }`,
+	// seed makes a machine a harness at prev (%[2]s) in one line and gives it
+	// a user's data: the OpenAI key (%[3]s) and an Anthropic one, and a
+	// session (%[4]s) that ran a command on admin (%[5]s). Its last line is
+	// the session's id.
+	seed = map[bool]string{
+		false: `curl -fsSL %[1]s%[2]s/install.sh | sh -s -- server >/dev/null || exit 1
+PATH=/usr/local/bin:$PATH
+for i in $(seq 90); do mainplane workers | grep -q '^admin ' && break; sleep 1; done
+mainplane key openai '%[3]s' >/dev/null && mainplane key anthropic sk-ant-e2e-unused >/dev/null && echo keys-ok
+id=$(echo '%[4]s' | mainplane new) || exit 1
+mainplane message $id '%[5]s' >/dev/null
+for i in $(seq 180); do mainplane tail $id | grep -qx 42 && { echo ran-ok; break; }; sleep 1; done
+echo "id $id"`,
+		true: `& ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) server *> $null
+if ($LASTEXITCODE) { exit $LASTEXITCODE }
+$m = "$env:ProgramFiles\mainplane\mainplane.exe"
+for ($i = 0; $i -lt 90 -and !(& $m workers | Select-String '^admin '); $i++) { Start-Sleep 1 }
+& $m key openai '%[3]s' > $null; $k = $LASTEXITCODE; & $m key anthropic sk-ant-e2e-unused > $null; if (!$k -and !$LASTEXITCODE) { 'keys-ok' }
+$id = '%[4]s' | & $m new
+if (!$id) { exit 1 }
+& $m message $id '%[5]s' > $null
+for ($i = 0; $i -lt 180; $i++) { if (& $m tail $id | Where-Object { $_ -eq '42' }) { 'ran-ok'; break }; Start-Sleep 1 }
+"id $id"`,
 	}
-	// adminAgents is the operator's scratch AGENTS.md. The harness install
-	// writes admin's there when there is none, and uninstall keeps it as the
-	// user's, so the run removes one its install wrote.
-	adminAgents = map[bool]string{
-		false: `f=~/.mainplane/AGENTS.md; if [ "%s" = rm ]; then rm "$f"; elif [ -e "$f" ] || [ -L "$f" ]; then echo there; fi`,
-		true:  `$f = "$HOME\.mainplane\AGENTS.md"; if ("%s" -eq 'rm') { Remove-Item $f } elseif (Test-Path $f) { 'there' }`,
+	// upgraded updates the seeded harness to v (%[1]s), prints its version
+	// first, then what of the data v kept, then steps the session (%[2]s)
+	// with a line (%[3]s) whose answer is "continued".
+	upgraded = map[bool]string{
+		false: `PATH=/usr/local/bin:$PATH
+sudo mainplane-server update %[1]s >/dev/null 2>&1
+mainplane-server version
+for i in $(seq 60); do mainplane providers >/dev/null 2>&1 && break; sleep 1; done
+p=$(mainplane providers); echo "$p" | grep -q openai && echo "$p" | grep -q anthropic && echo providers-ok
+mainplane tail %[2]s | grep -qx 42 && echo kept-ok
+mainplane message %[2]s '%[3]s' >/dev/null
+for i in $(seq 180); do mainplane tail %[2]s | grep -qix continued && { echo stepped-ok; break; }; sleep 1; done`,
+		true: `& "$env:ProgramFiles\mainplane\mainplane-server.exe" update %[1]s *> $null
+& "$env:ProgramFiles\mainplane\mainplane-server.exe" version
+$m = "$env:ProgramFiles\mainplane\mainplane.exe"
+for ($i = 0; $i -lt 60; $i++) { & $m providers *> $null; if (!$LASTEXITCODE) { break }; Start-Sleep 1 }
+$p = & $m providers | Out-String; if ($p -match 'openai' -and $p -match 'anthropic') { 'providers-ok' }
+if (& $m tail %[2]s | Where-Object { $_ -eq '42' }) { 'kept-ok' }
+& $m message %[2]s '%[3]s' > $null
+for ($i = 0; $i -lt 180; $i++) { if (& $m tail %[2]s | Where-Object { $_ -eq 'continued' }) { 'stepped-ok'; break }; Start-Sleep 1 }`,
 	}
 	// No provider key: install works without one; the quickstart sets one.
 	// Workers reach the harness on the mesh only: /worker, with a good key, is 404.
@@ -201,7 +248,7 @@ Get-Item "$env:ProgramData\mainplane" -ErrorAction SilentlyContinue | ForEach-Ob
 		"darwin": `mount | grep fd7c`,
 		"windows": `$f = "$env:ProgramData\mainplane-e2e.txt"
 $a = New-ScheduledTaskAction -Execute cmd.exe -Argument "/c (net use & cmdkey /list) | findstr /i mainplane.net > $f"
-Register-ScheduledTask mainplane-e2e -Action $a -Principal (New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited) -Force | Out-Null
+Register-ScheduledTask mainplane-e2e -Action $a -Principal (New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited) -Settings (New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries) -Force | Out-Null
 Start-ScheduledTask mainplane-e2e
 for ($i = 0; $i -lt 50 -and !((Test-Path $f) -and (Get-ScheduledTask mainplane-e2e).State -eq 'Ready'); $i++) { Start-Sleep -Milliseconds 200 }
 Unregister-ScheduledTask mainplane-e2e -Confirm:$false
@@ -271,9 +318,13 @@ if (@('%[3]s' | mainplane chat)[0] -eq $id) { 'chat-ok' }
 for ($i = 0; $i -lt 180 -and (mainplane info $id | Out-String) -notmatch '"status": "(closed|failed)"'; $i++) { Start-Sleep 1 }
 mainplane tail $id`,
 	}
-	// The README's session, and a line whose answer runs a command on admin.
-	session = `{"model":"openai/gpt-6.1-sol","tools":"patch","context_limit":250000,"workers":[{"name":"admin"}],"params":{"reasoning":{"effort":"medium","summary":"auto"}}}`
-	ask     = `With the run tool on worker admin, print 6*7 using its shell. Then reply with only the number.`
+	// The README's session, the same as prev takes it, which knows no tools,
+	// a line whose answer runs a command on admin, and one for the session
+	// again after an update.
+	prevSession = `{"model":"openai/gpt-6.1-sol","context_limit":200000,"workers":[{"name":"admin"}],"params":{"reasoning":{"effort":"medium","summary":"auto"}}}`
+	again       = `Reply with only the word continued.`
+	session     = `{"model":"openai/gpt-6.1-sol","tools":"patch","context_limit":250000,"workers":[{"name":"admin"}],"params":{"reasoning":{"effort":"medium","summary":"auto"}}}`
+	ask         = `With the run tool on worker admin, print 6*7 using its shell. Then reply with only the number.`
 	// oneCLI prints every mainplane on a Windows machine: the PATH's and this
 	// user's own copy. oneWin is its line when the only one is the machine's.
 	oneWin = "cli C:\\Program Files\\mainplane\\mainplane.exe\n"
@@ -349,6 +400,10 @@ func run(v, prev, port string, targets []string) {
 		ssh[o] = host
 	}
 	oses := slices.Sorted(maps.Keys(ssh))
+	// each phase reads hosts files over ssh too
+	if err := os.Setenv("E2E_TARGETS", strings.Join(targets, " ")); err != nil {
+		log.Fatal(err)
+	}
 	llm := os.Getenv("OPENAI_API_KEY")
 	if llm == "" {
 		log.Fatal("OPENAI_API_KEY is not set: infisical run --env=dev --path=/llm -- task e2e -- ...")
@@ -393,6 +448,10 @@ func run(v, prev, port string, targets []string) {
 		stop()
 		log.Fatal(err)
 	}
+	each(oses, func(o string) {
+		out, err := remote(o, ssh[o], wipe[o == "windows"])
+		check(o, "wiped: nothing of mainplane left", err == nil && strings.TrimSpace(out) == "wiped", out)
+	})
 	hosts := map[string][]string{} // each machine's hosts lines before the mesh
 	var hostsMu sync.Mutex
 	each(oses, func(o string) {
@@ -464,17 +523,35 @@ func run(v, prev, port string, targets []string) {
 	fmt.Printf("%s == %s in all\n", stamp(), time.Since(start).Round(time.Second))
 }
 
-// server makes o a harness in one line, a first install from no Dir, runs
-// the README quickstart against it on q, holding qMu while q is its worker,
-// then updates it to prev and back, uninstalls it and puts its Dir back.
-// before is o's hosts lines from before the run.
+// upgrade makes o a harness at prev with a user's data, updates it to v,
+// and checks v kept the providers and the session and steps it. Then that
+// harness is uninstalled, and wipe takes its Dir.
+func upgrade(ssh map[string]string, o, v, prev, llm string) {
+	win := o == "windows"
+	out, err := remote(o, ssh[o], fmt.Sprintf(seed[win], release.DL, prev, llm, prevSession, ask))
+	id := strings.TrimPrefix(last(out), "id ")
+	check(o, "upgrade: harness at "+prev+", keys and a session that ran", err == nil && strings.Contains(out, "keys-ok") && strings.Contains(out, "ran-ok") && id != "", out)
+	out, err = remote(o, ssh[o], fmt.Sprintf(upgraded[win], v, id, again))
+	f := strings.Fields(out)
+	check(o, "upgrade: harness updated to "+v, err == nil && len(f) > 0 && f[0] == v, out)
+	check(o, "upgrade: both providers kept", strings.Contains(out, "providers-ok"), out)
+	check(o, "upgrade: the session kept", strings.Contains(out, "kept-ok"), out)
+	check(o, "upgrade: the session steps at "+v, strings.Contains(out, "stepped-ok"), out)
+	out, err = remote(o, ssh[o], fmt.Sprintf(uninstall[win], meshGone[o]))
+	check(o, "upgrade: uninstall leaves nothing", err == nil && strings.TrimSpace(out) == "clean", out)
+	out, err = remote(o, ssh[o], wipe[win])
+	check(o, "upgrade: wiped, Dir gone", err == nil && strings.TrimSpace(out) == "wiped", out)
+}
+
+// server makes o a harness at prev with a user's data and updates it to v,
+// then a harness in one line, a first install from no Dir, runs the README
+// quickstart against it on q, holding qMu while q is its worker, then
+// updates it to prev and back and uninstalls it. before is o's hosts lines
+// from before the run.
 func server(ssh map[string]string, o, q string, qMu *sync.Mutex, v, prev, llm string, before []string) {
 	win := o == "windows"
-	out, err := remote(o, ssh[o], fmt.Sprintf(aside[win], harnessDir[o]))
-	check(o, "harness: no Dir before its first install", err == nil, out)
-	had, err := remote(o, ssh[o], fmt.Sprintf(adminAgents[win], ""))
-	check(o, "harness: AGENTS.md checked before install", err == nil, had)
-	out, err = remote(o, ssh[o], fmt.Sprintf(serverInstall[win], release.DL, v))
+	upgrade(ssh, o, v, prev, llm)
+	out, err := remote(o, ssh[o], fmt.Sprintf(serverInstall[win], release.DL, v))
 	check(o, "harness installed in one line, CLI logged in", err == nil && strings.Contains(out, "mainplane "+v+" installed") && strings.Contains(out, "mp_key_") && strings.Contains(out, "workers-ok"), last(out))
 	check(o, "harness: /worker is gone (404)", strings.Contains(out, "worker-404"), last(out))
 	check(o, "harness: worker admin joined", strings.Contains(out, "admin-ok"), last(out))
@@ -497,12 +574,6 @@ func server(ssh map[string]string, o, q string, qMu *sync.Mutex, v, prev, llm st
 	hostsCheck(o, ssh[o], "uninstall: hosts block gone, other lines kept", before, 0)
 	out, err = remote(o, ssh[o], tailscale[o])
 	check(o, "tailscale status works after uninstall", err == nil && strings.TrimSpace(out) == "ok", out)
-	out, err = remote(o, ssh[o], fmt.Sprintf(back[win], harnessDir[o]))
-	check(o, "harness: the Dir from before the run is back", err == nil, out)
-	if strings.TrimSpace(had) != "there" {
-		out, err = remote(o, ssh[o], fmt.Sprintf(adminAgents[win], "rm"))
-		check(o, "harness: the admin AGENTS.md its install wrote is removed", err == nil, out)
-	}
 }
 
 // quick runs the README quickstart against the harness just installed on o,
@@ -897,7 +968,9 @@ func unlinked(p *harness.Pool, got map[string]harness.Listed, oses []string) {
 }
 
 // link makes every worker see every other, as links in a config do, and
-// waits until each one's hosts block lists every node.
+// waits until each one's hosts block lists every node. It reads the block over
+// ssh, not through the worker: a prev worker may be one that cannot read files
+// as its operator, as v0.5.3 on macOS 26.6 cannot (#122).
 func link(coord *coordinator.Coordinator, p *harness.Pool, got map[string]harness.Listed, oses []string) {
 	var pairs [][2]string
 	for _, a := range oses {
@@ -908,17 +981,20 @@ func link(coord *coordinator.Coordinator, p *harness.Pool, got map[string]harnes
 		}
 	}
 	coord.Link(pairs)
+	ssh := map[string]string{}
+	for _, t := range strings.Fields(os.Getenv("E2E_TARGETS")) {
+		o, host, _ := strings.Cut(t, "=")
+		ssh[o] = host
+	}
 	for _, o := range oses {
-		r, ok := p.Get(got[o].Name)
-		if !ok {
-			continue
-		}
 		var block []string
+		var err error
 		for start := time.Now(); len(block) != len(oses)+1 && time.Since(start) < removeWait; time.Sleep(200 * time.Millisecond) {
-			b, _ := r.Read(context.Background(), hostsPath[o == "windows"])
-			_, block = hostsLines(string(b))
+			var out string
+			out, err = remote(o, ssh[o], hostsFile[o == "windows"])
+			_, block = hostsLines(out)
 		}
-		check(o, "mesh: linked, sees every node", len(block) == len(oses)+1, fmt.Sprint(block))
+		check(o, "mesh: linked, sees every node", len(block) == len(oses)+1, fmt.Sprint(block, err))
 	}
 }
 
