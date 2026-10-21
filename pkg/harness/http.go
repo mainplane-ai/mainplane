@@ -46,7 +46,7 @@ const MaxPost = 8 << 20
 //	PUT  /sessions/{id}/name          the name as text; ?via= required. a name     -> {"n"}
 //	                                  record; empty removes the name
 //	DELETE /sessions/{id}             ?via= required. the file is gone for good;   -> 204
-//	                                  a stop first
+//	                                  a running step is stopped first
 //	GET  /workers                     -> connected workers' hellos, and refused
 //	                                     ones with the reason
 //	DELETE /workers/{name}            the worker leaves the mesh for good; its     -> 204

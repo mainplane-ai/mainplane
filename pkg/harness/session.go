@@ -30,10 +30,11 @@ type session struct {
 	stopped string          // who asked for the stop, while one is in flight
 
 	// under Harness.mu
-	running bool               // a runner goroutine is stepping this session
-	kicked  bool               // a kick arrived while running: look again before stopping
-	cancel  context.CancelFunc // ends the running step
-	done    chan struct{}      // closed when the runner goroutine ends
+	running  bool               // a runner goroutine is stepping this session
+	kicked   bool               // a kick arrived while running: look again before stopping
+	cancel   context.CancelFunc // ends the running step
+	done     chan struct{}      // closed when the runner goroutine ends
+	deleting bool               // no kick starts or continues a runner
 }
 
 func (h *Harness) session(id string) *session {
@@ -221,10 +222,18 @@ func (h *Harness) SetName(id, via, n string) (int, error) {
 // the lock a post takes, so no post does. Copies keep their own files,
 // workers their logs.
 func (h *Harness) Delete(ctx context.Context, id, via string) error {
-	if err := h.Stop(ctx, id, via); err != nil {
-		return err
-	}
 	s := h.session(id)
+	h.mu.Lock()
+	s.deleting = true
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		s.deleting = false
+		h.mu.Unlock()
+	}()
+	if err := h.Stop(ctx, id, via); err != nil {
+		log.Printf("session %s: stop before delete: %v", id, err) // a broken file still goes
+	}
 	h.mu.Lock()
 	if s.running {
 		done := s.done
@@ -236,10 +245,7 @@ func (h *Harness) Delete(ctx context.Context, id, via string) error {
 		}
 		h.mu.Lock()
 	}
-	if s.running {
-		h.mu.Unlock()
-		return fmt.Errorf("session %s is stepping again: a message arrived as it stopped", id)
-	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	h.mu.Unlock()
@@ -271,11 +277,15 @@ func (h *Harness) Kick(ctx context.Context, id string) {
 	s := h.session(id)
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if s.deleting {
+		return
+	}
 	if s.running {
 		s.kicked = true
 		return
 	}
 	s.running, s.done = true, make(chan struct{})
+	done := s.done
 	rctx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
 	go func() {
@@ -291,14 +301,14 @@ func (h *Harness) Kick(ctx context.Context, id string) {
 			s.stopped = ""
 			s.mu.Unlock()
 			h.mu.Lock()
-			if !s.kicked {
-				s.running, s.cancel = false, nil
-				close(s.done)
+			if !s.kicked || s.deleting {
+				s.running, s.cancel, s.kicked = false, nil, false
 				h.mu.Unlock()
 				h.touch(id)
 				if st == statefile.StatusClosed || st == statefile.StatusFailed {
 					h.copyLogs(ctx, id)
 				}
+				close(done)
 				return
 			}
 			s.kicked = false
@@ -342,16 +352,13 @@ func (s *session) stoppedBy() string {
 func (h *Harness) Stop(ctx context.Context, id, via string) error {
 	s := h.session(id)
 	h.mu.Lock()
-	cancel := s.cancel
 	if s.running {
 		s.mu.Lock()
 		s.stopped = via
 		s.mu.Unlock()
+		s.cancel()
 	}
 	h.mu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
 	chain, err := h.Sessions.Load(id)
 	if err != nil {
 		return err

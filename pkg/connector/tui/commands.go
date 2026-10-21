@@ -890,12 +890,19 @@ func (s *session) halt(a *App) {
 		s.stop(a)
 		return
 	}
+	if s.id == "" {
+		a.Say("No session to stop yet")
+		return
+	}
 	id := s.id
 	a.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), callTime)
 		defer cancel()
 		err := s.c.Stop(ctx, id, via)
 		a.Post(func() {
+			if s.ctx.Err() != nil { // the screen left the session
+				return
+			}
 			if err != nil {
 				a.SayError(err)
 				return
