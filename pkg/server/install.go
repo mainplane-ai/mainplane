@@ -83,6 +83,7 @@ func Default() Config {
 // Expand fills provider values in from this process's environment, which a
 // service will not have, and refuses a provider the harness does not know.
 func (c *Config) Expand() error {
+	c.named()
 	for name, p := range c.Providers {
 		for _, s := range []*string{&p.Key, &p.URL, &p.Region} {
 			if *s != "" && os.ExpandEnv(*s) == "" {

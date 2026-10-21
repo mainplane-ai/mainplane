@@ -3,6 +3,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"crypto/ed25519"
 	"crypto/hmac"
@@ -90,7 +91,18 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return c, err
 	}
-	return c, json.Unmarshal(b, &c)
+	err = json.Unmarshal(b, &c)
+	c.named()
+	return c, err
+}
+
+// named gives a provider with no shape its name as its shape, as each had in
+// v0.5.3, so a config from then still loads.
+func (c Config) named() {
+	for name, p := range c.Providers {
+		p.Shape = cmp.Or(p.Shape, name)
+		c.Providers[name] = p
+	}
 }
 
 func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
