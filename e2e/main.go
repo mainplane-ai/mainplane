@@ -116,15 +116,16 @@ var (
 	wipe = map[bool]string{
 		false: `for b in mainplane-server mainplane; do [ ! -x /usr/local/bin/$b ] || sudo /usr/local/bin/$b uninstall >/dev/null 2>&1; done
 sudo rm -rf /usr/local/bin/mainplane* /var/lib/mainplane /var/lib/mainplane-server "/Library/Application Support/mainplane" "/Library/Application Support/mainplane-server" ~/.mainplane
-! grep -q '^# mainplane begin' /etc/hosts || { sudo sed -i.e2e '/^# mainplane begin/,/^# mainplane end/d' /etc/hosts && sudo rm -f /etc/hosts.e2e; }
-ls -d /usr/local/bin/mainplane* /var/lib/mainplane* "/Library/Application Support/mainplane"* ~/.mainplane 2>/dev/null
+! grep -qx '# mainplane begin' /etc/hosts || { sudo sed -i.e2e '/^# mainplane begin$/,/^# mainplane end$/d' /etc/hosts && sudo rm -f /etc/hosts.e2e; }
+ls -d /usr/local/bin/mainplane* /var/lib/mainplane* "/Library/Application Support/mainplane"* ~/.mainplane /etc/systemd/system/mainplane* /Library/LaunchDaemons/ai.mainplane.* 2>/dev/null
 echo wiped`,
 		true: `foreach ($b in 'mainplane-server', 'mainplane') { $f = "$env:ProgramFiles\mainplane\$b.exe"; if (Test-Path $f) { & $f uninstall *> $null } }
 Get-Process mainplane* -ErrorAction SilentlyContinue | Stop-Process -Force
 $d = "$env:ProgramFiles\mainplane", "$env:ProgramData\mainplane", "$env:ProgramData\mainplane-server", "$env:LOCALAPPDATA\Programs\mainplane", "$HOME\.mainplane"
 Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue
-$h = "$env:SystemRoot\System32\drivers\etc\hosts"; $t = [IO.File]::ReadAllText($h); $n = $t -replace '(?s)# mainplane begin.*?# mainplane end\r?\n?', ''; if ($n -ne $t) { [IO.File]::WriteAllText($h, $n) }
+$h = "$env:SystemRoot\System32\drivers\etc\hosts"; $t = [IO.File]::ReadAllText($h); $n = $t -replace '(?ms)^# mainplane begin\r?$.*?^# mainplane end\r?(\n|$)', ''; if ($n -ne $t) { [IO.File]::WriteAllText($h, $n) }
 Get-Item $d -ErrorAction SilentlyContinue | ForEach-Object FullName
+Get-Service mainplane* -ErrorAction SilentlyContinue | ForEach-Object Name
 'wiped'`,
 	}
 	// seed makes a machine a harness at prev (%[2]s) in one line and gives it
