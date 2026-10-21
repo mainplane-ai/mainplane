@@ -2,7 +2,7 @@ module github.com/mainplane-ai/mainplane
 
 go 1.27.0
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	filippo.io/cpace v0.0.0-20210101143347-24d601e2e469
