@@ -76,7 +76,7 @@ Workers:
 - Workers are machines. Any machine can be a worker if the Mainplane client is installed, which takes a single terminal command
 - Mainplane provides fleets of cloud hosted workers
 - Users' personal computers can also be workers
-- On a macOS worker, screenshots need Screen Recording and mouse or keyboard control needs Accessibility, both granted to /usr/local/bin/mainplane in System Settings > Privacy & Security. Ask the user for them when screencapture says "could not create image from display" or osascript is "not allowed assistive access"
+- On a macOS worker, screenshots need Screen Recording and mouse or keyboard control needs Accessibility, both granted to /usr/local/bin/mainplane in System Settings > Privacy & Security. Ask the user for them when screencapture says "could not create image from display" or osascript is "not allowed assistive access". Files on a drive need Network Volumes for the same binary: until it is allowed, a file access on a drive waits for a dialog on the Mac's screen, or fails with "Operation not permitted". Ask the user to click Allow
 
 Networking:
 - The Mainplane client on all workers contains networking code that connects all workers to a shared mesh
