@@ -2,6 +2,14 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.5.5
+
+- run takes `background: true`: the code runs as a job in a new interpreter process on the worker, with no shared state and no timeout, and its output goes to `<scratch>/jobs/<call id>.log`. The result comes at once with the job's pid and log path. When the job ends, a message via `job` brings its exit code, run time and the tail of its log, and opens a closed session like any message. A lost connection or a harness restart posts a message that the job may still be running. Stop ends a session's jobs
+- run takes an optional `timeout` in seconds. The default stays 10 minutes
+- Each message the model sees begins with a line `via <via>`, who sent it. Before, the model never saw it
+- Stop works on a session that is not stepping: it kills the session's interpreter processes on its workers and writes a system record naming who stopped it. Delete stops the session first and waits for its step to end, and a session past its context limit kills its processes. In the terminal app, /stop on an idle session does the same
+- The release gate runs on machines of its own. It wipes each one first, then installs the previous release with two providers and a session, updates it to the new one and checks that both and the session survive
+
 ## v0.5.4
 
 - macOS binaries are signed with one certificate, so a privacy grant to /usr/local/bin/mainplane (Network Volumes, Screen Recording, Accessibility) survives updates. Before, each release asked again, and a drive's first file access hung until someone answered the Network Volumes dialog on the Mac's screen
