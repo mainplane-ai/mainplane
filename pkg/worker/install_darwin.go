@@ -8,9 +8,10 @@ import (
 	"time"
 )
 
-// launchd removes a daemon a few milliseconds after bootout returns; seconds
-// later it is stuck.
-const unloadWait = 5 * time.Second
+// launchd removes a daemon a few milliseconds after it exits, which an
+// uninstall's may take a logout to a harness that is down (logoutWait, 5s) to do;
+// half a minute later it is stuck.
+const unloadWait = 30 * time.Second
 
 const (
 	stateDir  = "/Library/Application Support/mainplane"
