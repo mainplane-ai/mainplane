@@ -302,14 +302,20 @@ func status(args []string) {
 	}
 	c, err := login()
 	v := ""
-	if err == nil && (c.Local != "" || c.Mesh != "") { // calls go off the tunnel; the URL shown must still be current
-		err = c.Find(context.Background())
-	}
 	if err == nil {
 		v, err = c.Version(context.Background())
 	}
 	if err == nil {
-		fmt.Printf("mainplane-server version: %s\nmainplane-server url: %s\n", v, c.URL)
+		fmt.Printf("mainplane-server version: %s\n", v)
+		var ferr error
+		if c.Local != "" || c.Mesh != "" { // calls go off the tunnel; the URL shown must still be current
+			ferr = c.Find(context.Background())
+		}
+		if ferr != nil {
+			fmt.Printf("mainplane-server url: %v\n", ferr)
+		} else {
+			fmt.Printf("mainplane-server url: %s\n", c.URL)
+		}
 		if c.Local != "" {
 			fmt.Printf("mainplane-server on this machine: %s\n", c.Local)
 		}
