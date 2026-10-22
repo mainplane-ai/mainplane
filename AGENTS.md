@@ -9,4 +9,4 @@
 # Github info
 - main takes PRs only, squash merged.
 - Cubic AI reviews every push to a PR and merge waits for it
-- working_dir/ is gitignored and excluded from lint
+- working_dir/ is gitignored and excluded from lint- PR titles and descriptions are public and permanent. Write them for a reader who has only this repo: what changed and why, in the project's own terms. Leave out how the work was organized: people, sessions, agents, private docs and trackers, and the names of our machines. Name a test machine by what it is, such as a fresh Ubuntu 26.04 VM or Windows 11.
