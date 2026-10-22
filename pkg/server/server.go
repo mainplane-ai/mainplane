@@ -23,6 +23,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/net/http/httpguts"
+
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/coordinator"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
@@ -121,6 +123,9 @@ func providers(dir string, cfg map[string]Provider) (map[string]provider.Provide
 		}
 		if p.Shape == "bedrock" && os.ExpandEnv(p.Region) == "" && os.ExpandEnv(p.URL) == "" {
 			return nil, fmt.Errorf("provider %s: a bedrock provider needs region or url", name)
+		}
+		if p.Session != "" && !httpguts.ValidHeaderFieldName(p.Session) {
+			return nil, fmt.Errorf("provider %s: session %q is not a header name", name, p.Session)
 		}
 		pp := build(provider.Config{Key: os.ExpandEnv(p.Key), URL: os.ExpandEnv(p.URL), Region: os.ExpandEnv(p.Region), Dir: providerDir(dir, name)})
 		pp.Session = cmp.Or(p.Session, pp.Session)

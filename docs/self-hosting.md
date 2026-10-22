@@ -46,8 +46,9 @@ vendor's official SDK takes, such as `https://openrouter.ai/api/v1` for
 is the vendor's own: `https://api.anthropic.com`, `https://api.openai.com/v1`
 (`openai`, `openai-chat`), `https://generativelanguage.googleapis.com`,
 `https://bedrock-runtime.<region>.amazonaws.com`. A `session` names a header
-the harness sends each session's id in, for a server that routes its prompt
-cache by one, such as `x-opencode-session` for OpenCode Go. Connectors offer the
+the harness sends each session's first record id in, which a copy shares with
+the session it copies, as it shares the prompt, for a server that routes its
+prompt cache by one, such as `x-opencode-session` for OpenCode Go. Connectors offer the
 models of the providers in the [catalog](https://dl.mainplane.ai/catalog/v1.json)
 by its ids: `anthropic`, `openai`, `google`, `bedrock`, `openrouter`, `chatgpt`.
 OpenCode Go's one key serves four, one per API its models speak:

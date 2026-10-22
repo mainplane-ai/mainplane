@@ -809,13 +809,12 @@ func (s *session) connect(a *App, cat *catalog.Catalog, id, region, key string) 
 	a.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), callTime)
 		defer cancel()
-		var err error
+		var errs []error
 		for _, k := range cat.Keyed(id) {
 			p := cat.Providers[k]
-			if err = s.c.SetProvider(ctx, k, p.Shape, p.URL, region, p.Session, key); err != nil {
-				break
-			}
+			errs = append(errs, s.c.SetProvider(ctx, k, p.Shape, p.URL, region, p.Session, key))
 		}
+		err := errors.Join(errs...)
 		a.Post(func() {
 			if err != nil {
 				a.SayError(err)
