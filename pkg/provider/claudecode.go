@@ -190,12 +190,28 @@ type ccTurn struct {
 }
 
 // turnKey names a context that ends with an assistant turn: the hash of the
-// request without effort, which claude does not keep in the transcript.
+// request without what claude does not keep in the transcript, effort and
+// which frame queried.
 func turnKey(req ccReq, frames []ccFrame) (string, error) {
-	req.Effort, req.Frames = "", frames
+	req.Effort, req.Frames = "", slices.Clone(frames)
+	for i := range req.Frames {
+		req.Frames[i].ShouldQuery = nil
+	}
+	// Through any and back, so key order is the same whether the frames
+	// came from records or from the request body.
 	b, err := marshal(req)
+	if err != nil {
+		return "", err
+	}
+	var v any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return "", err
+	}
+	if b, err = marshal(v); err != nil {
+		return "", err
+	}
 	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:]), err
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // resumable is the turn to resume for frames and the frames after it, if a
