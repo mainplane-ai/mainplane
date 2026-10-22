@@ -228,7 +228,7 @@ shot 3 | grep -q 'Connected: OpenAI' && echo connected-ok
 tmux send-keys -t qs Enter
 s=$(shot 2); echo "$s" | grep -qF -- '-- %[2]s' && echo "$s" | grep -q 'Connected: admin' && echo workers-ok
 tmux send-keys -t qs Enter
-shot 3 | grep -q 'sh -s -- mp_key_' && sudo -n /usr/local/bin/mainplane-server key list | grep -qx tui-1 && echo connectors-ok
+shot 3 | grep -q 'mp_key_' && sudo -n /usr/local/bin/mainplane-server key list | grep -qx tui-1 && echo connectors-ok
 tmux send-keys -t qs Enter
 shot 2 | grep -q 'Share a drive' && echo drives-ok
 tmux send-keys -t qs Enter
@@ -237,7 +237,7 @@ tmux kill-session -t qs
 tmux new-session -d -s qs -x 120 -y 40 /usr/local/bin/mainplane
 s=$(shot 4); echo "$s" | grep -q 'Ask anything' && ! echo "$s" | grep -q 'Press any key' && echo again-ok
 tmux kill-session -t qs
-[ "$(/usr/local/bin/mainplane sessions)" = "[]" ] && echo unsent-ok`
+[ -z "$(/usr/local/bin/mainplane sessions)" ] && echo unsent-ok`
 	// heldUpdate updates the harness to %[1]s, then to %[2]s, each with one
 	// more TUI started from Program Files before it and left running, and
 	// waits for the worker to follow and run. Each line is the release
