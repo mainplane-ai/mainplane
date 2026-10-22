@@ -701,8 +701,9 @@ func (s *session) models(a *App) {
 	})
 }
 
-// providers is the menu of the catalog's providers, by name. Picking one asks for its
-// key, and the harness serves it with the catalog's shape and url.
+// providers is the menu of the catalog's providers, by name, a group once.
+// Picking one asks for its key, and the harness serves it, and each provider
+// that takes the same key, with the catalog's shape and url.
 func (s *session) providers(a *App) {
 	s.withProviders(a, func(cat *catalog.Catalog, ps []harness.ProviderInfo) {
 		m := &Menu{}
@@ -710,11 +711,14 @@ func (s *session) providers(a *App) {
 			return strings.Compare(strings.ToLower(cat.Providers[a].Name), strings.ToLower(cat.Providers[b].Name))
 		}
 		for _, id := range slices.SortedFunc(maps.Keys(cat.Providers), byName) {
+			if cat.Keyed(id)[0] != id {
+				continue
+			}
 			p, hint := cat.Providers[id], ""
 			if slices.ContainsFunc(ps, func(x harness.ProviderInfo) bool { return x.Name == id }) {
 				hint = "connected"
 			}
-			pick := func(a *App, _ *MenuItem) { s.keyDialog(a, id, p) }
+			pick := func(a *App, _ *MenuItem) { s.keyDialog(a, cat, id) }
 			if _, ok := provider.Logins[p.Shape]; ok {
 				pick = func(a *App, _ *MenuItem) { s.signin(a, id, p) }
 			}
@@ -777,13 +781,14 @@ func (s *session) awaitSignin(a *App, id string, p catalog.Provider, paste strin
 
 // keyDialog asks for the provider's key, and a bedrock provider's region,
 // which its endpoint is built from.
-func (s *session) keyDialog(a *App, id string, p catalog.Provider) {
+func (s *session) keyDialog(a *App, cat *catalog.Catalog, id string) {
+	p := cat.Providers[id]
 	ask(a, "Key for "+p.Name, "API key", true, func(a *App, key string) {
 		if p.Shape != "bedrock" {
-			s.connect(a, id, p, "", key)
+			s.connect(a, cat, id, "", key)
 			return
 		}
-		ask(a, "Region for "+p.Name, "us-east-1", false, func(a *App, region string) { s.connect(a, id, p, region, key) })
+		ask(a, "Region for "+p.Name, "us-east-1", false, func(a *App, region string) { s.connect(a, cat, id, region, key) })
 	})
 }
 
@@ -799,17 +804,24 @@ func ask(a *App, title, placeholder string, mask bool, then func(a *App, text st
 	l = a.Dialog(title, &Node{View: in})
 }
 
-func (s *session) connect(a *App, id string, p catalog.Provider, region, key string) {
+// connect sets the key on provider id and each that takes it.
+func (s *session) connect(a *App, cat *catalog.Catalog, id, region, key string) {
 	a.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), callTime)
 		defer cancel()
-		err := s.c.SetProvider(ctx, id, p.Shape, p.URL, region, key)
+		var err error
+		for _, k := range cat.Keyed(id) {
+			p := cat.Providers[k]
+			if err = s.c.SetProvider(ctx, k, p.Shape, p.URL, region, p.Session, key); err != nil {
+				break
+			}
+		}
 		a.Post(func() {
 			if err != nil {
 				a.SayError(err)
 				return
 			}
-			a.Say("Connected " + p.Name)
+			a.Say("Connected " + cat.Providers[id].Name)
 		})
 	})
 }

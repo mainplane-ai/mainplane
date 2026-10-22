@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
+	"github.com/mainplane-ai/mainplane/pkg/version"
 )
 
 // Shapes is every wire format a provider in the config may have, each built
@@ -252,6 +253,7 @@ func (p Provider) once(ctx context.Context, url, session string, body []byte, em
 		return h, false, err
 	}
 	hr.Header.Set("Content-Type", "application/json")
+	hr.Header.Set("User-Agent", "mainplane/"+version.V) // servers that watch for abuse ask clients to name themselves
 	key := p.Key
 	if p.Token != nil {
 		if key, err = p.Token(ctx); err != nil {

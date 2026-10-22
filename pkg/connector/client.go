@@ -369,9 +369,9 @@ func (c Client) signinPoll(ctx context.Context, name string, st provider.LoginSt
 }
 
 // SetProvider makes the harness serve provider name with this shape, url,
-// region and key, at once.
-func (c Client) SetProvider(ctx context.Context, name, shape, u, region, key string) error {
-	b, err := json.Marshal(map[string]string{"shape": shape, "url": u, "region": region, "key": key})
+// region, session header and key, at once.
+func (c Client) SetProvider(ctx context.Context, name, shape, u, region, session, key string) error {
+	b, err := json.Marshal(map[string]string{"shape": shape, "url": u, "region": region, "session": session, "key": key})
 	if err != nil {
 		return err
 	}

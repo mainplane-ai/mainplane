@@ -79,10 +79,11 @@ func Key(dir string) (ed25519.PrivateKey, error) {
 // Provider is one the config names. Its name is free, and the catalog's ids
 // are the names connectors know; its shape picks the code.
 type Provider struct {
-	Shape  string `json:"shape"`
-	Key    string `json:"key,omitempty"`    // none for a shape that logs in
-	URL    string `json:"url,omitempty"`    // the base url its SDK takes; none is the vendor's own
-	Region string `json:"region,omitempty"` // bedrock
+	Shape   string `json:"shape"`
+	Key     string `json:"key,omitempty"`     // none for a shape that logs in
+	URL     string `json:"url,omitempty"`     // the base url its SDK takes; none is the vendor's own
+	Region  string `json:"region,omitempty"`  // bedrock
+	Session string `json:"session,omitempty"` // the header the session's routing key goes in, for a server that routes its cache on one
 }
 
 // providerDir is the directory of provider name's own state, such as a
@@ -121,7 +122,9 @@ func providers(dir string, cfg map[string]Provider) (map[string]provider.Provide
 		if p.Shape == "bedrock" && os.ExpandEnv(p.Region) == "" && os.ExpandEnv(p.URL) == "" {
 			return nil, fmt.Errorf("provider %s: a bedrock provider needs region or url", name)
 		}
-		out[name] = build(provider.Config{Key: os.ExpandEnv(p.Key), URL: os.ExpandEnv(p.URL), Region: os.ExpandEnv(p.Region), Dir: providerDir(dir, name)})
+		pp := build(provider.Config{Key: os.ExpandEnv(p.Key), URL: os.ExpandEnv(p.URL), Region: os.ExpandEnv(p.Region), Dir: providerDir(dir, name)})
+		pp.Session = cmp.Or(p.Session, pp.Session)
+		out[name] = pp
 	}
 	return out, nil
 }
@@ -308,7 +311,7 @@ func setProvider(path, name string, body io.Reader, serve func(map[string]provid
 	}
 	var in Provider
 	if len(b) > maxKey || json.Unmarshal(b, &in) != nil {
-		return fmt.Errorf("the body is a provider of at most %d bytes: {\"shape\",\"key\",\"url\",\"region\"}", maxKey)
+		return fmt.Errorf("the body is a provider of at most %d bytes: {\"shape\",\"key\",\"url\",\"region\",\"session\"}", maxKey)
 	}
 	in.Key = strings.TrimSpace(in.Key)
 	if in.Key == "" || strings.ContainsAny(in.Key, "\r\n") {
@@ -331,7 +334,7 @@ func saveProvider(path, name string, in Provider, serve func(map[string]provider
 		c.Providers = map[string]Provider{}
 	}
 	p := c.Providers[name]
-	for _, f := range [][2]*string{{&p.Shape, &in.Shape}, {&p.Key, &in.Key}, {&p.URL, &in.URL}, {&p.Region, &in.Region}} {
+	for _, f := range [][2]*string{{&p.Shape, &in.Shape}, {&p.Key, &in.Key}, {&p.URL, &in.URL}, {&p.Region, &in.Region}, {&p.Session, &in.Session}} {
 		if *f[1] != "" {
 			*f[0] = *f[1]
 		}
