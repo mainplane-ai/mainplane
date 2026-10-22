@@ -8,9 +8,10 @@ import (
 )
 
 // Run takes the terminal until the user exits. With no client it opens on
-// login; with a session id, on that session; else on the empty session. It
-// returns a release when the app ended to update to it.
-func Run(c *connector.Client, id string) (update string, err error) {
+// login; with quick, on the quickstart; with a session id, on that session;
+// else on the empty session. It returns a release when the app ended to
+// update to it.
+func Run(c *connector.Client, id string, quick bool) (update string, err error) {
 	t, err := term.Open()
 	if err != nil {
 		return "", err
@@ -18,9 +19,12 @@ func Run(c *connector.Client, id string) (update string, err error) {
 	defer t.Close()
 	defer t.Recover()
 	a := NewApp(t)
-	if c == nil {
+	switch {
+	case c == nil:
 		a.SetScreen(newLogin(a))
-	} else {
+	case quick:
+		a.SetScreen(newQuickstart(a, *c))
+	default:
 		a.SetScreen(newSession(a, newSessionList(a, *c), id))
 	}
 	a.Run()

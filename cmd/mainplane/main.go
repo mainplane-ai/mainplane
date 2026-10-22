@@ -1,6 +1,8 @@
 // mainplane is the device binary: the worker, and the plainest connector.
 //
-//	mainplane                         the TUI; mainplane <session id> opens on that session
+//	mainplane                         the TUI; mainplane <session id> opens on that session; on the harness's machine
+//	                                  with no provider yet, the quickstart
+//	mainplane quickstart              the TUI on the quickstart, which the server install opens
 //	mainplane worker  [<network> <device code>]   make this machine a worker, named by its hostname
 //	mainplane install <network> <device code>     and again at every boot, as a service; asks for sudo or UAC, code still runs as you
 //	mainplane login   <api key>       find the harness, remember it and the key in ~/.mainplane/login.json, and become its release
@@ -43,7 +45,7 @@ const startTime = 15 * time.Second
 
 func main() {
 	if len(os.Args) == 1 || len(os.Args) == 2 && statefile.ValidID(os.Args[1]) {
-		app(strings.Join(os.Args[1:], ""))
+		app(strings.Join(os.Args[1:], ""), false)
 		return
 	}
 	if len(os.Args) > 2 && os.Args[1] == "worker" && os.Args[2] == "remove" {
@@ -65,6 +67,11 @@ func main() {
 			usage()
 		}
 		update(os.Args[2])
+	case "quickstart":
+		if len(os.Args) != 2 {
+			usage()
+		}
+		app("", true)
 	case "uninstall":
 		if len(os.Args) != 2 {
 			usage()
@@ -114,11 +121,12 @@ func logIn(token string) {
 	}
 }
 
-// app opens the TUI, on login when there is none, and on session id when it
-// is given. When this binary is not the harness's release it becomes it
+// app opens the TUI, on login when there is none, on the quickstart with
+// quick or on the harness's machine while it has no provider, and on
+// session id when it is given. When this binary is not the harness's release it becomes it
 // first, in the plain terminal where sudo or UAC can ask, then runs again.
 // It runs as the child of Supervise, which outlives a crash or a hang.
-func app(id string) {
+func app(id string, quick bool) {
 	tui.Supervise()
 	ctx, cancel := context.WithTimeout(context.Background(), startTime)
 	defer cancel()
@@ -133,14 +141,21 @@ func app(id string) {
 		if !version.Match(v) {
 			rerun(v)
 		}
+		if !quick && id == "" && c.Local != "" {
+			ps, err := c.Providers(ctx)
+			if err != nil {
+				log.Fatal(err)
+			}
+			quick = len(ps) == 0
+		}
 		cp = &c
-	case errors.Is(err, fs.ErrNotExist) && id == "":
+	case errors.Is(err, fs.ErrNotExist) && id == "" && !quick:
 	case errors.Is(err, fs.ErrNotExist):
 		log.Fatal("not logged in: mainplane login <api key>")
 	default:
 		log.Fatal(err)
 	}
-	v, err := tui.Run(cp, id)
+	v, err := tui.Run(cp, id, quick)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -349,7 +364,9 @@ func home() string {
 func usage() {
 	fmt.Fprint(os.Stderr, `usage: mainplane [<session id> | <verb> ...]
 
-                                     no verb opens the TUI: login, then the session given or a new one
+                                     no verb opens the TUI: login, then the session given or a new one; on the
+                                     harness's machine with no provider yet, the quickstart
+  quickstart                         the TUI on the quickstart: a provider, workers, a connector, a drive
   worker     [<network> <code>]      make this machine a worker, named by its hostname, with the network name and
                                      device code mainplane-server join prints; none is the installed worker's
   install    <network> <code>        and again at every boot, as a service; asks for sudo or UAC, code still runs as you
