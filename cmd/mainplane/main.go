@@ -302,7 +302,7 @@ func status(args []string) {
 	}
 	c, err := login()
 	v := ""
-	if err == nil && c.Mesh != "" { // calls go over the mesh; the URL shown must still be current
+	if err == nil && (c.Local != "" || c.Mesh != "") { // calls go off the tunnel; the URL shown must still be current
 		err = c.Find(context.Background())
 	}
 	if err == nil {
@@ -310,6 +310,9 @@ func status(args []string) {
 	}
 	if err == nil {
 		fmt.Printf("mainplane-server version: %s\nmainplane-server url: %s\n", v, c.URL)
+		if c.Local != "" {
+			fmt.Printf("mainplane-server on this machine: %s\n", c.Local)
+		}
 		if c.Mesh != "" {
 			fmt.Printf("mainplane-server on the mesh: %s\n", c.Mesh)
 		}

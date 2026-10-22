@@ -48,7 +48,6 @@ const (
 )
 
 var (
-	Dir     = filepath.Join(os.Getenv("ProgramData"), "mainplane-server")
 	bin     = filepath.Join(os.Getenv("ProgramFiles"), "mainplane", "mainplane-server.exe")
 	logPath = filepath.Join(Dir, "mainplane-server.log")
 	logs    = logPath

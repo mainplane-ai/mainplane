@@ -13,7 +13,6 @@ import (
 const unloadWait = 5 * time.Second
 
 const (
-	Dir       = "/Library/Application Support/mainplane-server"
 	label     = "ai.mainplane.server"
 	plistPath = "/Library/LaunchDaemons/" + label + ".plist"
 	logPath   = "/var/log/mainplane-server.log"

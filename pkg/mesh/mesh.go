@@ -88,11 +88,16 @@ func (m *Mesh) Report(f func() string) { m.report.Store(&f) }
 // It registers as name with the join secret on first start; the keys in
 // dir register again with none. It follows the harness with key harness
 // through the pointer and moves its control client when the harness moves.
+// On the harness's own machine, as admin, control is the harness on
+// loopback: no tunnel, pointer or proof. Its relay is still the tunnel's.
 func Up(dir, harness, secret, name string) (*Mesh, error) {
 	// Cloudflare answers 400 to the native upgrades of both.
 	envknob.Setenv("TS_CONTROL_WEBSOCKET", "1")
 	envknob.Setenv("TS_DEBUG_DERP_WS_CLIENT", "1")
 	controlclient.VerifyServerKey = func(ctx context.Context, u string, k key.MachinePublic) error {
+		if u == pointer.Local(harness) {
+			return nil
+		}
 		return pointer.ProveNoise(ctx, harness, u, k.String())
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -353,7 +358,8 @@ func run(name string, args ...string) error {
 // coordinator that moves. A harness that still proves its URL while the map
 // poll is down has likely lost this node, as when its registry was lost, and
 // answers every poll with 404: the client starts again, which registers,
-// with the join secret when the keys are unknown.
+// with the join secret when the keys are unknown. A harness on this machine
+// is at its loopback URL, which needs no proof.
 func follow(ctx context.Context, lb *ipnlocal.LocalBackend, h *health.Tracker, harness, secret, name string) {
 	var url string
 	var wait, backoff time.Duration
@@ -367,8 +373,8 @@ func follow(ctx context.Context, lb *ipnlocal.LocalBackend, h *health.Tracker, h
 		if h.GetInPollNetMap() {
 			continue
 		}
-		u := url
-		if u == "" || pointer.Prove(ctx, harness, u) != nil {
+		u := pointer.Local(harness)
+		if u == "" && (url == "" || pointer.Prove(ctx, harness, url) != nil) {
 			var err error
 			if u, err = pointer.Find(ctx, harness, ""); err != nil {
 				backoff = min(max(2*backoff, lookupWait), maxLookupWait)
@@ -377,6 +383,8 @@ func follow(ctx context.Context, lb *ipnlocal.LocalBackend, h *health.Tracker, h
 				continue
 			}
 			backoff = 0
+		} else if u == "" {
+			u = url
 		}
 		p := ipn.NewPrefs()
 		p.ControlURL, p.Hostname, p.WantRunning = u, name, true
