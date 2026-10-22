@@ -17,7 +17,7 @@
 // worker admin at v in one line, a first install from no Dir, with every file
 // in Dir the operator's, the harness updates to prev and back, and its
 // uninstall takes both: a run ends with every machine clean. Each harness also runs the
-// README quickstart with the lines its install printed, pointed at v: on its
+// steps without the quickstart in docs/self-hosting.md with the lines its install printed, pointed at v: on its
 // own machine the worker and login lines say it is already both; the next
 // machine runs each twice, then sets an OpenAI key from OPENAI_API_KEY and
 // starts a session on admin with mainplane new and chat. On Linux the
@@ -346,7 +346,7 @@ touch /drives/sessions/e2e 2>&1 | grep -q 'Read-only file system' && echo refuse
 	}
 	// unserved prints what is left of serving on a server that serves nothing.
 	unserved = `ls /etc/exports.d/mainplane.exports /etc/systemd/system/mainplane-smbd.service 2>/dev/null; grep ' /drives/' /proc/mounts`
-	// quickstart is the README's step 3 after the login line: an OpenAI key
+	// quickstart is docs/self-hosting.md's steps after the login line: an OpenAI key
 	// (%[1]s), a session on admin (%[2]s), and chat with no id, which follows
 	// the newest session, posts the line (%[3]s) and ends with stdin. Then the
 	// session once its step is done. /usr/local/bin is not on a macOS ssh PATH.
@@ -364,7 +364,7 @@ if (@('%[3]s' | mainplane chat)[0] -eq $id) { 'chat-ok' }
 for ($i = 0; $i -lt 180 -and (mainplane info $id | Out-String) -notmatch '"status": "(closed|failed)"'; $i++) { Start-Sleep 1 }
 mainplane tail $id`,
 	}
-	// The README's session, the same as prev takes it, which knows no tools,
+	// docs/self-hosting.md's session, the same as prev takes it, which knows no tools,
 	// a line whose answer runs a command on admin, and one for the session
 	// again after an update.
 	prevSession = `{"model":"openai/gpt-6.1-sol","context_limit":200000,"workers":[{"name":"admin"}],"params":{"reasoning":{"effort":"medium","summary":"auto"}}}`
@@ -590,8 +590,8 @@ func upgrade(ssh map[string]string, o, v, prev, llm string) {
 }
 
 // server makes o a harness at prev with a user's data and updates it to v,
-// then a harness in one line, a first install from no Dir, runs the README
-// quickstart against it on q, holding qMu while q is its worker, then
+// then a harness in one line, a first install from no Dir, runs the steps
+// without the quickstart (docs/self-hosting.md) against it on q, holding qMu while q is its worker, then
 // updates it to prev and back and uninstalls it. before is o's hosts lines
 // from before the run.
 func server(ssh map[string]string, o, q string, qMu *sync.Mutex, v, prev, llm string, before []string) {
@@ -634,7 +634,7 @@ func server(ssh map[string]string, o, q string, qMu *sync.Mutex, v, prev, llm st
 	check(o, "tailscale status works after uninstall", err == nil && strings.TrimSpace(out) == "ok", out)
 }
 
-// quick runs the README quickstart against the harness just installed on o,
+// quick runs the steps without the quickstart (docs/self-hosting.md) against the harness just installed on o,
 // with the tokens its install printed (out) in lines pointed at v. On o the
 // worker and login lines find it already both. On q each runs twice, the
 // second time with nothing to do, then step 3 in the login line's shell, and

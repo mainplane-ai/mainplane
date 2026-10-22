@@ -12,6 +12,51 @@ carry the harness key, not the URL. A worker or the CLI finds the URL through
 `pointer.mainplane.ai`, and the harness proves its key there before a secret
 goes to it.
 
+## Without the quickstart
+
+On a machine with no terminal, or for an automated install, leave out
+`quickstart`:
+
+```shell
+# Linux, macOS
+curl -fsSL https://mainplane.ai/install | sh -s -- server
+
+# Windows
+& ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) server
+```
+
+It prints commands with your network name and device code, and an API key
+(`mp_key_...`). Save these. Run `mainplane` there later to open the quickstart,
+or go on by hand.
+
+Connect more machines. Your agents can use them.
+
+```shell
+# Linux, macOS
+curl -fsSL https://mainplane.ai/install | sh -s -- your-network XXXX-XXXX
+
+# Windows
+& ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) your-network XXXX-XXXX
+```
+
+Log in from anywhere. A logged-in machine can message agents.
+
+```shell
+# Linux, macOS
+curl -fsSL https://mainplane.ai/install | sh -s -- mp_key_...
+
+# Windows
+& ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) mp_key_...
+```
+
+Add an LLM key (`openai`, `anthropic` or `google`), then start a session on `admin`:
+
+```shell
+mainplane key openai sk-...
+echo '{"model":"openai/gpt-6.1-sol","tools":"patch","context_limit":250000,"workers":[{"name":"admin"}],"params":{"reasoning":{"effort":"medium","summary":"auto"}}}' | mainplane new
+mainplane chat
+```
+
 ## The temporary URL
 
 `mainplane-server install` opens a Cloudflare quick tunnel: no account, no

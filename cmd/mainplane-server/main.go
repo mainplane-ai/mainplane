@@ -179,7 +179,7 @@ func logIn(h handover) {
 // tunnel meanwhile, and the TUI says while it does.
 func finish(h handover, quick bool) {
 	if quick && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
-		tui := exec.Command(worker.Bin)
+		tui := exec.Command(worker.Bin, "quickstart")
 		tui.Stdin, tui.Stdout, tui.Stderr = os.Stdin, os.Stdout, os.Stderr
 		if err := tui.Run(); err != nil && tui.ProcessState == nil {
 			log.Fatal(err)

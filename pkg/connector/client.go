@@ -43,7 +43,6 @@ type Client struct {
 	Harness string `json:"harness"`
 	Local   string `json:"-"`
 	Mesh    string `json:"-"`
-	Local   string `json:"-"` // TEMP
 }
 
 // Path is the login file, ~/.mainplane/login.json.
