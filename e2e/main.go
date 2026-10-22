@@ -239,8 +239,8 @@ s=$(shot 4); echo "$s" | grep -q 'Ask anything' && ! echo "$s" | grep -q 'Press 
 tmux kill-session -t qs
 [ "$(/usr/local/bin/mainplane sessions)" = "[]" ] && echo unsent-ok`
 	// heldUpdate updates the harness to %[1]s, then to %[2]s, each with one
-	// more TUI started from Program Files before it and left running (bug
-	// #151), and waits for the worker to follow. Each line is the release
+	// more TUI started from Program Files before it and left running, and
+	// waits for the worker to follow and run. Each line is the release
 	// asked for, the worker's, the service's state and the TUIs still running.
 	heldUpdate = `$m = "$env:ProgramFiles\mainplane\mainplane.exe"
 $held = @()
@@ -248,7 +248,7 @@ foreach ($u in '%[1]s', '%[2]s') {
 	$held += Start-Process $m -WindowStyle Hidden -PassThru
 	Start-Sleep 5
 	& "$env:ProgramFiles\mainplane\mainplane-server.exe" update $u *> $null
-	for ($i = 0; $i -lt 180 -and (& $m version) -ne $u; $i++) { Start-Sleep 1 }
+	for ($i = 0; $i -lt 180 -and ((& $m version) -ne $u -or (Get-Service mainplaned).Status -ne 'Running'); $i++) { Start-Sleep 1 }
 	"$u $(& $m version) $((Get-Service mainplaned).Status) $(@($held | Where-Object { !$_.HasExited }).Count)"
 }
 $kids = Get-CimInstance Win32_Process | Where-Object { $held.Id -contains $_.ParentProcessId } | ForEach-Object ProcessId
