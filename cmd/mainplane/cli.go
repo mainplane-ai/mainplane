@@ -21,7 +21,6 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/catalog"
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
-	"github.com/mainplane-ai/mainplane/pkg/server"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 )
@@ -162,11 +161,12 @@ const signinPoll = 2 * time.Second
 // signin runs a provider's login on the harness: it prints the prompt, sends
 // a line of stdin when the prompt asks for a paste, and waits for the end.
 func (c client) signin(name string) {
+	ctx := context.Background()
 	p := c.catalogProvider(name)
-	path := "/providers/" + url.PathEscape(name) + "/login"
-	body, _ := json.Marshal(map[string]string{"shape": p.Shape, "url": p.URL})
-	var st server.LoginState
-	c.call("POST", path, "application/json", bytes.NewReader(body), &st)
+	st, err := c.SignIn(ctx, name, p.Shape, p.URL)
+	if err != nil {
+		die(err)
+	}
 	fmt.Printf("%s\n\n%s\n", st.Text, st.URL)
 	if st.Code != "" {
 		fmt.Printf("\ncode: %s\n", st.Code)
@@ -177,12 +177,15 @@ func (c client) signin(name string) {
 		if err != nil && line == "" {
 			die(err)
 		}
-		code, _ := json.Marshal(map[string]string{"code": strings.TrimSpace(line)})
-		c.call("POST", path+"/code", "application/json", bytes.NewReader(code), nil)
+		if err := c.SignInPaste(ctx, name, strings.TrimSpace(line)); err != nil {
+			die(err)
+		}
 	}
 	for st.State == "pending" {
 		time.Sleep(signinPoll)
-		c.call("GET", path, "", nil, &st)
+		if st, err = c.SignInState(ctx, name); err != nil {
+			die(err)
+		}
 	}
 	if st.State != "done" {
 		die(errors.New(st.Error))

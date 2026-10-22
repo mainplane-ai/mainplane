@@ -18,6 +18,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
+	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 )
@@ -710,9 +711,77 @@ func (s *session) providers(a *App) {
 			if slices.ContainsFunc(ps, func(x harness.ProviderInfo) bool { return x.Name == id }) {
 				hint = "connected"
 			}
-			m.Items = append(m.Items, MenuItem{Label: p.Name, Hint: hint, Pick: func(a *App, _ *MenuItem) { s.keyDialog(a, id, p) }})
+			pick := func(a *App, _ *MenuItem) { s.keyDialog(a, id, p) }
+			if _, ok := provider.Logins[p.Shape]; ok {
+				pick = func(a *App, _ *MenuItem) { s.signin(a, id, p) }
+			}
+			m.Items = append(m.Items, MenuItem{Label: p.Name, Hint: hint, Pick: pick})
 		}
 		a.OpenMenu("Providers", m)
+	})
+}
+
+// signin runs the login of a provider that takes no key: it shows the
+// harness's prompt, asks for the paste the prompt wants, and says when the
+// login ends.
+func (s *session) signin(a *App, id string, p catalog.Provider) {
+	a.Go(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), callTime)
+		defer cancel()
+		st, err := s.c.SignIn(ctx, id, p.Shape, p.URL)
+		a.Post(func() {
+			if err != nil {
+				a.SayError(err)
+				return
+			}
+			msg := st.Text + "\n" + st.URL
+			if st.Code != "" {
+				msg += "\ncode: " + st.Code
+			}
+			a.Say(msg)
+			if !st.Paste {
+				s.awaitSignin(a, id, p)
+				return
+			}
+			ask(a, "Paste for "+p.Name, "", false, func(a *App, text string) {
+				a.Go(func() {
+					ctx, cancel := context.WithTimeout(context.Background(), callTime)
+					defer cancel()
+					err := s.c.SignInPaste(ctx, id, text)
+					a.Post(func() {
+						if err != nil {
+							a.SayError(err)
+							return
+						}
+						s.awaitSignin(a, id, p)
+					})
+				})
+			})
+		})
+	})
+}
+
+// awaitSignin polls the login until it ends.
+func (s *session) awaitSignin(a *App, id string, p catalog.Provider) {
+	a.Go(func() {
+		var st provider.LoginState
+		var err error
+		for st.State = "pending"; err == nil && st.State == "pending"; {
+			time.Sleep(signinPoll)
+			ctx, cancel := context.WithTimeout(context.Background(), callTime)
+			st, err = s.c.SignInState(ctx, id)
+			cancel()
+		}
+		a.Post(func() {
+			switch {
+			case err != nil:
+				a.SayError(err)
+			case st.State != "done":
+				a.SayError(errors.New(st.Error))
+			default:
+				a.Say("Connected " + p.Name)
+			}
+		})
 	})
 }
 

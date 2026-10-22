@@ -33,22 +33,15 @@ type logins struct {
 	m     map[string]*login
 }
 
-// LoginState is a login as the routes show it.
-type LoginState struct {
-	State string `json:"state"` // pending, done or failed
-	Error string `json:"error,omitempty"`
-	provider.Prompt
-}
-
 type login struct {
 	mu     sync.Mutex
-	st     LoginState
+	st     provider.LoginState
 	shown  chan struct{} // closed at the first prompt or the end
 	paste  chan string
 	cancel context.CancelFunc
 }
 
-func (l *login) view() LoginState {
+func (l *login) view() provider.LoginState {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.st
@@ -83,7 +76,7 @@ func (ls *logins) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ls.ctx, loginTime)
-	l := &login{st: LoginState{State: "pending"}, shown: make(chan struct{}), paste: make(chan string), cancel: cancel}
+	l := &login{st: provider.LoginState{State: "pending"}, shown: make(chan struct{}), paste: make(chan string), cancel: cancel}
 	ls.mu.Lock()
 	if old := ls.m[name]; old != nil {
 		old.cancel()

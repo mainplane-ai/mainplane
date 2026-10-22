@@ -58,6 +58,13 @@ type Prompt struct {
 	Paste bool   `json:"paste,omitempty"`
 }
 
+// LoginState is a login as the harness's routes show it.
+type LoginState struct {
+	State string `json:"state"` // pending, done or failed
+	Error string `json:"error,omitempty"`
+	Prompt
+}
+
 // base is the config's url, else the vendor's own, without a trailing slash,
 // for the shape to append its path to.
 func base(url, vendor string) string { return strings.TrimSuffix(cmp.Or(url, vendor), "/") }

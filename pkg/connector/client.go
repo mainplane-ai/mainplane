@@ -27,6 +27,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
+	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
@@ -304,6 +305,34 @@ func (c Client) Providers(ctx context.Context) ([]harness.ProviderInfo, error) {
 	var ps []harness.ProviderInfo
 	err := c.Call(ctx, "GET", "/providers", "", nil, &ps)
 	return ps, err
+}
+
+// SignIn starts provider name's login on the harness, with the shape and url
+// for a provider it does not have, and returns the first prompt.
+func (c Client) SignIn(ctx context.Context, name, shape, u string) (provider.LoginState, error) {
+	var st provider.LoginState
+	b, err := json.Marshal(map[string]string{"shape": shape, "url": u})
+	if err != nil {
+		return st, err
+	}
+	err = c.Call(ctx, "POST", "/providers/"+url.PathEscape(name)+"/login", "application/json", bytes.NewReader(b), &st)
+	return st, err
+}
+
+// SignInPaste hands the login what its prompt asked the user to paste.
+func (c Client) SignInPaste(ctx context.Context, name, text string) error {
+	b, err := json.Marshal(map[string]string{"code": text})
+	if err != nil {
+		return err
+	}
+	return c.Call(ctx, "POST", "/providers/"+url.PathEscape(name)+"/login/code", "application/json", bytes.NewReader(b), nil)
+}
+
+// SignInState is the login's state now.
+func (c Client) SignInState(ctx context.Context, name string) (provider.LoginState, error) {
+	var st provider.LoginState
+	err := c.Call(ctx, "GET", "/providers/"+url.PathEscape(name)+"/login", "", nil, &st)
+	return st, err
 }
 
 // SetProvider makes the harness serve provider name with this shape, url,

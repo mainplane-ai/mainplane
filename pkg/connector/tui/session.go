@@ -31,7 +31,9 @@ const (
 	pollWait = 30 * time.Second
 	// callTime bounds every call but the long poll, which gets it on top.
 	callTime = 15 * time.Second
-	retryIn  = 2 * time.Second
+	// signinPoll is how often a login is asked whether it ended.
+	signinPoll = 2 * time.Second
+	retryIn    = 2 * time.Second
 	// escTwice is how close the two presses of Esc Esc, stop, must be.
 	escTwice = time.Second
 	// outboxSize is how many sends can wait to post before a send blocks the loop.
