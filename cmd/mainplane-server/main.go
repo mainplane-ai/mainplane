@@ -6,6 +6,7 @@
 //	mainplane-server install [config.json]    and again at every boot, as a service, behind a quick tunnel; asks for sudo or admin itself;
 //	                                          with none, keeps an installed config; prints the join lines, with the network name and
 //	                                          device code made at the first install, and a new api key "default", the ones before it kept
+//	mainplane-server install quickstart       the same with none, then opens the TUI's quickstart on this terminal
 //	mainplane-server tunnel <url> <cloudflared token> | quick   the installed harness moves to the user's own tunnel, or back
 //	mainplane-server key  new <name> | revoke <name> | list    on the installed harness, as root
 //	mainplane-server join [cycle]             the join lines, with a new device code after cycle
@@ -34,6 +35,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/server"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
+	"golang.org/x/term"
 )
 
 func main() {
@@ -54,6 +56,10 @@ func main() {
 	case verb == "up" && len(args) == 2:
 		fatal(server.Up(args[1]))
 	case verb == "install":
+		quick := len(args) == 2 && args[1] == "quickstart"
+		if quick {
+			args = args[:1]
+		}
 		h, fresh := config(args[1:])
 		fatal(h.Expand())
 		if !elevate.Is() {
@@ -64,7 +70,7 @@ func main() {
 			if fresh { // the elevated install handed back; from a config file it printed itself
 				done(h)
 				logIn(h)
-				network(h)
+				finish(h, quick)
 			}
 			return
 		}
@@ -93,7 +99,7 @@ func main() {
 		if fresh {
 			logIn(h)
 		}
-		network(h)
+		finish(h, quick) // quick only with no config file, so fresh
 	case verb == "tunnel":
 		move(args)
 	case verb == auth.Key && (len(args) == 2 && args[1] == "list" || len(args) == 3 && (args[1] == "new" || args[1] == "revoke")):
@@ -168,6 +174,24 @@ func install(h handover) (handover, int) {
 func logIn(h handover) {
 	if out, err := exec.Command(worker.Bin, "login", auth.Token(auth.Key, h.Harness, h.Key)).CombinedOutput(); err != nil {
 		log.Fatalf("mainplane login: %v: %s", err, out)
+	}
+}
+
+// finish waits for the network. The quickstart on a terminal opens the TUI
+// there instead, as this user, and exits as that does: the harness starts its
+// tunnel meanwhile, and the TUI says while it does.
+func finish(h handover, quick bool) {
+	if quick && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
+		tui := exec.Command(worker.Bin) // the quickstart PR makes this "mainplane quickstart"
+		tui.Stdin, tui.Stdout, tui.Stderr = os.Stdin, os.Stdout, os.Stderr
+		if err := tui.Run(); err != nil && tui.ProcessState == nil {
+			log.Fatal(err)
+		}
+		os.Exit(tui.ProcessState.ExitCode())
+	}
+	network(h)
+	if quick {
+		fmt.Println("no terminal: run mainplane to finish setup")
 	}
 }
 
@@ -322,6 +346,7 @@ func usage() {
                                           quick tunnel: a temporary URL, no domain needed. Makes this machine the worker
                                           admin and logs its CLI in. A config already installed stays as it is.
                                           Providers and links in the config apply when it is saved
+  install   quickstart                    the same, then open the quickstart in the TUI on this terminal
   install   <config.json>                 run it at every boot from a root-only copy of the config
                                           Either install prints the line that makes a machine a worker, with the
                                           network name and device code the first install made, and a new api key

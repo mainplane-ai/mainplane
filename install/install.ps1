@@ -2,12 +2,13 @@
 # an api key it logs that CLI in. With a network name and device code it installs the CLI for the machine instead and
 # makes this Windows machine a worker for that user, after a UAC prompt. With server it also makes this
 # machine the harness, from the provider keys set in this shell, after a UAC prompt, and logs the CLI
-# in to it. The release stamps its version.
-#   & ([scriptblock]::Create((irm https://dl.mainplane.ai/@VERSION@/install.ps1))) [api key | <network> <device code> | server]
+# in to it; server quickstart then opens the quickstart in the TUI. The release stamps its version.
+#   & ([scriptblock]::Create((irm https://dl.mainplane.ai/@VERSION@/install.ps1))) [api key | <network> <device code> | server [quickstart]]
 param([string]$Token, [string]$Code)
 $ErrorActionPreference = 'Stop'
+$quick = $Token -eq 'server' -and $Code -eq 'quickstart'
 if ($args -or ($Token -and !$Code -and $Token -ne 'server' -and $Token -notlike 'mp_key_*')) {
-  throw 'usage: install.ps1 [api key | <network> <device code> | server]'
+  throw 'usage: install.ps1 [api key | <network> <device code> | server [quickstart]]'
 }
 $ProgressPreference = 'SilentlyContinue'
 $dl = 'https://dl.mainplane.ai/@VERSION@'
@@ -32,11 +33,11 @@ function Fetch($name) {
   if ($want -ne (Get-FileHash $t).Hash.ToLower()) { throw "$f does not match SHA256SUMS" }
   $t
 }
-if ($Token -eq 'server' -and !$Code) {
+if ($Token -eq 'server' -and (!$Code -or $quick)) {
   # install places mainplane-server in Program Files, runs it as a service, makes this machine the
   # worker admin with the mainplane beside it, which places that in Program Files, and logs that in
   Fetch mainplane | Out-Null
-  & (Fetch mainplane-server) install
+  & (Fetch mainplane-server) install @(if ($quick) { 'quickstart' })
   if ($LASTEXITCODE) { exit $LASTEXITCODE }
   $bin = "$env:ProgramFiles\mainplane"
 } elseif ($Code) {
