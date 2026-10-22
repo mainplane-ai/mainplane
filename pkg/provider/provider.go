@@ -1,6 +1,7 @@
 // Package provider turns a context of state file records into one LLM request
-// and the streamed response back into records. Five envelopes exist. Same
+// and the streamed response back into records. Six envelopes exist. Same
 // context, same envelope, same bytes: the step record's request hash proves it.
+// For claude-code the bytes are what the harness hands the claude binary.
 package provider
 
 import (

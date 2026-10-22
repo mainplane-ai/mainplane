@@ -50,7 +50,8 @@ the harness sends each session's first record id in, which a copy shares with
 the session it copies, as it shares the prompt, for a server that routes its
 prompt cache by one, such as `x-opencode-session` for OpenCode Go. Connectors offer the
 models of the providers in the [catalog](https://dl.mainplane.ai/catalog/v1.json)
-by its ids: `anthropic`, `openai`, `google`, `bedrock`, `openrouter`, `chatgpt`.
+by its ids: `anthropic`, `openai`, `google`, `bedrock`, `openrouter`, `chatgpt`,
+`claude-code`.
 OpenCode Go's one key serves four, one per API its models speak:
 `opencode-go` (Chat Completions), `opencode-go-openai`, `opencode-go-anthropic`
 and `opencode-go-google`; `mainplane key opencode-go <key>` sets all four. Install
@@ -65,6 +66,17 @@ in, or pick ChatGPT subscription in the app's /providers. Open the URL it gives,
 the access, and paste back the address of the page the browser lands on: a page
 on 127.0.0.1 that does not load. The harness keeps the tokens in
 `providers/chatgpt/chatgpt.json` next to its config and refreshes them itself.
+
+The `claude-code` shape takes no key either: it uses the plan of a Claude account
+through Anthropic's own Claude Code. The first time it is used, the harness
+downloads a pinned Claude Code release from npm into `providers/<name>/`, checks
+its integrity, and runs it once per step with the harness's tools; Claude Code
+makes the request with its own login. Use it only on a harness you host for
+yourself. To sign in, run `mainplane signin claude-code`, or pick Claude
+subscription in the app's /providers. Open the URL it gives, sign in on
+claude.ai, and paste back the code the page shows. Claude Code keeps its login
+itself, in that directory or the macOS keychain; the harness never reads it. Turn off extra usage on the
+Claude account, so a step that the plan does not cover fails instead of billing.
 
 The harness applies providers, links and drives within seconds of a save; any other
 change applies at its next start.
