@@ -27,6 +27,7 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
+	"github.com/mainplane-ai/mainplane/pkg/release"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 )
 
@@ -269,7 +270,7 @@ func Uninstall() error {
 	// A hosts file that cannot be written must not keep the token and keys.
 	cerr := mesh.Clean()
 	cli := filepath.Join(cliDir, "mainplane.exe")
-	for _, f := range []string{Bin, Bin + ".old", Bin + ".new", wintunDLL, cli, cli + ".old", cli + ".new"} {
+	for _, f := range slices.Concat([]string{Bin, Bin + ".new", wintunDLL, cli, cli + ".new"}, release.Asides(Bin), release.Asides(cli)) {
 		if err := remove(f); err != nil {
 			return err
 		}
