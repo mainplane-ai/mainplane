@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"slices"
 	"time"
 )
 
@@ -31,9 +33,27 @@ type Catalog struct {
 }
 
 type Provider struct {
-	Name  string `json:"name"`
-	Shape string `json:"shape"`
-	URL   string `json:"url,omitempty"` // the config's url, where it is not the shape's default
+	Name    string `json:"name"`
+	Shape   string `json:"shape"`
+	URL     string `json:"url,omitempty"`     // the config's url, where it is not the shape's default
+	Session string `json:"session,omitempty"` // the config's session header
+	Group   string `json:"group,omitempty"`   // providers that take one key, one per shape a vendor's models span: a connector asks once and sets it on each
+}
+
+// Keyed is the ids of the providers that take provider id's key: its group,
+// or id alone.
+func (c Catalog) Keyed(id string) []string {
+	g := c.Providers[id].Group
+	if g == "" {
+		return []string{id}
+	}
+	var ids []string
+	for _, k := range slices.Sorted(maps.Keys(c.Providers)) {
+		if c.Providers[k].Group == g {
+			ids = append(ids, k)
+		}
+	}
+	return ids
 }
 
 // Preset is a full session config but its workers.

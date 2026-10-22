@@ -133,11 +133,24 @@ func cli(verb string, args []string) {
 	}
 }
 
-// key sets a provider's key.
+// key sets a provider's key, and that of each catalog provider that takes
+// the same key. A provider the harness has keeps its shape, url and session;
+// a new one gets the catalog's.
 func (c client) key(name, key string) {
-	p := c.catalogProvider(name)
-	body, _ := json.Marshal(map[string]string{"shape": p.Shape, "url": p.URL, "key": key})
-	c.call("PUT", "/providers/"+url.PathEscape(name), "application/json", bytes.NewReader(body), nil)
+	var have []harness.ProviderInfo
+	c.call("GET", "/providers", "", nil, &have)
+	cat, err := catalog.Fetch(context.Background())
+	if err != nil {
+		die(err)
+	}
+	for _, k := range cat.Keyed(name) {
+		p := cat.Providers[k]
+		if slices.ContainsFunc(have, func(h harness.ProviderInfo) bool { return h.Name == k }) {
+			p = catalog.Provider{}
+		}
+		body, _ := json.Marshal(map[string]string{"shape": p.Shape, "url": p.URL, "session": p.Session, "key": key})
+		c.call("PUT", "/providers/"+url.PathEscape(k), "application/json", bytes.NewReader(body), nil)
+	}
 }
 
 // catalogProvider is the shape and url to send for provider name: none for a
