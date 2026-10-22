@@ -97,7 +97,7 @@ func (e anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
 	turns := Turns(rest)
 	for i, t := range turns {
 		if t.Assistant {
-			content, err := e.assistant(t.Records)
+			content, err := anthAssistant(e.Name(), t.Records)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -149,14 +149,16 @@ func anthUser(recs []statefile.Record) []anthBlock {
 	return blocks
 }
 
-func (e anthropic) assistant(recs []statefile.Record) ([]any, error) {
+// anthAssistant is an assistant turn's content. Only thinking that name made
+// is replayed.
+func anthAssistant(name string, recs []statefile.Record) ([]any, error) {
 	var content []any
 	for _, r := range recs {
 		switch r.Kind {
 		case statefile.Text:
 			content = append(content, anthBlock{Type: "text", Text: string(r.Body)})
 		case statefile.Thinking:
-			if r.Provider == e.Name() {
+			if r.Provider == name {
 				content = append(content, json.RawMessage(r.Body))
 			}
 		case statefile.Call:
