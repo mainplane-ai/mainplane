@@ -42,6 +42,8 @@ const (
 	// fell about 6 minutes before expiry, so a refresh this early is allowed
 	// and leaves a step time to send.
 	refreshEarly = 5 * time.Minute
+	// tokenTime bounds a token call, which holds refreshMu.
+	tokenTime = 30 * time.Second
 )
 
 // refreshMu serializes refreshes: a refresh rotates the refresh token, and the
@@ -89,10 +91,10 @@ func chatgptToken(ctx context.Context, dir string) (string, error) {
 	defer refreshMu.Unlock()
 	c, err := loadCreds(dir)
 	if errors.Is(err, fs.ErrNotExist) || err == nil && c.RefreshToken == "" {
-		return "", errors.New("chatgpt: not signed in: mainplane signin <provider>")
+		return "", configError{errors.New("chatgpt: not signed in: mainplane signin <provider>")}
 	}
 	if err != nil {
-		return "", err
+		return "", configError{err}
 	}
 	if time.Until(c.Expires) > refreshEarly {
 		return c.AccessToken, nil
@@ -112,6 +114,8 @@ func chatgptToken(ctx context.Context, dir string) (string, error) {
 // such as invalid_grant is not retried and a 5xx is.
 func postToken(ctx context.Context, form neturl.Values) (tokenResponse, error) {
 	var t tokenResponse
+	ctx, cancel := context.WithTimeout(ctx, tokenTime)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return t, err
@@ -142,14 +146,8 @@ func postToken(ctx context.Context, form neturl.Values) (tokenResponse, error) {
 // reuses its client id and the host id. The user opens the URL, approves, and
 // pastes the address of the page the browser lands on.
 func chatgptLogin(ctx context.Context, dir string, show func(Prompt), paste <-chan string) error {
-	c, err := loadCreds(dir)
-	if errors.Is(err, fs.ErrNotExist) {
-		c, err = chatgptCreds{HostID: "urn:uuid:" + uuid()}, nil
-	}
+	c, err := hostCreds(dir)
 	if err != nil {
-		return err
-	}
-	if err := saveCreds(dir, c); err != nil { // the docs: persist the host id before its first sign-in
 		return err
 	}
 	verifier, state, nonce := random(), random(), random()
@@ -219,7 +217,24 @@ func chatgptLogin(ctx context.Context, dir string, show func(Prompt), paste <-ch
 	}
 	c.Email, c.Subject, c.ClientID, c.IDToken = claims.Email, claims.Sub, id, t.IDToken
 	c.AccessToken, c.RefreshToken, c.Scope, c.Expires = t.AccessToken, t.RefreshToken, t.Scope, time.Now().Add(time.Duration(t.ExpiresIn)*time.Second)
+	refreshMu.Lock()
+	defer refreshMu.Unlock()
 	return saveCreds(dir, c)
+}
+
+// hostCreds is the login's record so far, with a host id. The docs: persist
+// the host id before its first sign-in.
+func hostCreds(dir string) (chatgptCreds, error) {
+	refreshMu.Lock()
+	defer refreshMu.Unlock()
+	c, err := loadCreds(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		c, err = chatgptCreds{HostID: "urn:uuid:" + uuid()}, nil
+	}
+	if err != nil {
+		return c, err
+	}
+	return c, saveCreds(dir, c)
 }
 
 type claims struct {

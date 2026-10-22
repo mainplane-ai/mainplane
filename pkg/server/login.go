@@ -37,6 +37,7 @@ type login struct {
 	mu     sync.Mutex
 	st     provider.LoginState
 	shown  chan struct{} // closed at the first prompt or the end
+	done   chan struct{} // closed at the end
 	paste  chan string
 	cancel context.CancelFunc
 }
@@ -57,9 +58,13 @@ func (ls *logins) start(w http.ResponseWriter, r *http.Request) {
 		fail(w, fmt.Errorf("the body is {\"shape\",\"url\"}: %w", err))
 		return
 	}
+	if name != filepath.Base(name) || !filepath.IsLocal(name) {
+		fail(w, fmt.Errorf("provider %q: a name is one path element", name))
+		return
+	}
 	c, err := Load(ls.path)
 	if err != nil {
-		fail(w, err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if in.Shape == "" {
@@ -76,7 +81,7 @@ func (ls *logins) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ls.ctx, loginTime)
-	l := &login{st: provider.LoginState{State: "pending"}, shown: make(chan struct{}), paste: make(chan string), cancel: cancel}
+	l := &login{st: provider.LoginState{State: "pending"}, shown: make(chan struct{}), done: make(chan struct{}), paste: make(chan string), cancel: cancel}
 	ls.mu.Lock()
 	if old := ls.m[name]; old != nil {
 		old.cancel()
@@ -102,6 +107,7 @@ func (ls *logins) start(w http.ResponseWriter, r *http.Request) {
 			l.st.State, l.st.Error = "failed", err.Error()
 		}
 		l.mu.Unlock()
+		close(l.done)
 		shown()
 	}()
 	select {
@@ -128,6 +134,8 @@ func (ls *logins) paste(w http.ResponseWriter, r *http.Request) {
 	select {
 	case l.paste <- in.Code:
 		w.WriteHeader(http.StatusNoContent)
+	case <-l.done:
+		fail(w, fmt.Errorf("the login has ended: %+v", l.view()))
 	case <-time.After(promptTime):
 		fail(w, fmt.Errorf("the login takes no paste now: %+v", l.view()))
 	}

@@ -308,6 +308,9 @@ func (c Client) Providers(ctx context.Context) ([]harness.ProviderInfo, error) {
 	return ps, err
 }
 
+// loginPath is the route of provider name's login.
+func loginPath(name string) string { return "/providers/" + url.PathEscape(name) + "/login" }
+
 // signinPoll is how often a login is asked how it stands.
 const signinPoll = 2 * time.Second
 
@@ -320,7 +323,7 @@ func (c Client) SignIn(ctx context.Context, name, shape, u string) (provider.Log
 	if err != nil {
 		return st, err
 	}
-	if err := c.Call(ctx, "POST", "/providers/"+url.PathEscape(name)+"/login", "application/json", bytes.NewReader(b), &st); err != nil {
+	if err := c.Call(ctx, "POST", loginPath(name), "application/json", bytes.NewReader(b), &st); err != nil {
 		return st, err
 	}
 	st, err = c.signinPoll(ctx, name, st, func(st provider.LoginState) bool { return st.URL != "" })
@@ -336,7 +339,7 @@ func (c Client) SignInPaste(ctx context.Context, name, text string) error {
 	if err != nil {
 		return err
 	}
-	return c.Call(ctx, "POST", "/providers/"+url.PathEscape(name)+"/login/code", "application/json", bytes.NewReader(b), nil)
+	return c.Call(ctx, "POST", loginPath(name)+"/code", "application/json", bytes.NewReader(b), nil)
 }
 
 // SignInWait waits for the login to end, and is an error unless it signed in.
@@ -358,7 +361,7 @@ func (c Client) signinPoll(ctx context.Context, name string, st provider.LoginSt
 			return st, ctx.Err()
 		}
 		st = provider.LoginState{}
-		if err := c.Call(ctx, "GET", "/providers/"+url.PathEscape(name)+"/login", "", nil, &st); err != nil {
+		if err := c.Call(ctx, "GET", loginPath(name), "", nil, &st); err != nil {
 			return st, err
 		}
 	}

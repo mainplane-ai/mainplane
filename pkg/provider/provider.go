@@ -170,12 +170,15 @@ type httpError struct {
 
 func (e *httpError) Error() string { return fmt.Sprintf("%s: %s: %s", e.name, e.status, e.body) }
 
+// configError is a failure no retry mends, such as a provider not signed in.
+type configError struct{ error }
+
 func transient(err error) bool {
 	var he *httpError
 	if errors.As(err, &he) {
 		return he.code == http.StatusTooManyRequests || he.code >= 500
 	}
-	return true // network or early stream failure
+	return !errors.As(err, new(configError)) // network or early stream failure
 }
 
 func backoff(attempt int, err error) time.Duration {
