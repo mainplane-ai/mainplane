@@ -53,6 +53,7 @@ type api struct {
 	dir, path string
 	k         ed25519.PrivateKey
 	at        func() string // the harness's URL, or none yet
+	proving   atomic.Value  // the URL prove last started on
 	reached   atomic.Value  // the URL a worker last found the harness at
 	coord     *coordinator.Coordinator
 	pool      *harness.Pool
@@ -79,8 +80,12 @@ func (a *api) root(w http.ResponseWriter, r *http.Request) {
 
 // prove marks url reached once a worker can find the harness there, as
 // joining does: the pointer names url and url proves the harness key. It
-// gives up when the harness moves to another URL.
+// gives up when the harness moves to another URL. A tunnel that starts
+// again at the same URL proves it once.
 func (a *api) prove(ctx context.Context, url string) {
+	if old, _ := a.proving.Swap(url).(string); old == url {
+		return
+	}
 	for a.at() == url {
 		if u, err := pointer.Find(ctx, pointer.Encode(a.k), ""); err == nil && u == url {
 			a.reached.Store(url)
