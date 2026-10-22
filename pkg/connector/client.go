@@ -287,12 +287,12 @@ func (c Client) Records(ctx context.Context, id string, after int, wait string) 
 	}
 }
 
-// Worker is a worker as GET /workers lists it: connected, unless refused.
-// Drives is whether it can serve drives.
+// Worker is a worker as GET /workers lists it: connected, unless refused,
+// and whether it can serve drives.
 type Worker struct {
-	Name    string `json:"name"`
-	Refused string `json:"refused,omitempty"`
-	Drives  bool   `json:"drives,omitempty"`
+	Name        string `json:"name"`
+	Refused     string `json:"refused,omitempty"`
+	DriveServer bool   `json:"drive_server,omitempty"`
 }
 
 // Workers lists the workers the harness knows.

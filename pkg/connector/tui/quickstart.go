@@ -306,7 +306,7 @@ func (q *quickstart) lines(args string) {
 func (q *quickstart) servers() []string {
 	var names []string
 	for _, w := range q.workers {
-		if w.Refused == "" && w.Drives {
+		if w.Refused == "" && w.DriveServer {
 			names = append(names, w.Name)
 		}
 	}
