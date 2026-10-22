@@ -313,8 +313,11 @@ type detail struct {
 	pieces map[string]*strings.Builder
 }
 
-// detailText are the reasoning_details fields a stream sends in pieces.
-var detailText = []string{"text", "summary", "data", "signature"}
+// Text and summary entries stream in pieces; an encrypted entry comes whole.
+var (
+	detailPieced = []string{`"reasoning.text"`, `"reasoning.summary"`} // the type, as raw JSON
+	detailText   = []string{"text", "summary", "signature"}
+)
 
 func (d *detail) MarshalJSON() ([]byte, error) {
 	for k, b := range d.pieces {
@@ -328,14 +331,15 @@ func (d *detail) MarshalJSON() ([]byte, error) {
 }
 
 // addDetails merges streamed reasoning_details entries into the list.
-// OpenRouter says only to concatenate the chunks in order. An entry with the
-// type and index of the last one continues it, as OpenRouter's SDK merges
-// consecutive text and summary entries: its text fields append, its other
-// fields fill those the last one lacks. Gemini sends a text entry and then an
-// encrypted one under the same index, so type and index both decide.
+// OpenRouter says only to concatenate the chunks in order. A text or summary
+// entry with the type and index of the last one continues it, as OpenRouter's
+// SDK merges them: its text fields append, its other fields fill those the
+// last one lacks. Any other entry is a new one. Gemini sends a text entry and
+// then an encrypted one under the same index, so type and index both decide.
 func addDetails(all []*detail, ds []map[string]json.RawMessage) ([]*detail, error) {
 	for _, d := range ds {
-		if n := len(all); n == 0 || !bytes.Equal(all[n-1].fields["type"], d["type"]) || !bytes.Equal(all[n-1].fields["index"], d["index"]) {
+		if n := len(all); n == 0 || !slices.Contains(detailPieced, string(d["type"])) ||
+			!bytes.Equal(all[n-1].fields["type"], d["type"]) || !bytes.Equal(all[n-1].fields["index"], d["index"]) {
 			all = append(all, &detail{fields: map[string]json.RawMessage{}, pieces: map[string]*strings.Builder{}})
 		}
 		last := all[len(all)-1]
