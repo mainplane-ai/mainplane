@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"syscall"
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
@@ -67,6 +68,12 @@ func dial(m *mesh.Mesh, l Local, ds *drives) {
 			}
 		}
 		log.Printf("%v, redial in %s", err, wait)
+		// The harness is in the map, so the route or rule to it is gone.
+		if errors.Is(err, syscall.ENETUNREACH) {
+			if err := m.Reroute(); err != nil {
+				log.Printf("mesh: reroute: %v", err)
+			}
+		}
 		select {
 		case <-m.Removed():
 			log.Print("removed from the mesh: no redial, its drives go")

@@ -16,6 +16,10 @@ func add(tun string, a netip.Prefix) error {
 	return run("route", "-q", "-n", "add", "-inet6", project(a).String(), "-iface", tun)
 }
 
+// keep checks nothing: no service here removes what add made, as
+// systemd-networkd does on Linux.
+func keep(string, netip.Prefix) error { return nil }
+
 // dropRule has nothing to drop: the route goes with the TUN.
 func dropRule() {}
 

@@ -77,6 +77,7 @@ type Mesh struct {
 	removed chan struct{}
 	sock    net.Listener // mainplane status asks here
 	harness string       // the key of the harness this node follows
+	router  *osRouter
 	report  atomic.Pointer[func() string]
 }
 
@@ -107,6 +108,7 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 	if err != nil {
 		return nil, err
 	}
+	rt := &osRouter{tun: tun}
 	// The TUN is read from inside the engine, before eng is set.
 	var eng wgengine.Engine
 	engUp := make(chan struct{})
@@ -131,7 +133,7 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 	sys.Set(dialer)
 	eng, err = wgengine.NewUserspaceEngine(logf, wgengine.Config{
 		Tun:           frag,
-		Router:        &osRouter{tun: tun},
+		Router:        rt,
 		ListenPort:    port,
 		EventBus:      sys.Bus.Get(),
 		Dialer:        dialer,
@@ -164,7 +166,7 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 	lb.SetVarRoot(dir)
 	log.Printf("mesh: %s up, port %d", tun, port)
 	ctx, unwatch := context.WithCancel(context.Background())
-	m := &Mesh{lb: lb, health: sys.HealthTracker.Get(), unwatch: unwatch, watched: make(chan struct{}), follows: make(chan struct{}), removed: make(chan struct{}), harness: harness}
+	m := &Mesh{lb: lb, health: sys.HealthTracker.Get(), unwatch: unwatch, watched: make(chan struct{}), follows: make(chan struct{}), removed: make(chan struct{}), harness: harness, router: rt}
 	go func() {
 		defer close(m.watched)
 		// Any change may be to a name: the block is made again from the
@@ -203,6 +205,17 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 		go m.serve()
 	}
 	return m, nil
+}
+
+// Reroute puts back this node's route and rule if something took them away.
+// The worker calls it when the harness's address is unreachable.
+func (m *Mesh) Reroute() error {
+	m.router.mu.Lock()
+	defer m.router.mu.Unlock()
+	if !m.router.addr.IsValid() {
+		return nil
+	}
+	return keep(m.router.tun, m.router.addr)
 }
 
 // Removed marks a mesh directory whose node the harness removed. Its keys
@@ -287,11 +300,14 @@ func Clean() error {
 // and routes the address's /48, the project's, to it. Every other route the
 // engine asks for is ignored: no peer has more than its address.
 type osRouter struct {
+	mu   sync.Mutex // Set is the engine's, Reroute the worker's
 	tun  string
 	addr netip.Prefix
 }
 
 func (r *osRouter) Set(c *router.Config) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	var a netip.Prefix
 	if c != nil {
 		for _, p := range c.LocalAddrs {
