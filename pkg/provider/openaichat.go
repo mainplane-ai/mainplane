@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"fmt"
@@ -15,7 +16,10 @@ import (
 // Thinking is reasoning_content, the field DeepSeek, Kimi, GLM and MiMo stream
 // and want back in a tool loop. OpenRouter and OpenCode Go stream it as
 // reasoning instead and read either field back, so it replays as
-// reasoning_content everywhere; a server without it sends none.
+// reasoning_content everywhere; a server without it sends none. OpenRouter
+// also streams reasoning_details, which hold the upstream's signed or
+// encrypted reasoning (Claude, GPT, Gemini). Where a step has them they are
+// its thinking record, a JSON array, replayed as reasoning_details.
 func OpenAIChat(url, key string) Provider {
 	return Provider{
 		URL:      base(url, "https://api.openai.com/v1") + "/chat/completions",
@@ -62,11 +66,12 @@ type chatFunction struct {
 // chatMsg content is a string for system, assistant, and tool messages and
 // []chatPart for user messages.
 type chatMsg struct {
-	Role       string         `json:"role"`
-	Content    any            `json:"content,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	Reasoning  string         `json:"reasoning_content,omitempty"`
+	Role       string            `json:"role"`
+	Content    any               `json:"content,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
+	ToolCalls  []chatToolCall    `json:"tool_calls,omitempty"`
+	Reasoning  string            `json:"reasoning_content,omitempty"`
+	Details    []json.RawMessage `json:"reasoning_details,omitempty"`
 }
 
 type chatPart struct {
@@ -151,9 +156,18 @@ func (e openaiChat) assistant(recs []statefile.Record) (chatMsg, error) {
 		case statefile.Text:
 			text = append(text, string(r.Body))
 		case statefile.Thinking:
-			if r.Provider == e.Name() {
-				reasoning = append(reasoning, string(r.Body))
+			if r.Provider != e.Name() {
+				continue
 			}
+			if r.Type != "application/json" {
+				reasoning = append(reasoning, string(r.Body))
+				continue
+			}
+			var d []json.RawMessage
+			if err := json.Unmarshal(r.Body, &d); err != nil {
+				return m, fmt.Errorf("thinking %s: %w", r.ID, err)
+			}
+			m.Details = append(m.Details, d...)
 		case statefile.Call:
 			var c Call
 			if err := json.Unmarshal(r.Body, &c); err != nil {
@@ -174,9 +188,10 @@ func (e openaiChat) assistant(recs []statefile.Record) (chatMsg, error) {
 type chatChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content   string `json:"content"`
-			Reasoning string `json:"reasoning_content"`
-			Alias     string `json:"reasoning"` // OpenRouter, OpenCode Go
+			Content   string                       `json:"content"`
+			Reasoning string                       `json:"reasoning_content"`
+			Alias     string                       `json:"reasoning"`         // OpenRouter, OpenCode Go
+			Details   []map[string]json.RawMessage `json:"reasoning_details"` // OpenRouter
 			ToolCalls []struct {
 				Index    int          `json:"index"`
 				ID       string       `json:"id"`
@@ -204,6 +219,7 @@ type chatChunk struct {
 // boundaries.
 func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
 	var reasoning, text strings.Builder
+	var details []*detail
 	var calls []*chatToolCall
 	var usage statefile.Usage
 	var stop string
@@ -238,6 +254,10 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 		}
 		d := c.Choices[0].Delta
 		reasoning.WriteString(cmp.Or(d.Reasoning, d.Alias)) // a server that sends both sends the same text
+		var err error
+		if details, err = addDetails(details, d.Details); err != nil {
+			return err
+		}
 		text.WriteString(d.Content)
 		for _, tc := range d.ToolCalls {
 			for len(calls) <= tc.Index {
@@ -256,8 +276,10 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 	if err != nil {
 		return statefile.Header{}, err
 	}
-	if reasoning.Len() > 0 {
-		emit(statefile.Record{Header: statefile.Header{Kind: statefile.Thinking, Type: "text/plain"}, Body: []byte(reasoning.String())})
+	if r, ok, err := chatThinking(details, reasoning.String()); err != nil {
+		return statefile.Header{}, err
+	} else if ok {
+		emit(r)
 	}
 	if text.Len() > 0 {
 		emit(statefile.Record{Header: statefile.Header{Kind: statefile.Text, Type: "text/plain"}, Body: []byte(text.String())})
@@ -270,4 +292,73 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 		emit(r)
 	}
 	return statefile.Header{Usage: &usage, Stop: stop}, nil
+}
+
+// chatThinking is a step's thinking record: its reasoning_details if it has
+// them, else its reasoning text.
+func chatThinking(details []*detail, reasoning string) (statefile.Record, bool, error) {
+	r := statefile.Record{Header: statefile.Header{Kind: statefile.Thinking, Type: "text/plain"}, Body: []byte(reasoning)}
+	if len(details) == 0 {
+		return r, reasoning != "", nil
+	}
+	body, err := marshal(details)
+	r.Type, r.Body = "application/json", body
+	return r, err == nil, err
+}
+
+// detail is one reasoning_details entry: its fields as first streamed, and
+// the fields a stream sends in pieces, appended.
+type detail struct {
+	fields map[string]json.RawMessage
+	pieces map[string]*strings.Builder
+}
+
+// Text and summary entries stream in pieces; an encrypted entry comes whole.
+var (
+	detailPieced = []string{`"reasoning.text"`, `"reasoning.summary"`} // the type, as raw JSON
+	detailText   = []string{"text", "summary", "signature"}
+)
+
+func (d *detail) MarshalJSON() ([]byte, error) {
+	for k, b := range d.pieces {
+		v, err := marshal(b.String())
+		if err != nil {
+			return nil, err
+		}
+		d.fields[k] = v
+	}
+	return marshal(d.fields)
+}
+
+// addDetails merges streamed reasoning_details entries into the list.
+// OpenRouter says only to concatenate the chunks in order. A text or summary
+// entry with the type and index of the last one continues it, as OpenRouter's
+// SDK merges them: its text fields append, its other fields fill those the
+// last one lacks. Any other entry is a new one. Gemini sends a text entry and
+// then an encrypted one under the same index, so type and index both decide.
+func addDetails(all []*detail, ds []map[string]json.RawMessage) ([]*detail, error) {
+	for _, d := range ds {
+		if n := len(all); n == 0 || !slices.Contains(detailPieced, string(d["type"])) ||
+			!bytes.Equal(all[n-1].fields["type"], d["type"]) || !bytes.Equal(all[n-1].fields["index"], d["index"]) {
+			all = append(all, &detail{fields: map[string]json.RawMessage{}, pieces: map[string]*strings.Builder{}})
+		}
+		last := all[len(all)-1]
+		for k, v := range d {
+			if old, ok := last.fields[k]; !ok || string(old) == "null" {
+				last.fields[k] = v
+			}
+			if !slices.Contains(detailText, k) || string(v) == "null" {
+				continue
+			}
+			var piece string
+			if err := json.Unmarshal(v, &piece); err != nil {
+				return nil, fmt.Errorf("openai-chat: reasoning_details %s: %w", k, err)
+			}
+			if last.pieces[k] == nil {
+				last.pieces[k] = &strings.Builder{}
+			}
+			last.pieces[k].WriteString(piece)
+		}
+	}
+	return all, nil
 }
