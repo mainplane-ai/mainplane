@@ -432,7 +432,7 @@ func (q *quickstart) saveDrive(a *App) {
 	})
 }
 
-// finish opens the new session screen with the cheapest fast model, every
+// finish opens the new session screen with the default model, every
 // connected worker, and the first message typed, for the user to send.
 func (q *quickstart) finish(a *App) {
 	cat := q.s.list.cat
@@ -440,7 +440,7 @@ func (q *quickstart) finish(a *App) {
 		a.SayError(errors.New("the catalog is not loaded"))
 		return
 	}
-	cf, err := quickConf(cat, q.providers)
+	cf, err := defaultConf(cat, q.providers, nil)
 	if err != nil {
 		a.SayError(err)
 		return

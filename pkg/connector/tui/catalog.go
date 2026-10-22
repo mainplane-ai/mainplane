@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/catalog"
@@ -114,22 +113,6 @@ func defaultConf(cat *catalog.Catalog, ps []harness.ProviderInfo, newest []harne
 	cf := presetConf(pick, cat.Presets[pick])
 	cf.Workers = workers
 	return cf, nil
-}
-
-// quickConf is the config of the quickstart's first session: the cheapest
-// fast preset connected, the first in the group's order of those that cost
-// the same, else the default.
-func quickConf(cat *catalog.Catalog, ps []harness.ProviderInfo) (statefile.Conf, error) {
-	pick, rate := "", func(c catalog.Cost) float64 { return c.Input + c.Output }
-	for _, id := range connected(cat, ps) {
-		if strings.HasSuffix(id, ":fast") && (pick == "" || rate(cat.Presets[id].Cost) < rate(cat.Presets[pick].Cost)) {
-			pick = id
-		}
-	}
-	if pick == "" {
-		return defaultConf(cat, ps, nil)
-	}
-	return presetConf(pick, cat.Presets[pick]), nil
 }
 
 // price is the cost of a config: its preset's, else the preset of its
