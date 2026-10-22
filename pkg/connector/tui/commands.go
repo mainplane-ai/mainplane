@@ -18,6 +18,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
+	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 )
@@ -710,9 +711,64 @@ func (s *session) providers(a *App) {
 			if slices.ContainsFunc(ps, func(x harness.ProviderInfo) bool { return x.Name == id }) {
 				hint = "connected"
 			}
-			m.Items = append(m.Items, MenuItem{Label: p.Name, Hint: hint, Pick: func(a *App, _ *MenuItem) { s.keyDialog(a, id, p) }})
+			pick := func(a *App, _ *MenuItem) { s.keyDialog(a, id, p) }
+			if _, ok := provider.Logins[p.Shape]; ok {
+				pick = func(a *App, _ *MenuItem) { s.signin(a, id, p) }
+			}
+			m.Items = append(m.Items, MenuItem{Label: p.Name, Hint: hint, Pick: pick})
 		}
 		a.OpenMenu("Providers", m)
+	})
+}
+
+// signin runs the login of a provider that takes no key: it shows the
+// harness's prompt with its URL on the clipboard, since a URL is longer than
+// the status line, asks for the paste the prompt wants, and says when the
+// login ends.
+func (s *session) signin(a *App, id string, p catalog.Provider) {
+	a.Go(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), signinTime)
+		st, err := s.c.SignIn(ctx, id, p.Shape, p.URL)
+		cancel()
+		a.Post(func() {
+			if err != nil {
+				a.SayError(err)
+				return
+			}
+			a.T.Copy(st.URL)
+			msg := "The URL is on the clipboard. " + st.Text
+			if st.Code != "" {
+				msg += " Code: " + st.Code
+			}
+			a.Say(msg)
+			if !st.Paste {
+				s.awaitSignin(a, id, p, "")
+				return
+			}
+			ask(a, "Paste for "+p.Name, "", false, func(a *App, text string) { s.awaitSignin(a, id, p, text) })
+		})
+	})
+}
+
+// awaitSignin hands the login the paste, if any, and says when it ends.
+func (s *session) awaitSignin(a *App, id string, p catalog.Provider, paste string) {
+	a.Go(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), signinTime)
+		defer cancel()
+		var err error
+		if paste != "" {
+			err = s.c.SignInPaste(ctx, id, paste)
+		}
+		if err == nil {
+			err = s.c.SignInWait(ctx, id)
+		}
+		a.Post(func() {
+			if err != nil {
+				a.SayError(err)
+				return
+			}
+			a.Say("Connected " + p.Name)
+		})
 	})
 }
 

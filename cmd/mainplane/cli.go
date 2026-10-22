@@ -35,7 +35,7 @@ const resultLines = 20
 // number.
 var arity = map[string][2]int{
 	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {0, 1}, "retry": {1, 1}, "stop": {1, 1}, "delete": {1, 1},
-	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "worker remove": {1, 1}, "providers": {0, 0}, "key": {2, 2},
+	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "worker remove": {1, 1}, "providers": {0, 0}, "key": {2, 2}, "signin": {1, 1},
 }
 
 // cli is the harness API as verbs: one verb, one route, its reply printed.
@@ -128,24 +128,60 @@ func cli(verb string, args []string) {
 		c.raw("/providers")
 	case "key":
 		c.key(args[0], args[1])
+	case "signin":
+		c.signin(args[0])
 	}
 }
 
-// key sets a provider's key. A provider the harness has keeps its shape and
-// url; a new one gets the catalog's.
+// key sets a provider's key.
 func (c client) key(name, key string) {
-	var have []harness.ProviderInfo
-	c.call("GET", "/providers", "", nil, &have)
-	p := catalog.Provider{}
-	if !slices.ContainsFunc(have, func(h harness.ProviderInfo) bool { return h.Name == name }) {
-		cat, err := catalog.Fetch(context.Background())
-		if err != nil {
-			die(err)
-		}
-		p = cat.Providers[name]
-	}
+	p := c.catalogProvider(name)
 	body, _ := json.Marshal(map[string]string{"shape": p.Shape, "url": p.URL, "key": key})
 	c.call("PUT", "/providers/"+url.PathEscape(name), "application/json", bytes.NewReader(body), nil)
+}
+
+// catalogProvider is the shape and url to send for provider name: none for a
+// provider the harness has, which keeps its own, the catalog's for a new one.
+func (c client) catalogProvider(name string) catalog.Provider {
+	var have []harness.ProviderInfo
+	c.call("GET", "/providers", "", nil, &have)
+	if slices.ContainsFunc(have, func(h harness.ProviderInfo) bool { return h.Name == name }) {
+		return catalog.Provider{}
+	}
+	cat, err := catalog.Fetch(context.Background())
+	if err != nil {
+		die(err)
+	}
+	return cat.Providers[name]
+}
+
+// signin runs a provider's login on the harness: it prints the prompt, sends
+// a line of stdin when the prompt asks for a paste, and waits for the end.
+func (c client) signin(name string) {
+	ctx := context.Background()
+	p := c.catalogProvider(name)
+	st, err := c.SignIn(ctx, name, p.Shape, p.URL)
+	if err != nil {
+		die(err)
+	}
+	fmt.Printf("%s\n\n%s\n", st.Text, st.URL)
+	if st.Code != "" {
+		fmt.Printf("\ncode: %s\n", st.Code)
+	}
+	if st.Paste {
+		fmt.Print("\npaste: ")
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil && line == "" {
+			die(err)
+		}
+		if err := c.SignInPaste(ctx, name, strings.TrimSpace(line)); err != nil {
+			die(err)
+		}
+	}
+	if err := c.SignInWait(ctx, name); err != nil {
+		die(err)
+	}
+	fmt.Println("signed in: " + name)
 }
 
 // client is the harness API with every failure the harness's own words on

@@ -25,15 +25,44 @@ import (
 )
 
 // Shapes is every wire format a provider in the config may have, each built
-// from the provider's key, url and region. The url is the base url the
-// vendor's official SDK takes; the shape appends the API path. An empty url
-// is the vendor's own.
-var Shapes = map[string]func(key, url, region string) Provider{
-	"anthropic":   func(key, url, _ string) Provider { return Anthropic(url, key) },
-	"openai":      func(key, url, _ string) Provider { return OpenAI(url, key) },
-	"openai-chat": func(key, url, _ string) Provider { return OpenAIChat(url, key) },
-	"google":      func(key, url, _ string) Provider { return Gemini(url, key) },
-	"bedrock":     func(key, url, region string) Provider { return Bedrock(url, region, key) },
+// from the provider's config. The url is the base url the vendor's official
+// SDK takes; the shape appends the API path. An empty url is the vendor's own.
+var Shapes = map[string]func(c Config) Provider{
+	"anthropic":   func(c Config) Provider { return Anthropic(c.URL, c.Key) },
+	"openai":      func(c Config) Provider { return OpenAI(c.URL, c.Key) },
+	"openai-chat": func(c Config) Provider { return OpenAIChat(c.URL, c.Key) },
+	"google":      func(c Config) Provider { return Gemini(c.URL, c.Key) },
+	"bedrock":     func(c Config) Provider { return Bedrock(c.URL, c.Region, c.Key) },
+	"chatgpt":     func(c Config) Provider { return ChatGPT(c.URL, c.Dir) },
+}
+
+// Config is a provider as the harness config has it. Dir is the harness's
+// own directory for this provider, where a login keeps what it needs.
+type Config struct {
+	Key, URL, Region, Dir string
+}
+
+// Logins are the shapes whose user signs in instead of pasting a key. A login
+// shows the user prompts, reads what the user pastes, and returns nil once
+// what the provider needs is in dir.
+var Logins = map[string]func(ctx context.Context, dir string, show func(Prompt), paste <-chan string) error{
+	"chatgpt": chatgptLogin,
+}
+
+// Prompt is what a login asks of the user: open URL, enter Code there if one
+// is given, and paste back what Text says if Paste.
+type Prompt struct {
+	Text  string `json:"text"`
+	URL   string `json:"url"`
+	Code  string `json:"code,omitempty"`
+	Paste bool   `json:"paste,omitempty"`
+}
+
+// LoginState is a login as the harness's routes show it.
+type LoginState struct {
+	State string `json:"state"` // pending, done or failed
+	Error string `json:"error,omitempty"`
+	Prompt
 }
 
 // base is the config's url, else the vendor's own, without a trailing slash,
@@ -109,8 +138,10 @@ type Provider struct {
 	URL      string // full endpoint. gemini and bedrock take the model in the path, see Endpoint
 	Key      string
 	Envelope Envelope
-	Headers  func(req *http.Request, key string) // auth and version headers
-	Endpoint func(url, model string) string      // nil means URL as is
+	Headers  func(req *http.Request, key string)       // auth and version headers
+	Endpoint func(url, model string) string            // nil means URL as is
+	Token    func(ctx context.Context) (string, error) // the key of each request, for a login's key that expires; nil means Key
+	Session  string                                    // the header that carries Request.Key, where the vendor routes its cache on a header
 }
 
 // Retry numbers are opencode's. A failure before the first block is out is
@@ -139,12 +170,15 @@ type httpError struct {
 
 func (e *httpError) Error() string { return fmt.Sprintf("%s: %s: %s", e.name, e.status, e.body) }
 
+// configError is a failure no retry mends, such as a provider not signed in.
+type configError struct{ error }
+
 func transient(err error) bool {
 	var he *httpError
 	if errors.As(err, &he) {
 		return he.code == http.StatusTooManyRequests || he.code >= 500
 	}
-	return true // network or early stream failure
+	return !errors.As(err, new(configError)) // network or early stream failure
 }
 
 func backoff(attempt int, err error) time.Duration {
@@ -183,7 +217,7 @@ func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Rec
 	}
 	for attempt := 0; ; attempt++ {
 		sent := time.Now().UTC().Truncate(time.Millisecond)
-		h, emitted, err := p.once(ctx, url, body, emit)
+		h, emitted, err := p.once(ctx, url, req.Key, body, emit)
 		if err == nil {
 			sum := sha256.Sum256(body)
 			h.Provider, h.Model, h.Request, h.Cache, h.Sent = p.Envelope.Name(), req.Model, "sha256:"+hex.EncodeToString(sum[:]), cache, sent
@@ -202,7 +236,7 @@ func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Rec
 
 // once is one HTTP attempt. emitted reports whether any block reached emit.
 // An idle timeout cancels the request, and its cause is the error.
-func (p Provider) once(ctx context.Context, url string, body []byte, emit func(statefile.Record)) (h statefile.Header, emitted bool, err error) {
+func (p Provider) once(ctx context.Context, url, session string, body []byte, emit func(statefile.Record)) (h statefile.Header, emitted bool, err error) {
 	name := p.Envelope.Name()
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
@@ -218,7 +252,16 @@ func (p Provider) once(ctx context.Context, url string, body []byte, emit func(s
 		return h, false, err
 	}
 	hr.Header.Set("Content-Type", "application/json")
-	p.Headers(hr, p.Key)
+	key := p.Key
+	if p.Token != nil {
+		if key, err = p.Token(ctx); err != nil {
+			return h, false, err
+		}
+	}
+	p.Headers(hr, key)
+	if p.Session != "" {
+		hr.Header.Set(p.Session, session)
+	}
 	resp, err := http.DefaultClient.Do(hr)
 	if err != nil {
 		return h, false, err

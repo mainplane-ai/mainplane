@@ -47,9 +47,18 @@ is the vendor's own: `https://api.anthropic.com`, `https://api.openai.com/v1`
 (`openai`, `openai-chat`), `https://generativelanguage.googleapis.com`,
 `https://bedrock-runtime.<region>.amazonaws.com`. Connectors offer the
 models of the providers in the [catalog](https://dl.mainplane.ai/catalog/v1.json)
-by its ids: `anthropic`, `openai`, `google`, `bedrock`, `openrouter`. Install
+by its ids: `anthropic`, `openai`, `google`, `bedrock`, `openrouter`, `chatgpt`. Install
 takes keys from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`,
 `AWS_BEARER_TOKEN_BEDROCK` with `AWS_REGION`, and `OPENROUTER_API_KEY`.
+
+The `chatgpt` shape takes no key: it uses the plan of a ChatGPT account, through
+OpenAI's [Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source)
+for open-source apps. OpenAI allows this for a harness you host for yourself.
+To sign in, run `mainplane signin chatgpt` on any machine whose CLI is logged
+in, or pick ChatGPT subscription in the app's /providers. Open the URL it gives, allow
+the access, and paste back the address of the page the browser lands on: a page
+on 127.0.0.1 that does not load. The harness keeps the tokens in
+`providers/chatgpt/chatgpt.json` next to its config and refreshes them itself.
 
 The harness applies providers, links and drives within seconds of a save; any other
 change applies at its next start.

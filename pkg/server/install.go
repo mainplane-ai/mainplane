@@ -93,7 +93,7 @@ func (c *Config) Expand() error {
 		}
 		c.Providers[name] = p
 	}
-	_, err := providers(c.Providers)
+	_, err := providers("", c.Providers)
 	return err
 }
 

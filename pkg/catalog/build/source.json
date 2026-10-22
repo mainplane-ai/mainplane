@@ -4,17 +4,20 @@
     "openai": {"name": "OpenAI", "shape": "openai", "models_dev": "openai"},
     "google": {"name": "Google", "shape": "google", "models_dev": "google"},
     "bedrock": {"name": "Amazon Bedrock", "shape": "bedrock", "models_dev": "amazon-bedrock"},
-    "openrouter": {"name": "OpenRouter", "shape": "openai-chat", "url": "https://openrouter.ai/api/v1", "models_dev": "openrouter"}
+    "openrouter": {"name": "OpenRouter", "shape": "openai-chat", "url": "https://openrouter.ai/api/v1", "models_dev": "openrouter"},
+    "chatgpt": {"name": "ChatGPT subscription", "shape": "chatgpt", "models_dev": "openai", "plan": true}
   },
   "params": {
     "anthropic": {"max_tokens": 32000},
     "bedrock": {"inferenceConfig": {"maxTokens": 32000}},
-    "openai": {"reasoning": {"summary": "auto"}}
+    "openai": {"reasoning": {"summary": "auto"}},
+    "chatgpt": {"reasoning": {"summary": "auto"}}
   },
   "effort": {
     "anthropic": {"output_config": {"effort": "$"}},
     "bedrock": {"additionalModelRequestFields": {"output_config": {"effort": "$"}}},
     "openai": {"reasoning": {"effort": "$"}},
+    "chatgpt": {"reasoning": {"effort": "$"}},
     "openai-chat": {"reasoning": {"effort": "$"}},
     "google": {"generationConfig": {"thinkingConfig": {"thinkingLevel": "$"}}}
   },
@@ -49,6 +52,9 @@
     {"provider": "openrouter", "model": "qwen/qwen3.8-max-0902", "effort": "xhigh"},
     {"provider": "openrouter", "model": "meta/muse-spark-1.3", "effort": "medium"},
     {"provider": "openrouter", "model": "mistralai/mistral-large-4-0", "effort": "high"},
-    {"provider": "openrouter", "model": "minimax/minimax-m3"}
+    {"provider": "openrouter", "model": "minimax/minimax-m3"},
+    {"provider": "chatgpt", "model": "gpt-6-astra", "effort": "medium", "tools": "patch"},
+    {"provider": "chatgpt", "model": "gpt-6.1-sol", "effort": "medium", "tools": "patch"},
+    {"provider": "chatgpt", "model": "gpt-6-luna", "effort": "medium", "tools": "patch"}
   ]
 }
