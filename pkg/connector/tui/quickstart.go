@@ -217,42 +217,12 @@ func (q *quickstart) layout(a *App) {
 	switch q.step {
 	case stepProviders:
 		q.title.S, q.body.S = qsProvidersTitle, qsProvidersLine
-		q.note.S = qsProvidersNone
-		if len(q.providers) > 0 {
-			var names []string
-			for _, p := range q.providers {
-				name := p.Name
-				if cat := q.s.list.cat; cat != nil && cat.Providers[name].Name != "" {
-					name = cat.Providers[name].Name
-				}
-				names = append(names, name)
-			}
-			q.note.S = qsConnected + strings.Join(names, ", ")
-		}
+		q.note.S = q.providerNote()
 		q.buttons = []qsButton{back, {qsConnect, true, q.s.providers}, {qsContinue, len(q.providers) > 0, q.next}}
 	case stepWorkers:
 		q.title.S, q.body.S = qsWorkersTitle, qsWorkersLine
 		q.lines(q.join)
-		switch q.network {
-		case "ready":
-		case "starting":
-			q.note.S = Spin() + qsNetStarting + "\n"
-		default:
-			q.note.S = qsNetFailed + q.network + "\n"
-		}
-		var names []string
-		for _, w := range q.workers {
-			if w.Refused != "" {
-				names = append(names, w.Name+" (refused: "+w.Refused+")")
-				continue
-			}
-			names = append(names, w.Name)
-		}
-		q.note.S += qsNoWorker
-		if len(names) > 0 {
-			q.note.S = strings.TrimSuffix(q.note.S, qsNoWorker) + qsConnected + strings.Join(names, ", ")
-		}
-		q.note.S += "\n" + qsMacNote
+		q.note.S = q.workerNote()
 		q.buttons = []qsButton{back, later, {qsContinue, true, q.next}}
 	case stepConnectors:
 		q.title.S, q.body.S = qsConnectorsTitle, qsConnectorsLine
@@ -273,6 +243,50 @@ func (q *quickstart) layout(a *App) {
 		q.rows = []qsRow{{qsDriveName, q.drive.name, q.nameDialog}, {qsDriveWorkers, ws, q.workersMenu}, {qsDriveServer, q.drive.server, q.serverMenu}}
 		q.buttons = []qsButton{back, later, {qsContinue, q.drive.name != "" && q.drive.server != "", q.saveDrive}}
 	}
+}
+
+// providerNote names the providers connected, by the catalog's names.
+func (q *quickstart) providerNote() string {
+	if len(q.providers) == 0 {
+		return qsProvidersNone
+	}
+	var names []string
+	for _, p := range q.providers {
+		name := p.Name
+		if cat := q.s.list.cat; cat != nil && cat.Providers[name].Name != "" {
+			name = cat.Providers[name].Name
+		}
+		names = append(names, name)
+	}
+	return qsConnected + strings.Join(names, ", ")
+}
+
+// workerNote is the network while it is not ready, the workers connected,
+// and what a Mac asks.
+func (q *quickstart) workerNote() string {
+	var b strings.Builder
+	switch q.network {
+	case "ready":
+	case "starting":
+		b.WriteString(Spin() + qsNetStarting + "\n")
+	default:
+		b.WriteString(qsNetFailed + q.network + "\n")
+	}
+	var names []string
+	for _, w := range q.workers {
+		if w.Refused != "" {
+			names = append(names, w.Name+" (refused: "+w.Refused+")")
+			continue
+		}
+		names = append(names, w.Name)
+	}
+	if len(names) == 0 {
+		b.WriteString(qsNoWorker)
+	} else {
+		b.WriteString(qsConnected + strings.Join(names, ", "))
+	}
+	b.WriteString("\n" + qsMacNote)
+	return b.String()
 }
 
 // lines are the rows that run the install script with args, a row each for
