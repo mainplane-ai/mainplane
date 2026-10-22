@@ -11,6 +11,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -106,7 +107,7 @@ func logIn(token string) {
 	case "":
 		fmt.Println("logged in")
 	default:
-		fmt.Printf("logged in; switched from the mainplane-server at %s\n", was.URL)
+		fmt.Printf("logged in; switched from the mainplane-server at %s\n", cmp.Or(was.URL, "this machine"))
 	}
 	if !version.Match(v) {
 		update(v)

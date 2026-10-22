@@ -62,8 +62,8 @@ func main() {
 				os.Exit(code)
 			}
 			if fresh { // the elevated install handed back; from a config file it printed itself
-				logIn(h)
 				done(h)
+				logIn(h)
 				network(h)
 			}
 			return
@@ -89,10 +89,10 @@ func main() {
 			fatal(os.WriteFile(args[1], b, 0o600))
 			return
 		}
+		done(h)
 		if fresh {
 			logIn(h)
 		}
-		done(h)
 		network(h)
 	case verb == "tunnel":
 		move(args)

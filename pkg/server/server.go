@@ -75,7 +75,7 @@ func Auth(dir string) auth.Store { return auth.Store{Path: filepath.Join(dir, "a
 
 // Key is the harness key every token carries, made on first use.
 func Key(dir string) (ed25519.PrivateKey, error) {
-	return pointer.Key(filepath.Join(dir, pointer.KeyFile))
+	return pointer.Key(filepath.Join(dir, "harness.key"))
 }
 
 // Provider is one the config names. Its name is free, and the catalog's ids

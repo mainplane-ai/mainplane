@@ -1071,7 +1071,7 @@ func (s *session) infoItems(a *App, harnessV string, listed []connector.Worker) 
 	} else {
 		add("Session", "Model", s.base().Model)
 	}
-	add("App", "Harness", s.c.URL)
+	add("App", "Harness", cmp.Or(s.c.URL, s.c.Local))
 	add("App", "Harness version", harnessV)
 	add("App", "App version", version.V)
 	add("App", "Terminal", fmt.Sprintf("%dx%d, kitty keys %v, truecolor %v", a.W, a.H, a.T.Caps.Kitty, a.T.Caps.Truecolor))

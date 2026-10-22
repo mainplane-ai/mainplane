@@ -59,7 +59,7 @@ func Login(ctx context.Context, token string) (c Client, old Client, version str
 	if err != nil {
 		return c, old, "", err
 	}
-	c = Client{Key: key, Harness: h, Local: pointer.Local(h)}
+	c = Client{Key: key, Harness: h, Local: pointer.Local(ctx, h)}
 	if c.Local == "" {
 		if c.URL, err = pointer.Find(ctx, h, ""); err != nil {
 			return c, old, "", unreachable(err)
@@ -94,7 +94,7 @@ func Load(ctx context.Context) (Client, error) {
 	if err := json.Unmarshal(b, &c); err != nil {
 		return c, err
 	}
-	if c.Local = pointer.Local(c.Harness); c.Local != "" {
+	if c.Local = pointer.Local(ctx, c.Harness); c.Local != "" {
 		return c, nil
 	}
 	if k, a, err := mesh.Harness(worker.Harness); err == nil && k == c.Harness {
@@ -131,8 +131,8 @@ func (c Client) Save() error {
 }
 
 // unreachable says plainly that a request found no network path to its
-// host: most often this machine is offline, and the bare dial error reads
-// as a fault of Mainplane.
+// host: most often this machine is offline, or on loopback the harness is
+// stopped, and the bare dial error reads as a fault of Mainplane.
 func unreachable(err error) error {
 	var u *url.Error
 	var op *net.OpError
@@ -142,6 +142,9 @@ func unreachable(err error) error {
 	host := u.URL
 	if p, perr := url.Parse(u.URL); perr == nil {
 		host = p.Host
+		if net.ParseIP(p.Hostname()).IsLoopback() {
+			return fmt.Errorf("the harness on this machine does not answer at %s: is mainplane-server running? (%w)", host, op)
+		}
 	}
 	return fmt.Errorf("cannot reach %s: is this machine offline? (%w)", host, op)
 }

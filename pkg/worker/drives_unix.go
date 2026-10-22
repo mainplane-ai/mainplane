@@ -15,7 +15,7 @@ const exportsDir = "/srv/mainplane"
 // exportPath is where a Linux server keeps the drive name.
 func exportPath(name string) string {
 	if name == Sessions {
-		return filepath.Join(pointer.Dir, Sessions)
+		return filepath.Join(pointer.LinuxDir, Sessions)
 	}
 	return filepath.Join(exportsDir, name)
 }

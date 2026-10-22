@@ -89,15 +89,12 @@ func (m *Mesh) Report(f func() string) { m.report.Store(&f) }
 // dir register again with none. It follows the harness with key harness
 // through the pointer and moves its control client when the harness moves.
 // On the harness's own machine, as admin, control is the harness on
-// loopback: no tunnel, pointer or proof. Its relay is still the tunnel's.
+// loopback: no tunnel or pointer. Its relay is still the tunnel's.
 func Up(dir, harness, secret, name string) (*Mesh, error) {
 	// Cloudflare answers 400 to the native upgrades of both.
 	envknob.Setenv("TS_CONTROL_WEBSOCKET", "1")
 	envknob.Setenv("TS_DEBUG_DERP_WS_CLIENT", "1")
 	controlclient.VerifyServerKey = func(ctx context.Context, u string, k key.MachinePublic) error {
-		if u == pointer.Local(harness) {
-			return nil
-		}
 		return pointer.ProveNoise(ctx, harness, u, k.String())
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -359,7 +356,7 @@ func run(name string, args ...string) error {
 // poll is down has likely lost this node, as when its registry was lost, and
 // answers every poll with 404: the client starts again, which registers,
 // with the join secret when the keys are unknown. A harness on this machine
-// is at its loopback URL, which needs no proof.
+// is at its loopback URL, which needs neither the tunnel nor the pointer.
 func follow(ctx context.Context, lb *ipnlocal.LocalBackend, h *health.Tracker, harness, secret, name string) {
 	var url string
 	var wait, backoff time.Duration
@@ -373,7 +370,7 @@ func follow(ctx context.Context, lb *ipnlocal.LocalBackend, h *health.Tracker, h
 		if h.GetInPollNetMap() {
 			continue
 		}
-		u := pointer.Local(harness)
+		u := pointer.Local(ctx, harness)
 		if u == "" && (url == "" || pointer.Prove(ctx, harness, url) != nil) {
 			var err error
 			if u, err = pointer.Find(ctx, harness, ""); err != nil {
