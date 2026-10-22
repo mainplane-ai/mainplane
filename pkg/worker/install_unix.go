@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
+	"github.com/mainplane-ai/mainplane/pkg/release"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 )
 
@@ -97,7 +98,7 @@ func Uninstall() error {
 	}
 	// A hosts file that cannot be written must not keep the token and keys.
 	cerr := errors.Join(derr, dropDrives(nil), mesh.Clean())
-	for _, f := range []string{Bin, Bin + ".old", Bin + ".new"} {
+	for _, f := range append([]string{Bin, Bin + ".new"}, release.Asides(Bin)...) {
 		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}

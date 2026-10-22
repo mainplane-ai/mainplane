@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
+	"github.com/mainplane-ai/mainplane/pkg/release"
 )
 
 // leave logs the service's node out of its harness when uninstall took the
@@ -38,11 +39,10 @@ func rejoin() error {
 }
 
 // place copies this binary to bin, the path the service runs, through a new
-// file and renames. The old one moves aside to .old first, since Windows
-// renames a running binary but will not replace it, and a CLI or file helper
-// may run from bin. Installing from bin itself leaves it. The mode is set
-// apart from the write, which the installer's umask would narrow, so every
-// user can run the CLI.
+// file and renames. The old one moves aside first, since a CLI or file helper
+// may run from bin: see release.Aside. Installing from bin itself leaves it.
+// The mode is set apart from the write, which the installer's umask would
+// narrow, so every user can run the CLI.
 func place(bin string) error {
 	exe, err := os.Executable()
 	if err != nil || exe == bin {
@@ -61,11 +61,12 @@ func place(bin string) error {
 	if err := os.Chmod(bin+".new", 0o755); err != nil {
 		return err
 	}
-	if err := os.Rename(bin, bin+".old"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	old, err := release.Aside(bin)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	if err := os.Rename(bin+".new", bin); err != nil {
-		return errors.Join(err, os.Rename(bin+".old", bin))
+		return errors.Join(err, os.Rename(old, bin))
 	}
 	return nil
 }

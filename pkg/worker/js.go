@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mainplane-ai/mainplane/pkg/release"
 )
 
 // The js interpreter is Bun running run.js, with cdp.js, a CDP client, and
@@ -151,10 +153,8 @@ func JS(dir string) error {
 	if err := os.Chmod(bun+".new", 0o755); err != nil {
 		return err
 	}
-	// Windows renames a running binary but will not replace it, and an
-	// environment may be running the old one.
-	_ = os.Remove(bun + ".old")
-	if err := os.Rename(bun, bun+".old"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	// An environment may be running the old one.
+	if _, err := release.Aside(bun); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	return os.Rename(bun+".new", bun)

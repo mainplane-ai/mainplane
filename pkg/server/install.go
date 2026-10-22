@@ -18,6 +18,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
+	"github.com/mainplane-ai/mainplane/pkg/release"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
@@ -291,9 +292,8 @@ func answers(addr string) error {
 }
 
 // place copies this binary to bin through a new file and renames. The old one
-// moves aside to .old first, since Windows renames a running binary but will
-// not replace it. Installing from bin leaves it. The mode is set apart from
-// the write, which the installer's umask would narrow.
+// moves aside first: see release.Aside. Installing from bin leaves it. The
+// mode is set apart from the write, which the installer's umask would narrow.
 func place() error {
 	exe, err := os.Executable()
 	if err != nil || exe == bin {
@@ -312,11 +312,12 @@ func place() error {
 	if err := os.Chmod(bin+".new", 0o755); err != nil {
 		return err
 	}
-	if err := os.Rename(bin, bin+".old"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	old, err := release.Aside(bin)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	if err := os.Rename(bin+".new", bin); err != nil {
-		return errors.Join(err, os.Rename(bin+".old", bin))
+		return errors.Join(err, os.Rename(old, bin))
 	}
 	return nil
 }

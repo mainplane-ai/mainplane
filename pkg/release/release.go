@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -71,8 +72,7 @@ func Get(v, file string) ([]byte, error) {
 }
 
 // Install puts release v's build of cmd for this machine at path. The new
-// binary must say it is v. The old one is kept beside it as .old, since
-// Windows renames a running binary but will not replace it.
+// binary must say it is v. The old one moves aside: see Aside.
 func Install(path, cmd, v string) error {
 	name := cmd + "-" + runtime.GOOS + "-" + runtime.GOARCH
 	if runtime.GOOS == "windows" {
@@ -95,13 +95,33 @@ func Install(path, cmd, v string) error {
 	if got := string(bytes.TrimSpace(out)); got != v {
 		return fmt.Errorf("release %s: %s says it is %s", v, name, got)
 	}
-	if err := os.Rename(path, path+".old"); err != nil {
+	old, err := Aside(path)
+	if err != nil {
 		return err
 	}
 	if err := os.Rename(path+".new", path); err != nil {
-		return errors.Join(err, os.Rename(path+".old", path))
+		return errors.Join(err, os.Rename(old, path))
 	}
 	return nil
+}
+
+// Aside renames path to a name of its own beside it and returns that name, so
+// a new binary can take path. Windows renames a running binary but will not
+// replace or delete it, and a TUI may run any old binary for days, so each
+// gets a new name and the asides from before go only once nothing runs them.
+func Aside(path string) (string, error) {
+	for _, f := range Asides(path) {
+		_ = os.Remove(f) // one still running stays for a later Aside
+	}
+	old := fmt.Sprintf("%s.old-%d", path, time.Now().UnixNano())
+	return old, os.Rename(path, old)
+}
+
+// Asides are the old binaries Aside left beside path, and the .old that
+// releases before it left.
+func Asides(path string) []string {
+	m, _ := filepath.Glob(path + ".old*") // the pattern is well formed
+	return m
 }
 
 func fetch(path string) ([]byte, error) {

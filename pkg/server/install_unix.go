@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"syscall"
+
+	"github.com/mainplane-ai/mainplane/pkg/release"
 )
 
 const bin = "/usr/local/bin/mainplane-server"
@@ -35,7 +37,7 @@ func Uninstall() error {
 	if err := uninstallAdmin(); err != nil {
 		return err
 	}
-	for _, f := range []string{bin, bin + ".old", bin + ".new"} {
+	for _, f := range append([]string{bin, bin + ".new"}, release.Asides(bin)...) {
 		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
