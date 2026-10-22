@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,7 +13,9 @@ import (
 
 // OpenAIChat is the Chat Completions envelope for OpenAI-compatible endpoints.
 // Thinking is reasoning_content, the field DeepSeek, Kimi, GLM and MiMo stream
-// and want back in a tool loop; a server without it sends none.
+// and want back in a tool loop. OpenRouter and OpenCode Go stream it as
+// reasoning instead and read either field back, so it replays as
+// reasoning_content everywhere; a server without it sends none.
 func OpenAIChat(url, key string) Provider {
 	return Provider{
 		URL:      base(url, "https://api.openai.com/v1") + "/chat/completions",
@@ -173,6 +176,7 @@ type chatChunk struct {
 		Delta struct {
 			Content   string `json:"content"`
 			Reasoning string `json:"reasoning_content"`
+			Alias     string `json:"reasoning"` // OpenRouter, OpenCode Go
 			ToolCalls []struct {
 				Index    int          `json:"index"`
 				ID       string       `json:"id"`
@@ -233,7 +237,7 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 			stop = f
 		}
 		d := c.Choices[0].Delta
-		reasoning.WriteString(d.Reasoning)
+		reasoning.WriteString(cmp.Or(d.Reasoning, d.Alias)) // a server that sends both sends the same text
 		text.WriteString(d.Content)
 		for _, tc := range d.ToolCalls {
 			for len(calls) <= tc.Index {
