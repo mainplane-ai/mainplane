@@ -726,9 +726,9 @@ func (s *session) providers(a *App) {
 // login ends.
 func (s *session) signin(a *App, id string, p catalog.Provider) {
 	a.Go(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), callTime)
-		defer cancel()
+		ctx, cancel := context.WithTimeout(context.Background(), signinTime)
 		st, err := s.c.SignIn(ctx, id, p.Shape, p.URL)
+		cancel()
 		a.Post(func() {
 			if err != nil {
 				a.SayError(err)
@@ -740,47 +740,32 @@ func (s *session) signin(a *App, id string, p catalog.Provider) {
 			}
 			a.Say(msg)
 			if !st.Paste {
-				s.awaitSignin(a, id, p)
+				s.awaitSignin(a, id, p, "")
 				return
 			}
-			ask(a, "Paste for "+p.Name, "", false, func(a *App, text string) {
-				a.Go(func() {
-					ctx, cancel := context.WithTimeout(context.Background(), callTime)
-					defer cancel()
-					err := s.c.SignInPaste(ctx, id, text)
-					a.Post(func() {
-						if err != nil {
-							a.SayError(err)
-							return
-						}
-						s.awaitSignin(a, id, p)
-					})
-				})
-			})
+			ask(a, "Paste for "+p.Name, "", false, func(a *App, text string) { s.awaitSignin(a, id, p, text) })
 		})
 	})
 }
 
-// awaitSignin polls the login until it ends.
-func (s *session) awaitSignin(a *App, id string, p catalog.Provider) {
+// awaitSignin hands the login the paste, if any, and says when it ends.
+func (s *session) awaitSignin(a *App, id string, p catalog.Provider, paste string) {
 	a.Go(func() {
-		var st provider.LoginState
+		ctx, cancel := context.WithTimeout(context.Background(), signinTime)
+		defer cancel()
 		var err error
-		for st.State = "pending"; err == nil && st.State == "pending"; {
-			time.Sleep(signinPoll)
-			ctx, cancel := context.WithTimeout(context.Background(), callTime)
-			st, err = s.c.SignInState(ctx, id)
-			cancel()
+		if paste != "" {
+			err = s.c.SignInPaste(ctx, id, paste)
+		}
+		if err == nil {
+			err = s.c.SignInWait(ctx, id)
 		}
 		a.Post(func() {
-			switch {
-			case err != nil:
+			if err != nil {
 				a.SayError(err)
-			case st.State != "done":
-				a.SayError(errors.New(st.Error))
-			default:
-				a.Say("Connected " + p.Name)
+				return
 			}
+			a.Say("Connected " + p.Name)
 		})
 	})
 }

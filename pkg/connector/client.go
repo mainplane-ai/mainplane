@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
@@ -307,15 +308,25 @@ func (c Client) Providers(ctx context.Context) ([]harness.ProviderInfo, error) {
 	return ps, err
 }
 
+// signinPoll is how often a login is asked how it stands.
+const signinPoll = 2 * time.Second
+
 // SignIn starts provider name's login on the harness, with the shape and url
-// for a provider it does not have, and returns the first prompt.
+// for a provider it does not have, and returns its first prompt, or its end.
+// The prompt may wait on a download, such as a provider's binary.
 func (c Client) SignIn(ctx context.Context, name, shape, u string) (provider.LoginState, error) {
 	var st provider.LoginState
 	b, err := json.Marshal(map[string]string{"shape": shape, "url": u})
 	if err != nil {
 		return st, err
 	}
-	err = c.Call(ctx, "POST", "/providers/"+url.PathEscape(name)+"/login", "application/json", bytes.NewReader(b), &st)
+	if err := c.Call(ctx, "POST", "/providers/"+url.PathEscape(name)+"/login", "application/json", bytes.NewReader(b), &st); err != nil {
+		return st, err
+	}
+	st, err = c.signinPoll(ctx, name, st, func(st provider.LoginState) bool { return st.URL != "" })
+	if err == nil && st.State == "failed" {
+		err = errors.New(st.Error)
+	}
 	return st, err
 }
 
@@ -328,11 +339,30 @@ func (c Client) SignInPaste(ctx context.Context, name, text string) error {
 	return c.Call(ctx, "POST", "/providers/"+url.PathEscape(name)+"/login/code", "application/json", bytes.NewReader(b), nil)
 }
 
-// SignInState is the login's state now.
-func (c Client) SignInState(ctx context.Context, name string) (provider.LoginState, error) {
-	var st provider.LoginState
-	err := c.Call(ctx, "GET", "/providers/"+url.PathEscape(name)+"/login", "", nil, &st)
-	return st, err
+// SignInWait waits for the login to end, and is an error unless it signed in.
+func (c Client) SignInWait(ctx context.Context, name string) error {
+	st, err := c.signinPoll(ctx, name, provider.LoginState{State: "pending"}, func(provider.LoginState) bool { return false })
+	if err == nil && st.State != "done" {
+		err = errors.New(st.Error)
+	}
+	return err
+}
+
+// signinPoll asks for the login's state until it is no longer pending or
+// stop holds.
+func (c Client) signinPoll(ctx context.Context, name string, st provider.LoginState, stop func(provider.LoginState) bool) (provider.LoginState, error) {
+	for st.State == "pending" && !stop(st) {
+		select {
+		case <-time.After(signinPoll):
+		case <-ctx.Done():
+			return st, ctx.Err()
+		}
+		st = provider.LoginState{}
+		if err := c.Call(ctx, "GET", "/providers/"+url.PathEscape(name)+"/login", "", nil, &st); err != nil {
+			return st, err
+		}
+	}
+	return st, nil
 }
 
 // SetProvider makes the harness serve provider name with this shape, url,

@@ -155,9 +155,6 @@ func (c client) catalogProvider(name string) catalog.Provider {
 	return cat.Providers[name]
 }
 
-// signinPoll is how often signin asks whether the login is done.
-const signinPoll = 2 * time.Second
-
 // signin runs a provider's login on the harness: it prints the prompt, sends
 // a line of stdin when the prompt asks for a paste, and waits for the end.
 func (c client) signin(name string) {
@@ -181,14 +178,8 @@ func (c client) signin(name string) {
 			die(err)
 		}
 	}
-	for st.State == "pending" {
-		time.Sleep(signinPoll)
-		if st, err = c.SignInState(ctx, name); err != nil {
-			die(err)
-		}
-	}
-	if st.State != "done" {
-		die(errors.New(st.Error))
+	if err := c.SignInWait(ctx, name); err != nil {
+		die(err)
 	}
 	fmt.Println("signed in: " + name)
 }

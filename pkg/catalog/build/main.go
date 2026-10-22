@@ -41,6 +41,7 @@ type source struct {
 	Providers map[string]struct {
 		catalog.Provider
 		ModelsDev string `json:"models_dev"`
+		Plan      bool   `json:"plan"` // its use counts against the user's plan, not per token: its presets cost nothing
 	} `json:"providers"`
 	Params  map[string]map[string]any `json:"params"` // by shape: what every preset of it sends
 	Effort  map[string]map[string]any `json:"effort"` // by shape: the params an effort is, "$" the value
@@ -124,6 +125,9 @@ func preset(src source, dev map[string]devProvider, s sourcePreset) (catalog.Pre
 	}
 	envelope := provider.Shapes[p.Shape](provider.Config{}).Envelope
 	pr := catalog.Preset{Name: m.Name, Provider: s.Provider, Model: s.Model, Tools: s.Tools, ContextLimit: min(contextLimit, m.Limit.Context), Input: []string{}, Cost: m.Cost}
+	if p.Plan {
+		pr.Cost = catalog.Cost{}
+	}
 	if pr.Tools == "" {
 		pr.Tools = "default"
 	}
