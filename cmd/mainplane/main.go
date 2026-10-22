@@ -11,6 +11,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -106,7 +107,7 @@ func logIn(token string) {
 	case "":
 		fmt.Println("logged in")
 	default:
-		fmt.Printf("logged in; switched from the mainplane-server at %s\n", was.URL)
+		fmt.Printf("logged in; switched from the mainplane-server at %s\n", cmp.Or(was.URL, "this machine"))
 	}
 	if !version.Match(v) {
 		update(v)
@@ -302,14 +303,23 @@ func status(args []string) {
 	}
 	c, err := login()
 	v := ""
-	if err == nil && c.Mesh != "" { // calls go over the mesh; the URL shown must still be current
-		err = c.Find(context.Background())
-	}
 	if err == nil {
 		v, err = c.Version(context.Background())
 	}
 	if err == nil {
-		fmt.Printf("mainplane-server version: %s\nmainplane-server url: %s\n", v, c.URL)
+		fmt.Printf("mainplane-server version: %s\n", v)
+		var ferr error
+		if c.Local != "" || c.Mesh != "" { // calls go off the tunnel; the URL shown must still be current
+			ferr = c.Find(context.Background())
+		}
+		if ferr != nil {
+			fmt.Printf("mainplane-server url: %v\n", ferr)
+		} else {
+			fmt.Printf("mainplane-server url: %s\n", c.URL)
+		}
+		if c.Local != "" {
+			fmt.Printf("mainplane-server on this machine: %s\n", c.Local)
+		}
 		if c.Mesh != "" {
 			fmt.Printf("mainplane-server on the mesh: %s\n", c.Mesh)
 		}

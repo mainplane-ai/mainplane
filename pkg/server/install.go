@@ -35,8 +35,12 @@ const (
 // with it at once.
 const tunnelFailed = "tunnel-failed.txt"
 
-// Conf is the config the installed harness runs from.
-var Conf = filepath.Join(Dir, "config.json")
+// Dir is the installed harness's, and Conf the config it runs from. Admin
+// serves the sessions drive from Dir on Linux.
+var (
+	Dir  = pointer.Dir
+	Conf = filepath.Join(Dir, pointer.Config)
+)
 
 // adminAgents is admin's root AGENTS.md, which install writes in its scratch
 // when none is there: what only the worker on the harness's machine can do.

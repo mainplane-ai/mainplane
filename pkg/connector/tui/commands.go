@@ -1010,6 +1010,9 @@ func (s *session) infoMenu(a *App) {
 				a.SayError(err)
 			}
 			m := s.infoItems(a, hv, listed)
+			if s.c.Local != "" {
+				m.Items = append(m.Items, MenuItem{Label: "Harness on this machine", Hint: s.c.Local, Section: "Network", Pick: func(a *App, _ *MenuItem) { a.Copy(s.c.Local) }})
+			}
 			if s.c.Mesh != "" {
 				m.Items = append(m.Items, MenuItem{Label: "Harness on the mesh", Hint: s.c.Mesh, Section: "Network", Pick: func(a *App, _ *MenuItem) { a.Copy(s.c.Mesh) }})
 			}
@@ -1068,7 +1071,7 @@ func (s *session) infoItems(a *App, harnessV string, listed []connector.Worker) 
 	} else {
 		add("Session", "Model", s.base().Model)
 	}
-	add("App", "Harness", s.c.URL)
+	add("App", "Harness", cmp.Or(s.c.URL, s.c.Local))
 	add("App", "Harness version", harnessV)
 	add("App", "App version", version.V)
 	add("App", "Terminal", fmt.Sprintf("%dx%d, kitty keys %v, truecolor %v", a.W, a.H, a.T.Caps.Kitty, a.T.Caps.Truecolor))

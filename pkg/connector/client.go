@@ -34,12 +34,14 @@ import (
 )
 
 // Client is what login wrote: the harness's key, the URL it was last found
-// at, and the api key's secret. On a worker of that harness, calls go to its
-// node on the mesh, at Mesh.
+// at, none when login found it on this machine, and the api key's secret. On
+// the harness's own machine, calls go to it on loopback, at Local; on a
+// worker of that harness, to its node on the mesh, at Mesh.
 type Client struct {
 	URL     string `json:"url"`
 	Key     string `json:"key"`
 	Harness string `json:"harness"`
+	Local   string `json:"-"`
 	Mesh    string `json:"-"`
 }
 
@@ -49,19 +51,20 @@ func Path() (string, error) {
 	return filepath.Join(h, ".mainplane", "login.json"), err
 }
 
-// Login finds the harness of an api key, checks that it takes the key, and
-// saves both. It returns the client, the login it replaced (empty for none),
+// Login finds the harness of an api key, on this machine or through the
+// pointer, checks that it takes the key, and saves both. It returns the client, the login it replaced (empty for none),
 // and the release the harness runs.
 func Login(ctx context.Context, token string) (c Client, old Client, version string, err error) {
 	h, key, err := auth.Parse(auth.Key, token)
 	if err != nil {
 		return c, old, "", err
 	}
-	u, err := pointer.Find(ctx, h, "")
-	if err != nil {
-		return c, old, "", unreachable(err)
+	c = Client{Key: key, Harness: h, Local: pointer.Local(ctx, h)}
+	if c.Local == "" {
+		if c.URL, err = pointer.Find(ctx, h, ""); err != nil {
+			return c, old, "", unreachable(err)
+		}
 	}
-	c = Client{URL: u, Key: key, Harness: h}
 	if version, err = c.Version(ctx); err != nil {
 		return c, old, "", err
 	}
@@ -74,9 +77,10 @@ func Login(ctx context.Context, token string) (c Client, old Client, version str
 	return c, old, version, c.Save()
 }
 
-// Load is what login wrote, with the harness on the mesh when the worker on
-// this machine follows the same harness key, else proved at its URL, or found
-// again through the pointer and saved.
+// Load is what login wrote, with the harness on loopback when it is the one
+// installed on this machine, on the mesh when the worker on this machine
+// follows the same harness key, else proved at its URL, or found again
+// through the pointer and saved.
 func Load(ctx context.Context) (Client, error) {
 	var c Client
 	p, err := Path()
@@ -89,6 +93,9 @@ func Load(ctx context.Context) (Client, error) {
 	}
 	if err := json.Unmarshal(b, &c); err != nil {
 		return c, err
+	}
+	if c.Local = pointer.Local(ctx, c.Harness); c.Local != "" {
+		return c, nil
 	}
 	if k, a, err := mesh.Harness(worker.Harness); err == nil && k == c.Harness {
 		c.Mesh = "http://" + net.JoinHostPort(a.String(), strconv.Itoa(worker.APIPort))
@@ -124,8 +131,8 @@ func (c Client) Save() error {
 }
 
 // unreachable says plainly that a request found no network path to its
-// host: most often this machine is offline, and the bare dial error reads
-// as a fault of Mainplane.
+// host: most often this machine is offline, or on loopback the harness is
+// stopped, and the bare dial error reads as a fault of Mainplane.
 func unreachable(err error) error {
 	var u *url.Error
 	var op *net.OpError
@@ -135,6 +142,9 @@ func unreachable(err error) error {
 	host := u.URL
 	if p, perr := url.Parse(u.URL); perr == nil {
 		host = p.Host
+		if net.ParseIP(p.Hostname()).IsLoopback() {
+			return fmt.Errorf("the harness on this machine does not answer at %s: is mainplane-server running? (%w)", host, op)
+		}
 	}
 	return fmt.Errorf("cannot reach %s: is this machine offline? (%w)", host, op)
 }
@@ -142,7 +152,7 @@ func unreachable(err error) error {
 // Do does one request; a status outside 2xx is an error in the harness's own
 // words.
 func (c Client) Do(ctx context.Context, method, path, ctype string, body io.Reader) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, method, cmp.Or(c.Mesh, c.URL)+path, body)
+	req, err := http.NewRequestWithContext(ctx, method, cmp.Or(c.Local, c.Mesh, c.URL)+path, body)
 	if err != nil {
 		return nil, err
 	}

@@ -495,8 +495,8 @@ func (c *Coordinator) update(n *node, req tailcfg.MapRequest) {
 }
 
 // delta is what n has not seen: every peer it sees whose version differs
-// from sent, peers gone from its sight since, and the relay map when the host
-// moved from host. It is nil when there is nothing, and not ok once n itself
+// from sent, peers gone from its sight since, and the relay map in the full
+// map and when the host moved from host. It is nil when there is nothing, and not ok once n itself
 // is gone, or removed since the full map, which told it so.
 func (c *Coordinator) delta(n *node, sent map[tailcfg.NodeID]uint64, host *string, full bool) (*tailcfg.MapResponse, bool) {
 	if !slices.Contains(c.st.Nodes, n) || n.Removed && !full {
@@ -509,7 +509,7 @@ func (c *Coordinator) delta(n *node, sent map[tailcfg.NodeID]uint64, host *strin
 		r.PacketFilter = tailcfg.FilterAllowAll
 		r.UserProfiles = []tailcfg.UserProfile{{ID: user, LoginName: "mainplane", DisplayName: "mainplane"}}
 	}
-	if c.host != *host {
+	if full || c.host != *host {
 		*host = c.host
 		r.DERPMap = c.relayMap()
 	}
@@ -598,18 +598,19 @@ func tail(n *node) *tailcfg.Node {
 
 // relayMap has the harness's relay first, because a WebSocket client dials
 // the first node of a region, then two public STUN servers on different IPs,
-// because telling a hard NAT needs two.
+// because telling a hard NAT needs two. Before the tunnel is up it has no
+// relay: a node with a map but no relay still reports its endpoints, so
+// nodes on loopback or a LAN find a direct path without the tunnel.
 func (c *Coordinator) relayMap() *tailcfg.DERPMap {
-	return &tailcfg.DERPMap{Regions: map[int]*tailcfg.DERPRegion{region: {
-		RegionID:   region,
-		RegionCode: "harness",
-		RegionName: "harness",
-		Nodes: []*tailcfg.DERPNode{
-			{Name: "harness", RegionID: region, HostName: c.host, DERPPort: 443, STUNPort: -1},
-			{Name: "stun-cloudflare", RegionID: region, HostName: "stun.cloudflare.com", STUNPort: 3478, STUNOnly: true},
-			{Name: "stun-google", RegionID: region, HostName: "stun.l.google.com", STUNPort: 19302, STUNOnly: true},
-		},
-	}}}
+	var nodes []*tailcfg.DERPNode
+	if c.host != "" {
+		nodes = append(nodes, &tailcfg.DERPNode{Name: "harness", RegionID: region, HostName: c.host, DERPPort: 443, STUNPort: -1})
+	}
+	nodes = append(nodes,
+		&tailcfg.DERPNode{Name: "stun-cloudflare", RegionID: region, HostName: "stun.cloudflare.com", STUNPort: 3478, STUNOnly: true},
+		&tailcfg.DERPNode{Name: "stun-google", RegionID: region, HostName: "stun.l.google.com", STUNPort: 19302, STUNOnly: true},
+	)
+	return &tailcfg.DERPMap{Regions: map[int]*tailcfg.DERPRegion{region: {RegionID: region, RegionCode: "harness", RegionName: "harness", Nodes: nodes}}}
 }
 
 // write is headscale's writeMapResponse: JSON, zstd framed when the client

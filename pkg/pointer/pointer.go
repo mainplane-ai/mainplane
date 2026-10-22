@@ -179,7 +179,8 @@ func Find(ctx context.Context, key, cached string) (string, error) {
 
 // Prove is nil when the harness at url holds key. It signs a fresh nonce with
 // the URL it knows itself by, which must be url: a host that relays another
-// harness's answer fails.
+// harness's answer fails. On loopback the harness is on this machine and
+// knows itself by its tunnel's URL, or by none before the tunnel is up.
 func Prove(ctx context.Context, key, url string) error {
 	_, err := prove(ctx, key, url)
 	return err
@@ -204,10 +205,10 @@ func prove(ctx context.Context, key, url string) (record, error) {
 	if err := get(ctx, url+"/id?nonce="+nonce, &r); err != nil {
 		return r, err
 	}
-	if r.URL != url {
+	if r.URL != url && !loopback(url) {
 		return r, fmt.Errorf("%s says it is %s", url, r.URL)
 	}
-	if err := verify(key, idMsg(url, nonce), r.Sig); err != nil {
+	if err := verify(key, idMsg(r.URL, nonce), r.Sig); err != nil {
 		return r, fmt.Errorf("%s: %w", url, err)
 	}
 	return r, nil

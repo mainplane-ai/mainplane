@@ -63,7 +63,8 @@ func main() {
 			}
 			if fresh { // the elevated install handed back; from a config file it printed itself
 				done(h)
-				network(h, true)
+				logIn(h)
+				network(h)
 			}
 			return
 		}
@@ -89,7 +90,10 @@ func main() {
 			return
 		}
 		done(h)
-		network(h, fresh)
+		if fresh {
+			logIn(h)
+		}
+		network(h)
 	case verb == "tunnel":
 		move(args)
 	case verb == auth.Key && (len(args) == 2 && args[1] == "list" || len(args) == 3 && (args[1] == "new" || args[1] == "revoke")):
@@ -159,20 +163,21 @@ func install(h handover) (handover, int) {
 	return h, 0
 }
 
+// logIn logs in the CLI the admin install placed with the default api key.
+// It finds the harness on loopback, so it needs no tunnel.
+func logIn(h handover) {
+	if out, err := exec.Command(worker.Bin, "login", auth.Token(auth.Key, h.Harness, h.Key)).CombinedOutput(); err != nil {
+		log.Fatalf("mainplane login: %v: %s", err, out)
+	}
+}
+
 // network waits, behind the spinner, until workers can find the harness
 // through its tunnel, after the lines are printed: they name no URL, and the
-// wait is the first start's. Then, with login, it logs in the CLI the admin
-// install placed with the default api key, which needs the tunnel too.
-func network(h handover, login bool) {
+// wait is the first start's.
+func network(h handover) {
 	fmt.Println()
 	stop := spin("initializing network")
-	_, err := server.Reached(h.Harness)
-	if err == nil && login {
-		if out, e := exec.Command(worker.Bin, "login", auth.Token(auth.Key, h.Harness, h.Key)).CombinedOutput(); e != nil {
-			err = fmt.Errorf("mainplane login: %w: %s", e, out)
-		}
-	}
-	if err != nil {
+	if _, err := server.Reached(h.Harness); err != nil {
 		stop("")
 		fatal(err)
 	}

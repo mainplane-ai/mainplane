@@ -5,13 +5,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-
-	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
-// Dir is the worker's constant: admin serves the sessions drive from it.
 const (
-	Dir      = worker.HarnessDir
 	unitPath = "/etc/systemd/system/mainplane-server.service"
 	logs     = "journalctl -u mainplane-server"
 )

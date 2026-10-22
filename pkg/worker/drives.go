@@ -14,13 +14,10 @@ import (
 )
 
 // Sessions is the drive of the harness's state files, read-only everywhere,
-// and HarnessDir the directory of a harness on Linux, the only harness whose
-// admin can serve it. Every path of a drive is a constant of the worker's
-// OS, so the harness names drives and never a path that root acts on.
-const (
-	Sessions   = "sessions"
-	HarnessDir = "/var/lib/mainplane-server"
-)
+// in the harness's directory; only a Linux admin serves it. Every path of a
+// drive is a constant of the worker's OS, so the harness names drives and
+// never a path that root acts on.
+const Sessions = "sessions"
 
 // A drive that waits or failed is tried again this often; a mounted one has
 // its server probed as often, so status says when it waits.
