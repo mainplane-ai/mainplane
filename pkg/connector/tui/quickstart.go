@@ -115,8 +115,10 @@ type quickstart struct {
 }
 
 func newQuickstart(a *App, c connector.Client) *quickstart {
-	q := &quickstart{s: newSession(a, newSessionList(a, c), ""), sel: -1, title: &Text{Style: term.Style{FG: a.Theme.Text, Attr: term.Bold}},
-		body: &Text{Style: a.Theme.text()}, note: &Text{Style: a.Theme.muted()}, status: &Text{}}
+	q := &quickstart{
+		s: newSession(a, newSessionList(a, c), ""), sel: -1, title: &Text{Style: term.Style{FG: a.Theme.Text, Attr: term.Bold}},
+		body: &Text{Style: a.Theme.text()}, note: &Text{Style: a.Theme.muted()}, status: &Text{},
+	}
 	q.ctx, q.cancel = context.WithCancel(context.Background())
 	q.list, q.bar = &qsRows{q: q}, &qsBar{q: q}
 	q.splash = Box(&Node{Dir: Col},
