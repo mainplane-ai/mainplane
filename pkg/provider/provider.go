@@ -35,6 +35,7 @@ var Shapes = map[string]func(c Config) Provider{
 	"google":      func(c Config) Provider { return Gemini(c.URL, c.Key) },
 	"bedrock":     func(c Config) Provider { return Bedrock(c.URL, c.Region, c.Key) },
 	"chatgpt":     func(c Config) Provider { return ChatGPT(c.URL, c.Dir) },
+	"claude-code": func(c Config) Provider { return ClaudeCode(c.Dir) },
 }
 
 // Config is a provider as the harness config has it. Dir is the harness's
@@ -47,7 +48,8 @@ type Config struct {
 // shows the user prompts, reads what the user pastes, and returns nil once
 // what the provider needs is in dir.
 var Logins = map[string]func(ctx context.Context, dir string, show func(Prompt), paste <-chan string) error{
-	"chatgpt": chatgptLogin,
+	"chatgpt":     chatgptLogin,
+	"claude-code": claudeLogin,
 }
 
 // Prompt is what a login asks of the user: open URL, enter Code there if one
@@ -80,6 +82,7 @@ var normalStops = map[string][]string{
 	"openai":      {"completed"},
 	"openai-chat": {"stop", ""},
 	"google":      {"STOP"},
+	"claude-code": {"end_turn", "stop_sequence"},
 }
 
 // Normal reports whether a step ended because the model ended its turn.
@@ -143,6 +146,9 @@ type Provider struct {
 	Endpoint func(url, model string) string            // nil means URL as is
 	Token    func(ctx context.Context) (string, error) // the key of each request, for a login's key that expires; nil means Key
 	Session  string                                    // the header that carries Request.Key, where the vendor routes its cache on a header
+	// Run, if set, makes the step instead of an HTTP request: claude-code's
+	// process. It retries what it can itself.
+	Run func(ctx context.Context, body []byte, emit func(statefile.Record)) (statefile.Header, error)
 }
 
 // Retry numbers are opencode's. A failure before the first block is out is
@@ -208,6 +214,16 @@ func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Rec
 	body, cache, err := p.Envelope.Compile(req)
 	if err != nil {
 		return statefile.Header{}, err
+	}
+	if p.Run != nil {
+		sent := time.Now().UTC().Truncate(time.Millisecond)
+		h, err := p.Run(ctx, body, emit)
+		if err != nil {
+			return statefile.Header{}, err
+		}
+		sum := sha256.Sum256(body)
+		h.Provider, h.Model, h.Request, h.Cache, h.Sent = p.Envelope.Name(), req.Model, "sha256:"+hex.EncodeToString(sum[:]), cache, sent
+		return h, nil
 	}
 	url := p.URL
 	if p.Endpoint != nil {

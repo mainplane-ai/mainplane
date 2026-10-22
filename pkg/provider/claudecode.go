@@ -1,0 +1,573 @@
+package provider
+
+import (
+	"archive/tar"
+	"bufio"
+	"bytes"
+	"cmp"
+	"compress/gzip"
+	"context"
+	"crypto/sha512"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/mainplane-ai/mainplane/pkg/statefile"
+)
+
+// The claude-code shape runs the user's Claude subscription through the
+// unmodified claude binary, the one way Anthropic allows: one claude -p per
+// step, which makes one request with its own login. The harness keeps the
+// loop. The context goes in as stream-json frames, the tools as an MCP server
+// that runs nothing, and a PreToolUse hook stops claude at the first tool
+// call, so the call comes back to the harness unrun. The harness never sees
+// the login: claude keeps it in the provider's dir, its CLAUDE_CONFIG_DIR.
+//
+// The request hash covers what the harness hands claude (model, effort,
+// system prompt, tools, frames), not the wire bytes: claude adds its own
+// system blocks and reminders, places its own cache marks, and names the
+// tools mcp__mainplane__<name>.
+
+// claudeVersion is the release the frame replay and the hook stop were tested
+// on. Neither is a documented contract, so a new version is tested before the
+// pin moves. The integrity values are npm's dist.integrity for
+// @anthropic-ai/claude-code-<platform> at this version.
+const claudeVersion = "2.1.307"
+
+var claudeIntegrity = map[string]string{
+	"darwin-arm64": "sha512-bBNAygs3y8j4jkwmBoq9PyYNHaYj4KsJ5Ca2dtj8CGeUAiFsTCOzzwNMbXHhMAhAkg7m0jXUo2S1YDQmYh1gUw==",
+	"darwin-x64":   "sha512-sq02aE963Lywd7Wh2JPB7S/1pqlZ4c2dNJqKaFQR7p6BOIppsRoSbnUjFdfIQnTj7VvtUFRlKfJwLgaSS7KC8A==",
+	"linux-arm64":  "sha512-llr4hI7rHHdCWeCgtl/QYIMIA/mpxcEauCqPQfyp83xUPvbSHDpccpglbrlChmgO52Qw8bQsAk27xylBwS7hHw==",
+	"linux-x64":    "sha512-5KroAXOTbVYtrV86imf8ktsfVY2UgUrC6ws/FMblu+ny14kjFLxDBi2nHweJtUwSajA8yiLfOlNkwaKNbici8A==",
+	"win32-arm64":  "sha512-lUNn2RMZQdbtiCkZbgieeTv71r85VTBwZ5f8jXMX5f9D9Iyhi4/k91Rtb7Pijtyy7EFDmvb4q8j4S1U3kxyjCQ==",
+	"win32-x64":    "sha512-vCDHtsyHXelsub8+o6zvuvLiwfyuLqVrr0waO2mMGRsKaVpDVAfquMJLs5Odqx9W0HI6I6Cl3EeGBcg3GWNMiw==",
+}
+
+// claude names an MCP tool mcp__<server>__<tool>.
+const claudePrefix = "mcp__mainplane__"
+
+// claudeEnv keeps the step to one request with nothing of the machine's in
+// it: no update, telemetry or memory, no CLAUDE.md, no compaction (an extra
+// request; the harness owns the context limit), no token budget reminder. A
+// description past claude's default cut would change our tools.
+var claudeEnv = []string{
+	"DISABLE_AUTOUPDATER=1",
+	"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+	"CLAUDE_CODE_DISABLE_CLAUDE_MDS=1",
+	"CLAUDE_CODE_DISABLE_AUTO_MEMORY=1",
+	"DISABLE_AUTO_COMPACT=1",
+	"DISABLE_COMPACT=1",
+	"CLAUDE_CODE_TOTAL_TOKENS_REMINDER=off",
+	"CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH=100000",
+}
+
+// stopHook is the PreToolUse answer: deny the call and end claude's turn, so
+// no tool runs and no second request goes out.
+const stopHook = `{"continue":false,"stopReason":"mainplane runs tools","hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"mainplane runs tools"}}`
+
+func ClaudeCode(dir string) Provider {
+	return Provider{
+		Envelope: claudeCode{},
+		Run: func(ctx context.Context, body []byte, emit func(statefile.Record)) (statefile.Header, error) {
+			return runClaude(ctx, dir, body, emit)
+		},
+	}
+}
+
+type claudeCode struct{}
+
+func (claudeCode) Name() string { return "claude-code" }
+
+func (claudeCode) Accepts(typ string) bool { return slices.Contains(images, typ) }
+
+// Owns all but effort: claude builds the request and takes no other field.
+func (claudeCode) Owns(field string) bool { return field != "effort" }
+
+type ccReq struct {
+	Model  string    `json:"model"`
+	Effort string    `json:"effort,omitempty"`
+	System string    `json:"system"`
+	Tools  []mcpTool `json:"tools"`
+	Frames []ccFrame `json:"frames"`
+}
+
+type mcpTool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"inputSchema"`
+}
+
+// ccFrame is one stream-json input line. A user frame with shouldQuery false
+// joins the conversation without a request; only the last one queries.
+type ccFrame struct {
+	Type        string  `json:"type"`
+	Message     anthMsg `json:"message"`
+	Parent      *string `json:"parent_tool_use_id"`
+	ShouldQuery *bool   `json:"shouldQuery,omitempty"`
+}
+
+func (e claudeCode) Compile(req Request) ([]byte, json.RawMessage, error) {
+	system, rest := Split(req.Context)
+	body := ccReq{Model: req.Model, System: systemText(system), Tools: []mcpTool{}}
+	if v, ok := req.Params["effort"]; ok {
+		if err := json.Unmarshal(v, &body.Effort); err != nil {
+			return nil, nil, fmt.Errorf("claude-code: effort is a string: %s", v)
+		}
+	}
+	for _, t := range req.Tools {
+		body.Tools = append(body.Tools, mcpTool{Name: t.Name, Description: t.Description, InputSchema: t.Schema})
+	}
+	turns := Turns(rest)
+	no := false
+	for i, t := range turns {
+		if t.Assistant {
+			content, err := anthAssistant(e.Name(), t.Records)
+			if err != nil {
+				return nil, nil, err
+			}
+			for j, c := range content {
+				if b, ok := c.(anthBlock); ok && b.Type == "tool_use" {
+					b.Name = claudePrefix + b.Name
+					content[j] = b
+				}
+			}
+			body.Frames = append(body.Frames, ccFrame{Type: "assistant", Message: anthMsg{Role: "assistant", Content: content}})
+			continue
+		}
+		f := ccFrame{Type: "user", Message: anthMsg{Role: "user", Content: anthUser(t.Records)}}
+		if i < len(turns)-1 {
+			f.ShouldQuery = &no
+		}
+		body.Frames = append(body.Frames, f)
+	}
+	var marks []string
+	if len(req.Context) > 0 {
+		marks = append(marks, req.Context[len(req.Context)-1].ID)
+	}
+	cache, err := cacheHeader(0, marks...)
+	if err != nil {
+		return nil, nil, err
+	}
+	b, err := marshal(body)
+	return b, cache, err
+}
+
+// runClaude is one step: claude installed, the inert MCP server and the hook
+// on a loopback port, the frames replayed, the stream read to its result.
+func runClaude(ctx context.Context, dir string, body []byte, emit func(statefile.Record)) (statefile.Header, error) {
+	var req ccReq
+	if err := json.Unmarshal(body, &req); err != nil {
+		return statefile.Header{}, err
+	}
+	bin, err := installClaude(ctx, dir)
+	if err != nil {
+		return statefile.Header{}, err
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return statefile.Header{}, err
+	}
+	defer func() { _ = ln.Close() }()
+	go func() { _ = http.Serve(ln, inert(req.Tools)) }()
+	base := "http://" + ln.Addr().String()
+	// claude puts its working directory in the request, so it stays the same
+	// across steps for the cache.
+	work := filepath.Join(dir, "work")
+	if err := os.MkdirAll(work, 0o700); err != nil {
+		return statefile.Header{}, err
+	}
+	sys, err := os.CreateTemp(dir, "system-*.txt")
+	if err != nil {
+		return statefile.Header{}, err
+	}
+	defer func() { _ = os.Remove(sys.Name()) }()
+	_, err = sys.WriteString(req.System)
+	if cerr := sys.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return statefile.Header{}, err
+	}
+	mcp := fmt.Sprintf(`{"mcpServers":{"mainplane":{"type":"http","url":%q}}}`, base+"/mcp")
+	settings := fmt.Sprintf(`{"hooks":{"PreToolUse":[{"matcher":"%s.*","hooks":[{"type":"http","url":%q,"onFailure":"block"}]}]}}`, claudePrefix, base+"/hook")
+	args := []string{"-p", "--model", req.Model, "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+		"--system-prompt-file", sys.Name(), "--tools", "", "--strict-mcp-config", "--mcp-config", mcp, "--settings", settings,
+		"--allowedTools", claudePrefix + "*", "--setting-sources", "", "--disable-slash-commands", "--no-session-persistence", "--max-turns", "1"}
+	if req.Effort != "" {
+		args = append(args, "--effort", req.Effort)
+	}
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir, cmd.Env, cmd.WaitDelay = work, claudeEnviron(dir), 5*time.Second
+	var stderr tail
+	cmd.Stderr = &stderr
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return statefile.Header{}, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return statefile.Header{}, err
+	}
+	if err := cmd.Start(); err != nil {
+		return statefile.Header{}, err
+	}
+	timer := time.AfterFunc(idle, func() { cancel(fmt.Errorf("claude-code: no output for %s", idle)) })
+	defer timer.Stop()
+	out := bufio.NewReader(idleReader{stdout, timer})
+	h, err := replay(stdin, out, req.Frames, emit)
+	werr := cmd.Wait()
+	if cause := context.Cause(ctx); cause != nil {
+		return statefile.Header{}, cause
+	}
+	if err == nil && werr != nil {
+		err = werr
+	}
+	if err != nil {
+		return statefile.Header{}, fmt.Errorf("%w; claude stderr: %s", err, stderr.b.Bytes())
+	}
+	return h, nil
+}
+
+// replay sends the frames one by one, waiting for claude to take each
+// shouldQuery false frame before the next, or they merge into the query;
+// then it reads the step.
+func replay(stdin io.WriteCloser, out *bufio.Reader, frames []ccFrame, emit func(statefile.Record)) (statefile.Header, error) {
+	for _, f := range frames {
+		b, err := marshal(f)
+		if err != nil {
+			return statefile.Header{}, err
+		}
+		if _, err := stdin.Write(append(b, '\n')); err != nil {
+			return statefile.Header{}, err
+		}
+		if f.ShouldQuery == nil {
+			continue
+		}
+		for {
+			line, err := out.ReadBytes('\n')
+			if err != nil {
+				return statefile.Header{}, fmt.Errorf("claude-code: replay: %w", err)
+			}
+			var e ccEvent
+			if json.Unmarshal(line, &e) == nil && e.Type == "result" {
+				if e.IsError {
+					return statefile.Header{}, fmt.Errorf("claude-code: replay: %s", line)
+				}
+				break
+			}
+		}
+	}
+	if err := stdin.Close(); err != nil {
+		return statefile.Header{}, err
+	}
+	return claudeCode{}.Stream(out, emit)
+}
+
+type ccEvent struct {
+	Type    string          `json:"type"`
+	Subtype string          `json:"subtype"`
+	IsError bool            `json:"is_error"`
+	Result  string          `json:"result"`
+	Stop    string          `json:"stop_reason"`
+	Usage   anthUsage       `json:"usage"`
+	Message json.RawMessage `json:"message"`
+}
+
+// Stream reads claude's stream-json: an assistant event per finished block,
+// then the result with the request's usage. Blocks are kept as claude gave
+// them.
+func (claudeCode) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
+	r := bufio.NewReader(resp)
+	for {
+		line, err := r.ReadBytes('\n')
+		if len(bytes.TrimSpace(line)) == 0 {
+			if err != nil {
+				return statefile.Header{}, fmt.Errorf("claude-code: stream ended before its result: %w", err)
+			}
+			continue
+		}
+		var e ccEvent
+		if err := json.Unmarshal(line, &e); err != nil {
+			return statefile.Header{}, fmt.Errorf("claude-code: %w: %.200s", err, line)
+		}
+		switch e.Type {
+		case "assistant":
+			var m struct {
+				Content []json.RawMessage `json:"content"`
+			}
+			if err := json.Unmarshal(e.Message, &m); err != nil {
+				return statefile.Header{}, fmt.Errorf("claude-code: %w: %.200s", err, line)
+			}
+			for _, raw := range m.Content {
+				rec, ok, err := claudeBlock(raw)
+				if err != nil {
+					return statefile.Header{}, err
+				}
+				if ok {
+					emit(rec)
+				}
+			}
+		case "result":
+			if e.IsError {
+				return statefile.Header{}, fmt.Errorf("claude-code: %s: %s", e.Subtype, e.Result)
+			}
+			var usage statefile.Usage
+			e.Usage.apply(&usage)
+			return statefile.Header{Usage: &usage, Stop: e.Stop}, nil
+		}
+	}
+}
+
+// claudeBlock is the record for one content block.
+func claudeBlock(raw json.RawMessage) (statefile.Record, bool, error) {
+	var b struct {
+		Type  string          `json:"type"`
+		Text  string          `json:"text"`
+		ID    string          `json:"id"`
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(raw, &b); err != nil {
+		return statefile.Record{}, false, err
+	}
+	switch b.Type {
+	case "text":
+		if b.Text == "" {
+			return statefile.Record{}, false, nil
+		}
+		return statefile.Record{Header: statefile.Header{Kind: statefile.Text, Type: "text/plain"}, Body: []byte(b.Text)}, true, nil
+	case "thinking", "redacted_thinking":
+		return statefile.Record{Header: statefile.Header{Kind: statefile.Thinking, Type: "application/json", Provider: "claude-code"}, Body: raw}, true, nil
+	case "tool_use":
+		name, ok := strings.CutPrefix(b.Name, claudePrefix)
+		if !ok {
+			return statefile.Record{}, false, fmt.Errorf("claude-code: claude called its own tool %q", b.Name)
+		}
+		r, err := callRecord(b.ID, name, string(b.Input))
+		return r, err == nil, err
+	}
+	return statefile.Record{}, false, fmt.Errorf("claude-code: unknown block %.200s", raw)
+}
+
+// inert serves the tools as an MCP server (streamable HTTP, JSON answers)
+// whose calls never run, and the PreToolUse hook that keeps claude from
+// calling it.
+func inert(tools []mcpTool) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /hook", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, stopHook)
+	})
+	mux.HandleFunc("POST /mcp", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params struct {
+				ProtocolVersion string `json:"protocolVersion"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if in.ID == nil { // a notification
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		var result any
+		switch in.Method {
+		case "initialize":
+			result = map[string]any{"protocolVersion": in.Params.ProtocolVersion, "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]string{"name": "mainplane", "version": claudeVersion}}
+		case "tools/list":
+			result = map[string]any{"tools": tools}
+		case "tools/call":
+			result = map[string]any{"isError": true, "content": []map[string]string{{"type": "text", "text": "mainplane runs tools"}}}
+		default:
+			result = map[string]any{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": in.ID, "result": result})
+	})
+	return mux
+}
+
+// claudeEnviron is the harness's environment without any Anthropic or Claude
+// setting, which could swap the login for an API key or another config, plus
+// the provider's config dir and claudeEnv.
+func claudeEnviron(dir string) []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "ANTHROPIC_") && !strings.HasPrefix(kv, "CLAUDE_") {
+			env = append(env, kv)
+		}
+	}
+	return append(append(env, "CLAUDE_CONFIG_DIR="+dir), claudeEnv...)
+}
+
+// tail keeps the last bytes claude wrote to stderr for the error.
+type tail struct{ b bytes.Buffer }
+
+func (t *tail) Write(p []byte) (int, error) {
+	t.b.Write(p)
+	if over := t.b.Len() - 4096; over > 0 {
+		t.b.Next(over)
+	}
+	return len(p), nil
+}
+
+var installMu sync.Mutex
+
+// installClaude puts the pinned claude in dir the first time a step needs
+// it, from npm, checked against its integrity, and returns its path.
+func installClaude(ctx context.Context, dir string) (string, error) {
+	npm := func(s string) string { return cmp.Or(map[string]string{"windows": "win32", "amd64": "x64"}[s], s) }
+	platform := npm(runtime.GOOS) + "-" + npm(runtime.GOARCH)
+	want, ok := claudeIntegrity[platform]
+	if !ok {
+		return "", fmt.Errorf("claude-code: Claude Code has no build for %s", platform)
+	}
+	exe := "claude"
+	if runtime.GOOS == "windows" {
+		exe += ".exe"
+	}
+	bin := filepath.Join(dir, "claude-"+claudeVersion, exe)
+	installMu.Lock()
+	defer installMu.Unlock()
+	if _, err := os.Stat(bin); err == nil {
+		return bin, nil
+	}
+	url := fmt.Sprintf("https://registry.npmjs.org/@anthropic-ai/claude-code-%s/-/claude-code-%s-%s.tgz", platform, platform, claudeVersion)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("claude-code: %s: %s", url, resp.Status)
+	}
+	tgz, err := os.CreateTemp(dir, "claude-*.tgz")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tgz.Close(); _ = os.Remove(tgz.Name()) }()
+	sum := sha512.New()
+	if _, err := io.Copy(io.MultiWriter(tgz, sum), resp.Body); err != nil {
+		return "", err
+	}
+	if got := "sha512-" + base64.StdEncoding.EncodeToString(sum.Sum(nil)); got != want {
+		return "", fmt.Errorf("claude-code: %s has integrity %s, want %s", url, got, want)
+	}
+	if _, err := tgz.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	zr, err := gzip.NewReader(tgz)
+	if err != nil {
+		return "", err
+	}
+	tr := tar.NewReader(zr)
+	for {
+		h, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return "", fmt.Errorf("claude-code: %s has no package/%s", url, exe)
+		}
+		if err != nil {
+			return "", err
+		}
+		if h.Name == "package/"+exe {
+			break
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(bin), 0o700); err != nil {
+		return "", err
+	}
+	part := bin + ".part"
+	f, err := os.OpenFile(part, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o700)
+	if err != nil {
+		return "", err
+	}
+	_, err = io.Copy(f, tr)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return "", err
+	}
+	return bin, os.Rename(part, bin)
+}
+
+// claudeURL finds the sign-in URL in claude auth login's output.
+var claudeURL = regexp.MustCompile(`https://\S+/oauth/authorize\?\S+`)
+
+// claudeLogin is Anthropic's own sign-in: claude auth login, with the
+// provider's dir as its config dir, prints a URL; the person signs in on
+// claude.ai and pastes the code it shows, which goes to claude as typed.
+// claude checks it and keeps the login in dir; the harness sees only the
+// code, which works once.
+func claudeLogin(ctx context.Context, dir string, show func(Prompt), paste <-chan string) error {
+	bin, err := installClaude(ctx, dir)
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, bin, "auth", "login", "--claudeai")
+	cmd.Dir, cmd.Env, cmd.WaitDelay = dir, claudeEnviron(dir), 5*time.Second
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	pr, pw := io.Pipe()
+	var out tail
+	cmd.Stdout, cmd.Stderr = io.MultiWriter(&out, pw), &out
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() { err := cmd.Wait(); _ = pw.CloseWithError(io.EOF); done <- err }()
+	found := make(chan string, 1)
+	go func() {
+		lines := bufio.NewScanner(pr)
+		for lines.Scan() {
+			if u := claudeURL.FindString(lines.Text()); u != "" {
+				found <- u
+				break
+			}
+		}
+		_, _ = io.Copy(io.Discard, pr)
+	}()
+	select {
+	case u := <-found:
+		show(Prompt{Text: "Open the URL and sign in with your Claude account. Then paste the code the page shows.", URL: u, Paste: true})
+	case err := <-done:
+		return fmt.Errorf("claude auth login ended before its URL: %v: %s", err, out.b.Bytes())
+	}
+	select {
+	case code := <-paste:
+		if _, err := io.WriteString(stdin, strings.TrimSpace(code)+"\n"); err != nil {
+			return err
+		}
+	case err := <-done:
+		return fmt.Errorf("claude auth login ended before the code: %v: %s", err, out.b.Bytes())
+	}
+	if err := <-done; err != nil {
+		return fmt.Errorf("claude auth login: %v: %s", err, out.b.Bytes())
+	}
+	return nil
+}
