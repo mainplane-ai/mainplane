@@ -2,10 +2,12 @@ package mesh
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/netip"
 	"os/exec"
+	"strings"
 )
 
 const (
@@ -65,12 +67,19 @@ func keep(tun string, a netip.Prefix) error {
 	if err := run("ip", "-6", "route", "replace", p, "dev", tun, "table", table); err != nil {
 		return err
 	}
-	out, err := exec.Command("ip", "-6", "rule", "list", "to", p, "table", table, "priority", priority).Output()
-	if err != nil || len(out) > 0 {
+	args := []string{"-6", "rule", "list", "to", p, "table", table, "priority", priority}
+	out, err := exec.Command("ip", args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ip %s: %w: %s", strings.Join(args, " "), err, out)
+	}
+	if len(out) > 0 {
+		return nil
+	}
+	if err := run("ip", "-6", "rule", "add", "to", p, "table", table, "priority", priority); err != nil {
 		return err
 	}
 	log.Printf("mesh: the rule to %s was gone: added again", p)
-	return run("ip", "-6", "rule", "add", "to", p, "table", table, "priority", priority)
+	return nil
 }
 
 func del(tun string, a netip.Prefix) error {
