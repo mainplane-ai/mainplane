@@ -369,6 +369,8 @@ func usage() {
   providers                          GET  /providers: each one's name, shape and url
   key        <provider> <key>        PUT  /providers/{provider}: the harness saves the key, with the shape and url
                                      the catalog gives the provider, in its config, and serves it at once
+  signin     <provider>              POST /providers/{provider}/login: sign in where a provider takes no key, such as
+                                     chatgpt; prints the URL to open, reads what to paste back, waits for the end
 `)
 	os.Exit(2)
 }

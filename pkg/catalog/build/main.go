@@ -122,7 +122,7 @@ func preset(src source, dev map[string]devProvider, s sourcePreset) (catalog.Pre
 	if !ok {
 		return catalog.Preset{}, fmt.Errorf("%s/%s: not in models.dev %s", s.Provider, s.Model, p.ModelsDev)
 	}
-	envelope := provider.Shapes[p.Shape]("", "", "").Envelope
+	envelope := provider.Shapes[p.Shape](provider.Config{}).Envelope
 	pr := catalog.Preset{Name: m.Name, Provider: s.Provider, Model: s.Model, Tools: s.Tools, ContextLimit: min(contextLimit, m.Limit.Context), Input: []string{}, Cost: m.Cost}
 	if pr.Tools == "" {
 		pr.Tools = "default"

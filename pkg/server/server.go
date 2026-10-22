@@ -80,10 +80,14 @@ func Key(dir string) (ed25519.PrivateKey, error) {
 // are the names connectors know; its shape picks the code.
 type Provider struct {
 	Shape  string `json:"shape"`
-	Key    string `json:"key"`
+	Key    string `json:"key,omitempty"`    // none for a shape that logs in
 	URL    string `json:"url,omitempty"`    // the base url its SDK takes; none is the vendor's own
 	Region string `json:"region,omitempty"` // bedrock
 }
+
+// providerDir is the directory of provider name's own state, such as a
+// login's tokens, in the harness's dir.
+func providerDir(dir, name string) string { return filepath.Join(dir, "providers", name) }
 
 func Load(path string) (Config, error) {
 	var c Config
@@ -105,7 +109,9 @@ func (c Config) named() {
 	}
 }
 
-func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
+// providers builds the config's providers. Each has a directory of its own
+// under dir, where a login keeps what it needs.
+func providers(dir string, cfg map[string]Provider) (map[string]provider.Provider, error) {
 	out := map[string]provider.Provider{}
 	for name, p := range cfg {
 		build, ok := provider.Shapes[p.Shape]
@@ -115,7 +121,7 @@ func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
 		if p.Shape == "bedrock" && os.ExpandEnv(p.Region) == "" && os.ExpandEnv(p.URL) == "" {
 			return nil, fmt.Errorf("provider %s: a bedrock provider needs region or url", name)
 		}
-		out[name] = build(os.ExpandEnv(p.Key), os.ExpandEnv(p.URL), os.ExpandEnv(p.Region))
+		out[name] = build(provider.Config{Key: os.ExpandEnv(p.Key), URL: os.ExpandEnv(p.URL), Region: os.ExpandEnv(p.Region), Dir: providerDir(dir, name)})
 	}
 	return out, nil
 }
@@ -137,11 +143,11 @@ func Harness(ctx context.Context, path string) error {
 	if host, _, _ := net.SplitHostPort(c.HTTP); !net.ParseIP(host).IsLoopback() {
 		return fmt.Errorf("http %q: the harness listens on loopback only, such as 127.0.0.1:8080; the tunnel is the one way in", c.HTTP)
 	}
-	ps, err := providers(c.Providers)
+	dir := filepath.Dir(path)
+	ps, err := providers(dir, c.Providers)
 	if err != nil {
 		return err
 	}
-	dir := filepath.Dir(path)
 	sessions := filepath.Join(dir, "sessions")
 	if err := os.MkdirAll(sessions, 0o755); err != nil {
 		return err
@@ -192,7 +198,7 @@ func Harness(ctx context.Context, path string) error {
 	setDrives(coord, pool, c.Drives)
 	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove}
 	go watch(ctx, path, func(c Config) error {
-		ps, err := providers(c.Providers)
+		ps, err := providers(dir, c.Providers)
 		if err == nil {
 			h.SetProviders(ps)
 			coord.Link(c.Links)
@@ -220,6 +226,10 @@ func Harness(ctx context.Context, path string) error {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	logins := &logins{ctx: ctx, path: path, serve: h.SetProviders, m: map[string]*login{}}
+	routes.HandleFunc("POST /providers/{name}/login", logins.start)
+	routes.HandleFunc("POST /providers/{name}/login/code", logins.paste)
+	routes.HandleFunc("GET /providers/{name}/login", logins.get)
 	api := store.Bearer(limit, routes)
 	mux.Handle("/", api)
 	srv := &http.Server{Addr: c.HTTP, Handler: mux}
@@ -290,7 +300,7 @@ var keyMu sync.Mutex
 // path: the fields it sets replace the ones there, so a key alone renews the
 // key of a provider the config has. It serves the providers it makes at
 // once: the README runs mainplane new right after mainplane key, sooner than
-// the watch rereads. The lock holds the write and serve in one order.
+// the watch rereads.
 func setProvider(path, name string, body io.Reader, serve func(map[string]provider.Provider)) error {
 	b, err := io.ReadAll(io.LimitReader(body, maxKey+1))
 	if err != nil {
@@ -304,6 +314,13 @@ func setProvider(path, name string, body io.Reader, serve func(map[string]provid
 	if in.Key == "" || strings.ContainsAny(in.Key, "\r\n") {
 		return errors.New("a key is one line")
 	}
+	return saveProvider(path, name, in, serve)
+}
+
+// saveProvider writes in over the provider name in the config at path, each
+// field in sets, and serves the providers. The lock holds the write and serve
+// in one order.
+func saveProvider(path, name string, in Provider, serve func(map[string]provider.Provider)) error {
 	keyMu.Lock()
 	defer keyMu.Unlock()
 	c, err := Load(path)
@@ -314,14 +331,13 @@ func setProvider(path, name string, body io.Reader, serve func(map[string]provid
 		c.Providers = map[string]Provider{}
 	}
 	p := c.Providers[name]
-	p.Key = in.Key
-	for _, f := range [][2]*string{{&p.Shape, &in.Shape}, {&p.URL, &in.URL}, {&p.Region, &in.Region}} {
+	for _, f := range [][2]*string{{&p.Shape, &in.Shape}, {&p.Key, &in.Key}, {&p.URL, &in.URL}, {&p.Region, &in.Region}} {
 		if *f[1] != "" {
 			*f[0] = *f[1]
 		}
 	}
 	c.Providers[name] = p
-	ps, err := providers(c.Providers)
+	ps, err := providers(filepath.Dir(path), c.Providers)
 	if err != nil {
 		return err
 	}
