@@ -722,7 +722,8 @@ func (s *session) providers(a *App) {
 }
 
 // signin runs the login of a provider that takes no key: it shows the
-// harness's prompt, asks for the paste the prompt wants, and says when the
+// harness's prompt with its URL on the clipboard, since a URL is longer than
+// the status line, asks for the paste the prompt wants, and says when the
 // login ends.
 func (s *session) signin(a *App, id string, p catalog.Provider) {
 	a.Go(func() {
@@ -734,9 +735,10 @@ func (s *session) signin(a *App, id string, p catalog.Provider) {
 				a.SayError(err)
 				return
 			}
-			msg := st.Text + "\n" + st.URL
+			a.T.Copy(st.URL)
+			msg := "The URL is on the clipboard. " + st.Text
 			if st.Code != "" {
-				msg += "\ncode: " + st.Code
+				msg += " Code: " + st.Code
 			}
 			a.Say(msg)
 			if !st.Paste {
