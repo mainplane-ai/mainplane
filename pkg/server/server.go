@@ -238,7 +238,8 @@ func Harness(ctx context.Context, path string) error {
 	routes.HandleFunc("POST /providers/{name}/login", logins.start)
 	routes.HandleFunc("POST /providers/{name}/login/code", logins.paste)
 	routes.HandleFunc("GET /providers/{name}/login", logins.get)
-	(&api{dir: dir, path: path, k: k, at: func() string { return at.Load().(string) }, coord: coord, pool: pool}).handle(routes)
+	a := &api{dir: dir, path: path, k: k, at: func() string { return at.Load().(string) }, coord: coord, pool: pool}
+	a.handle(routes)
 	api := store.Bearer(limit, routes)
 	mux.Handle("/", api)
 	srv := &http.Server{Addr: c.HTTP, Handler: mux}
@@ -277,6 +278,7 @@ func Harness(ctx context.Context, path string) error {
 		log.Printf("harness: reached at %s", url)
 		_ = os.Remove(filepath.Join(dir, tunnelFailed)) // from a run before; GET / shows it only until this one is up
 		at.Store(url)
+		go a.prove(ctx, url)
 		coord.Relay(url)
 		select {
 		case <-urls:

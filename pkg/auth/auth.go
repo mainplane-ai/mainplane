@@ -57,6 +57,10 @@ type Table map[string][]Entry
 // entry counts at once.
 type Store struct{ Path string }
 
+// writes holds each read and rewrite of a table whole, so two at once in
+// this process, such as two POST /keys, never drop an entry.
+var writes sync.Mutex
+
 func (s Store) Load() (Table, error) {
 	t := Table{}
 	b, err := os.ReadFile(s.Path)
@@ -82,6 +86,8 @@ func (s Store) save(t Table) error {
 
 // Issue adds an entry and returns its secret: the one time it is in the clear.
 func (s Store) Issue(kind, name string) (string, error) {
+	writes.Lock()
+	defer writes.Unlock()
 	t, err := s.Load()
 	if err != nil {
 		return "", err
@@ -96,6 +102,8 @@ func (s Store) Issue(kind, name string) (string, error) {
 
 // Add makes secret an entry of kind named name, beside any before it.
 func (s Store) Add(kind, name, secret string) error {
+	writes.Lock()
+	defer writes.Unlock()
 	t, err := s.Load()
 	if err != nil {
 		return err
@@ -105,6 +113,8 @@ func (s Store) Add(kind, name, secret string) error {
 }
 
 func (s Store) Revoke(kind, name string) error {
+	writes.Lock()
+	defer writes.Unlock()
 	t, err := s.Load()
 	if err != nil {
 		return err

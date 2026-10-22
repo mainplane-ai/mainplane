@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/coordinator"
@@ -23,7 +26,11 @@ import (
 // this.
 const maxDrive = 64 << 10
 
-// Network states in GET /: the harness has no URL yet, or has one.
+// The pointer has the URL a moment after cloudflared starts, or a minute
+// after a failed publish; a second between tries shows ready soon after.
+const proveRetry = time.Second
+
+// Network states in GET /: no worker can find the harness yet, or one can.
 const (
 	starting = "starting"
 	ready    = "ready"
@@ -32,8 +39,9 @@ const (
 // api is the routes of the harness's machine and config, beside the
 // sessions' in harness.Handler:
 //
-//	GET    /               -> {"version","network"}: network is "starting", "ready", or
-//	                          why the tunnel last stopped the harness while it starts again
+//	GET    /               -> {"version","network"}: network is "ready" once a worker can
+//	                          find the harness at its URL, else why the tunnel last stopped
+//	                          the harness while it starts again, else "starting"
 //	GET    /join           -> {"join"}: the network name and device code, as a worker
 //	                          installs with them
 //	POST   /keys           {"name"} -> {"name","key"}: a new api key; a name in use is 409
@@ -45,6 +53,7 @@ type api struct {
 	dir, path string
 	k         ed25519.PrivateKey
 	at        func() string // the harness's URL, or none yet
+	reached   atomic.Value  // the URL a worker last found the harness at
 	coord     *coordinator.Coordinator
 	pool      *harness.Pool
 }
@@ -60,12 +69,29 @@ func (a *api) handle(mux *http.ServeMux) {
 
 func (a *api) root(w http.ResponseWriter, r *http.Request) {
 	network := starting
-	if a.at() != "" {
+	if u, _ := a.reached.Load().(string); u != "" && u == a.at() {
 		network = ready
 	} else if b, err := os.ReadFile(filepath.Join(a.dir, tunnelFailed)); err == nil {
 		network = string(b)
 	}
 	reply(w, map[string]string{"version": version.V, "network": network})
+}
+
+// prove marks url reached once a worker can find the harness there, as
+// joining does: the pointer names url and url proves the harness key. It
+// gives up when the harness moves to another URL.
+func (a *api) prove(ctx context.Context, url string) {
+	for a.at() == url {
+		if u, err := pointer.Find(ctx, pointer.Encode(a.k), ""); err == nil && u == url {
+			a.reached.Store(url)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(proveRetry):
+		}
+	}
 }
 
 func (a *api) join(w http.ResponseWriter, r *http.Request) {
