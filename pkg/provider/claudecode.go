@@ -328,9 +328,11 @@ func runClaude(ctx context.Context, dir string, body []byte, emit func(statefile
 	}
 	mcp := fmt.Sprintf(`{"mcpServers":{"mainplane":{"type":"http","url":%q}}}`, base+"/mcp")
 	settings := fmt.Sprintf(`{"hooks":{"PreToolUse":[{"matcher":"%s.*","hooks":[{"type":"http","url":%q,"onFailure":"block"}]}]}}`, claudePrefix, base+"/hook")
-	args := []string{"-p", "--model", req.Model, "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+	args := []string{
+		"-p", "--model", req.Model, "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
 		"--system-prompt-file", sys.Name(), "--tools", "", "--strict-mcp-config", "--mcp-config", mcp, "--settings", settings,
-		"--allowedTools", claudePrefix + "*", "--setting-sources", "", "--disable-slash-commands", "--max-turns", "1"}
+		"--allowedTools", claudePrefix + "*", "--setting-sources", "", "--disable-slash-commands", "--max-turns", "1",
+	}
 	if resumed.Session != "" {
 		args = append(args, "--resume", resumed.Session, "--resume-session-at", resumed.UUID, "--fork-session")
 	}
@@ -359,8 +361,11 @@ func runClaude(ctx context.Context, dir string, body []byte, emit func(statefile
 	out := bufio.NewReader(idleReader{stdout, timer})
 	var recs []statefile.Record
 	h, end, err := replay(stdin, out, frames, func(r statefile.Record) { recs = append(recs, r); emit(r) })
+	if err != nil {
+		cancel(err)
+	}
 	werr := cmd.Wait()
-	if cause := context.Cause(ctx); cause != nil {
+	if cause := context.Cause(ctx); cause != nil && !errors.Is(cause, err) {
 		return statefile.Header{}, cause
 	}
 	if err == nil && werr != nil {
@@ -552,7 +557,7 @@ func inert(tools []mcpTool) http.Handler {
 func claudeEnviron(dir string) []string {
 	var env []string
 	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "ANTHROPIC_") && !strings.HasPrefix(kv, "CLAUDE_") {
+		if k := strings.ToUpper(kv); !strings.HasPrefix(k, "ANTHROPIC_") && !strings.HasPrefix(k, "CLAUDE_") {
 			env = append(env, kv)
 		}
 	}
@@ -675,7 +680,8 @@ func claudeLogin(ctx context.Context, dir string, show func(Prompt), paste <-cha
 	}
 	pr, pw := io.Pipe()
 	var out tail
-	cmd.Stdout, cmd.Stderr = io.MultiWriter(&out, pw), &out
+	w := io.MultiWriter(&out, pw)
+	cmd.Stdout, cmd.Stderr = w, w
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -696,7 +702,7 @@ func claudeLogin(ctx context.Context, dir string, show func(Prompt), paste <-cha
 	case u := <-found:
 		show(Prompt{Text: "Open the URL and sign in with your Claude account. Then paste the code the page shows.", URL: u, Paste: true})
 	case err := <-done:
-		return fmt.Errorf("claude auth login ended before its URL: %v: %s", err, out.b.Bytes())
+		return fmt.Errorf("claude auth login ended before its URL: %w: %s", err, out.b.Bytes())
 	}
 	select {
 	case code := <-paste:
@@ -704,10 +710,10 @@ func claudeLogin(ctx context.Context, dir string, show func(Prompt), paste <-cha
 			return err
 		}
 	case err := <-done:
-		return fmt.Errorf("claude auth login ended before the code: %v: %s", err, out.b.Bytes())
+		return fmt.Errorf("claude auth login ended before the code: %w: %s", err, out.b.Bytes())
 	}
 	if err := <-done; err != nil {
-		return fmt.Errorf("claude auth login: %v: %s", err, out.b.Bytes())
+		return fmt.Errorf("claude auth login: %w: %s", err, out.b.Bytes())
 	}
 	return nil
 }
