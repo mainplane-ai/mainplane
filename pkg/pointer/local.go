@@ -10,14 +10,15 @@ import (
 	"runtime"
 )
 
-// Dir is the directory of the harness installed on this machine, and Config
-// its config there. Only root and the operator may read it. LinuxDir is
-// Linux's, where admin serves the sessions drive from.
+// LinuxDir is the harness's directory on Linux, where admin serves the
+// sessions drive from, and Config the config in the harness's directory.
 const (
 	LinuxDir = "/var/lib/mainplane-server"
 	Config   = "config.json"
 )
 
+// Dir is the directory of the harness installed on this machine. Only root
+// and the operator may read it.
 var Dir = map[string]string{
 	"linux":   LinuxDir,
 	"darwin":  "/Library/Application Support/mainplane-server",
