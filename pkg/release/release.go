@@ -29,7 +29,16 @@ const (
 	DL      = "https://dl.mainplane.ai/" // every release's files, install scripts included, under its version
 	key     = "Epmoycu6ik6l3iJiEtfOAdK+DLFDVXhgdc+uNv6ua/U="
 	timeout = 5 * time.Minute
+	// script is the latest release's install script for Linux and macOS; with
+	// .ps1, for Windows.
+	script = "https://mainplane.ai/install"
 )
+
+// InstallLines run the latest install script with args: on Linux and macOS,
+// then on Windows.
+func InstallLines(args string) (unix, windows string) {
+	return "curl -fsSL " + script + " | sh -s -- " + args, "& ([scriptblock]::Create((irm " + script + ".ps1))) " + args
+}
 
 // Latest is the newest stable release, which release.yml writes on stable
 // tags only.

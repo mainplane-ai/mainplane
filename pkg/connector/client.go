@@ -43,6 +43,7 @@ type Client struct {
 	Harness string `json:"harness"`
 	Local   string `json:"-"`
 	Mesh    string `json:"-"`
+	Local   string `json:"-"` // TEMP
 }
 
 // Path is the login file, ~/.mainplane/login.json.
@@ -167,10 +168,18 @@ func (c Client) Do(ctx context.Context, method, path, ctype string, body io.Read
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("%s %s: %d %s", method, path, resp.StatusCode, strings.TrimSpace(string(b)))
+		return nil, fmt.Errorf("%s %s: %w", method, path, &StatusError{resp.StatusCode, strings.TrimSpace(string(b))})
 	}
 	return resp, nil
 }
+
+// StatusError is a reply outside 2xx, in the harness's own words.
+type StatusError struct {
+	Code int
+	Text string
+}
+
+func (e *StatusError) Error() string { return fmt.Sprintf("%d %s", e.Code, e.Text) }
 
 // Call does one request, and decodes a JSON reply into out when out is given.
 func (c Client) Call(ctx context.Context, method, path, ctype string, body io.Reader, out any) error {
@@ -279,9 +288,11 @@ func (c Client) Records(ctx context.Context, id string, after int, wait string) 
 }
 
 // Worker is a worker as GET /workers lists it: connected, unless refused.
+// Drives is whether it can serve drives.
 type Worker struct {
 	Name    string `json:"name"`
 	Refused string `json:"refused,omitempty"`
+	Drives  bool   `json:"drives,omitempty"`
 }
 
 // Workers lists the workers the harness knows.
@@ -386,4 +397,40 @@ func (c Client) SetProvider(ctx context.Context, name, shape, u, region, session
 		return err
 	}
 	return c.Call(ctx, "PUT", "/providers/"+url.PathEscape(name), "application/json", bytes.NewReader(b), nil)
+}
+
+// Network is the state of the harness's tunnel: starting, ready, or its error.
+func (c Client) Network(ctx context.Context) (string, error) {
+	var out struct{ Network string }
+	err := c.Call(ctx, "GET", "/", "", nil, &out)
+	return out.Network, err
+}
+
+// Join is the network name and device code that make a machine a worker.
+func (c Client) Join(ctx context.Context) (string, error) {
+	var out struct{ Join string }
+	err := c.Call(ctx, "GET", "/join", "", nil, &out)
+	return out.Join, err
+}
+
+// NewKey mints an api key named name and returns its token. A name in use is
+// a StatusError of 409.
+func (c Client) NewKey(ctx context.Context, name string) (string, error) {
+	b, err := json.Marshal(map[string]string{"name": name})
+	if err != nil {
+		return "", err
+	}
+	var out struct{ Key string }
+	err = c.Call(ctx, "POST", "/keys", "application/json", bytes.NewReader(b), &out)
+	return out.Key, err
+}
+
+// SetDrive makes or changes the drive name, served by server to workers, "*"
+// for all.
+func (c Client) SetDrive(ctx context.Context, name, server string, workers []string) error {
+	b, err := json.Marshal(map[string]any{"server": server, "workers": workers})
+	if err != nil {
+		return err
+	}
+	return c.Call(ctx, "PUT", "/drives/"+url.PathEscape(name), "application/json", bytes.NewReader(b), nil)
 }

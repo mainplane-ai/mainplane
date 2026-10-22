@@ -32,6 +32,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/elevate"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
+	"github.com/mainplane-ai/mainplane/pkg/release"
 	"github.com/mainplane-ai/mainplane/pkg/server"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
@@ -118,10 +119,6 @@ func main() {
 // defaultName names the api key every install makes anew, so the first
 // connector needs no second command.
 const defaultName = "default"
-
-// script is the latest release's install script for Linux and macOS; with
-// .ps1, for Windows.
-const script = "https://mainplane.ai/install"
 
 // handover is a config and, from an install that made the config itself, the
 // secret of the api key the install prints, and then what the elevated
@@ -222,7 +219,8 @@ func installLines(kind, token string) string {
 	if kind == auth.Join {
 		label = "connect a device:"
 	}
-	return fmt.Sprintf("%s\n  linux, macos:  curl -fsSL %s | sh -s -- %s\n  windows:       & ([scriptblock]::Create((irm %s.ps1))) %s\n", label, script, token, script, token)
+	unix, windows := release.InstallLines(token)
+	return fmt.Sprintf("%s\n  linux, macos:  %s\n  windows:       %s\n", label, unix, windows)
 }
 
 // spinner is design/ascii/spinner.json: Braille frames and the milliseconds
