@@ -39,8 +39,11 @@ func add(tun string, a netip.Prefix) error {
 func keep(tun string, a netip.Prefix) error {
 	p := project(a).String()
 	h, err := holder(p)
-	if err != nil || h != "" {
+	if err != nil || h == tun {
 		return err
+	}
+	if h != "" {
+		return fmt.Errorf("%s holds the route to %s: another worker runs on this machine", h, p)
 	}
 	if err := run("route", "-q", "-n", "add", "-inet6", p, "-iface", tun); err != nil {
 		return err
