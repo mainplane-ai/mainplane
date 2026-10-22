@@ -254,11 +254,9 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 		}
 		d := c.Choices[0].Delta
 		reasoning.WriteString(cmp.Or(d.Reasoning, d.Alias)) // a server that sends both sends the same text
-		for _, x := range d.Details {
-			var err error
-			if details, err = addDetail(details, x); err != nil {
-				return err
-			}
+		var err error
+		if details, err = addDetails(details, d.Details); err != nil {
+			return err
 		}
 		text.WriteString(d.Content)
 		for _, tc := range d.ToolCalls {
@@ -278,14 +276,10 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 	if err != nil {
 		return statefile.Header{}, err
 	}
-	if len(details) > 0 {
-		body, err := marshal(details)
-		if err != nil {
-			return statefile.Header{}, err
-		}
-		emit(statefile.Record{Header: statefile.Header{Kind: statefile.Thinking, Type: "application/json"}, Body: body})
-	} else if reasoning.Len() > 0 {
-		emit(statefile.Record{Header: statefile.Header{Kind: statefile.Thinking, Type: "text/plain"}, Body: []byte(reasoning.String())})
+	if r, ok, err := chatThinking(details, reasoning.String()); err != nil {
+		return statefile.Header{}, err
+	} else if ok {
+		emit(r)
 	}
 	if text.Len() > 0 {
 		emit(statefile.Record{Header: statefile.Header{Kind: statefile.Text, Type: "text/plain"}, Body: []byte(text.String())})
@@ -300,45 +294,60 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 	return statefile.Header{Usage: &usage, Stop: stop}, nil
 }
 
+// chatThinking is a step's thinking record: its reasoning_details if it has
+// them, else its reasoning text.
+func chatThinking(details []detail, reasoning string) (statefile.Record, bool, error) {
+	r := statefile.Record{Header: statefile.Header{Kind: statefile.Thinking, Type: "text/plain"}, Body: []byte(reasoning)}
+	if len(details) == 0 {
+		return r, reasoning != "", nil
+	}
+	body, err := marshal(details)
+	r.Type, r.Body = "application/json", body
+	return r, err == nil, err
+}
+
 // detail is one reasoning_details entry, kept field by field as streamed.
 type detail map[string]json.RawMessage
 
 // detailText are the reasoning_details fields a stream sends in pieces.
 var detailText = []string{"text", "summary", "data", "signature"}
 
-// addDetail merges a streamed reasoning_details entry into the list.
+// addDetails merges streamed reasoning_details entries into the list.
 // OpenRouter says only to concatenate the chunks in order. An entry with the
 // type and index of the last one continues it, as OpenRouter's SDK merges
 // consecutive text and summary entries: its text fields append, its other
 // fields fill those the last one lacks. Gemini sends a text entry and then an
 // encrypted one under the same index, so type and index both decide.
-func addDetail(all []detail, d detail) ([]detail, error) {
-	n := len(all)
-	if n == 0 || !bytes.Equal(all[n-1]["type"], d["type"]) || !bytes.Equal(all[n-1]["index"], d["index"]) {
-		return append(all, d), nil
-	}
-	last := all[n-1]
-	for k, v := range d {
-		old, ok := last[k]
-		if !ok || string(old) == "null" {
-			last[k] = v
+func addDetails(all, ds []detail) ([]detail, error) {
+	for _, d := range ds {
+		n := len(all)
+		if n == 0 || !bytes.Equal(all[n-1]["type"], d["type"]) || !bytes.Equal(all[n-1]["index"], d["index"]) {
+			all = append(all, d)
 			continue
 		}
-		if !slices.Contains(detailText, k) || string(v) == "null" {
-			continue
+		last := all[n-1]
+		for k, v := range d {
+			old, ok := last[k]
+			if !ok || string(old) == "null" {
+				last[k] = v
+				continue
+			}
+			if !slices.Contains(detailText, k) || string(v) == "null" {
+				continue
+			}
+			var a, b string
+			if err := json.Unmarshal(old, &a); err != nil {
+				return nil, fmt.Errorf("openai-chat: reasoning_details %s: %w", k, err)
+			}
+			if err := json.Unmarshal(v, &b); err != nil {
+				return nil, fmt.Errorf("openai-chat: reasoning_details %s: %w", k, err)
+			}
+			s, err := marshal(a + b)
+			if err != nil {
+				return nil, err
+			}
+			last[k] = s
 		}
-		var a, b string
-		if err := json.Unmarshal(old, &a); err != nil {
-			return nil, fmt.Errorf("openai-chat: reasoning_details %s: %w", k, err)
-		}
-		if err := json.Unmarshal(v, &b); err != nil {
-			return nil, fmt.Errorf("openai-chat: reasoning_details %s: %w", k, err)
-		}
-		s, err := marshal(a + b)
-		if err != nil {
-			return nil, err
-		}
-		last[k] = s
 	}
 	return all, nil
 }
