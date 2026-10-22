@@ -22,9 +22,9 @@ const bedrockCacheTTL = 300 // the default cachePoint: 5 minutes, refreshed on e
 // Bedrock authenticates with a Bedrock API key (AWS_BEARER_TOKEN_BEDROCK),
 // not SigV4. Model is an inference profile id such as
 // us.anthropic.claude-haiku-4-5-20251001-v1:0.
-func Bedrock(region, key string) Provider {
+func Bedrock(url, region, key string) Provider {
 	return Provider{
-		URL:      "https://bedrock-runtime." + region + ".amazonaws.com/model",
+		URL:      base(url, "https://bedrock-runtime."+region+".amazonaws.com") + "/model",
 		Key:      key,
 		Envelope: bedrock{},
 		Headers:  func(r *http.Request, key string) { r.Header.Set("Authorization", "Bearer "+key) },

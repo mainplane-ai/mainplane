@@ -5,6 +5,7 @@ package provider
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -24,14 +25,20 @@ import (
 )
 
 // Shapes is every wire format a provider in the config may have, each built
-// from the provider's key, url and region.
+// from the provider's key, url and region. The url is the base url the
+// vendor's official SDK takes; the shape appends the API path. An empty url
+// is the vendor's own.
 var Shapes = map[string]func(key, url, region string) Provider{
-	"anthropic":   func(key, _, _ string) Provider { return Anthropic(key) },
-	"openai":      func(key, _, _ string) Provider { return OpenAI(key) },
+	"anthropic":   func(key, url, _ string) Provider { return Anthropic(url, key) },
+	"openai":      func(key, url, _ string) Provider { return OpenAI(url, key) },
 	"openai-chat": func(key, url, _ string) Provider { return OpenAIChat(url, key) },
-	"google":      func(key, _, _ string) Provider { return Gemini(key) },
-	"bedrock":     func(key, _, region string) Provider { return Bedrock(region, key) },
+	"google":      func(key, url, _ string) Provider { return Gemini(url, key) },
+	"bedrock":     func(key, url, region string) Provider { return Bedrock(url, region, key) },
 }
+
+// base is the config's url, else the vendor's own, without a trailing slash,
+// for the shape to append its path to.
+func base(url, vendor string) string { return strings.TrimSuffix(cmp.Or(url, vendor), "/") }
 
 // normalStops are the stops each envelope names when the model ended its turn
 // itself. Any other stop on a step with no call is the output limit, a

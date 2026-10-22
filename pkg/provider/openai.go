@@ -11,9 +11,9 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
-func OpenAI(key string) Provider {
+func OpenAI(url, key string) Provider {
 	return Provider{
-		URL:      "https://api.openai.com/v1/responses",
+		URL:      base(url, "https://api.openai.com/v1") + "/responses",
 		Key:      key,
 		Envelope: openai{},
 		Headers:  bearer,

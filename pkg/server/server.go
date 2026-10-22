@@ -81,7 +81,7 @@ func Key(dir string) (ed25519.PrivateKey, error) {
 type Provider struct {
 	Shape  string `json:"shape"`
 	Key    string `json:"key"`
-	URL    string `json:"url,omitempty"`    // openai-chat
+	URL    string `json:"url,omitempty"`    // the base url its SDK takes; none is the vendor's own
 	Region string `json:"region,omitempty"` // bedrock
 }
 
@@ -112,8 +112,8 @@ func providers(cfg map[string]Provider) (map[string]provider.Provider, error) {
 		if !ok {
 			return nil, fmt.Errorf("provider %s: unknown shape %q; shapes: %s", name, p.Shape, strings.Join(slices.Sorted(maps.Keys(provider.Shapes)), ", "))
 		}
-		if p.Shape == "openai-chat" && os.ExpandEnv(p.URL) == "" || p.Shape == "bedrock" && os.ExpandEnv(p.Region) == "" {
-			return nil, fmt.Errorf("provider %s: an openai-chat provider needs url, a bedrock one region", name)
+		if p.Shape == "bedrock" && os.ExpandEnv(p.Region) == "" && os.ExpandEnv(p.URL) == "" {
+			return nil, fmt.Errorf("provider %s: a bedrock provider needs region or url", name)
 		}
 		out[name] = build(os.ExpandEnv(p.Key), os.ExpandEnv(p.URL), os.ExpandEnv(p.Region))
 	}

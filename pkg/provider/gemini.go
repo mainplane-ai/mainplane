@@ -11,9 +11,9 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
-func Gemini(key string) Provider {
+func Gemini(url, key string) Provider {
 	return Provider{
-		URL:      "https://generativelanguage.googleapis.com/v1beta/models",
+		URL:      base(url, "https://generativelanguage.googleapis.com") + "/v1beta/models",
 		Key:      key,
 		Envelope: gemini{},
 		Headers:  func(r *http.Request, key string) { r.Header.Set("x-goog-api-key", key) },

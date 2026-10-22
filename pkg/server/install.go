@@ -63,7 +63,7 @@ var envProviders = map[string]Provider{
 	"openai":     {Shape: "openai", Key: "$OPENAI_API_KEY"},
 	"google":     {Shape: "google", Key: "$GEMINI_API_KEY"},
 	"bedrock":    {Shape: "bedrock", Key: "$AWS_BEARER_TOKEN_BEDROCK", Region: "$AWS_REGION"},
-	"openrouter": {Shape: "openai-chat", Key: "$OPENROUTER_API_KEY", URL: "https://openrouter.ai/api"},
+	"openrouter": {Shape: "openai-chat", Key: "$OPENROUTER_API_KEY", URL: "https://openrouter.ai/api/v1"},
 }
 
 // Default is the config install writes when given none and none is
