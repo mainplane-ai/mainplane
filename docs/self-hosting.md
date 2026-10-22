@@ -39,8 +39,13 @@ replaces it. Add keys there:
 
 or from any machine whose CLI is logged in: `mainplane key anthropic sk-ant-...`.
 A provider's name is free; its `shape` is the API it speaks: `anthropic`,
-`openai`, `google` (Gemini), `openai-chat` (Chat Completions, with `url`, such as
-`https://openrouter.ai/api`) or `bedrock` (with `region`). Connectors offer the
+`openai` (Responses), `google` (Gemini), `openai-chat` (Chat Completions) or
+`bedrock` (with `region`). Each takes an optional `url`, the base url the
+vendor's official SDK takes, such as `https://openrouter.ai/api/v1` for
+`openai-chat`; the harness appends the API path (`/chat/completions`). No `url`
+is the vendor's own: `https://api.anthropic.com`, `https://api.openai.com/v1`
+(`openai`, `openai-chat`), `https://generativelanguage.googleapis.com`,
+`https://bedrock-runtime.<region>.amazonaws.com`. Connectors offer the
 models of the providers in the [catalog](https://dl.mainplane.ai/catalog/v1.json)
 by its ids: `anthropic`, `openai`, `google`, `bedrock`, `openrouter`. Install
 takes keys from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`,

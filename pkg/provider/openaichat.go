@@ -12,9 +12,9 @@ import (
 
 // OpenAIChat is the Chat Completions envelope for OpenAI-compatible endpoints.
 // Thinking records are never replayed.
-func OpenAIChat(base, key string) Provider {
+func OpenAIChat(url, key string) Provider {
 	return Provider{
-		URL:      strings.TrimSuffix(base, "/") + "/v1/chat/completions",
+		URL:      base(url, "https://api.openai.com/v1") + "/chat/completions",
 		Key:      key,
 		Envelope: openaiChat{},
 		Headers:  bearer,

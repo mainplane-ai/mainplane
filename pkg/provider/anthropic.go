@@ -16,9 +16,9 @@ import (
 // the harness, says what each model takes.
 const anthCacheTTL = 300 // ephemeral: 5 minutes from the start of the request that writes or reads it
 
-func Anthropic(key string) Provider {
+func Anthropic(url, key string) Provider {
 	return Provider{
-		URL:      "https://api.anthropic.com/v1/messages",
+		URL:      base(url, "https://api.anthropic.com") + "/v1/messages",
 		Key:      key,
 		Envelope: anthropic{},
 		Headers: func(r *http.Request, key string) {

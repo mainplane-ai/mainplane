@@ -33,7 +33,7 @@ type Catalog struct {
 type Provider struct {
 	Name  string `json:"name"`
 	Shape string `json:"shape"`
-	URL   string `json:"url,omitempty"` // what the config's url is, for an openai-chat provider
+	URL   string `json:"url,omitempty"` // the config's url, where it is not the shape's default
 }
 
 // Preset is a full session config but its workers.

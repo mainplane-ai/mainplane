@@ -4,7 +4,7 @@
     "openai": {"name": "OpenAI", "shape": "openai", "models_dev": "openai"},
     "google": {"name": "Google", "shape": "google", "models_dev": "google"},
     "bedrock": {"name": "Amazon Bedrock", "shape": "bedrock", "models_dev": "amazon-bedrock"},
-    "openrouter": {"name": "OpenRouter", "shape": "openai-chat", "url": "https://openrouter.ai/api", "models_dev": "openrouter"}
+    "openrouter": {"name": "OpenRouter", "shape": "openai-chat", "url": "https://openrouter.ai/api/v1", "models_dev": "openrouter"}
   },
   "params": {
     "anthropic": {"max_tokens": 32000},
