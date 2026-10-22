@@ -5,7 +5,6 @@ import (
 	"log"
 	"net"
 	"net/netip"
-	"syscall"
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
@@ -66,14 +65,15 @@ func dial(m *mesh.Mesh, l Local, ds *drives) {
 					wait = redialMin
 				}
 			}
-		}
-		log.Printf("%v, redial in %s", err, wait)
-		// The harness is in the map, so the route or rule to it is gone.
-		if errors.Is(err, syscall.ENETUNREACH) {
+			// The connection is lost, maybe with the route or rule to the
+			// harness: systemd-networkd removes rules it did not make. With
+			// them gone a dial fails as unreachable, or times out by a
+			// default route.
 			if err := m.Reroute(); err != nil {
 				log.Printf("mesh: reroute: %v", err)
 			}
 		}
+		log.Printf("%v, redial in %s", err, wait)
 		select {
 		case <-m.Removed():
 			log.Print("removed from the mesh: no redial, its drives go")
