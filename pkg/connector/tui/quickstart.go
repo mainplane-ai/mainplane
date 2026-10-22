@@ -212,7 +212,7 @@ func (q *quickstart) at() int {
 // last.
 func (q *quickstart) layout(a *App) {
 	q.rows, q.note.S = nil, ""
-	back := qsButton{qsBack, true, func(a *App) { q.to(q.step - 1) }}
+	back := qsButton{qsBack, true, func(a *App) { q.to(a, q.step-1) }}
 	later := qsButton{qsLater, true, func(a *App) { q.next(a) }}
 	switch q.step {
 	case stepProviders:
@@ -227,9 +227,6 @@ func (q *quickstart) layout(a *App) {
 	case stepConnectors:
 		q.title.S, q.body.S = qsConnectorsTitle, qsConnectorsLine
 		q.lines(q.key)
-		if q.key == "" && !q.minting {
-			q.mint(a)
-		}
 		if q.minting {
 			q.note.S = Spin() + qsMinting
 		}
@@ -313,12 +310,17 @@ func (q *quickstart) servers() []string {
 	return names
 }
 
-// to opens step n; the drives step only when a worker can serve one.
-func (q *quickstart) to(n int) {
+// to opens step n; the drives step only when a worker can serve one. The
+// connectors step mints its key on the way in, so a failed mint is tried
+// again only when the step is opened again.
+func (q *quickstart) to(a *App, n int) {
 	if n == stepDrives && len(q.servers()) == 0 {
 		n = stepConnectors
 	}
 	q.step, q.sel = n, -1
+	if n == stepConnectors && q.key == "" && !q.minting {
+		q.mint(a)
+	}
 }
 
 // next opens the step after this one, or, after the last, the session.
@@ -334,7 +336,7 @@ func (q *quickstart) next(a *App) {
 			q.drive.server = "admin"
 		}
 	}
-	q.to(q.step + 1)
+	q.to(a, q.step+1)
 }
 
 // mint makes an api key for the connector lines, named with the first number
@@ -356,6 +358,9 @@ func (q *quickstart) mint(a *App) {
 		}
 		a.Post(func() {
 			q.minting = false
+			if q.ctx.Err() != nil { // the quickstart is over
+				return
+			}
 			if err != nil {
 				a.SayError(err)
 				return
@@ -465,7 +470,7 @@ func (q *quickstart) finish(a *App) {
 // or changes it, and Esc goes back.
 func (q *quickstart) Key(a *App, k term.Key) bool {
 	if q.step == stepSplash {
-		q.to(stepProviders)
+		q.to(a, stepProviders)
 		return true
 	}
 	n := len(q.rows) + len(q.buttons)
@@ -477,7 +482,7 @@ func (q *quickstart) Key(a *App, k term.Key) bool {
 	case "enter", "space":
 		q.press(a, q.at())
 	case "esc":
-		q.to(q.step - 1)
+		q.to(a, q.step-1)
 	default:
 		if i := strings.Index("123456789", s); len(s) == 1 && i >= 0 && i < len(q.rows) {
 			q.sel = i

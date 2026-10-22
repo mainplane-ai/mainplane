@@ -240,7 +240,10 @@ tmux kill-session -t qs
 [ -z "$(/usr/local/bin/mainplane sessions)" ] && echo unsent-ok`
 	// heldUpdate updates the harness to %[1]s, then to %[2]s, each with one
 	// more TUI started from Program Files before it and left running, and
-	// waits for the worker to follow and run. Each line is the release
+	// waits for the worker to follow and run. A worker updates itself with
+	// its own code, so the update to %[1]s is v's: it must move the binary a
+	// TUI runs aside. The one back is prev's, which before release.Aside
+	// renamed to .old: it passes when v's left .old free for it. Each line is the release
 	// asked for, the worker's, the service's state and the TUIs still running.
 	heldUpdate = `$m = "$env:ProgramFiles\mainplane\mainplane.exe"
 $held = @()
@@ -607,7 +610,7 @@ func server(ssh map[string]string, o, q string, qMu *sync.Mutex, v, prev, llm st
 		check(o, "harness: sessions drive on admin, read-only", err == nil && strings.Join(strings.Fields(got), " ") == "ro listed refused", got)
 	}
 	if o == "linux" {
-		join := regexp.MustCompile(`[a-z0-9-]+ [0-9A-Z]{4}-[0-9A-Z]{4}`).FindString(out)
+		join := joinLine.FindString(out)
 		got, err := remote(o, ssh[o], fmt.Sprintf(tuiQuickstart, llm, join))
 		for _, step := range []string{"splash", "providers", "connected", "workers", "connectors", "drives", "session", "again", "unsent"} {
 			check(o, "TUI quickstart: "+step, err == nil && strings.Contains(got, step+"-ok"), got)
@@ -634,13 +637,16 @@ func server(ssh map[string]string, o, q string, qMu *sync.Mutex, v, prev, llm st
 	check(o, "tailscale status works after uninstall", err == nil && strings.TrimSpace(out) == "ok", out)
 }
 
+// joinLine finds the network name and device code in what an install printed.
+var joinLine = regexp.MustCompile(`[a-z0-9-]+ [0-9A-Z]{4}-[0-9A-Z]{4}`)
+
 // quick runs the steps without the quickstart (docs/self-hosting.md) against the harness just installed on o,
 // with the tokens its install printed (out) in lines pointed at v. On o the
 // worker and login lines find it already both. On q each runs twice, the
 // second time with nothing to do, then step 3 in the login line's shell, and
 // q's worker goes again, all holding qMu.
 func quick(ssh map[string]string, q, o, v, llm, out string, qMu *sync.Mutex) {
-	join, key := regexp.MustCompile(`[a-z0-9-]+ [0-9A-Z]{4}-[0-9A-Z]{4}`).FindString(out), regexp.MustCompile(`mp_key_\S+`).FindString(out)
+	join, key := joinLine.FindString(out), regexp.MustCompile(`mp_key_\S+`).FindString(out)
 	if o == "windows" {
 		check(o, "harness: one mainplane, in Program Files", strings.Contains(out, oneWin), last(out))
 	}

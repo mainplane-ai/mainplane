@@ -26,8 +26,8 @@ curl -fsSL https://mainplane.ai/install | sh -s -- server
 ```
 
 It prints commands with your network name and device code, and an API key
-(`mp_key_...`). Save these. Run `mainplane` there later to open the quickstart,
-or go on by hand.
+(`mp_key_...`). Save these. Run `mainplane quickstart` there later to open the
+quickstart, or go on by hand.
 
 Connect more machines. Your agents can use them.
 
