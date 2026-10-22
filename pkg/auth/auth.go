@@ -42,6 +42,9 @@ const (
 	window   = time.Minute
 )
 
+// ErrTaken is a name that already has an entry of its kind.
+var ErrTaken = errors.New("name in use")
+
 type Entry struct {
 	Name string `json:"name"`
 	Hash string `json:"hash"`
@@ -53,6 +56,10 @@ type Table map[string][]Entry
 // Store is the table as a file, read on every check so a new or revoked
 // entry counts at once.
 type Store struct{ Path string }
+
+// writes holds each read and rewrite of a table whole, so two at once in
+// this process, such as two POST /keys, never drop an entry.
+var writes sync.Mutex
 
 func (s Store) Load() (Table, error) {
 	t := Table{}
@@ -79,12 +86,14 @@ func (s Store) save(t Table) error {
 
 // Issue adds an entry and returns its secret: the one time it is in the clear.
 func (s Store) Issue(kind, name string) (string, error) {
+	writes.Lock()
+	defer writes.Unlock()
 	t, err := s.Load()
 	if err != nil {
 		return "", err
 	}
 	if slices.ContainsFunc(t[kind], func(e Entry) bool { return e.Name == name }) {
-		return "", fmt.Errorf("%s %q exists", kind, name)
+		return "", fmt.Errorf("%s %q: %w", kind, name, ErrTaken)
 	}
 	secret := rand.Text()
 	t[kind] = append(t[kind], Entry{Name: name, Hash: Hash(secret)})
@@ -93,6 +102,8 @@ func (s Store) Issue(kind, name string) (string, error) {
 
 // Add makes secret an entry of kind named name, beside any before it.
 func (s Store) Add(kind, name, secret string) error {
+	writes.Lock()
+	defer writes.Unlock()
 	t, err := s.Load()
 	if err != nil {
 		return err
@@ -102,6 +113,8 @@ func (s Store) Add(kind, name, secret string) error {
 }
 
 func (s Store) Revoke(kind, name string) error {
+	writes.Lock()
+	defer writes.Unlock()
 	t, err := s.Load()
 	if err != nil {
 		return err

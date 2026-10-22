@@ -70,13 +70,14 @@ type Header struct {
 	Exit int    `json:"exit,omitempty"` // result
 	Full string `json:"full,omitempty"` // result: file holding all the output, when over the limits
 
-	Name    string   `json:"name,omitempty"`    // what sessions call this worker: its mesh name, set by the harness
-	OS      string   `json:"os,omitempty"`      // hello
-	Arch    string   `json:"arch,omitempty"`    // hello
-	Interps []string `json:"interps,omitempty"` // hello: first is the default
-	Scratch string   `json:"scratch,omitempty"` // hello: where spilled output lands
-	Version string   `json:"version,omitempty"` // hello: the release this worker was built from; update: the one to become
-	Drives  []Drive  `json:"drives,omitempty"`  // hello, status: every drive this worker serves or mounts
+	Name        string   `json:"name,omitempty"`         // what sessions call this worker: its mesh name, set by the harness
+	OS          string   `json:"os,omitempty"`           // hello
+	Arch        string   `json:"arch,omitempty"`         // hello
+	Interps     []string `json:"interps,omitempty"`      // hello: first is the default
+	Scratch     string   `json:"scratch,omitempty"`      // hello: where spilled output lands
+	Version     string   `json:"version,omitempty"`      // hello: the release this worker was built from; update: the one to become
+	Drives      []Drive  `json:"drives,omitempty"`       // hello, status: every drive this worker serves or mounts
+	DriveServer bool     `json:"drive_server,omitempty"` // hello: this worker can serve drives
 }
 
 type Frame struct {

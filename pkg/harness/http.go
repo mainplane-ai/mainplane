@@ -17,14 +17,13 @@ import (
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
-	"github.com/mainplane-ai/mainplane/pkg/version"
 )
 
 // MaxPost bounds one post: a paragraph and a screenshot, typed or pasted by a
 // person. A file goes to a worker, not into the state file.
 const MaxPost = 8 << 20
 
-// Handler is the harness's HTTP surface: ten verbs on a session, three
+// Handler is the harness's HTTP surface: ten verbs on a session, two
 // reads of the environment, and removing a worker. Records go out in the
 // state file's own bytes, one after another.
 //
@@ -53,7 +52,6 @@ const MaxPost = 8 << 20
 //	                                  device code still joins new machines
 //	GET  /providers                   -> [{"name","shape","url"}]: what this harness
 //	                                     serves as name/model; no secrets
-//	GET  /                            -> {"version"}
 //
 // ctx outlives every request: it is what steps run under.
 func Handler(ctx context.Context, h *Harness) http.Handler {
@@ -68,9 +66,6 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 			fn(w, r)
 		})
 	}
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		reply(w, map[string]string{"version": version.V})
-	})
 	mux.HandleFunc("GET /workers", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, h.Workers.List())
 	})

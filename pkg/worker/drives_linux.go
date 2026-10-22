@@ -404,6 +404,13 @@ func nfsServer() error {
 	return write(nfsConf, nfsConfText, "systemctl", "restart", "nfs-server")
 }
 
+// canServe is whether this machine can serve drives: it does, or it passes
+// the preflight.
+func canServe() bool {
+	_, err := os.Stat(exportsFile)
+	return err == nil || preflight() == nil
+}
+
 // preflight refuses a machine that already serves files to others: knfsd is
 // one per machine, so our nfs.conf would change their exports too, and SMB
 // for Windows workers needs port 445 to itself.
