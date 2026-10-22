@@ -701,12 +701,15 @@ func (s *session) models(a *App) {
 	})
 }
 
-// providers is the menu of the catalog's providers. Picking one asks for its
+// providers is the menu of the catalog's providers, by name. Picking one asks for its
 // key, and the harness serves it with the catalog's shape and url.
 func (s *session) providers(a *App) {
 	s.withProviders(a, func(cat *catalog.Catalog, ps []harness.ProviderInfo) {
 		m := &Menu{}
-		for _, id := range slices.Sorted(maps.Keys(cat.Providers)) {
+		byName := func(a, b string) int {
+			return strings.Compare(strings.ToLower(cat.Providers[a].Name), strings.ToLower(cat.Providers[b].Name))
+		}
+		for _, id := range slices.SortedFunc(maps.Keys(cat.Providers), byName) {
 			p, hint := cat.Providers[id], ""
 			if slices.ContainsFunc(ps, func(x harness.ProviderInfo) bool { return x.Name == id }) {
 				hint = "connected"

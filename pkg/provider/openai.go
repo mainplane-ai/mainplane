@@ -183,7 +183,8 @@ type respUsage struct {
 	InputTokens        int `json:"input_tokens"`
 	OutputTokens       int `json:"output_tokens"`
 	InputTokensDetails struct {
-		CachedTokens int `json:"cached_tokens"`
+		CachedTokens     int `json:"cached_tokens"`
+		CacheWriteTokens int `json:"cache_write_tokens"`
 	} `json:"input_tokens_details"`
 }
 
@@ -249,9 +250,10 @@ func (openai) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Hea
 			}
 			u := e.Response.Usage
 			usage = statefile.Usage{
-				Input:     u.InputTokens - u.InputTokensDetails.CachedTokens,
-				Output:    u.OutputTokens,
-				CacheRead: u.InputTokensDetails.CachedTokens,
+				Input:      u.InputTokens - u.InputTokensDetails.CachedTokens - u.InputTokensDetails.CacheWriteTokens,
+				Output:     u.OutputTokens,
+				CacheRead:  u.InputTokensDetails.CachedTokens,
+				CacheWrite: u.InputTokensDetails.CacheWriteTokens,
 			}
 		}
 		return nil

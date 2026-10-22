@@ -11,7 +11,8 @@ import (
 )
 
 // OpenAIChat is the Chat Completions envelope for OpenAI-compatible endpoints.
-// Thinking records are never replayed.
+// Thinking is reasoning_content, the field DeepSeek, Kimi, GLM and MiMo stream
+// and want back in a tool loop; a server without it sends none.
 func OpenAIChat(url, key string) Provider {
 	return Provider{
 		URL:      base(url, "https://api.openai.com/v1") + "/chat/completions",
@@ -28,13 +29,14 @@ func (openaiChat) Name() string { return "openai-chat" }
 func (openaiChat) Accepts(typ string) bool { return slices.Contains(images, typ) }
 
 func (openaiChat) Owns(field string) bool {
-	return slices.Contains([]string{"model", "stream", "stream_options", "messages", "tools"}, field)
+	return slices.Contains([]string{"model", "stream", "stream_options", "prompt_cache_key", "messages", "tools"}, field)
 }
 
 type chatReq struct {
 	Model         string            `json:"model"`
 	Stream        bool              `json:"stream"`
 	StreamOptions chatStreamOptions `json:"stream_options"`
+	CacheKey      string            `json:"prompt_cache_key,omitempty"`
 	Messages      []chatMsg         `json:"messages"`
 	Tools         []chatTool        `json:"tools,omitempty"`
 }
@@ -61,6 +63,7 @@ type chatMsg struct {
 	Content    any            `json:"content,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
 	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
+	Reasoning  string         `json:"reasoning_content,omitempty"`
 }
 
 type chatPart struct {
@@ -84,9 +87,9 @@ type chatCallBody struct {
 	Arguments string `json:"arguments"`
 }
 
-func (openaiChat) Compile(req Request) ([]byte, json.RawMessage, error) {
+func (e openaiChat) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
-	body := chatReq{Model: req.Model, Stream: true, StreamOptions: chatStreamOptions{IncludeUsage: true}, Messages: []chatMsg{}}
+	body := chatReq{Model: req.Model, Stream: true, StreamOptions: chatStreamOptions{IncludeUsage: true}, CacheKey: req.Key, Messages: []chatMsg{}}
 	if len(system) > 0 {
 		body.Messages = append(body.Messages, chatMsg{Role: "system", Content: systemText(system)})
 	}
@@ -98,13 +101,13 @@ func (openaiChat) Compile(req Request) ([]byte, json.RawMessage, error) {
 			body.Messages = append(body.Messages, chatUser(t.Records)...)
 			continue
 		}
-		m, err := chatAssistant(t.Records)
+		m, err := e.assistant(t.Records)
 		if err != nil {
 			return nil, nil, err
 		}
 		body.Messages = append(body.Messages, m)
 	}
-	b, err := encode(body, req.Params) // no cache header: third-party caches are their own business
+	b, err := encode(body, req.Params) // no cache header: the server caches the prefix itself, prompt_cache_key routes to it
 	return b, nil, err
 }
 
@@ -137,26 +140,31 @@ func chatUser(recs []statefile.Record) []chatMsg {
 	return msgs
 }
 
-func chatAssistant(recs []statefile.Record) (chatMsg, error) {
+func (e openaiChat) assistant(recs []statefile.Record) (chatMsg, error) {
 	m := chatMsg{Role: "assistant"}
-	var text []string
+	var text, reasoning []string
 	for _, r := range recs {
 		switch r.Kind {
 		case statefile.Text:
 			text = append(text, string(r.Body))
+		case statefile.Thinking:
+			if r.Provider == e.Name() {
+				reasoning = append(reasoning, string(r.Body))
+			}
 		case statefile.Call:
 			var c Call
 			if err := json.Unmarshal(r.Body, &c); err != nil {
 				return m, fmt.Errorf("call %s: %w", r.ID, err)
 			}
 			m.ToolCalls = append(m.ToolCalls, chatToolCall{ID: r.ID, Type: "function", Function: chatCallBody{c.Name, string(c.Arguments)}})
-		case statefile.Start, statefile.Config, statefile.Name, statefile.System, statefile.Message, statefile.Thinking,
+		case statefile.Start, statefile.Config, statefile.Name, statefile.System, statefile.Message,
 			statefile.Step, statefile.Result, statefile.Error:
 		}
 	}
 	if len(text) > 0 {
 		m.Content = strings.Join(text, "")
 	}
+	m.Reasoning = strings.Join(reasoning, "")
 	return m, nil
 }
 
@@ -164,6 +172,7 @@ type chatChunk struct {
 	Choices []struct {
 		Delta struct {
 			Content   string `json:"content"`
+			Reasoning string `json:"reasoning_content"`
 			ToolCalls []struct {
 				Index    int          `json:"index"`
 				ID       string       `json:"id"`
@@ -175,8 +184,10 @@ type chatChunk struct {
 	Usage *struct {
 		PromptTokens        int `json:"prompt_tokens"`
 		CompletionTokens    int `json:"completion_tokens"`
+		CacheHitTokens      int `json:"prompt_cache_hit_tokens"` // DeepSeek's name for cached_tokens
 		PromptTokensDetails struct {
-			CachedTokens int `json:"cached_tokens"`
+			CachedTokens     int `json:"cached_tokens"`
+			CacheWriteTokens int `json:"cache_write_tokens"` // Kimi
 		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
 	Error *struct {
@@ -184,10 +195,11 @@ type chatChunk struct {
 	} `json:"error"`
 }
 
-// Stream accumulates text and tool call deltas by index and emits them when
-// the stream ends, text first: Chat Completions marks no block boundaries.
+// Stream accumulates reasoning, text and tool call deltas by index and emits
+// them when the stream ends, in that order: Chat Completions marks no block
+// boundaries.
 func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
-	var text strings.Builder
+	var reasoning, text strings.Builder
 	var calls []*chatToolCall
 	var usage statefile.Usage
 	var stop string
@@ -205,10 +217,13 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 			return fmt.Errorf("openai-chat: %s", c.Error.Message)
 		}
 		if c.Usage != nil {
+			u := c.Usage
+			read := max(u.PromptTokensDetails.CachedTokens, u.CacheHitTokens)
 			usage = statefile.Usage{
-				Input:     c.Usage.PromptTokens - c.Usage.PromptTokensDetails.CachedTokens,
-				Output:    c.Usage.CompletionTokens,
-				CacheRead: c.Usage.PromptTokensDetails.CachedTokens,
+				Input:      u.PromptTokens - read - u.PromptTokensDetails.CacheWriteTokens,
+				Output:     u.CompletionTokens,
+				CacheRead:  read,
+				CacheWrite: u.PromptTokensDetails.CacheWriteTokens,
 			}
 		}
 		if len(c.Choices) == 0 {
@@ -218,6 +233,7 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 			stop = f
 		}
 		d := c.Choices[0].Delta
+		reasoning.WriteString(d.Reasoning)
 		text.WriteString(d.Content)
 		for _, tc := range d.ToolCalls {
 			for len(calls) <= tc.Index {
@@ -235,6 +251,9 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 	}
 	if err != nil {
 		return statefile.Header{}, err
+	}
+	if reasoning.Len() > 0 {
+		emit(statefile.Record{Header: statefile.Header{Kind: statefile.Thinking, Type: "text/plain"}, Body: []byte(reasoning.String())})
 	}
 	if text.Len() > 0 {
 		emit(statefile.Record{Header: statefile.Header{Kind: statefile.Text, Type: "text/plain"}, Body: []byte(text.String())})

@@ -1,6 +1,9 @@
 // Build prints the catalog: source.json, our choices, filled in with each
 // model's name, limits, input and prices from models.dev. It fails on a
-// preset models.dev does not have, or an effort the model does not take.
+// preset models.dev does not have, or an effort the model does not take. A
+// variant, such as a fast mode, is the model's preset again with params of its
+// own and a price that is the model's models.dev price times the multiplier
+// source.json gives with its source, since models.dev lists none.
 //
 //	go run ./pkg/catalog/build > catalog.json
 package main
@@ -9,6 +12,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"slices"
@@ -43,16 +47,20 @@ type source struct {
 		ModelsDev string `json:"models_dev"`
 		Plan      bool   `json:"plan"` // its use counts against the user's plan, not per token: its presets cost nothing
 	} `json:"providers"`
-	Params  map[string]map[string]any `json:"params"` // by shape: what every preset of it sends
-	Effort  map[string]map[string]any `json:"effort"` // by shape: the params an effort is, "$" the value
+	Params  map[string]map[string]any `json:"params"` // by provider: what every preset of it sends
+	Effort  map[string]map[string]any `json:"effort"` // by provider: the params an effort is, "$" the value
 	Presets []sourcePreset            `json:"presets"`
 }
 
 type sourcePreset struct {
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
-	Effort   string `json:"effort"` // the one the provider uses when none is sent
-	Tools    string `json:"tools"`
+	Provider string         `json:"provider"`
+	Model    string         `json:"model"`
+	Effort   string         `json:"effort"` // the one the provider uses when none is sent
+	Tools    string         `json:"tools"`
+	Variant  string         `json:"variant"`      // the id suffix and name suffix: provider/model:variant, "<name> <Variant>"
+	Params   map[string]any `json:"params"`       // this preset's own, merged over the provider's and the effort's
+	Price    float64        `json:"price"`        // a variant's price as a multiple of the model's
+	Source   string         `json:"price_source"` // where a variant's price is published
 }
 
 type devProvider struct {
@@ -105,6 +113,12 @@ func run() error {
 			return err
 		}
 		id := s.Provider + "/" + s.Model
+		if s.Variant != "" {
+			id += ":" + s.Variant
+		}
+		if _, dup := c.Presets[id]; dup {
+			return fmt.Errorf("%s: twice in source.json", id)
+		}
 		c.Presets[id] = pr
 		c.Groups["self-hosted-all"] = append(c.Groups["self-hosted-all"], id)
 	}
@@ -138,7 +152,16 @@ func preset(src source, dev map[string]devProvider, s sourcePreset) (catalog.Pre
 			}
 		}
 	}
-	params := merge(map[string]any{}, src.Params[p.Shape])
+	if (s.Variant == "") != (s.Price == 0) || (s.Variant == "") != (s.Source == "") {
+		return catalog.Preset{}, fmt.Errorf("%s/%s: a variant, and only a variant, has price and price_source", s.Provider, s.Model)
+	}
+	if s.Variant != "" {
+		pr.Name += " " + strings.ToUpper(s.Variant[:1]) + s.Variant[1:]
+		times := func(v float64) float64 { return math.Round(v*s.Price*1e6) / 1e6 } // 0.1*6 is 0.6000000000000001
+		c := pr.Cost
+		pr.Cost = catalog.Cost{Input: times(c.Input), Output: times(c.Output), CacheRead: times(c.CacheRead), CacheWrite: times(c.CacheWrite)}
+	}
+	params := merge(map[string]any{}, src.Params[s.Provider])
 	if s.Effort != "" {
 		var levels []string
 		for _, r := range m.Reasoning {
@@ -151,7 +174,7 @@ func preset(src source, dev map[string]devProvider, s sourcePreset) (catalog.Pre
 		}
 		set := catalog.Setting{Name: "effort"}
 		for _, l := range levels {
-			v, err := effort(src.Effort[p.Shape], l)
+			v, err := effort(src.Effort[s.Provider], l)
 			if err != nil {
 				return catalog.Preset{}, err
 			}
@@ -162,14 +185,14 @@ func preset(src source, dev map[string]devProvider, s sourcePreset) (catalog.Pre
 		}
 		pr.Settings = []catalog.Setting{set}
 	}
-	pr.Params = raw(params)
+	pr.Params = raw(merge(params, s.Params))
 	return pr, nil
 }
 
 // effort is the shape's effort params with "$" made the level.
 func effort(tmpl map[string]any, level string) (map[string]any, error) {
 	if tmpl == nil {
-		return nil, fmt.Errorf("no effort params for a shape with effort %s", level)
+		return nil, fmt.Errorf("no effort params for a provider with effort %s", level)
 	}
 	b, _ := json.Marshal(tmpl)
 	var v map[string]any
