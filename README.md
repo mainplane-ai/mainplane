@@ -18,7 +18,7 @@
 
 ## Quickstart
 
-Install mainplane-server on any machine. In a terminal, the quickstart then connects a provider, your machines and your other devices.
+**1. Install mainplane-server** on any machine.
 
 ```shell
 # Linux, macOS
@@ -26,6 +26,38 @@ curl -fsSL https://mainplane.ai/install | sh -s -- server quickstart
 
 # Windows
 & ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) server quickstart
+```
+
+In a terminal, the quickstart opens: it connects a provider, your machines and your other devices. Without one, it prints commands with your network name and device code, and an API key (`mp_key_...`), save these for the steps below.
+<br/><br/>
+
+**2. Optional: connect more machines.** Your agents can use them.
+
+```shell
+# Linux, macOS - use network name and device code from step 1
+curl -fsSL https://mainplane.ai/install | sh -s -- your-network XXXX-XXXX
+
+# Windows - use network name and device code from step 1
+& ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) your-network XXXX-XXXX
+```
+<br/>
+
+**3. Log in from anywhere and start a session.** A logged-in machine can message agents.
+ 
+```shell
+# Linux, macOS - use api key from step 1
+curl -fsSL https://mainplane.ai/install | sh -s -- mp_key_...
+
+# Windows - use api key from step 1
+& ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) mp_key_...
+```
+
+Add an LLM key (`openai`, `anthropic` or `google`), then start a session on `admin`:
+
+```shell
+mainplane key openai sk-...
+echo '{"model":"openai/gpt-6.1-sol","tools":"patch","context_limit":250000,"workers":[{"name":"admin"}],"params":{"reasoning":{"effort":"medium","summary":"auto"}}}' | mainplane new
+mainplane chat
 ```
 
 More in [docs/self-hosting.md](docs/self-hosting.md).

@@ -20,7 +20,10 @@
 // README quickstart with the lines its install printed, pointed at v: on its
 // own machine the worker and login lines say it is already both; the next
 // machine runs each twice, then sets an OpenAI key from OPENAI_API_KEY and
-// starts a session on admin with mainplane new and chat. Each phase is this
+// starts a session on admin with mainplane new and chat. On Linux the
+// harness's own TUI runs the quickstart first, in tmux. On Windows the
+// harness updates to prev and back once more with TUIs left running from
+// Program Files, which must not block either update. Each phase is this
 // program again, as a harness at one version: its exit drops every
 // connection, so each worker says hello to the next.
 //
@@ -207,6 +210,49 @@ systemctl is-active mainplane-server 2>/dev/null || { sudo launchctl print syste
 		true: `$b = "$env:ProgramFiles\mainplane\mainplane-server.exe"
 & $b update %[1]s *> $null; & $b version; if ((Get-Service mainplane-server).Status -eq 'Running') { 'active' }`,
 	}
+	// tuiQuickstart drives the TUI on a Linux harness just installed, with no
+	// provider, in tmux, as its operator: plain mainplane opens the
+	// quickstart, an OpenAI key (%[1]s) set meanwhile shows connected, the
+	// workers step shows the join line (%[2]s) and admin, the connectors step
+	// a minted key tui-1, the drives step is set up later, and it ends on a
+	// new session with the first message typed, not sent. Then, with a
+	// provider, plain mainplane opens on a session, not the quickstart.
+	tuiQuickstart = `command -v tmux >/dev/null || sudo apt-get install -y tmux >/dev/null 2>&1
+shot() { sleep $1; tmux capture-pane -p -t qs; }
+tmux new-session -d -s qs -x 120 -y 40 /usr/local/bin/mainplane
+shot 4 | grep -q 'Press any key' && echo splash-ok
+tmux send-keys -t qs x
+shot 2 | grep -q 'No provider is connected yet' && echo providers-ok
+/usr/local/bin/mainplane key openai '%[1]s' >/dev/null
+shot 3 | grep -q 'Connected: OpenAI' && echo connected-ok
+tmux send-keys -t qs Enter
+s=$(shot 2); echo "$s" | grep -qF -- '-- %[2]s' && echo "$s" | grep -q 'Connected: admin' && echo workers-ok
+tmux send-keys -t qs Enter
+shot 3 | grep -q 'sh -s -- mp_key_' && sudo -n /usr/local/bin/mainplane-server key list | grep -qx tui-1 && echo connectors-ok
+tmux send-keys -t qs Enter
+shot 2 | grep -q 'Share a drive' && echo drives-ok
+tmux send-keys -t qs Enter
+shot 3 | grep -q 'Tell me what devices you have access to and what you can do' && echo session-ok
+tmux kill-session -t qs
+tmux new-session -d -s qs -x 120 -y 40 /usr/local/bin/mainplane
+s=$(shot 4); echo "$s" | grep -q 'Ask anything' && ! echo "$s" | grep -q 'Press any key' && echo again-ok
+tmux kill-session -t qs
+[ "$(/usr/local/bin/mainplane sessions)" = "[]" ] && echo unsent-ok`
+	// heldUpdate updates the harness to %[1]s, then to %[2]s, each with one
+	// more TUI started from Program Files before it and left running (bug
+	// #151), and waits for the worker to follow. Each line is the release
+	// asked for, the worker's, the service's state and the TUIs still running.
+	heldUpdate = `$m = "$env:ProgramFiles\mainplane\mainplane.exe"
+$held = @()
+foreach ($u in '%[1]s', '%[2]s') {
+	$held += Start-Process $m -WindowStyle Hidden -PassThru
+	Start-Sleep 5
+	& "$env:ProgramFiles\mainplane\mainplane-server.exe" update $u *> $null
+	for ($i = 0; $i -lt 180 -and (& $m version) -ne $u; $i++) { Start-Sleep 1 }
+	"$u $(& $m version) $((Get-Service mainplaned).Status) $(@($held | Where-Object { !$_.HasExited }).Count)"
+}
+$kids = Get-CimInstance Win32_Process | Where-Object { $held.Id -contains $_.ParentProcessId } | ForEach-Object ProcessId
+$held.Id + $kids | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }`
 	// The harness uninstall elevates itself and takes the worker admin with
 	// it. What is left of either, the worker's state, the mesh and drives
 	// (%s, from meshGone and drivesGone) is printed before clean.
@@ -560,6 +606,13 @@ func server(ssh map[string]string, o, q string, qMu *sync.Mutex, v, prev, llm st
 		got, err := remote(o, ssh[o], sessionsDrive)
 		check(o, "harness: sessions drive on admin, read-only", err == nil && strings.Join(strings.Fields(got), " ") == "ro listed refused", got)
 	}
+	if o == "linux" {
+		join := regexp.MustCompile(`[a-z0-9-]+ [0-9A-Z]{4}-[0-9A-Z]{4}`).FindString(out)
+		got, err := remote(o, ssh[o], fmt.Sprintf(tuiQuickstart, llm, join))
+		for _, step := range []string{"splash", "providers", "connected", "workers", "connectors", "drives", "session", "again", "unsent"} {
+			check(o, "TUI quickstart: "+step, err == nil && strings.Contains(got, step+"-ok"), got)
+		}
+	}
 	quick(ssh, q, o, v, llm, out, qMu)
 	// A harness before v0.5.0 finds its files elsewhere in Dir and stops,
 	// so prev is checked to be placed, and v to run again.
@@ -568,6 +621,11 @@ func server(ssh map[string]string, o, q string, qMu *sync.Mutex, v, prev, llm st
 		f := strings.Fields(out)
 		// prev only placed: before v0.5.0 a harness stops on this Dir, so systemctl fails the script
 		check(o, "harness updated to "+u, len(f) > 0 && f[0] == u && (u == prev || err == nil && strings.Join(f, " ") == u+" active"), out)
+	}
+	if win {
+		out, err = remote(o, ssh[o], fmt.Sprintf(heldUpdate, prev, v))
+		want := fmt.Sprintf("%[1]s %[1]s Running 1\n%[2]s %[2]s Running 2", prev, v)
+		check(o, "harness updated to "+prev+" and back with TUIs held from Program Files", err == nil && strings.TrimSpace(out) == want, out)
 	}
 	out, err = remote(o, ssh[o], fmt.Sprintf(uninstall[win], meshGone[o]+"\n"+drivesGone[o]))
 	check(o, "uninstall: no service, binary, state, mesh or drive left", err == nil && strings.TrimSpace(out) == "clean", out)
