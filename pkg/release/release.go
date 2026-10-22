@@ -118,9 +118,17 @@ func Aside(path string) (string, error) {
 }
 
 // Asides are the old binaries Aside left beside path, and the .old that
-// releases before it left.
+// releases before it left. A directory that cannot be read has none: Aside's
+// rename and uninstall's removals then fail on it by name.
 func Asides(path string) []string {
-	m, _ := filepath.Glob(path + ".old*") // the pattern is well formed
+	dir, base := filepath.Dir(path), filepath.Base(path)
+	es, _ := os.ReadDir(dir)
+	var m []string
+	for _, e := range es {
+		if n := e.Name(); n == base+".old" || strings.HasPrefix(n, base+".old-") {
+			m = append(m, filepath.Join(dir, n))
+		}
+	}
 	return m
 }
 
