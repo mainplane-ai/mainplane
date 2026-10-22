@@ -189,3 +189,6 @@ func dropDrives(*user.User) error {
 	}
 	return errors.Join(errs...)
 }
+
+// canServe is false: only a Linux worker serves drives.
+func canServe() bool { return false }

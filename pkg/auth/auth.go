@@ -42,6 +42,9 @@ const (
 	window   = time.Minute
 )
 
+// ErrTaken is a name that already has an entry of its kind.
+var ErrTaken = errors.New("name in use")
+
 type Entry struct {
 	Name string `json:"name"`
 	Hash string `json:"hash"`
@@ -84,7 +87,7 @@ func (s Store) Issue(kind, name string) (string, error) {
 		return "", err
 	}
 	if slices.ContainsFunc(t[kind], func(e Entry) bool { return e.Name == name }) {
-		return "", fmt.Errorf("%s %q exists", kind, name)
+		return "", fmt.Errorf("%s %q: %w", kind, name, ErrTaken)
 	}
 	secret := rand.Text()
 	t[kind] = append(t[kind], Entry{Name: name, Hash: Hash(secret)})

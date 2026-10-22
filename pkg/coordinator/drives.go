@@ -33,17 +33,28 @@ func (c *Coordinator) SetDrives(ds map[string]Drive) []error {
 	c.wake()
 	var errs []error
 	for _, name := range slices.Sorted(maps.Keys(ds)) {
-		if _, err := c.check(name); err != nil {
+		if _, err := c.check(name, ds[name]); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errs
 }
 
-// check is the server of the drive name, or why it has none. The caller
+// Check is the name of the server drive d, named name, would have, or why
+// it would have none.
+func (c *Coordinator) Check(name string, d Drive) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n, err := c.check(name, d)
+	if err != nil {
+		return "", err
+	}
+	return n.Name, nil
+}
+
+// check is the server of drive d, named name, or why it has none. The caller
 // holds mu.
-func (c *Coordinator) check(name string) (*node, error) {
-	d := c.drives[name]
+func (c *Coordinator) check(name string, d Drive) (*node, error) {
 	server := d.Server
 	switch {
 	case !worker.ValidDrive(name):
@@ -72,7 +83,7 @@ func on(d Drive, n *node) bool {
 // serves is whether a serves a drive that b mounts. The caller holds mu.
 func (c *Coordinator) serves(a, b *node) bool {
 	for name, d := range c.drives {
-		if s, err := c.check(name); err == nil && s == a && on(d, b) {
+		if s, err := c.check(name, d); err == nil && s == a && on(d, b) {
 			return true
 		}
 	}
@@ -87,7 +98,7 @@ func (c *Coordinator) Desired(name string) worker.Desired {
 	want := worker.Desired{Serve: []worker.Export{}, Mount: []worker.Mount{}}
 	for _, dn := range slices.Sorted(maps.Keys(c.drives)) {
 		d := c.drives[dn]
-		s, err := c.check(dn)
+		s, err := c.check(dn, d)
 		if err != nil {
 			continue
 		}

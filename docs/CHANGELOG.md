@@ -8,6 +8,7 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 - run takes an optional `timeout` in seconds. The default stays 10 minutes
 - Each message the model sees begins with a line `via <via>`, who sent it. Before, the model never saw it
 - Stop works on a session that is not stepping: it kills the session's interpreter processes on its connected workers and writes a system record naming who stopped it. Delete stops the session first and waits for its step to end, and a session past its context limit kills its processes. In the terminal app, /stop on an idle session does the same
+- Harness API for setup: `GET /` adds `network` (`starting`, `ready`, or why the tunnel last stopped the harness), `GET /join` gives the network name and device code, `POST /keys {"name"}` makes an api key (409 when the name is in use), and `GET /drives`, `PUT /drives/{name} {"server","workers"}` and `DELETE /drives/{name}` change drives as a config save does. `PUT` refuses a server that is not connected or cannot serve drives. `GET /workers` shows `drive_server: true` for a worker that can serve drives: Debian or Ubuntu, with no other NFS export and port 445 free
 - The release gate runs on machines of its own. It wipes each one first, then installs the previous release with two providers and a session, updates it to the new one and checks that both and the session survive
 
 ## v0.5.4

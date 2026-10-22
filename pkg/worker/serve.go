@@ -47,7 +47,7 @@ type server struct {
 // which reports on the connection while it lasts.
 func Serve(conn net.Conn, l Local, d *drives) error {
 	s := &server{Local: l, conn: conn, envs: map[string]*env{}, dead: map[string]bool{}}
-	if err := d.attach(Frame{Header: Header{Kind: Hello, OS: runtime.GOOS, Arch: runtime.GOARCH, Interps: l.Interps, Scratch: l.Scratch, Version: version.V}}, s.send); err != nil {
+	if err := d.attach(Frame{Header: Header{Kind: Hello, OS: runtime.GOOS, Arch: runtime.GOARCH, Interps: l.Interps, Scratch: l.Scratch, Version: version.V, DriveServer: canServe()}}, s.send); err != nil {
 		return err
 	}
 	defer d.detach()
