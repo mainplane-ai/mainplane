@@ -40,7 +40,7 @@ replaces it. Add keys there:
 or from any machine whose CLI is logged in: `mainplane key anthropic sk-ant-...`.
 A provider's name is free; its `shape` is the API it speaks: `anthropic`,
 `openai` (Responses), `google` (Gemini), `openai-chat` (Chat Completions) or
-`bedrock` (with `region`). Each takes an optional `url`, the base url the
+`bedrock` (with `region`, unless its `url` names the endpoint). Each takes an optional `url`, the base url the
 vendor's official SDK takes, such as `https://openrouter.ai/api/v1` for
 `openai-chat`; the harness appends the API path (`/chat/completions`). No `url`
 is the vendor's own: `https://api.anthropic.com`, `https://api.openai.com/v1`
