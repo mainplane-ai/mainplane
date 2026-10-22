@@ -2,8 +2,12 @@ package mesh
 
 import (
 	"errors"
+	"fmt"
+	"log"
 	"net"
 	"net/netip"
+	"os/exec"
+	"strings"
 )
 
 const (
@@ -53,6 +57,28 @@ func add(tun string, a netip.Prefix) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// keep puts back a's route and rule when something took them away, as
+// systemd-networkd does with every rule it did not make when it starts.
+func keep(tun string, a netip.Prefix) error {
+	p := project(a).String()
+	if err := run("ip", "-6", "route", "replace", p, "dev", tun, "table", table); err != nil {
+		return err
+	}
+	args := []string{"-6", "rule", "list", "to", p, "table", table, "priority", priority}
+	out, err := exec.Command("ip", args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ip %s: %w: %s", strings.Join(args, " "), err, out)
+	}
+	if len(out) > 0 {
+		return nil
+	}
+	if err := run("ip", "-6", "rule", "add", "to", p, "table", table, "priority", priority); err != nil {
+		return err
+	}
+	log.Printf("mesh: the rule to %s was gone: added again", p)
 	return nil
 }
 

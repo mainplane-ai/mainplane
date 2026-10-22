@@ -90,6 +90,10 @@ func add(_ string, a netip.Prefix) error {
 	return luid.AddRoute(project(a), netip.IPv6Unspecified(), 0)
 }
 
+// keep checks nothing: no service here removes what add made, as
+// systemd-networkd does on Linux.
+func keep(string, netip.Prefix) error { return nil }
+
 // dropRule removes the firewall rule, which outlives a worker that was killed.
 func dropRule() { _ = run("netsh", "advfirewall", "firewall", "delete", "rule", "name="+rule) }
 

@@ -65,6 +65,13 @@ func dial(m *mesh.Mesh, l Local, ds *drives) {
 					wait = redialMin
 				}
 			}
+			// The connection is lost, maybe with the route or rule to the
+			// harness: systemd-networkd removes rules it did not make. With
+			// them gone a dial fails as unreachable, or times out by a
+			// default route.
+			if err := m.Reroute(); err != nil {
+				log.Printf("mesh: reroute: %v", err)
+			}
 		}
 		log.Printf("%v, redial in %s", err, wait)
 		select {
