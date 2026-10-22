@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"fmt"
@@ -15,7 +16,10 @@ import (
 // Thinking is reasoning_content, the field DeepSeek, Kimi, GLM and MiMo stream
 // and want back in a tool loop. OpenRouter and OpenCode Go stream it as
 // reasoning instead and read either field back, so it replays as
-// reasoning_content everywhere; a server without it sends none.
+// reasoning_content everywhere; a server without it sends none. OpenRouter
+// also streams reasoning_details, which hold the upstream's signed or
+// encrypted reasoning (Claude, GPT, Gemini). Where a step has them they are
+// its thinking record, a JSON array, replayed as reasoning_details.
 func OpenAIChat(url, key string) Provider {
 	return Provider{
 		URL:      base(url, "https://api.openai.com/v1") + "/chat/completions",
@@ -62,11 +66,12 @@ type chatFunction struct {
 // chatMsg content is a string for system, assistant, and tool messages and
 // []chatPart for user messages.
 type chatMsg struct {
-	Role       string         `json:"role"`
-	Content    any            `json:"content,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	Reasoning  string         `json:"reasoning_content,omitempty"`
+	Role       string            `json:"role"`
+	Content    any               `json:"content,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
+	ToolCalls  []chatToolCall    `json:"tool_calls,omitempty"`
+	Reasoning  string            `json:"reasoning_content,omitempty"`
+	Details    []json.RawMessage `json:"reasoning_details,omitempty"`
 }
 
 type chatPart struct {
@@ -151,9 +156,18 @@ func (e openaiChat) assistant(recs []statefile.Record) (chatMsg, error) {
 		case statefile.Text:
 			text = append(text, string(r.Body))
 		case statefile.Thinking:
-			if r.Provider == e.Name() {
-				reasoning = append(reasoning, string(r.Body))
+			if r.Provider != e.Name() {
+				continue
 			}
+			if r.Type != "application/json" {
+				reasoning = append(reasoning, string(r.Body))
+				continue
+			}
+			var d []json.RawMessage
+			if err := json.Unmarshal(r.Body, &d); err != nil {
+				return m, fmt.Errorf("thinking %s: %w", r.ID, err)
+			}
+			m.Details = append(m.Details, d...)
 		case statefile.Call:
 			var c Call
 			if err := json.Unmarshal(r.Body, &c); err != nil {
@@ -174,9 +188,10 @@ func (e openaiChat) assistant(recs []statefile.Record) (chatMsg, error) {
 type chatChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content   string `json:"content"`
-			Reasoning string `json:"reasoning_content"`
-			Alias     string `json:"reasoning"` // OpenRouter, OpenCode Go
+			Content   string   `json:"content"`
+			Reasoning string   `json:"reasoning_content"`
+			Alias     string   `json:"reasoning"`         // OpenRouter, OpenCode Go
+			Details   []detail `json:"reasoning_details"` // OpenRouter
 			ToolCalls []struct {
 				Index    int          `json:"index"`
 				ID       string       `json:"id"`
@@ -204,6 +219,7 @@ type chatChunk struct {
 // boundaries.
 func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
 	var reasoning, text strings.Builder
+	var details []detail
 	var calls []*chatToolCall
 	var usage statefile.Usage
 	var stop string
@@ -238,6 +254,12 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 		}
 		d := c.Choices[0].Delta
 		reasoning.WriteString(cmp.Or(d.Reasoning, d.Alias)) // a server that sends both sends the same text
+		for _, x := range d.Details {
+			var err error
+			if details, err = addDetail(details, x); err != nil {
+				return err
+			}
+		}
 		text.WriteString(d.Content)
 		for _, tc := range d.ToolCalls {
 			for len(calls) <= tc.Index {
@@ -256,7 +278,13 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 	if err != nil {
 		return statefile.Header{}, err
 	}
-	if reasoning.Len() > 0 {
+	if len(details) > 0 {
+		body, err := marshal(details)
+		if err != nil {
+			return statefile.Header{}, err
+		}
+		emit(statefile.Record{Header: statefile.Header{Kind: statefile.Thinking, Type: "application/json"}, Body: body})
+	} else if reasoning.Len() > 0 {
 		emit(statefile.Record{Header: statefile.Header{Kind: statefile.Thinking, Type: "text/plain"}, Body: []byte(reasoning.String())})
 	}
 	if text.Len() > 0 {
@@ -270,4 +298,47 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 		emit(r)
 	}
 	return statefile.Header{Usage: &usage, Stop: stop}, nil
+}
+
+// detail is one reasoning_details entry, kept field by field as streamed.
+type detail map[string]json.RawMessage
+
+// detailText are the reasoning_details fields a stream sends in pieces.
+var detailText = []string{"text", "summary", "data", "signature"}
+
+// addDetail merges a streamed reasoning_details entry into the list.
+// OpenRouter says only to concatenate the chunks in order. An entry with the
+// type and index of the last one continues it, as OpenRouter's SDK merges
+// consecutive text and summary entries: its text fields append, its other
+// fields fill those the last one lacks. Gemini sends a text entry and then an
+// encrypted one under the same index, so type and index both decide.
+func addDetail(all []detail, d detail) ([]detail, error) {
+	n := len(all)
+	if n == 0 || !bytes.Equal(all[n-1]["type"], d["type"]) || !bytes.Equal(all[n-1]["index"], d["index"]) {
+		return append(all, d), nil
+	}
+	last := all[n-1]
+	for k, v := range d {
+		old, ok := last[k]
+		if !ok || string(old) == "null" {
+			last[k] = v
+			continue
+		}
+		if !slices.Contains(detailText, k) || string(v) == "null" {
+			continue
+		}
+		var a, b string
+		if err := json.Unmarshal(old, &a); err != nil {
+			return nil, fmt.Errorf("openai-chat: reasoning_details %s: %w", k, err)
+		}
+		if err := json.Unmarshal(v, &b); err != nil {
+			return nil, fmt.Errorf("openai-chat: reasoning_details %s: %w", k, err)
+		}
+		s, err := marshal(a + b)
+		if err != nil {
+			return nil, err
+		}
+		last[k] = s
+	}
+	return all, nil
 }
