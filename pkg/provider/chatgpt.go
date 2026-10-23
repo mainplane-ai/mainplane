@@ -34,9 +34,10 @@ const (
 	agentName   = "Mainplane"
 	register    = "dynamic_agent_client" // the client id of a first login, never saved
 	credentials = "chatgpt.json"
-	// The browser lands on the loopback callback, which the harness, maybe
-	// remote, does not serve: the user pastes the address it shows. Only the
-	// port may differ between logins; 1455 is the docs' and Codex's.
+	// The browser lands on the loopback callback, which the TUI serves on its
+	// machine; a browser elsewhere shows a page that does not load, and the
+	// user pastes its address. Only the port may differ between logins; 1455
+	// is the docs' and Codex's.
 	callback = "http://127.0.0.1:1455/auth/callback"
 	// Access tokens last an hour. The token response's earliest_refresh_at
 	// fell about 6 minutes before expiry, so a refresh this early is allowed
@@ -143,8 +144,8 @@ func postToken(ctx context.Context, form neturl.Values) (tokenResponse, error) {
 }
 
 // chatgptLogin signs in: a first login registers the client, a later one
-// reuses its client id and the host id. The user opens the URL, approves, and
-// pastes the address of the page the browser lands on.
+// reuses its client id and the host id. The user opens the URL and approves,
+// and the address the browser lands on comes back as the paste.
 func chatgptLogin(ctx context.Context, dir string, show func(Prompt), paste <-chan string) error {
 	c, err := hostCreds(dir)
 	if err != nil {
@@ -171,7 +172,7 @@ func chatgptLogin(ctx context.Context, dir string, show func(Prompt), paste <-ch
 		q.Set("login_hint", c.Email)
 	}
 	show(Prompt{
-		Text:  "Open the URL and sign in with ChatGPT. The browser then shows a page on 127.0.0.1 that does not load: paste its full address.",
+		Text:  "Sign in with ChatGPT. If the browser then shows a page on 127.0.0.1 that does not load, paste its full address.",
 		URL:   issuer + "/api/accounts/authorize?" + q.Encode(),
 		Paste: true,
 	})
