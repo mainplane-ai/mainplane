@@ -103,7 +103,7 @@ func newSession(a *App, l *sessionList, id string) *session {
 		l.cur = s
 	}
 	s.input.Placeholder, s.input.OnSubmit = "Ask anything", s.send
-	s.slash = &slash{s: s}
+	s.slash = &slash{s: s, in: s.input, all: commands()}
 	s.input.Before = s.slash.Key
 	s.box = inputBox(a, s.input)
 	s.inputRow = Box(&Node{Dir: Row}, &Node{Grow: 1}, s.box, &Node{Grow: 1})

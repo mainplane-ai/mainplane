@@ -71,13 +71,15 @@ func (c command) is(word string) bool { return word == c.name || slices.Contains
 // slashRows is the most rows the list above the input shows.
 const slashRows = 10
 
-// slash is the list of commands above the input while the input up to the
+// slash is the list of commands above an input while the input up to the
 // cursor is a / and the start of a command's name or alias. Up and Down
 // move, Enter, Tab or a click runs, Esc closes it until that text changes.
 // The text after the cursor stays in the input.
 type slash struct {
 	s     *session
-	query string // the input up to the cursor that made the list
+	in    *Input
+	all   []command // the commands it offers: commands(), or the quickstart's one
+	query string    // the input up to the cursor that made the list
 	cmds  []command
 	sel   int
 	top   int
@@ -86,7 +88,7 @@ type slash struct {
 // update makes the list for the input up to the cursor. Names that match
 // come before aliases that do.
 func (l *slash) update() {
-	in := l.s.input
+	in := l.in
 	before := Input{els: in.els[:in.cur]}
 	t := before.Text()
 	if t == l.query {
@@ -97,7 +99,7 @@ func (l *slash) update() {
 		return
 	}
 	var byAlias []command
-	for _, c := range commands() {
+	for _, c := range l.all {
 		switch {
 		case strings.HasPrefix(c.name, t[1:]):
 			l.cmds = append(l.cmds, c)
@@ -114,12 +116,12 @@ func (l *slash) run(a *App, i int) {
 	if i < 0 || i >= len(l.cmds) {
 		return
 	}
-	l.s.runCommand(a, l.cmds[i], l.s.input.cur)
+	l.runCommand(a, l.cmds[i], l.in.cur)
 }
 
 // runCommand runs c, typed in the input's first end elements, which leave it.
-func (s *session) runCommand(a *App, c command, end int) {
-	in := s.input
+func (l *slash) runCommand(a *App, c command, end int) {
+	in := l.in
 	rest := in.els[end:]
 	for len(rest) > 0 && rest[0].space() {
 		rest = rest[1:]
@@ -127,13 +129,13 @@ func (s *session) runCommand(a *App, c command, end int) {
 	in.Clear()
 	in.els = append([]elem(nil), rest...)
 	in.cur = len(in.els)
-	c.run(s, a)
+	c.run(l.s, a)
 }
 
 // typed is the command the input's first word names, and the word's end:
 // Enter runs it when the list is closed.
-func (s *session) typed() (*command, int) {
-	els := s.input.els
+func (l *slash) typed() (*command, int) {
+	els := l.in.els
 	end := slices.IndexFunc(els, func(e elem) bool { return e.space() || e.paste != "" })
 	if end < 0 {
 		end = len(els)
@@ -143,7 +145,7 @@ func (s *session) typed() (*command, int) {
 	if !strings.HasPrefix(t, "/") {
 		return nil, 0
 	}
-	for _, c := range commands() {
+	for _, c := range l.all {
 		if c.is(t[1:]) {
 			return &c, end
 		}
@@ -155,8 +157,8 @@ func (s *session) typed() (*command, int) {
 // and Enter on a typed command.
 func (l *slash) Key(a *App, k term.Key) bool {
 	if l.update(); len(l.cmds) == 0 {
-		if c, end := l.s.typed(); c != nil && k.String() == "enter" {
-			l.s.runCommand(a, *c, end)
+		if c, end := l.typed(); c != nil && k.String() == "enter" {
+			l.runCommand(a, *c, end)
 			return true
 		}
 		return false
@@ -197,7 +199,7 @@ func (l *slash) Mouse(a *App, m term.Mouse, r Rect) bool {
 
 func (l *slash) Draw(a *App, c *Canvas, r Rect) {
 	nameW := 0
-	for _, cmd := range commands() {
+	for _, cmd := range l.all {
 		nameW = max(nameW, term.Width(cmd.name)+1)
 	}
 	l.top = min(max(l.top, l.sel-r.H+1), l.sel)
@@ -762,56 +764,86 @@ func (s *session) providers(a *App) {
 	})
 }
 
-// signin runs the login of a provider that takes no key. It opens the
-// harness's prompt URL in the browser when this machine shows one, puts it
-// on the clipboard, and serves the URL's loopback callback here, where the
-// browser lands, so the login ends with no paste. The paste the prompt asks
-// for covers a browser on another machine.
+// signinStarting is the dialog's words until the harness shows the login's URL.
+const signinStarting = "Starting the sign-in..."
+
+// signin runs the login of a provider that takes no key, in a dialog that
+// opens at once. Its words are for a user whose browser is on another
+// machine: open the URL there and paste back the address it lands on. When
+// this machine shows a browser, the URL opens in it, and catch serves the
+// URL's loopback callback here, where the browser lands, so the login ends
+// with no paste. Esc ends the login here.
 func (s *session) signin(a *App, id string, p catalog.Provider) {
+	ctx, cancel := context.WithTimeout(context.Background(), signinTime)
+	words, in := &Node{}, NewInput()
+	in.Cursor = true
+	show := func(md string) {
+		sb, b := NewScrollbox(), &textBlock{md}
+		sb.Append(b)
+		sb.Show(b)
+		words.View = sized{sb, b, a}
+	}
+	show(signinStarting)
+	field := &Node{View: in, Hidden: true}
+	l := a.Dialog("Sign in to "+p.Name, Box(&Node{Dir: Col}, words, &Node{Fixed: 1}, field))
+	closed := false // with Esc: the login ends with no word
+	l.Esc = func() { closed = true; cancel() }
+	in.OnSubmit = func(a *App, text string) {
+		in.Clear()
+		a.Go(func() {
+			if err := s.c.SignInPaste(ctx, id, strings.TrimSpace(text)); err != nil {
+				a.Post(func() { a.SayError(err) })
+			}
+		})
+	}
 	a.Go(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), signinTime)
 		defer cancel()
 		st, err := s.c.SignIn(ctx, id, p.Shape, p.URL)
-		if err != nil {
-			a.Post(func() { a.SayError(err) })
-			return
+		if err == nil {
+			go catch(ctx, st.URL, func(text string) error { return s.c.SignInPaste(ctx, id, text) })
+			openBrowser(st.URL)
+			a.Post(func() {
+				md := st.Text + "\n\n```\n" + st.URL + "\n```"
+				if st.Code != "" {
+					md += "\n\nCode: `" + st.Code + "`"
+				}
+				show(md)
+				field.Hidden, in.Placeholder = !st.Paste, landing(st.URL)
+			})
+			err = s.c.SignInWait(ctx, id)
 		}
-		paste := func(text string) error { return s.c.SignInPaste(ctx, id, text) }
-		go catch(ctx, st.URL, paste)
-		msg := "The URL is on the clipboard. " + st.Text
-		if openBrowser(st.URL) {
-			msg = "The browser shows the URL, also on the clipboard. " + st.Text
-		}
-		if st.Code != "" {
-			msg += " Code: " + st.Code
-		}
-		var l *Layer
 		a.Post(func() {
-			a.T.Copy(st.URL)
-			a.Say(msg)
-			if st.Paste {
-				l = ask(a, "Signing in to "+p.Name, "the address, if the page does not load", func(a *App, text string) {
-					a.Go(func() {
-						if err := paste(text); err != nil {
-							a.Post(func() { a.SayError(err) })
-						}
-					})
-				})
-			}
-		})
-		err = s.c.SignInWait(ctx, id)
-		a.Post(func() {
-			if l != nil {
-				a.Pop(l)
-			}
-			if err != nil {
+			a.Pop(l)
+			switch {
+			case closed:
+			case err != nil:
 				a.SayError(err)
-				return
+			default:
+				s.home, s.homeAsked = nil, false
+				a.Say("Connected " + p.Name)
 			}
-			s.home, s.homeAsked = nil, false
-			a.Say("Connected " + p.Name)
 		})
 	})
+}
+
+// sized is a Scrollbox of one block, as tall as the block: words in a
+// dialog, to select and copy as in the transcript.
+type sized struct {
+	*Scrollbox
+	b *textBlock
+	a *App
+}
+
+func (s sized) Height(w int) int { return len(s.b.Rows(s.a, w)) }
+
+// landing is the shape of the address the browser lands on after the login
+// at url: its loopback callback with a code and state.
+func landing(url string) string {
+	u, err := neturl.Parse(url)
+	if err != nil {
+		return ""
+	}
+	return u.Query().Get("redirect_uri") + "?code=...&state=..."
 }
 
 // catch serves the loopback callback that url redirects to, until ctx ends,

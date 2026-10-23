@@ -13,13 +13,16 @@ func (closer) Draw(*App, *Canvas, Rect) {}
 func (d closer) Key(a *App, k term.Key) bool {
 	if k.Code == term.KeyEsc {
 		a.Pop(d.l)
+		if d.l.Esc != nil {
+			d.l.Esc()
+		}
 		return true
 	}
 	return false
 }
 
 // Dialog shows body under a title on a raised panel over the dimmed screen,
-// until Esc. The body's view measures its height.
+// until Esc. The body measures its height.
 func (a *App) Dialog(title string, body *Node) *Layer {
 	l := &Layer{Modal: true}
 	head := Box(&Node{Dir: Row, Fixed: 1},
@@ -29,11 +32,7 @@ func (a *App) Dialog(title string, body *Node) *Layer {
 		head, &Node{Fixed: 1}, body)
 	l.Place = func(w, h int) Rect {
 		dw := min(dialogWidth, w-4)
-		bh := 0
-		if m, ok := body.View.(Measurer); ok {
-			bh = m.Height(dw - 4)
-		}
-		dh := min(bh+4, h-2)
+		dh := min(body.measure(dw-4)+4, h-2)
 		return Rect{(w - dw) / 2, (h - dh) / 2, dw, dh}
 	}
 	a.Push(l)

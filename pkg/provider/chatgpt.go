@@ -172,7 +172,7 @@ func chatgptLogin(ctx context.Context, dir string, show func(Prompt), paste <-ch
 		q.Set("login_hint", c.Email)
 	}
 	show(Prompt{
-		Text:  "Sign in with ChatGPT. If the browser then shows a page on 127.0.0.1 that does not load, paste its full address.",
+		Text:  "Visit this URL in a browser and log in to ChatGPT. Then paste the address it sends you to.",
 		URL:   issuer + "/api/accounts/authorize?" + q.Encode(),
 		Paste: true,
 	})
