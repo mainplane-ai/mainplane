@@ -28,7 +28,6 @@ func (e elem) space() bool { return e.g == " " || e.g == "\t" || e.g == "\n" }
 // each key first and takes it by returning true.
 type Input struct {
 	Placeholder string
-	Mask        bool // show each grapheme as a dot, for a secret
 	Cursor      bool // show the cursor without focus, as in a dialog
 	MaxRows     int
 	OnSubmit    func(a *App, text string)
@@ -53,16 +52,9 @@ type snap struct {
 
 func NewInput() *Input { return &Input{anchor: -1, MaxRows: 1} }
 
-func (s *Input) width(i int) int {
-	if s.Mask && s.els[i].g != "\n" {
-		return 1
-	}
-	return s.els[i].w
-}
-
 // rows wraps at w less one column, where the cursor sits after a full row.
 func (s *Input) rows(w int) [][2]int {
-	return wrap(len(s.els), s.width, func(i int) bool { return s.els[i].space() }, func(i int) bool { return s.els[i].g == "\n" }, max(1, w-1))
+	return wrap(len(s.els), func(i int) int { return s.els[i].w }, func(i int) bool { return s.els[i].space() }, func(i int) bool { return s.els[i].g == "\n" }, max(1, w-1))
 }
 
 func (s *Input) Height(w int) int { return min(max(1, len(s.rows(w))), max(1, s.MaxRows)) }
@@ -73,7 +65,7 @@ func (s *Input) at(rows [][2]int, i int) (int, int) {
 		if i < row[1] || r == len(rows)-1 {
 			col := 0
 			for j := row[0]; j < i && j < row[1]; j++ {
-				col += s.width(j)
+				col += s.els[j].w
 			}
 			return r, col
 		}
@@ -91,10 +83,10 @@ func (s *Input) index(rows [][2]int, r, col int) int {
 		end-- // before the break or the space the row wrapped at
 	}
 	for i := row[0]; i < end; i++ {
-		if x+s.width(i) > col {
+		if x+s.els[i].w > col {
 			return i
 		}
-		x += s.width(i)
+		x += s.els[i].w
 	}
 	return end
 }
@@ -410,10 +402,7 @@ func (s *Input) Draw(a *App, c *Canvas, r Rect) {
 				continue
 			}
 			st, g := a.Theme.text(), e.g
-			switch {
-			case s.Mask:
-				g = "•"
-			case e.paste != "":
+			if e.paste != "" {
 				st = term.Style{FG: a.Theme.Accent, Attr: term.Bold}
 			}
 			if i >= sa && i < sb {

@@ -100,7 +100,7 @@ func (l *sessionList) leave() {
 
 // tick animates while any session steps.
 func (l *sessionList) tick(a *App) {
-	on := l.cur.stepping()
+	on := l.cur.stepping() || l.cur.blank && !a.Blurred
 	for i := range l.infos {
 		on = on || l.info(i).Status == statefile.StatusStepping
 	}
