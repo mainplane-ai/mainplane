@@ -201,10 +201,11 @@ func (q *quickstart) Size(a *App, w, h int) {
 	}
 	*q.status = *a.Status
 	a.Frame = 0
-	if q.step == stepSplash {
+	splash := q.step == stepSplash && !a.Blurred
+	if splash {
 		a.Frame = planeFrame
 	}
-	a.Ticking(q.step == stepSplash || q.minting || q.step == stepWorkers && q.network == "starting")
+	a.Ticking(splash || q.minting || q.step == stepWorkers && q.network == "starting")
 }
 
 // Tick opens the providers once the plane has flown off.

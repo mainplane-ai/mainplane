@@ -99,8 +99,11 @@ type App struct {
 	MouseX, MouseY int
 	// Frame, when set, is how often the tick comes, for an animation faster
 	// than the spinner.
-	Frame  time.Duration
-	Update string // the release to update to, when the loop ends for it
+	Frame time.Duration
+	// Blurred is whether the terminal said it lost focus: animations stop
+	// until it is back.
+	Blurred bool
+	Update  string // the release to update to, when the loop ends for it
 	// Status is the line under the input: what the last action did, until the
 	// next key or click replaces it.
 	Status *Text
@@ -230,6 +233,7 @@ func (a *App) event(e term.Event) {
 			p.Paste(a, e.Text)
 		}
 	case term.Focus:
+		a.Blurred = !e.In
 	}
 }
 

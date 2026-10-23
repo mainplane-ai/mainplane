@@ -140,7 +140,7 @@ func (s *session) Size(a *App, w, h int) {
 	loaded := s.id != "" && s.info.ID == s.id
 	empty := !s.started && (s.id == "" || loaded && len(s.asked) == 0) // a session that loads shows its blank transcript, not home
 	s.blank, a.Frame = empty, 0
-	if empty {
+	if empty && !a.Blurred {
 		a.Frame = planeFrame
 		a.Ticking(true)
 	}

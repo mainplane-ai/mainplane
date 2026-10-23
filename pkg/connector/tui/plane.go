@@ -139,7 +139,7 @@ var loadPlane = sync.OnceValue(func() *planeMesh {
 type plane struct {
 	tel      *Node // text at the bottom: the plane fits in the rows above it; nil is every row
 	on       func() bool
-	start    time.Time
+	t        float64 // seconds of animation so far, which stops while the terminal is blurred
 	last     time.Time
 	fly      time.Time // the key that flies it off; zero until then
 	ex, ey   float64   // the eased mouse
@@ -167,11 +167,15 @@ func (p *plane) flown(now time.Time) bool {
 
 func (p *plane) Draw(a *App, c *Canvas, r Rect) {
 	now := time.Now()
-	if p.start.IsZero() {
-		p.start, p.last = now, now
+	if p.last.IsZero() {
+		p.last = now
 	}
 	dt := min(0.1, now.Sub(p.last).Seconds())
 	p.last = now
+	if a.Blurred {
+		dt = 0
+	}
+	p.t += dt
 	bank, turn, d, f, done := p.flight(now)
 	area := r.H
 	if p.tel != nil {
@@ -196,7 +200,7 @@ func (p *plane) Draw(a *App, c *Canvas, r Rect) {
 	ease(&p.ey, my)
 	roll := flyBank * bank
 	M := rotation(planeAzimuth+flyTurn*turn-p.ex*planeTilt, planeElevation+p.ey*planeTilt*.6, flyClimb*turn, roll)
-	prop := (25 + now.Sub(p.start).Seconds()*planeProp*360*(1+(flyProp-1)*bank)) * rad
+	prop := (25 + p.t*planeProp*360*(1+(flyProp-1)*bank)) * rad
 	cells := p.render(loadPlane(), M, roll, prop, d, f, r.W, r.H, area)
 	inks := [2]term.Color{a.Theme.BG.Blend(a.Theme.Text, planeStrength), a.Theme.BG.Blend(a.Theme.Accent, planeStrength)}
 	for y := range r.H {
