@@ -169,7 +169,8 @@ func (c client) catalogProvider(name string) catalog.Provider {
 }
 
 // signin runs a provider's login on the harness: it prints the prompt, sends
-// a line of stdin when the prompt asks for a paste, and waits for the end.
+// a line of stdin, if one comes, when the prompt asks for a paste, and waits
+// for the end.
 func (c client) signin(name string) {
 	ctx := context.Background()
 	p := c.catalogProvider(name)
@@ -183,13 +184,15 @@ func (c client) signin(name string) {
 	}
 	if st.Paste {
 		fmt.Print("\npaste: ")
-		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-		if err != nil && line == "" {
-			die(err)
-		}
-		if err := c.SignInPaste(ctx, name, strings.TrimSpace(line)); err != nil {
-			die(err)
-		}
+		go func() { // the login can end without it: the browser may reach the callback itself
+			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+			if strings.TrimSpace(line) == "" {
+				return
+			}
+			if err := c.SignInPaste(ctx, name, strings.TrimSpace(line)); err != nil {
+				die(err)
+			}
+		}()
 	}
 	if err := c.SignInWait(ctx, name); err != nil {
 		die(err)

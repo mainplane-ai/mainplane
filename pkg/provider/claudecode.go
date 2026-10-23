@@ -741,5 +741,8 @@ func claudeCallback(ctx context.Context, cb *neturl.URL, pasted string) error {
 	if err != nil {
 		return fmt.Errorf("claude: its callback: %w", err)
 	}
-	return r.Body.Close()
+	if err := r.Body.Close(); err != nil || r.StatusCode < 400 {
+		return err
+	}
+	return fmt.Errorf("claude: its callback answered %s", r.Status)
 }

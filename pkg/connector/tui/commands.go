@@ -841,7 +841,7 @@ func catch(ctx context.Context, url string, paste func(string) error) {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		fmt.Fprint(w, "Mainplane has the sign-in. Close this tab and return to the terminal.")
+		_, _ = fmt.Fprint(w, "Mainplane has the sign-in. Close this tab and return to the terminal.")
 	})}
 	go func() { <-ctx.Done(); _ = srv.Close() }()
 	_ = srv.Serve(ln)
