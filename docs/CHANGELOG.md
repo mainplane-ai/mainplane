@@ -2,6 +2,10 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.5.6
+
+- Subscription sign-in in the terminal app opens its dialog at once. The dialog shows the URL, to select and copy, with words for a browser on another machine: visit the URL, log in, paste the address it sends you to. The paste field shows the shape of that address. A browser on the app's machine still opens and ends the sign-in by itself. The quickstart's /providers shows the list of commands above the input, as in a session
+
 ## v0.5.5
 
 - run takes `background: true`: the code runs as a job in a new interpreter process on the worker, with no shared state and no timeout, and its output goes to `<scratch>/jobs/<call id>.log`. The result comes at once with the job's pid and log path. When the job ends, a message via `job` brings its exit code, run time and the tail of its log, and opens a closed session like any message. A lost connection or a harness restart posts a message that the job may still be running. Stop ends a session's jobs on the workers connected at the time
