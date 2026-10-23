@@ -12,8 +12,8 @@ import (
 	"os/signal"
 	"os/user"
 	"path/filepath"
-	"strconv"
 	"slices"
+	"strconv"
 	"syscall"
 
 	"github.com/mainplane-ai/mainplane/pkg/release"
