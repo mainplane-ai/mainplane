@@ -94,16 +94,20 @@ type App struct {
 	lastAt  time.Time
 	prevAt  time.Time
 	quit    bool
-	// MouseX and MouseY are where the mouse was last reported, for hover.
+	// MouseX and MouseY are where the mouse was last reported, for hover; -1
+	// before the first report.
 	MouseX, MouseY int
-	Update         string // the release to update to, when the loop ends for it
+	// Frame, when set, is how often the tick comes, for an animation faster
+	// than the spinner.
+	Frame  time.Duration
+	Update string // the release to update to, when the loop ends for it
 	// Status is the line under the input: what the last action did, until the
 	// next key or click replaces it.
 	Status *Text
 }
 
 func NewApp(t *term.Terminal) *App {
-	a := &App{T: t, Theme: themeFor(t.Caps), r: term.NewRenderer(t), post: make(chan func(), 64), Status: &Text{}}
+	a := &App{T: t, Theme: themeFor(t.Caps), r: term.NewRenderer(t), post: make(chan func(), 64), Status: &Text{}, MouseX: -1, MouseY: -1}
 	a.W, a.H = t.Size()
 	return a
 }
@@ -134,11 +138,20 @@ func (a *App) Select(s Selector) {
 	a.sel = s
 }
 
+// untilTick is how long until the next tick: a Frame, or the spinner's
+// next frame.
+func (a *App) untilTick() time.Duration {
+	if a.Frame > 0 {
+		return a.Frame
+	}
+	return untilSpin()
+}
+
 // Ticking turns the animation tick on or off.
 func (a *App) Ticking(on bool) {
 	switch {
 	case on && a.ticker == nil:
-		a.ticker = time.NewTimer(untilSpin())
+		a.ticker = time.NewTimer(a.untilTick())
 	case !on && a.ticker != nil:
 		a.ticker.Stop()
 		a.ticker = nil
@@ -164,7 +177,7 @@ func (a *App) Run() {
 		case <-tick:
 			a.screen.Tick(a)
 			if a.ticker != nil {
-				a.ticker.Reset(untilSpin())
+				a.ticker.Reset(a.untilTick())
 			}
 		}
 		for more := true; more && !a.quit; {

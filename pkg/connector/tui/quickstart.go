@@ -106,6 +106,10 @@ type quickstart struct {
 	root    *Node
 	col     *Node
 	splash  *Node
+	steps   *Node
+	tel     *Node
+	plane   *plane
+	layer   *Layer
 	title   *Text
 	body    *Text
 	list    *qsRows
@@ -121,10 +125,14 @@ func newQuickstart(a *App, c connector.Client) *quickstart {
 	}
 	q.ctx, q.cancel = context.WithCancel(context.Background())
 	q.list, q.bar = &qsRows{q: q}, &qsBar{q: q}
-	q.splash = Box(&Node{Dir: Col},
+	q.tel = &Node{View: &Text{S: qsTelemetry, Center: true, Style: a.Theme.muted()}}
+	q.splash = Box(&Node{Dir: Col, Grow: 1}, &Node{Grow: 1},
 		&Node{View: Wordmark{}}, &Node{Fixed: 1},
-		&Node{View: &Text{S: qsTelemetry, Center: true, Style: a.Theme.muted()}}, &Node{Fixed: 1},
-		&Node{View: &Text{S: qsAnyKey, Center: true, Style: a.Theme.text()}})
+		&Node{View: &Text{S: qsAnyKey, Center: true, Style: a.Theme.text()}},
+		&Node{Grow: 1}, q.tel, &Node{Fixed: 1})
+	q.plane = &plane{tel: q.tel, on: func() bool { return q.step == stepSplash }}
+	q.layer = &Layer{Root: &Node{View: q.plane}, Place: func(w, h int) Rect { return Rect{0, 0, w, h} }}
+	a.Push(q.layer)
 	q.col = Box(&Node{Dir: Col},
 		&Node{View: q.title}, &Node{Fixed: 1},
 		&Node{View: q.body}, &Node{Fixed: 1},
@@ -132,7 +140,8 @@ func newQuickstart(a *App, c connector.Client) *quickstart {
 		&Node{View: q.note}, &Node{Fixed: 1},
 		&Node{Fixed: 1, View: q.bar}, &Node{Fixed: 1},
 		&Node{View: q.status})
-	q.root = Box(&Node{Dir: Col, BG: a.Theme.BG}, &Node{Grow: 1}, q.splash, centered(q.col), &Node{Grow: 1})
+	q.steps = Box(&Node{Dir: Col, Grow: 1}, &Node{Grow: 1}, centered(q.col), &Node{Grow: 1})
+	q.root = Box(&Node{Dir: Col, BG: a.Theme.BG}, q.splash, q.steps)
 	a.Focus(nil)
 	q.poll(a)
 	return q
@@ -182,17 +191,31 @@ func (q *quickstart) poll(a *App) {
 func (q *quickstart) Root() *Node { return q.root }
 
 func (q *quickstart) Size(a *App, w, h int) {
-	q.splash.Hidden, q.col.Hidden = q.step != stepSplash, q.step == stepSplash
+	q.splash.Hidden, q.steps.Hidden = q.step != stepSplash, q.step == stepSplash
+	pad := 2
+	if w < 44 {
+		pad = 1
+	}
+	q.tel.Pad = [4]int{pad, 0, pad, 0}
 	q.col.Fixed = min(qsWidth, w-4)
 	q.layout(a)
 	if q.sel >= len(q.rows)+len(q.buttons) || q.sel >= len(q.rows) && !q.buttons[q.sel-len(q.rows)].on {
 		q.sel = -1
 	}
 	*q.status = *a.Status
-	a.Ticking(q.minting || q.step == stepWorkers && q.network == "starting")
+	a.Frame = 0
+	if q.step == stepSplash {
+		a.Frame = planeFrame
+	}
+	a.Ticking(q.step == stepSplash || q.minting || q.step == stepWorkers && q.network == "starting")
 }
 
-func (q *quickstart) Tick(*App) {}
+// Tick opens the providers once the plane has flown off.
+func (q *quickstart) Tick(a *App) {
+	if q.step == stepSplash && q.plane.flown(time.Now()) {
+		q.to(a, stepProviders)
+	}
+}
 
 // at is the row or button selected: until one is picked, the last button
 // that is on, Continue when it is.
@@ -318,6 +341,9 @@ func (q *quickstart) to(a *App, n int) {
 		n = stepConnectors
 	}
 	q.step, q.sel = n, -1
+	if n == stepSplash {
+		q.plane.fly = time.Time{}
+	}
 	if n == stepConnectors && q.key == "" && !q.minting {
 		q.mint(a)
 	}
@@ -457,6 +483,7 @@ func (q *quickstart) finish(a *App) {
 	}
 	q.cancel()
 	a.Ticking(false)
+	a.Pop(q.layer)
 	s := q.s
 	s.cfg = &cf
 	s.input.Clear()
@@ -465,12 +492,17 @@ func (q *quickstart) finish(a *App) {
 	a.Focus(s.box.Kids[1])
 }
 
-// Key: on the splash, any key starts. Then Up, Down, Tab and the arrows move
+// Key: on the splash, any key flies the plane off, and a key in its flight
+// opens the providers at once. Then Up, Down, Tab and the arrows move
 // over the rows and buttons, Enter or Space presses, a row's number copies
 // or changes it, and Esc goes back.
 func (q *quickstart) Key(a *App, k term.Key) bool {
 	if q.step == stepSplash {
-		q.to(a, stepProviders)
+		if q.plane.fly.IsZero() {
+			q.plane.fly = time.Now()
+		} else {
+			q.to(a, stepProviders)
+		}
 		return true
 	}
 	n := len(q.rows) + len(q.buttons)
