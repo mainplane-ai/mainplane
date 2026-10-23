@@ -13,9 +13,11 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"slices"
 	"syscall"
 
 	"github.com/mainplane-ai/mainplane/pkg/release"
+	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 const bin = "/usr/local/bin/mainplane-server"
@@ -37,7 +39,9 @@ func Uninstall() error {
 	if err := uninstallAdmin(); err != nil {
 		return err
 	}
-	for _, f := range append([]string{bin, bin + ".new"}, release.Asides(bin)...) {
+	// worker.Bin's asides too: the worker uninstalls itself with its own code, which a
+	// release before Aside's names, or one still following the harness, leaves.
+	for _, f := range slices.Concat([]string{bin, bin + ".new"}, release.Asides(bin), release.Asides(worker.Bin)) {
 		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
