@@ -39,7 +39,7 @@ const (
 	qsMinting     = "Making an api key..."
 	qsKeyName     = "tui-%d" // the api key a quickstart mints, the first number free
 	qsDriveName   = "shared"
-	qsConnect     = "/connect"
+	qsCommand     = "/providers"
 	qsPrompt      = "Tell me what devices you have access to and what you can do"
 )
 
@@ -75,7 +75,7 @@ type quickstart struct {
 	plane                         *plane
 	words                         string // the step's words, which body shows
 	body                          *Node  // the words in a Scrollbox, to select and copy as in the transcript
-	input                         *Input // the providers step's, which takes only /connect
+	input                         *Input // the providers step's, which takes only /providers
 	inputRow                      *Node
 	hint                          *Node
 	left, right                   *Glyphs // the keys, as the status line under the input
@@ -84,8 +84,8 @@ type quickstart struct {
 func newQuickstart(a *App, c connector.Client) *quickstart {
 	q := &quickstart{s: newSession(a, newSessionList(a, c), ""), input: NewInput(), body: &Node{}, left: &Glyphs{}, right: &Glyphs{}}
 	q.ctx, q.cancel = context.WithCancel(context.Background())
-	q.input.Placeholder, q.input.Before = qsConnect, q.connect
-	q.input.insert(textElems(qsConnect)...)
+	q.input.Placeholder, q.input.Before = qsCommand, q.connect
+	q.input.insert(textElems(qsCommand)...)
 	q.tel = &Node{View: &Text{S: qsTelemetry, Center: true, Style: a.Theme.muted()}}
 	q.splash = Box(&Node{Dir: Col, Grow: 1}, &Node{Grow: 1},
 		&Node{View: Wordmark{}}, &Node{Fixed: 1},
@@ -286,7 +286,7 @@ func (q *quickstart) to(a *App, n int) {
 		q.plane.fly = time.Time{}
 	case n == stepProviders:
 		a.Focus(q.inputRow.Kids[0].Kids[1])
-		if len(q.providers) > 0 { // back here: Enter continues, and /connect, typed, connects another
+		if len(q.providers) > 0 { // back here: Enter continues, and /providers, typed, connects another
 			q.input.Clear()
 		}
 	case n == stepConnectors && q.key == "" && !q.minting:
@@ -304,7 +304,7 @@ func (q *quickstart) next(a *App) {
 	q.to(a, q.step+1)
 }
 
-// connect is the input's Before: Enter on /connect opens the providers, and
+// connect is the input's Before: Enter on /providers opens them, and
 // Enter on anything else continues once one is connected. The input does
 // nothing else but take what is typed.
 func (q *quickstart) connect(a *App, k term.Key) bool {
@@ -312,7 +312,7 @@ func (q *quickstart) connect(a *App, k term.Key) bool {
 		return false
 	}
 	switch {
-	case strings.TrimSpace(q.input.Text()) == qsConnect:
+	case strings.TrimSpace(q.input.Text()) == qsCommand:
 		q.s.providers(a)
 	case len(q.providers) > 0:
 		q.next(a)

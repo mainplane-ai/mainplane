@@ -95,7 +95,7 @@ func connected(cat *catalog.Catalog, ps []harness.ProviderInfo) []string {
 func defaultConf(cat *catalog.Catalog, ps []harness.ProviderInfo, newest []harness.Info) (statefile.Conf, error) {
 	ids := connected(cat, ps)
 	if len(ids) == 0 {
-		return statefile.Conf{}, errors.New("no provider of the catalog is connected: /connect")
+		return statefile.Conf{}, errors.New("no provider of the catalog is connected: /providers")
 	}
 	want := []string{defaultPreset}
 	var workers []statefile.Worker
