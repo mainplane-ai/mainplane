@@ -18,10 +18,10 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -659,61 +659,90 @@ func installClaude(ctx context.Context, dir string) (string, error) {
 	return bin, os.Rename(part, bin)
 }
 
-// claudeURL finds the sign-in URL in claude auth login's output.
-var claudeURL = regexp.MustCompile(`https://\S+/oauth/authorize\?\S+`)
-
 // claudeLogin is Anthropic's own sign-in: claude auth login, with the
-// provider's dir as its config dir, prints a URL; the person signs in on
-// claude.ai and pastes the code it shows, which goes to claude as typed.
-// claude checks it and keeps the login in dir; the harness sees only the
+// provider's dir as its config dir, waits on a callback on localhost, and
+// opens the URL that redirects there with $BROWSER, here a script that keeps
+// it in a file. The person opens that URL and signs in on claude.ai. A
+// browser on the harness's machine lands on claude itself; any other
+// browser's page does not load, and its address, pasted, is handed to
+// claude here. claude keeps the login in dir; the harness sees only the
 // code, which works once.
 func claudeLogin(ctx context.Context, dir string, show func(Prompt), paste <-chan string) error {
 	bin, err := installClaude(ctx, dir)
 	if err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, bin, "auth", "login", "--claudeai")
-	cmd.Dir, cmd.Env, cmd.WaitDelay = dir, claudeEnviron(dir), 5*time.Second
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
+	script, body := filepath.Join(dir, "browser.sh"), "#!/bin/sh\nprintf '%s' \"$1\" > \"$0.url\"\n"
+	if runtime.GOOS == "windows" {
+		script, body = filepath.Join(dir, "browser.cmd"), "@echo %1> \"%~f0.url\"\r\n" // %1 keeps cmd's quotes, which the reader trims
+	}
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
 		return err
 	}
-	pr, pw := io.Pipe()
+	_ = os.Remove(script + ".url")
+	cmd := exec.CommandContext(ctx, bin, "auth", "login", "--claudeai")
+	cmd.Dir, cmd.Env, cmd.WaitDelay = dir, append(claudeEnviron(dir), "BROWSER="+script), 5*time.Second
+	if _, err := cmd.StdinPipe(); err != nil { // open: at its end claude would stop waiting for a code
+		return err
+	}
 	var out tail
-	w := io.MultiWriter(&out, pw)
-	cmd.Stdout, cmd.Stderr = w, w
+	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	done := make(chan error, 1)
-	go func() { err := cmd.Wait(); _ = pw.CloseWithError(io.EOF); done <- err }()
-	found := make(chan string, 1)
-	go func() {
-		lines := bufio.NewScanner(pr)
-		for lines.Scan() {
-			if u := claudeURL.FindString(lines.Text()); u != "" {
-				found <- u
-				break
+	go func() { done <- cmd.Wait() }()
+	var opened []byte
+	for len(opened) == 0 {
+		select {
+		case err := <-done:
+			return fmt.Errorf("claude auth login ended before it opened its URL: %w: %s", err, out.b.Bytes())
+		case <-time.After(100 * time.Millisecond):
+		}
+		opened, _ = os.ReadFile(script + ".url")
+	}
+	u, err := neturl.Parse(strings.Trim(strings.TrimSpace(string(opened)), `"`))
+	if err != nil {
+		return err
+	}
+	cb, err := neturl.Parse(u.Query().Get("redirect_uri"))
+	if err != nil {
+		return err
+	}
+	show(Prompt{Text: "Sign in with your Claude account. If the browser then shows a page on localhost that does not load, paste its full address.", URL: u.String(), Paste: true})
+	for {
+		select {
+		case text := <-paste:
+			if err := claudeCallback(ctx, cb, text); err != nil {
+				return err
 			}
+		case err := <-done:
+			if err != nil {
+				return fmt.Errorf("claude auth login: %w: %s", err, out.b.Bytes())
+			}
+			return nil
 		}
-		_, _ = io.Copy(io.Discard, pr)
-	}()
-	select {
-	case u := <-found:
-		show(Prompt{Text: "Open the URL and sign in with your Claude account. Then paste the code the page shows.", URL: u, Paste: true})
-	case err := <-done:
-		return fmt.Errorf("claude auth login ended before its URL: %w: %s", err, out.b.Bytes())
 	}
-	select {
-	case code := <-paste:
-		if _, err := io.WriteString(stdin, strings.TrimSpace(code)+"\n"); err != nil {
-			return err
-		}
-	case err := <-done:
-		return fmt.Errorf("claude auth login ended before the code: %w: %s", err, out.b.Bytes())
+}
+
+// claudeCallback hands claude's callback the address the browser landed on,
+// as the browser would have.
+func claudeCallback(ctx context.Context, cb *neturl.URL, pasted string) error {
+	u, err := neturl.Parse(strings.TrimSpace(pasted))
+	if err != nil || u.Host != cb.Host || u.Path != cb.Path || u.Query().Get("code") == "" {
+		return fmt.Errorf("claude: the pasted text is not the address %s?code=...: start again", cb)
 	}
-	if err := <-done; err != nil {
-		return fmt.Errorf("claude auth login: %w: %s", err, out.b.Bytes())
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
+	if err != nil {
+		return err
 	}
-	return nil
+	c := http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	r, err := c.Do(req)
+	if err != nil {
+		return fmt.Errorf("claude: its callback: %w", err)
+	}
+	if err := r.Body.Close(); err != nil || r.StatusCode < 400 {
+		return err
+	}
+	return fmt.Errorf("claude: its callback answered %s", r.Status)
 }

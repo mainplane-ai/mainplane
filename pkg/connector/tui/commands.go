@@ -7,8 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net"
+	"net/http"
+	neturl "net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -757,48 +762,48 @@ func (s *session) providers(a *App) {
 	})
 }
 
-// signin runs the login of a provider that takes no key: it shows the
-// harness's prompt with its URL on the clipboard, since a URL is longer than
-// the status line, asks for the paste the prompt wants, and says when the
-// login ends.
+// signin runs the login of a provider that takes no key. It opens the
+// harness's prompt URL in the browser when this machine shows one, puts it
+// on the clipboard, and serves the URL's loopback callback here, where the
+// browser lands, so the login ends with no paste. The paste the prompt asks
+// for covers a browser on another machine.
 func (s *session) signin(a *App, id string, p catalog.Provider) {
 	a.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), signinTime)
-		st, err := s.c.SignIn(ctx, id, p.Shape, p.URL)
-		cancel()
-		a.Post(func() {
-			if err != nil {
-				a.SayError(err)
-				return
-			}
-			a.T.Copy(st.URL)
-			msg := "The URL is on the clipboard. " + st.Text
-			if st.Code != "" {
-				msg += " Code: " + st.Code
-			}
-			a.Say(msg)
-			if !st.Paste {
-				s.awaitSignin(a, id, p, "")
-				return
-			}
-			ask(a, "Paste for "+p.Name, "", func(a *App, text string) { s.awaitSignin(a, id, p, text) })
-		})
-	})
-}
-
-// awaitSignin hands the login the paste, if any, and says when it ends.
-func (s *session) awaitSignin(a *App, id string, p catalog.Provider, paste string) {
-	a.Go(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), signinTime)
 		defer cancel()
-		var err error
-		if paste != "" {
-			err = s.c.SignInPaste(ctx, id, paste)
+		st, err := s.c.SignIn(ctx, id, p.Shape, p.URL)
+		if err != nil {
+			a.Post(func() { a.SayError(err) })
+			return
 		}
-		if err == nil {
-			err = s.c.SignInWait(ctx, id)
+		paste := func(text string) error { return s.c.SignInPaste(ctx, id, text) }
+		go catch(ctx, st.URL, paste)
+		msg := "The URL is on the clipboard. " + st.Text
+		if openBrowser(st.URL) {
+			msg = "The browser shows the URL, also on the clipboard. " + st.Text
 		}
+		if st.Code != "" {
+			msg += " Code: " + st.Code
+		}
+		var l *Layer
 		a.Post(func() {
+			a.T.Copy(st.URL)
+			a.Say(msg)
+			if st.Paste {
+				l = ask(a, "Signing in to "+p.Name, "the address, if the page does not load", func(a *App, text string) {
+					a.Go(func() {
+						if err := paste(text); err != nil {
+							a.Post(func() { a.SayError(err) })
+						}
+					})
+				})
+			}
+		})
+		err = s.c.SignInWait(ctx, id)
+		a.Post(func() {
+			if l != nil {
+				a.Pop(l)
+			}
 			if err != nil {
 				a.SayError(err)
 				return
@@ -807,6 +812,62 @@ func (s *session) awaitSignin(a *App, id string, p catalog.Provider, paste strin
 			a.Say("Connected " + p.Name)
 		})
 	})
+}
+
+// catch serves the loopback callback that url redirects to, until ctx ends,
+// and pastes the address the browser lands on. A harness on this machine may
+// hold the port itself, and then the browser reaches it directly.
+func catch(ctx context.Context, url string, paste func(string) error) {
+	u, err := neturl.Parse(url)
+	if err != nil {
+		return
+	}
+	cb, err := neturl.Parse(u.Query().Get("redirect_uri"))
+	if err != nil || cb.Scheme != "http" {
+		return
+	}
+	ln, err := net.Listen("tcp", cb.Host)
+	if err != nil {
+		return
+	}
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != cb.Path {
+			http.NotFound(w, r)
+			return
+		}
+		land := *cb
+		land.RawQuery = r.URL.RawQuery
+		if err := paste(land.String()); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		_, _ = fmt.Fprint(w, "Mainplane has the sign-in. Close this tab and return to the terminal.")
+	})}
+	go func() { <-ctx.Done(); _ = srv.Close() }()
+	_ = srv.Serve(ln)
+}
+
+// openBrowser opens url in the browser of this machine, unless it has no
+// screen to show it: an ssh session, or Linux without a display.
+func openBrowser(url string) bool {
+	var c *exec.Cmd
+	switch {
+	case os.Getenv("SSH_CONNECTION") != "":
+		return false
+	case runtime.GOOS == "darwin":
+		c = exec.Command("open", url)
+	case runtime.GOOS == "windows":
+		c = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	case os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "":
+		return false
+	default:
+		c = exec.Command("xdg-open", url)
+	}
+	if c.Start() != nil {
+		return false
+	}
+	go func() { _ = c.Wait() }()
+	return true
 }
 
 // keyDialog asks for the provider's key, and a bedrock provider's region,
@@ -823,7 +884,7 @@ func (s *session) keyDialog(a *App, cat *catalog.Catalog, id string) {
 }
 
 // ask is a dialog of one line of text.
-func ask(a *App, title, placeholder string, then func(a *App, text string)) {
+func ask(a *App, title, placeholder string, then func(a *App, text string)) *Layer {
 	in := NewInput()
 	in.Placeholder, in.Cursor = placeholder, true
 	var l *Layer
@@ -832,6 +893,7 @@ func ask(a *App, title, placeholder string, then func(a *App, text string)) {
 		then(a, strings.TrimSpace(text))
 	}
 	l = a.Dialog(title, &Node{View: in})
+	return l
 }
 
 // connect sets the key on provider id and each that takes it.
