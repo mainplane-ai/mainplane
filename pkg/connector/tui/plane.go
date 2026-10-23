@@ -141,9 +141,10 @@ type plane struct {
 	on       func() bool
 	t        float64 // seconds of animation so far, which stops while the terminal is blurred
 	last     time.Time
-	fly      time.Time // the key that flies it off; zero until then
-	ex, ey   float64   // the eased mouse
-	held     []bool    // the dots on in the last frame, at heldSize
+	flying   bool    // a key flew it off
+	fly      float64 // t at that key
+	ex, ey   float64 // the eased mouse
+	held     []bool  // the dots on in the last frame, at heldSize
 	px       planePixels
 	heldDens []float64
 	heldSize [2]int
@@ -151,18 +152,18 @@ type plane struct {
 
 // flight is how far the bank, the turn and the run toward the camera are,
 // from 0 to 1, and the camera's distance; done once the plane is gone.
-func (p *plane) flight(now time.Time) (bank, turn, d, f float64, done bool) {
-	if p.fly.IsZero() {
+func (p *plane) flight() (bank, turn, d, f float64, done bool) {
+	if !p.flying {
 		return 0, 0, 0, math.Inf(1), false
 	}
-	u := now.Sub(p.fly).Seconds() / flyDur
+	u := (p.t - p.fly) / flyDur
 	g := clamp01((u - flyGo) / (1 - flyGo))
 	return smooth(u / flyBankT), smooth(u / flyTurnT), flyDist * g * g * g, flyLens / math.Pow(smooth(u/flyGo+1e-4), 2), u >= 1
 }
 
 // flown is whether the flight and the pause after it are over.
-func (p *plane) flown(now time.Time) bool {
-	return !p.fly.IsZero() && now.Sub(p.fly).Seconds() >= flyDur+flyAfter
+func (p *plane) flown() bool {
+	return p.flying && p.t-p.fly >= flyDur+flyAfter
 }
 
 func (p *plane) Draw(a *App, c *Canvas, r Rect) {
@@ -176,7 +177,7 @@ func (p *plane) Draw(a *App, c *Canvas, r Rect) {
 		dt = 0
 	}
 	p.t += dt
-	bank, turn, d, f, done := p.flight(now)
+	bank, turn, d, f, done := p.flight()
 	area := r.H
 	if p.tel != nil {
 		area = p.tel.Rect.Y - r.Y
@@ -273,12 +274,74 @@ var bayer4 = [16]float64{0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5}
 func (p *plane) render(m *planeMesh, M mat, roll, prop, d, f float64, cols, rows, area int) []planeCell {
 	W, H := cols*planeSX, rows*planeSY
 	ppu, cx, cy := m.fit(roll, W, cols, area)
-	mid := float64(area*planeSY) / 2
 	p.px.clear(W * H)
-	depth, nv, ink, crease := p.px.depth, p.px.nv, p.px.ink, p.px.crease
+	Q, P, zmin, zmax := m.project(M, prop, d, f, ppu, cx, cy, float64(W)/2, float64(area*planeSY)/2)
+	near := func(i int) bool { return Q[i][2] > f-.5 } // past the eye
+	N := make([]vec, len(m.t))
+	for k, t := range m.t {
+		N[k] = Q[t[1]].sub(Q[t[0]]).cross(Q[t[2]].sub(Q[t[0]])).norm()
+		if N[k][2] > 0 && !near(t[0]) && !near(t[1]) && !near(t[2]) {
+			p.px.fill(P[t[0]], P[t[1]], P[t[2]], N[k][2], k < m.paint, W, H)
+		}
+	}
+	// Creases: edges between two visible faces at more than planeCrease,
+	// depth tested.
+	cos := math.Cos(planeCrease * rad)
+	for _, e := range m.e {
+		n1, n2 := N[e[2]], N[e[3]]
+		if n1[2] > 0 && n2[2] > 0 && n1.dot(n2) < cos && !near(e[0]) && !near(e[1]) {
+			p.px.edge(P[e[0]], P[e[1]], W, H)
+		}
+	}
+	DW, DH, zr := cols*2, rows*4, zmax-zmin
+	if zr == 0 {
+		zr = 1
+	}
+	held := p.heldSize == [2]int{DW, DH}
+	dens, depthN, dink, line := p.dots(W, DW, DH, zmin, zr, held)
+	outline(dens, depthN, line, DW, planeDz/zr)
+	on := make([]bool, DW*DH)
+	for i := range on {
+		s := 0.0
+		if held {
+			s = -planeHold
+			if p.held[i] {
+				s = planeHold
+			}
+		}
+		on[i] = dens[i]+s > (bayer4[(i/DW%4)*4+i%DW%4]+.5)/16
+	}
+	p.held, p.heldDens, p.heldSize = on, dens, [2]int{DW, DH}
+	return braille(dens, dink, on, line, cols, rows)
+}
+
+// braille is the cells of the dots that are on or on a line.
+func braille(dens []float64, dink []uint8, on, line []bool, cols, rows int) []planeCell {
+	DW := cols * 2
+	out := make([]planeCell, cols*rows)
+	bit := [4][2]uint8{{1, 8}, {2, 16}, {4, 32}, {64, 128}}
+	for i := range out {
+		row, col := i/cols, i%cols
+		for j := range 4 {
+			for x := range 2 {
+				if k := (row*4+j)*DW + col*2 + x; dens[k] >= 0 {
+					if on[k] || line[k] {
+						out[i].bits |= bit[j][x]
+					}
+					out[i].ink = dink[k]
+				}
+			}
+		}
+	}
+	return out
+}
+
+// project is the vertices turned by M, the propeller at prop, in model
+// units (Q) and in pixels about the center ox, oy (P, with Q's depth).
+func (m *planeMesh) project(M mat, prop, d, f, ppu, cx, cy, ox, oy float64) (Q, P []vec, zmin, zmax float64) {
 	pc, ps := math.Cos(prop), math.Sin(prop)
-	Q, P := make([]vec, len(m.v)), make([]vec, len(m.v))
-	zmin, zmax := math.Inf(1), math.Inf(-1)
+	Q, P = make([]vec, len(m.v)), make([]vec, len(m.v))
+	zmin, zmax = math.Inf(1), math.Inf(-1)
 	for i, v := range m.v {
 		if i >= len(m.v)-m.prop {
 			dy, dz := v[1]-m.pivot[1], v[2]-m.pivot[2]
@@ -289,77 +352,66 @@ func (p *plane) render(m *planeMesh, M mat, roll, prop, d, f float64, cols, rows
 		if !math.IsInf(f, 1) {
 			s = f / (f - q[2])
 		}
-		Q[i], P[i] = q, vec{float64(W)/2 + (q[0]-cx)*ppu*s, mid - (q[1]-cy)*ppu*s, q[2]}
+		Q[i], P[i] = q, vec{ox + (q[0]-cx)*ppu*s, oy - (q[1]-cy)*ppu*s, q[2]}
 		zmin, zmax = min(zmin, q[2]), max(zmax, q[2])
 	}
-	near := func(i int) bool { return Q[i][2] > f-.5 } // past the eye
-	N := make([]vec, len(m.t))
-	for k, t := range m.t {
-		N[k] = Q[t[1]].sub(Q[t[0]]).cross(Q[t[2]].sub(Q[t[0]])).norm()
-		if N[k][2] <= 0 || near(t[0]) || near(t[1]) || near(t[2]) {
-			continue
-		}
-		a, b, c := P[t[0]], P[t[1]], P[t[2]]
-		ar := (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0])
-		if math.Abs(ar) < 1e-9 {
-			continue
-		}
-		x0, x1 := max(0, int(math.Floor(min(a[0], b[0], c[0])))), min(W-1, int(math.Ceil(max(a[0], b[0], c[0]))))
-		y0, y1 := max(0, int(math.Floor(min(a[1], b[1], c[1])))), min(H-1, int(math.Ceil(max(a[1], b[1], c[1]))))
-		for y := y0; y <= y1; y++ {
-			for x := x0; x <= x1; x++ {
-				px, py := float64(x)+.5, float64(y)+.5
-				u := ((b[0]-px)*(c[1]-py) - (b[1]-py)*(c[0]-px)) / ar
-				v := ((c[0]-px)*(a[1]-py) - (c[1]-py)*(a[0]-px)) / ar
-				if u < 0 || v < 0 || u+v > 1 {
-					continue
-				}
-				if z, i := u*a[2]+v*b[2]+(1-u-v)*c[2], y*W+x; z > depth[i] {
-					depth[i], nv[i], ink[i] = z, N[k][2], 0
-					if k < m.paint {
-						ink[i] = 1
-					}
-				}
-			}
-		}
-	}
-	// Creases: edges between two visible faces at more than planeCrease,
-	// depth tested.
-	cos := math.Cos(planeCrease * rad)
-	for _, e := range m.e {
-		n1, n2 := N[e[2]], N[e[3]]
-		if n1[2] <= 0 || n2[2] <= 0 || n1.dot(n2) >= cos || near(e[0]) || near(e[1]) {
-			continue
-		}
-		a, b := P[e[0]], P[e[1]]
-		dx, dy := b[0]-a[0], b[1]-a[1]
-		steps := int(math.Ceil(math.Hypot(dx, dy)*2)) + 1
-		for s := 0; s <= steps; s++ {
-			t := float64(s) / float64(steps)
-			x, y := int(math.Floor(a[0]+dx*t)), int(math.Floor(a[1]+dy*t))
-			if x >= 0 && y >= 0 && x < W && y < H && a[2]+(b[2]-a[2])*t >= depth[y*W+x]-.06 {
-				crease[y*W+x] = true
-			}
-		}
-	}
+	return Q, P, zmin, zmax
+}
 
-	// Dots: the rim light's tone of each 2x2 pixels. With hold, a dot needs
-	// more pixels to appear than to stay.
-	DW, DH, zr := cols*2, rows*4, zmax-zmin
-	if zr == 0 {
-		zr = 1
+// fill rasterizes one face, depth tested, with its n.V and ink.
+func (b *planePixels) fill(a, bb, c vec, nz float64, paint bool, W, H int) {
+	ar := (bb[0]-a[0])*(c[1]-a[1]) - (bb[1]-a[1])*(c[0]-a[0])
+	if math.Abs(ar) < 1e-9 {
+		return
 	}
-	held := p.heldSize == [2]int{DW, DH}
-	dens, depthN, dink, line := make([]float64, DW*DH), make([]float64, DW*DH), make([]uint8, DW*DH), make([]bool, DW*DH)
+	var k int8
+	if paint {
+		k = 1
+	}
+	x0, x1 := max(0, int(math.Floor(min(a[0], bb[0], c[0])))), min(W-1, int(math.Ceil(max(a[0], bb[0], c[0]))))
+	y0, y1 := max(0, int(math.Floor(min(a[1], bb[1], c[1])))), min(H-1, int(math.Ceil(max(a[1], bb[1], c[1]))))
+	for y := y0; y <= y1; y++ {
+		for x := x0; x <= x1; x++ {
+			px, py := float64(x)+.5, float64(y)+.5
+			u := ((bb[0]-px)*(c[1]-py) - (bb[1]-py)*(c[0]-px)) / ar
+			v := ((c[0]-px)*(a[1]-py) - (c[1]-py)*(a[0]-px)) / ar
+			if u < 0 || v < 0 || u+v > 1 {
+				continue
+			}
+			if z, i := u*a[2]+v*bb[2]+(1-u-v)*c[2], y*W+x; z > b.depth[i] {
+				b.depth[i], b.nv[i], b.ink[i] = z, nz, k
+			}
+		}
+	}
+}
+
+// edge marks the crease pixels of one edge that are not behind a face.
+func (b *planePixels) edge(a, c vec, W, H int) {
+	dx, dy := c[0]-a[0], c[1]-a[1]
+	steps := int(math.Ceil(math.Hypot(dx, dy)*2)) + 1
+	for s := 0; s <= steps; s++ {
+		t := float64(s) / float64(steps)
+		x, y := int(math.Floor(a[0]+dx*t)), int(math.Floor(a[1]+dy*t))
+		if x >= 0 && y >= 0 && x < W && y < H && a[2]+(c[2]-a[2])*t >= b.depth[y*W+x]-.06 {
+			b.crease[y*W+x] = true
+		}
+	}
+}
+
+// dots are the rim light's tone of each 2x2 pixels (-1 empty), their depth
+// from 0 to 1, ink and crease. With held, a dot needs more pixels to appear
+// than to stay.
+func (p *plane) dots(W, DW, DH int, zmin, zr float64, held bool) (dens, depthN []float64, dink []uint8, line []bool) {
+	dens, depthN, dink, line = make([]float64, DW*DH), make([]float64, DW*DH), make([]uint8, DW*DH), make([]bool, DW*DH)
 	for i := range DW * DH {
 		dx, dy := i%DW, i/DW
 		n, t, z, k, cr := 0, 0.0, 0.0, int8(0), false
 		for y := dy * 2; y < dy*2+2; y++ {
 			for x := dx * 2; x < dx*2+2; x++ {
 				j := y*W + x
-				cr = cr || crease[j]
-				if ink[j] >= 0 {
-					n, t, z, k = n+1, t+math.Pow(1-nv[j], planeRim), z+depth[j], ink[j]
+				cr = cr || p.px.crease[j]
+				if p.px.ink[j] >= 0 {
+					n, t, z, k = n+1, t+math.Pow(1-p.px.nv[j], planeRim), z+p.px.depth[j], p.px.ink[j]
 				}
 			}
 		}
@@ -377,49 +429,23 @@ func (p *plane) render(m *planeMesh, M mat, roll, prop, d, f float64, cols, rows
 		tone := clamp01(planeAmbient + (1-planeAmbient)*t/float64(n))
 		dens[i], depthN[i], dink[i], line[i] = planeDmax*tone, (z/float64(n)-zmin)/zr, uint8(k), cr
 	}
-	// Outlines: a dot beside an empty one, or beside one farther by planeDz.
-	dz := planeDz / zr
-	for i := range DW * DH {
+	return dens, depthN, dink, line
+}
+
+// outline lines a dot beside an empty one, or beside one farther by dz.
+func outline(dens, depthN []float64, line []bool, DW int, dz float64) {
+	for i := range dens {
 		if dens[i] < 0 {
 			continue
 		}
 		x := i % DW
 		for _, o := range [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
 			j := i + o[1]*DW + o[0]
-			if x+o[0] < 0 || x+o[0] >= DW || j < 0 || j >= DW*DH || dens[j] < 0 || depthN[i]-depthN[j] > dz {
+			if x+o[0] < 0 || x+o[0] >= DW || j < 0 || j >= len(dens) || dens[j] < 0 || depthN[i]-depthN[j] > dz {
 				line[i] = true
 			}
 		}
 	}
-	on := make([]bool, DW*DH)
-	for i := range on {
-		s := 0.0
-		if held {
-			s = -planeHold
-			if p.held[i] {
-				s = planeHold
-			}
-		}
-		on[i] = dens[i]+s > (bayer4[(i/DW%4)*4+i%DW%4]+.5)/16
-	}
-	p.held, p.heldDens, p.heldSize = on, dens, [2]int{DW, DH}
-
-	out := make([]planeCell, cols*rows)
-	bit := [4][2]uint8{{1, 8}, {2, 16}, {4, 32}, {64, 128}}
-	for i := range out {
-		row, col := i/cols, i%cols
-		for j := range 4 {
-			for x := range 2 {
-				if k := (row*4+j)*DW + col*2 + x; dens[k] >= 0 {
-					if on[k] || line[k] {
-						out[i].bits |= bit[j][x]
-					}
-					out[i].ink = dink[k]
-				}
-			}
-		}
-	}
-	return out
 }
 
 func clamp01(v float64) float64 { return max(0, min(1, v)) }

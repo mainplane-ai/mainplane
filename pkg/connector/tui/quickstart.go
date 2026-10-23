@@ -169,7 +169,7 @@ func (q *quickstart) Size(a *App, w, h int) {
 
 // Tick opens the providers once the plane has flown off.
 func (q *quickstart) Tick(a *App) {
-	if q.step == stepSplash && q.plane.flown(time.Now()) {
+	if q.step == stepSplash && q.plane.flown() {
 		q.to(a, stepProviders)
 	}
 }
@@ -283,7 +283,7 @@ func (q *quickstart) to(a *App, n int) {
 	a.Focus(nil)
 	switch {
 	case n == stepSplash:
-		q.plane.fly = time.Time{}
+		q.plane.flying = false
 	case n == stepProviders:
 		a.Focus(q.inputRow.Kids[0].Kids[1])
 		if len(q.providers) > 0 { // back here: Enter continues, and /providers, typed, connects another
@@ -355,6 +355,10 @@ func (q *quickstart) mint(a *App) {
 // can serve one, else by the first worker that can. Then the session.
 func (q *quickstart) saveDrive(a *App) {
 	srv := q.servers()
+	if len(srv) == 0 {
+		a.SayError(errors.New("no connected worker can serve a drive"))
+		return
+	}
 	server := srv[0]
 	if slices.Contains(srv, "admin") {
 		server = "admin"
@@ -407,8 +411,8 @@ func (q *quickstart) finish(a *App) {
 // the drives step Enter makes the drive and Esc skips it.
 func (q *quickstart) Key(a *App, k term.Key) bool {
 	if q.step == stepSplash {
-		if q.plane.fly.IsZero() {
-			q.plane.fly = time.Now()
+		if !q.plane.flying {
+			q.plane.flying, q.plane.fly = true, q.plane.t
 		} else {
 			q.to(a, stepProviders)
 		}

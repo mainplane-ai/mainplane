@@ -142,8 +142,8 @@ func (s *session) Size(a *App, w, h int) {
 	s.blank, a.Frame = empty, 0
 	if empty && !a.Blurred {
 		a.Frame = planeFrame
-		a.Ticking(true)
 	}
+	s.list.tick(a)
 	s.sidebar.Hidden = w < sidebarFrom
 	s.body.Hidden = empty
 	for _, n := range s.empty {
