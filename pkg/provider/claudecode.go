@@ -709,7 +709,7 @@ func claudeLogin(ctx context.Context, dir string, show func(Prompt), paste <-cha
 	if err != nil {
 		return err
 	}
-	show(Prompt{Text: "Sign in with your Claude account. If the browser then shows a page on localhost that does not load, paste its full address.", URL: u.String(), Paste: true})
+	show(Prompt{Text: "Visit this URL in a browser and log in to Claude. Then paste the address it sends you to.", URL: u.String(), Paste: true})
 	for {
 		select {
 		case text := <-paste:

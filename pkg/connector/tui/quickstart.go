@@ -76,6 +76,8 @@ type quickstart struct {
 	words                         string // the step's words, which body shows
 	body                          *Node  // the words in a Scrollbox, to select and copy as in the transcript
 	input                         *Input // the providers step's, which takes only /providers
+	slash                         *slash // its list of commands, which is /providers alone
+	slashRow                      *Node
 	inputRow                      *Node
 	hint                          *Node
 	left, right                   *Glyphs // the keys, as the status line under the input
@@ -85,6 +87,8 @@ func newQuickstart(a *App, c connector.Client) *quickstart {
 	q := &quickstart{s: newSession(a, newSessionList(a, c), ""), input: NewInput(), body: &Node{}, left: &Glyphs{}, right: &Glyphs{}}
 	q.ctx, q.cancel = context.WithCancel(context.Background())
 	q.input.Placeholder, q.input.Before = qsCommand, q.connect
+	i := slices.IndexFunc(commands(), func(c command) bool { return "/"+c.name == qsCommand })
+	q.slash = &slash{s: q.s, in: q.input, all: commands()[i : i+1]}
 	q.input.insert(textElems(qsCommand)...)
 	q.tel = &Node{View: &Text{S: qsTelemetry, Center: true, Style: a.Theme.muted()}}
 	q.splash = Box(&Node{Dir: Col, Grow: 1}, &Node{Grow: 1},
@@ -92,9 +96,10 @@ func newQuickstart(a *App, c connector.Client) *quickstart {
 		&Node{View: &Text{S: qsAnyKey, Center: true, Style: a.Theme.text()}},
 		&Node{Grow: 1}, q.tel, &Node{Fixed: 1})
 	q.plane = &plane{tel: q.tel, on: func() bool { return q.step == stepSplash }}
+	q.slashRow = Box(&Node{Dir: Row}, &Node{Fixed: 1, View: bar{a.Theme.Muted}}, &Node{Grow: 1, BG: a.Theme.Panel, View: q.slash})
 	q.inputRow = Box(&Node{Dir: Col, Pad: [4]int{0, 1, 0, 0}}, inputBox(a, q.input))
 	q.hint = Box(&Node{Dir: Row, Pad: [4]int{margin, 0, 0, 0}}, &Node{Grow: 1, View: q.left}, &Node{View: q.right})
-	q.col = Box(&Node{Dir: Col}, &Node{View: Wordmark{}}, &Node{Fixed: 1}, q.body, q.inputRow, q.hint)
+	q.col = Box(&Node{Dir: Col}, &Node{View: Wordmark{}}, &Node{Fixed: 1}, q.body, q.slashRow, q.inputRow, q.hint)
 	q.steps = Box(&Node{Dir: Col, Grow: 1}, &Node{Grow: 1}, centered(q.col), &Node{Grow: 1})
 	q.root = Box(&Node{Dir: Col, BG: a.Theme.BG, Over: q.plane}, q.splash, q.steps)
 	a.Focus(nil)
@@ -194,6 +199,12 @@ func (q *quickstart) layout(a *App) {
 		back, next = "to skip", "to create"
 	}
 	q.inputRow.Hidden = q.step != stepProviders
+	q.slash.update()
+	q.slashRow.Hidden = q.inputRow.Hidden || len(q.slash.cmds) == 0
+	q.inputRow.Pad[1] = 1 // the blank row above the input, which the list takes
+	if !q.slashRow.Hidden {
+		q.inputRow.Pad[1] = 0
+	}
 	key, muted := term.Style{FG: a.Theme.Text, Attr: term.Bold}, a.Theme.muted()
 	q.left.Gs = cat(run("esc", key), run(" "+back, muted))
 	if a.Status.S != "" {
@@ -304,16 +315,20 @@ func (q *quickstart) next(a *App) {
 	q.to(a, q.step+1)
 }
 
-// connect is the input's Before: Enter on /providers opens them, and
-// Enter on anything else continues once one is connected. The input does
-// nothing else but take what is typed.
+// connect is the input's Before: the list of commands takes its keys, as
+// in a session, but Esc goes back. Enter on anything else continues once a
+// provider is connected. The input does nothing else but take what is typed.
 func (q *quickstart) connect(a *App, k term.Key) bool {
-	if k.String() != "enter" {
-		return false
-	}
 	switch {
-	case strings.TrimSpace(q.input.Text()) == qsCommand:
-		q.s.providers(a)
+	case k.String() == "esc":
+		return false
+	case q.slash.Key(a, k):
+		if len(q.input.els) == 0 && len(q.providers) == 0 { // a command ran: /providers again, for Enter to open them again
+			q.input.insert(textElems(qsCommand)...)
+		}
+		return true
+	case k.String() != "enter":
+		return false
 	case len(q.providers) > 0:
 		q.next(a)
 	}

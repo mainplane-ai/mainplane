@@ -255,4 +255,5 @@ type Layer struct {
 	Root  *Node
 	Modal bool
 	Place func(w, h int) Rect
+	Esc   func() // runs when Esc closes a dialog
 }
