@@ -47,7 +47,7 @@ func commands() []command {
 		{"config", nil, "Config for a new session", "", (*session).config},
 		{"rename", nil, "Rename the session", "", (*session).renameDialog},
 		{"model", nil, "Model for a new session", "", (*session).models},
-		{"providers", []string{"connect"}, "Connect a provider", "", (*session).providers},
+		{"connect", []string{"providers"}, "Connect a provider", "", (*session).providers},
 		{"goto", []string{"jump", "timeline"}, "Go to a message", "", (*session).goTo},
 		{"fork", nil, "Fork into a new session", "", (*session).fork},
 		{"rollback", []string{"revert", "rewind"}, "Roll back to before a message", "", (*session).rollback},
@@ -694,14 +694,14 @@ func (s *session) models(a *App) {
 			m.Items = append(m.Items, MenuItem{Label: p.Name, Hint: hint, Section: cat.Providers[p.Provider].Name, Pick: func(a *App, _ *MenuItem) { s.useModel(a, presetConf(id, p)) }})
 		}
 		if len(m.Items) == 0 {
-			a.Say("No provider is connected: /providers")
+			a.Say("No provider is connected: /connect")
 			return
 		}
 		a.OpenMenu("Model for a new session", m)
 	})
 }
 
-// providerSections orders /providers: subscriptions first, then each kind
+// providerSections orders /connect: subscriptions first, then each kind
 // of provider, the ones people use most first. A provider the catalog adds
 // later is under More, by name, until it is placed here.
 var providerSections = []struct {

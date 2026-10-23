@@ -107,7 +107,7 @@ The `chatgpt` shape takes no key: it uses the plan of a ChatGPT account, through
 OpenAI's [Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source)
 for open-source apps. OpenAI allows this for a harness you host for yourself.
 To sign in, run `mainplane signin chatgpt` on any machine whose CLI is logged
-in, or pick ChatGPT subscription in the app's /providers. Open the URL it gives, allow
+in, or pick ChatGPT subscription in the app's /connect. Open the URL it gives, allow
 the access, and paste back the address of the page the browser lands on: a page
 on 127.0.0.1 that does not load. The harness keeps the tokens in
 `providers/chatgpt/chatgpt.json` next to its config and refreshes them itself.
@@ -118,7 +118,7 @@ downloads a pinned Claude Code release from npm into `providers/<name>/`, checks
 its integrity, and runs it once per step with the harness's tools; Claude Code
 makes the request with its own login. Use it only on a harness you host for
 yourself. To sign in, run `mainplane signin claude-code`, or pick Claude
-subscription in the app's /providers. Open the URL it gives, sign in on
+subscription in the app's /connect. Open the URL it gives, sign in on
 claude.ai, and paste back the code the page shows. Claude Code keeps its login
 itself, in that directory or the macOS keychain; the harness never reads it. Turn off extra usage on the
 Claude account, so a step that the plan does not cover fails instead of billing.
