@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -32,6 +33,12 @@ const api = "https://pointer.mainplane.ai/"
 // The pointer and a harness answer in well under this; one that has not is
 // down, and a worker should try again rather than hang.
 var client = http.Client{Timeout: 10 * time.Second}
+
+// A claim touches two to four storage objects on the pointer, one after the
+// other. Starting one now and then takes seconds, so a claim can pass the
+// timeout and still land, and a harness install fails on a failed claim: a
+// claim tries again after a timeout, with a new seq.
+const claimTries = 3
 
 type record struct {
 	URL   string `json:"url"`
@@ -115,9 +122,16 @@ func Publish(ctx context.Context, k ed25519.PrivateKey, url string) error {
 // Claim makes name the network name of k's harness, in place of the one it
 // had, which is then free. A name another harness holds is ErrTaken.
 func Claim(ctx context.Context, k ed25519.PrivateKey, name string) error {
-	key, seq := Encode(k), time.Now().UnixMilli()
-	msg := fmt.Sprintf("name %s %s %d", name, key, seq)
-	return put(ctx, api+"name/"+name, map[string]any{"key": key, "seq": seq, "sig": sign(k, msg)})
+	var err error
+	for range claimTries {
+		key, seq := Encode(k), time.Now().UnixMilli()
+		msg := fmt.Sprintf("name %s %s %d", name, key, seq)
+		err = put(ctx, api+"name/"+name, map[string]any{"key": key, "seq": seq, "sig": sign(k, msg)})
+		if ne := net.Error(nil); !errors.As(err, &ne) || !ne.Timeout() {
+			return err
+		}
+	}
+	return err
 }
 
 // Named is the key of the harness that holds network name. It is a hint, as
