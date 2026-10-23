@@ -87,8 +87,15 @@ func newQuickstart(a *App, c connector.Client) *quickstart {
 	q := &quickstart{s: newSession(a, newSessionList(a, c), ""), input: NewInput(), body: &Node{}, left: &Glyphs{}, right: &Glyphs{}}
 	q.ctx, q.cancel = context.WithCancel(context.Background())
 	q.input.Placeholder, q.input.Before = qsCommand, q.connect
-	i := slices.IndexFunc(commands(), func(c command) bool { return "/"+c.name == qsCommand })
-	q.slash = &slash{s: q.s, in: q.input, all: commands()[i : i+1]}
+	cmd := commands()[slices.IndexFunc(commands(), func(c command) bool { return "/"+c.name == qsCommand })]
+	run := cmd.run
+	cmd.run = func(s *session, a *App) { // typed again after, for Enter to open the providers again until one is connected
+		run(s, a)
+		if len(q.input.els) == 0 && len(q.providers) == 0 {
+			q.input.insert(textElems(qsCommand)...)
+		}
+	}
+	q.slash = &slash{s: q.s, in: q.input, all: []command{cmd}}
 	q.input.insert(textElems(qsCommand)...)
 	q.tel = &Node{View: &Text{S: qsTelemetry, Center: true, Style: a.Theme.muted()}}
 	q.splash = Box(&Node{Dir: Col, Grow: 1}, &Node{Grow: 1},
@@ -323,9 +330,6 @@ func (q *quickstart) connect(a *App, k term.Key) bool {
 	case k.String() == "esc":
 		return false
 	case q.slash.Key(a, k):
-		if len(q.input.els) == 0 && len(q.providers) == 0 { // a command ran: /providers again, for Enter to open them again
-			q.input.insert(textElems(qsCommand)...)
-		}
 		return true
 	case k.String() != "enter":
 		return false

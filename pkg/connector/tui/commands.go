@@ -786,7 +786,8 @@ func (s *session) signin(a *App, id string, p catalog.Provider) {
 	show(signinStarting)
 	field := &Node{View: in, Hidden: true}
 	l := a.Dialog("Sign in to "+p.Name, Box(&Node{Dir: Col}, words, &Node{Fixed: 1}, field))
-	l.Esc = cancel
+	closed := false // with Esc: the login ends with no word
+	l.Esc = func() { closed = true; cancel() }
 	in.OnSubmit = func(a *App, text string) {
 		in.Clear()
 		a.Go(func() {
@@ -814,7 +815,7 @@ func (s *session) signin(a *App, id string, p catalog.Provider) {
 		a.Post(func() {
 			a.Pop(l)
 			switch {
-			case errors.Is(ctx.Err(), context.Canceled): // closed with Esc
+			case closed:
 			case err != nil:
 				a.SayError(err)
 			default:
