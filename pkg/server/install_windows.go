@@ -229,9 +229,9 @@ func Uninstall() error {
 	if err := uninstallAdmin(); err != nil {
 		return err
 	}
-	// worker.Bin's asides too: the worker uninstalls itself with its own code, which a
-	// release before Aside's names, or one still following the harness, leaves.
-	for _, f := range slices.Concat([]string{bin, bin + ".new"}, release.Asides(bin), release.Asides(worker.Bin)) {
+	// worker.Bin, its .new and asides too: the worker uninstalls itself with its own code, which a
+	// release before Aside's names, one still following the harness, or an install cut short leaves.
+	for _, f := range slices.Concat([]string{bin, bin + ".new", worker.Bin, worker.Bin + ".new"}, release.Asides(bin), release.Asides(worker.Bin)) {
 		if err := remove(f); err != nil {
 			return err
 		}
