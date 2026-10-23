@@ -701,19 +701,48 @@ func (s *session) models(a *App) {
 	})
 }
 
-// providers is the menu of the catalog's providers, by name, a group once.
-// Picking one asks for its key, and the harness serves it, and each provider
-// that takes the same key, with the catalog's shape and url.
+// providerSections orders /providers: subscriptions first, then each kind
+// of provider, the ones people use most first. A provider the catalog adds
+// later is under More, by name, until it is placed here.
+var providerSections = []struct {
+	name string
+	ids  []string
+}{
+	{"Subscriptions", []string{"claude-code", "chatgpt", "opencode-go"}},
+	{"Frontier labs", []string{"anthropic", "openai", "google", "meta", "xai", "deepseek", "moonshot", "zai", "minimax", "xiaomi"}},
+	{"Clouds", []string{"bedrock"}},
+	{"Gateways", []string{"openrouter"}},
+}
+
+// providers is the menu of the catalog's providers, in providerSections, a
+// group once. Picking one asks for its key, and the harness serves it, and
+// each provider that takes the same key, with the catalog's shape and url.
 func (s *session) providers(a *App) {
 	s.withProviders(a, func(cat *catalog.Catalog, ps []harness.ProviderInfo) {
-		m := &Menu{}
+		type entry struct{ section, id string }
+		var order []entry
+		placed := map[string]bool{}
+		for _, sec := range providerSections {
+			for _, id := range sec.ids {
+				if _, ok := cat.Providers[id]; ok {
+					order = append(order, entry{sec.name, id})
+					for _, k := range cat.Keyed(id) {
+						placed[k] = true
+					}
+				}
+			}
+		}
 		byName := func(a, b string) int {
 			return strings.Compare(strings.ToLower(cat.Providers[a].Name), strings.ToLower(cat.Providers[b].Name))
 		}
 		for _, id := range slices.SortedFunc(maps.Keys(cat.Providers), byName) {
-			if cat.Keyed(id)[0] != id {
-				continue
+			if !placed[id] && cat.Keyed(id)[0] == id {
+				order = append(order, entry{"More", id})
 			}
+		}
+		m := &Menu{}
+		for _, e := range order {
+			id := e.id
 			p, hint := cat.Providers[id], ""
 			if slices.ContainsFunc(ps, func(x harness.ProviderInfo) bool { return x.Name == id }) {
 				hint = "connected"
@@ -722,7 +751,7 @@ func (s *session) providers(a *App) {
 			if _, ok := provider.Logins[p.Shape]; ok {
 				pick = func(a *App, _ *MenuItem) { s.signin(a, id, p) }
 			}
-			m.Items = append(m.Items, MenuItem{Label: p.Name, Hint: hint, Pick: pick})
+			m.Items = append(m.Items, MenuItem{Label: p.Name, Hint: hint, Section: e.section, Pick: pick})
 		}
 		a.OpenMenu("Providers", m)
 	})
@@ -752,7 +781,7 @@ func (s *session) signin(a *App, id string, p catalog.Provider) {
 				s.awaitSignin(a, id, p, "")
 				return
 			}
-			ask(a, "Paste for "+p.Name, "", false, func(a *App, text string) { s.awaitSignin(a, id, p, text) })
+			ask(a, "Paste for "+p.Name, "", func(a *App, text string) { s.awaitSignin(a, id, p, text) })
 		})
 	})
 }
@@ -774,6 +803,7 @@ func (s *session) awaitSignin(a *App, id string, p catalog.Provider, paste strin
 				a.SayError(err)
 				return
 			}
+			s.home, s.homeAsked = nil, false
 			a.Say("Connected " + p.Name)
 		})
 	})
@@ -783,19 +813,19 @@ func (s *session) awaitSignin(a *App, id string, p catalog.Provider, paste strin
 // which its endpoint is built from.
 func (s *session) keyDialog(a *App, cat *catalog.Catalog, id string) {
 	p := cat.Providers[id]
-	ask(a, "Key for "+p.Name, "API key", true, func(a *App, key string) {
+	ask(a, "Key for "+p.Name, "API key", func(a *App, key string) {
 		if p.Shape != "bedrock" {
 			s.connect(a, cat, id, "", key)
 			return
 		}
-		ask(a, "Region for "+p.Name, "us-east-1", false, func(a *App, region string) { s.connect(a, cat, id, region, key) })
+		ask(a, "Region for "+p.Name, "us-east-1", func(a *App, region string) { s.connect(a, cat, id, region, key) })
 	})
 }
 
 // ask is a dialog of one line of text.
-func ask(a *App, title, placeholder string, mask bool, then func(a *App, text string)) {
+func ask(a *App, title, placeholder string, then func(a *App, text string)) {
 	in := NewInput()
-	in.Placeholder, in.Cursor, in.Mask = placeholder, true, mask
+	in.Placeholder, in.Cursor = placeholder, true
 	var l *Layer
 	in.OnSubmit = func(a *App, text string) {
 		a.Pop(l)
@@ -820,6 +850,7 @@ func (s *session) connect(a *App, cat *catalog.Catalog, id, region, key string) 
 				a.SayError(err)
 				return
 			}
+			s.home, s.homeAsked = nil, false
 			a.Say("Connected " + cat.Providers[id].Name)
 		})
 	})

@@ -137,7 +137,7 @@ var loadPlane = sync.OnceValue(func() *planeMesh {
 // a run of up to 3 spaces between glyphs counts as text, so a line stays
 // solid and the gaps in the wordmark open.
 type plane struct {
-	tel      *Node // the telemetry line: the plane fits in the rows above it
+	tel      *Node // text at the bottom: the plane fits in the rows above it; nil is every row
 	on       func() bool
 	start    time.Time
 	last     time.Time
@@ -173,7 +173,11 @@ func (p *plane) Draw(a *App, c *Canvas, r Rect) {
 	dt := min(0.1, now.Sub(p.last).Seconds())
 	p.last = now
 	bank, turn, d, f, done := p.flight(now)
-	if !p.on() || done || p.tel.Rect.Y <= 0 {
+	area := r.H
+	if p.tel != nil {
+		area = p.tel.Rect.Y - r.Y
+	}
+	if !p.on() || done || area <= 0 {
 		return
 	}
 	// The mouse from -1 to 1 about the center, held at the edge past
@@ -193,7 +197,7 @@ func (p *plane) Draw(a *App, c *Canvas, r Rect) {
 	roll := flyBank * bank
 	M := rotation(planeAzimuth+flyTurn*turn-p.ex*planeTilt, planeElevation+p.ey*planeTilt*.6, flyClimb*turn, roll)
 	prop := (25 + now.Sub(p.start).Seconds()*planeProp*360*(1+(flyProp-1)*bank)) * rad
-	cells := p.render(loadPlane(), M, roll, prop, d, f, r.W, r.H, p.tel.Rect.Y, !a.T.Caps.Dark)
+	cells := p.render(loadPlane(), M, roll, prop, d, f, r.W, r.H, area)
 	inks := [2]term.Color{a.Theme.BG.Blend(a.Theme.Text, planeStrength), a.Theme.BG.Blend(a.Theme.Accent, planeStrength)}
 	for y := range r.H {
 		text := make([]bool, r.W)
@@ -261,8 +265,8 @@ var bayer4 = [16]float64{0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5}
 
 // render is the braille cells of one pose: the plane d units along its nose
 // and the eye f units away (Inf: orthographic), centered in the top area
-// rows. light puts dots where the shadow is.
-func (p *plane) render(m *planeMesh, M mat, roll, prop, d, f float64, cols, rows, area int, light bool) []planeCell {
+// rows. The dots are the light, in the dark and the light theme alike.
+func (p *plane) render(m *planeMesh, M mat, roll, prop, d, f float64, cols, rows, area int) []planeCell {
 	W, H := cols*planeSX, rows*planeSY
 	ppu, cx, cy := m.fit(roll, W, cols, area)
 	mid := float64(area*planeSY) / 2
@@ -367,9 +371,6 @@ func (p *plane) render(m *planeMesh, M mat, roll, prop, d, f float64, cols, rows
 			continue
 		}
 		tone := clamp01(planeAmbient + (1-planeAmbient)*t/float64(n))
-		if light {
-			tone = 1 - tone
-		}
 		dens[i], depthN[i], dink[i], line[i] = planeDmax*tone, (z/float64(n)-zmin)/zr, uint8(k), cr
 	}
 	// Outlines: a dot beside an empty one, or beside one farther by planeDz.

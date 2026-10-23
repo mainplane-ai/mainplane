@@ -109,7 +109,6 @@ type quickstart struct {
 	steps   *Node
 	tel     *Node
 	plane   *plane
-	layer   *Layer
 	title   *Text
 	body    *Text
 	list    *qsRows
@@ -131,8 +130,6 @@ func newQuickstart(a *App, c connector.Client) *quickstart {
 		&Node{View: &Text{S: qsAnyKey, Center: true, Style: a.Theme.text()}},
 		&Node{Grow: 1}, q.tel, &Node{Fixed: 1})
 	q.plane = &plane{tel: q.tel, on: func() bool { return q.step == stepSplash }}
-	q.layer = &Layer{Root: &Node{View: q.plane}, Place: func(w, h int) Rect { return Rect{0, 0, w, h} }}
-	a.Push(q.layer)
 	q.col = Box(&Node{Dir: Col},
 		&Node{View: q.title}, &Node{Fixed: 1},
 		&Node{View: q.body}, &Node{Fixed: 1},
@@ -141,7 +138,7 @@ func newQuickstart(a *App, c connector.Client) *quickstart {
 		&Node{Fixed: 1, View: q.bar}, &Node{Fixed: 1},
 		&Node{View: q.status})
 	q.steps = Box(&Node{Dir: Col, Grow: 1}, &Node{Grow: 1}, centered(q.col), &Node{Grow: 1})
-	q.root = Box(&Node{Dir: Col, BG: a.Theme.BG}, q.splash, q.steps)
+	q.root = Box(&Node{Dir: Col, BG: a.Theme.BG, Over: q.plane}, q.splash, q.steps)
 	a.Focus(nil)
 	q.poll(a)
 	return q
@@ -397,7 +394,7 @@ func (q *quickstart) mint(a *App) {
 }
 
 func (q *quickstart) nameDialog(a *App) {
-	ask(a, qsDriveName, "files", false, func(_ *App, name string) { q.drive.name = name })
+	ask(a, qsDriveName, "files", func(_ *App, name string) { q.drive.name = name })
 }
 
 // workersMenu checks the workers of the drive: every one, or those picked.
@@ -483,7 +480,6 @@ func (q *quickstart) finish(a *App) {
 	}
 	q.cancel()
 	a.Ticking(false)
-	a.Pop(q.layer)
 	s := q.s
 	s.cfg = &cf
 	s.input.Clear()
@@ -524,11 +520,12 @@ func (q *quickstart) Key(a *App, k term.Key) bool {
 	return true
 }
 
-// move steps the selection by d, past buttons that are off.
+// move steps the selection by d, past buttons that are off, around from the
+// last to the first, so every press moves it.
 func (q *quickstart) move(d, n int) {
-	for i := q.at() + d; i >= 0 && i < n; i += d {
-		if i < len(q.rows) || q.buttons[i-len(q.rows)].on {
-			q.sel = i
+	for k, i := 1, q.at(); k < n; k++ {
+		if j := ((i+d*k)%n + n) % n; j < len(q.rows) || q.buttons[j-len(q.rows)].on {
+			q.sel = j
 			return
 		}
 	}

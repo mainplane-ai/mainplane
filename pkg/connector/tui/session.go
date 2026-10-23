@@ -70,6 +70,10 @@ type session struct {
 	armed      bool            // Esc was pressed once: again stops
 	turn       time.Time       // the last message, from which the work is timed
 	cfg        *statefile.Conf // the config to make the session with, else the default
+	home       *statefile.Conf // on home with none chosen, the default, to show under the input
+	homeAsked  bool            // home is fetched, or being fetched, for the providers there are
+	blank      bool            // no message yet: the wordmark, and the plane behind it
+	plane      *plane
 	price      *catalog.Cost   // the price set in the config's JSON, else the catalog's
 	ctx        context.Context // ends when the screen leaves the session
 	cancel     context.CancelFunc
@@ -109,8 +113,9 @@ func newSession(a *App, l *sessionList, id string) *session {
 	s.empty = []*Node{{Grow: 1}, {View: Wordmark{}}, {Fixed: 1}, {Grow: 1}}
 	s.statusRow = Box(&Node{Dir: Row, Min: 1, Max: 3}, &Node{Grow: 1, View: s.status}, &Node{View: s.meta})
 	s.busyRow = &Node{Fixed: 2, Pad: [4]int{0, 1, 0, 0}, View: s.busy}
+	s.plane = &plane{on: func() bool { return s.blank }}
 	s.sidebar = &Node{Fixed: sidebarWidth, BG: a.Theme.Panel, Pad: [4]int{0, 1, 0, 1}, View: l}
-	main := Box(&Node{Dir: Col, Grow: 1},
+	main := Box(&Node{Dir: Col, Grow: 1, Over: s.plane},
 		s.empty[0], s.empty[1], s.empty[2], s.body, s.busyRow, s.slashRow, s.inputRow, s.statusRow, &Node{Fixed: 1}, s.empty[3]) // a blank row under the status, as opencode
 	s.root = Box(&Node{Dir: Row, BG: a.Theme.BG}, s.sidebar, main)
 	a.Focus(s.box.Kids[1])
@@ -134,6 +139,11 @@ func (s *session) Size(a *App, w, h int) {
 	}
 	loaded := s.id != "" && s.info.ID == s.id
 	empty := !s.started && (s.id == "" || loaded && len(s.asked) == 0) // a session that loads shows its blank transcript, not home
+	s.blank, a.Frame = empty, 0
+	if empty {
+		a.Frame = planeFrame
+		a.Ticking(true)
+	}
 	s.sidebar.Hidden = w < sidebarFrom
 	s.body.Hidden = empty
 	for _, n := range s.empty {
@@ -160,27 +170,50 @@ func (s *session) Size(a *App, w, h int) {
 	if !s.slashRow.Hidden {
 		s.inputRow.Pad[1] = 0
 	}
-	s.statusRow.Pad = [4]int{pad + 2, 0, pad, 0} // under the input's text
+	s.statusRow.Pad = [4]int{pad + 2, 0, pad, 0} // under the input's text, to the box's right edge
 	if empty {
-		s.statusRow.Pad[0] = pad
+		left := pad + (main-2*pad-s.box.Fixed)/2
+		s.statusRow.Pad = [4]int{left + 2, 0, main - left - s.box.Fixed, 0}
+		s.askHome(a)
+	}
+	cf := s.info.Config
+	if cf.Model == "" && s.cfg != nil {
+		cf = *s.cfg
+	}
+	if cf.Model == "" && empty && s.home != nil {
+		cf = *s.home
 	}
 	*s.status = *a.Status
-	if s.status.S == "" && (!empty || s.cfg != nil) {
-		s.status.S, s.status.Style = s.info.Config.Model, a.Theme.muted()
-		if s.status.S == "" && s.cfg != nil {
-			s.status.S = s.cfg.Model
-		}
+	if s.status.S == "" {
+		s.status.S, s.status.Style = cf.Model, a.Theme.muted()
 	}
-	s.status.Center = empty
 	s.meta.Gs = nil
-	if !empty {
+	switch {
+	case !empty:
 		s.meta.Gs = s.metaLine(a, main-2*pad > hintFrom)
+	case cf.ContextLimit > 0:
+		s.meta.Gs = run("0/"+tokens(cf.ContextLimit), a.Theme.muted())
 	}
 	s.statusRow.Kids[1].Fixed = gwidth(s.meta.Gs)
 	s.statusRow.Kids[1].Hidden = len(s.meta.Gs) == 0
 	s.busy.Gs = s.busyLine(a)
 	s.busyRow.Hidden = len(s.busy.Gs) == 0 || empty
 	s.busyRow.Pad[0] = pad + margin
+}
+
+// askHome fetches the default config for home, once the catalog and the
+// sessions it takes its preset from are loaded. With no provider there is
+// none to show; the send says why.
+func (s *session) askHome(a *App) {
+	if s.id != "" || s.cfg != nil || s.homeAsked || s.list.cat == nil || !s.list.loaded {
+		return
+	}
+	s.homeAsked = true
+	s.withProviders(a, func(cat *catalog.Catalog, ps []harness.ProviderInfo) {
+		if d, err := defaultConf(cat, ps, s.list.infos); err == nil {
+			s.home = &d
+		}
+	})
 }
 
 // hintFrom is the width of the status line from which it shows the commands key.

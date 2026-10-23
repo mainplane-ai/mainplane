@@ -48,7 +48,7 @@ type login struct {
 
 func newLogin(a *App) *login {
 	s := &login{input: NewInput(), status: &Text{}}
-	s.input.Placeholder, s.input.Mask, s.input.OnSubmit = "mp_...", true, s.submit
+	s.input.Placeholder, s.input.OnSubmit = "mp_...", s.submit
 	s.box = inputBox(a, s.input)
 	s.root = Box(&Node{Dir: Col, BG: a.Theme.BG},
 		&Node{Grow: 1},

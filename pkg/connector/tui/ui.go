@@ -113,6 +113,7 @@ type Node struct {
 	Hidden   bool
 	Kids     []*Node
 	View     View
+	Over     View // drawn over the children, in the node's rect
 	Rect     Rect // where layout put it
 	parent   *Node
 }
@@ -228,6 +229,9 @@ func (n *Node) Draw(a *App, c *Canvas) {
 	}
 	for _, k := range n.Kids {
 		k.Draw(a, c)
+	}
+	if n.Over != nil {
+		n.Over.Draw(a, c, n.Rect)
 	}
 }
 
