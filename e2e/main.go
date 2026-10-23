@@ -222,7 +222,7 @@ shot() { sleep $1; tmux capture-pane -p -t qs; }
 tmux new-session -d -s qs -x 120 -y 40 /usr/local/bin/mainplane
 shot 4 | grep -q 'Press any key' && echo splash-ok
 tmux send-keys -t qs x
-shot 2 | grep -q 'No provider is connected yet' && echo providers-ok
+shot 4 | grep -q 'No provider is connected yet' && echo providers-ok
 /usr/local/bin/mainplane key openai '%[1]s' >/dev/null
 shot 3 | grep -q 'Connected: OpenAI' && echo connected-ok
 tmux send-keys -t qs Enter
