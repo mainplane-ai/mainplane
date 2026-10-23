@@ -22,6 +22,7 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 
 	"github.com/mainplane-ai/mainplane/pkg/release"
+	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 // The harness is a Windows service as LocalSystem, which needs no one logged
@@ -228,7 +229,9 @@ func Uninstall() error {
 	if err := uninstallAdmin(); err != nil {
 		return err
 	}
-	for _, f := range append([]string{bin, bin + ".new"}, release.Asides(bin)...) {
+	// worker.Bin, its .new and asides too: the worker uninstalls itself with its own code, which a
+	// release before Aside's names, one still following the harness, or an install cut short leaves.
+	for _, f := range slices.Concat([]string{bin, bin + ".new", worker.Bin, worker.Bin + ".new"}, release.Asides(bin), release.Asides(worker.Bin)) {
 		if err := remove(f); err != nil {
 			return err
 		}

@@ -177,7 +177,9 @@ if (& $m tail %[2]s | Where-Object { $_ -eq '42' }) { 'kept-ok' }
 for ($i = 0; $i -lt 180; $i++) { if (& $m tail %[2]s | Where-Object { $_ -eq 'continued' }) { 'stepped-ok'; break }; Start-Sleep 1 }`,
 	}
 	// No provider key: install works without one; the quickstart sets one.
-	// Workers reach the harness on the mesh only: /worker, with a good key, is 404.
+	// Workers reach the harness on the mesh only: /worker, with a good key, is 404
+	// at the tunnel's URL, which status shows: the login here names none, since
+	// the CLI on the harness's machine reaches it on loopback.
 	// The install makes the machine the worker admin, which joins once it
 	// finds the harness through the pointer. Dir and every file in it are the
 	// operator's, with sessions in it: a file root wrote is one the harness
@@ -189,8 +191,8 @@ for i in $(seq 90); do /usr/local/bin/mainplane workers | grep -q '^admin ' && {
 d=/var/lib/mainplane-server; [ -d $d ] || d="/Library/Application Support/mainplane-server"
 root=$(find "$d" ! -user "$(id -un)" 2>&1)
 [ -z "$root" ] && cat "$d/config.json" >/dev/null && touch "$d/config.json" "$d/sessions/e2e" && rm "$d/sessions/e2e" && echo dir-ok || echo "not the operator's: $root"
-l=~/.mainplane/login.json
-curl -s -o /dev/null -w 'worker-%%{http_code}\n' -H "Authorization: Bearer $(sed 's/.*"key":"\([^"]*\)".*/\1/' $l)" "$(sed 's/.*"url":"\([^"]*\)".*/\1/' $l)/worker"`,
+u=$(/usr/local/bin/mainplane status | sed -n 's/^mainplane-server url: //p')
+curl -s -o /dev/null -w 'worker-%%{http_code}\n' -H "Authorization: Bearer $(sed 's/.*"key":"\([^"]*\)".*/\1/' ~/.mainplane/login.json)" "$u/worker"`,
 		true: `& ([scriptblock]::Create((irm %[1]s%[2]s/install.ps1))) server
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 mainplane workers
@@ -198,8 +200,9 @@ if (!$LASTEXITCODE) { 'workers-ok' }
 for ($i = 0; $i -lt 90; $i++) { if (mainplane workers | Select-String '^admin ') { 'admin-ok'; break }; Start-Sleep 1 }
 $d = "$env:ProgramData\mainplane-server"
 if ((Test-Path "$d\sessions") -and ((Get-Acl $d).Access | Where-Object { $_.IdentityReference.Value -like "*\$env:USERNAME" -and $_.FileSystemRights -eq 'FullControl' -and $_.AccessControlType -eq 'Allow' })) { 'dir-ok' }
-$l = Get-Content "$HOME\.mainplane\login.json" | ConvertFrom-Json
-try { Invoke-WebRequest "$($l.url)/worker" -Headers @{ Authorization = "Bearer $($l.key)" } -UseBasicParsing | Out-Null; 'worker-200' } catch { "worker-$([int]$_.Exception.Response.StatusCode)" }
+$u = (mainplane status | Select-String '^mainplane-server url: (.+)').Matches.Groups[1].Value
+$k = (Get-Content "$HOME\.mainplane\login.json" | ConvertFrom-Json).key
+try { Invoke-WebRequest "$u/worker" -Headers @{ Authorization = "Bearer $k" } -UseBasicParsing | Out-Null; 'worker-200' } catch { "worker-$([int]$_.Exception.Response.StatusCode)" }
 ` + oneCLI,
 	}
 	serverUpdate = map[bool]string{
