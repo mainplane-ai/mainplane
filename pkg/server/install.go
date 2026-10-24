@@ -82,6 +82,9 @@ func Default() Config {
 			c.Providers[name] = p
 		}
 	}
+	if doNotTrack() {
+		c.DataSharing = &DataSharing{Via: "DO_NOT_TRACK"}
+	}
 	return c
 }
 
