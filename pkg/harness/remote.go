@@ -304,6 +304,11 @@ func (r *Remote) Write(ctx context.Context, path string, data []byte) error {
 	return r.call(ctx, worker.Header{Kind: worker.Write, Path: path}, data, func(worker.Frame) {})
 }
 
+// Update has the worker make cmd beside it release v.
+func (r *Remote) Update(ctx context.Context, cmd, v string) error {
+	return r.call(ctx, worker.Header{Kind: worker.Update, Path: cmd, Version: v}, nil, func(worker.Frame) {})
+}
+
 func (r *Remote) Kill(ctx context.Context, session string) error {
 	return r.call(ctx, worker.Header{Kind: worker.Kill, Session: session}, nil, func(worker.Frame) {})
 }

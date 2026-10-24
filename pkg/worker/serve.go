@@ -111,6 +111,9 @@ func (s *server) answer(f Frame) (Frame, error) {
 		s.kill(f.Session)
 		return Frame{Header: Header{Kind: Done}}, nil
 	case Update:
+		if f.Path == "mainplane-server" {
+			return Frame{Header: Header{Kind: Done}}, updateServer(f.Version)
+		}
 		exe, err := update(f.Version)
 		if err != nil {
 			return Frame{}, err
