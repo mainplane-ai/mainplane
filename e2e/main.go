@@ -215,11 +215,12 @@ systemctl is-active mainplane-server 2>/dev/null || { sudo launchctl print syste
 	}
 	// tuiQuickstart drives the TUI on a Linux harness just installed, with no
 	// provider, in tmux, as its operator: plain mainplane opens the
-	// quickstart, an OpenAI key (%[1]s) set meanwhile moves on to the workers
-	// step, which shows the join line (%[2]s) and admin, the connectors step
-	// a minted key tui-1, Esc skips the drives step, and it ends on a
+	// quickstart, an OpenAI key (%[1]s) set meanwhile asks the data sharing
+	// question, declined, then the workers step shows the join line (%[2]s)
+	// and admin, the connectors step a minted key tui-1, Esc skips the drives step, and it ends on a
 	// new session with the first message typed, not sent. Then, with a
-	// provider, plain mainplane opens on a session, not the quickstart.
+	// provider, plain mainplane opens on a session, with no quickstart and
+	// no question.
 	tuiQuickstart = `command -v tmux >/dev/null || sudo apt-get install -y tmux >/dev/null 2>&1
 shot() { sleep $1; tmux capture-pane -p -t qs; }
 tmux new-session -d -s qs -x 120 -y 40 /usr/local/bin/mainplane
@@ -227,7 +228,9 @@ shot 4 | grep -q 'Press any key' && echo splash-ok
 tmux send-keys -t qs x
 shot 4 | grep -q 'Connect a model provider to begin' && echo providers-ok
 /usr/local/bin/mainplane key openai '%[1]s' >/dev/null
-s=$(shot 3); echo "$s" | grep -q 'OPTIONAL: Connect workers' && echo connected-ok
+shot 3 | grep -q 'Help improve Mainplane' && echo sharing-ok
+tmux send-keys -t qs Escape
+s=$(shot 2); echo "$s" | grep -q 'OPTIONAL: Connect workers' && echo connected-ok
 echo "$s" | grep -qF -- '-- %[2]s' && echo "$s" | grep -q 'Connected: admin' && echo workers-ok
 tmux send-keys -t qs Enter
 shot 3 | grep -q 'mp_key_' && sudo -n /usr/local/bin/mainplane-server key list | grep -qx tui-1 && echo connectors-ok
@@ -237,7 +240,7 @@ tmux send-keys -t qs Escape
 shot 3 | grep -q 'Tell me what devices you have access to and what you can do' && echo session-ok
 tmux kill-session -t qs
 tmux new-session -d -s qs -x 120 -y 40 /usr/local/bin/mainplane
-s=$(shot 4); echo "$s" | grep -q 'Ask anything' && ! echo "$s" | grep -q 'Press any key' && echo again-ok
+s=$(shot 4); echo "$s" | grep -q 'Ask anything' && ! echo "$s" | grep -q 'Press any key' && ! echo "$s" | grep -q 'Help make agents' && echo again-ok
 tmux kill-session -t qs
 [ -z "$(/usr/local/bin/mainplane sessions)" ] && echo unsent-ok`
 	// heldUpdate updates the harness to %[1]s, then to %[2]s, each with one
@@ -614,7 +617,7 @@ func server(ssh map[string]string, o, q string, qMu *sync.Mutex, v, prev, llm st
 	if o == "linux" {
 		join := joinLine.FindString(out)
 		got, err := remote(o, ssh[o], fmt.Sprintf(tuiQuickstart, llm, join))
-		for _, step := range []string{"splash", "providers", "connected", "workers", "connectors", "drives", "session", "again", "unsent"} {
+		for _, step := range []string{"splash", "providers", "sharing", "connected", "workers", "connectors", "drives", "session", "again", "unsent"} {
 			check(o, "TUI quickstart: "+step, err == nil && strings.Contains(got, step+"-ok"), got)
 		}
 	}
