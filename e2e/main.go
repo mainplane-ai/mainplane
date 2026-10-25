@@ -240,7 +240,7 @@ tmux send-keys -t qs Escape
 shot 3 | grep -q 'Tell me what devices you have access to and what you can do' && echo session-ok
 tmux kill-session -t qs
 tmux new-session -d -s qs -x 120 -y 40 /usr/local/bin/mainplane
-s=$(shot 4); echo "$s" | grep -q 'Ask anything' && ! echo "$s" | grep -q 'Press any key' && ! echo "$s" | grep -q 'Help make agents' && echo again-ok
+s=$(shot 4); echo "$s" | grep -q 'Ask anything' && ! echo "$s" | grep -q 'Press any key' && ! echo "$s" | grep -q 'Help improve Mainplane' && echo again-ok
 tmux kill-session -t qs
 [ -z "$(/usr/local/bin/mainplane sessions)" ] && echo unsent-ok`
 	// heldUpdate updates the harness to %[1]s, then to %[2]s, each with one

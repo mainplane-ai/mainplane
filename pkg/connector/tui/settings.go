@@ -3,9 +3,11 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
@@ -37,9 +39,12 @@ func getSettings(c connector.Client) (settings, error) {
 	return s, c.Call(ctx, http.MethodGet, "/settings", "", nil, &s)
 }
 
+// postSettings is bounded by the harness's own time for an update.
 func postSettings(c connector.Client, v any) error {
 	b, _ := json.Marshal(v)
-	return c.Call(context.Background(), http.MethodPost, "/settings", "application/json", strings.NewReader(string(b)), nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	return c.Call(ctx, http.MethodPost, "/settings", "application/json", strings.NewReader(string(b)), nil)
 }
 
 // askSharing asks for data sharing permission, unless it was answered,
@@ -109,10 +114,14 @@ func (s *session) settingsMenu(a *App) {
 				v.Pick = func(a *App, _ *MenuItem) {
 					a.Say("Updating to " + l)
 					a.Go(func() {
+						// A success restarts the harness, so it never answers.
 						err := postSettings(s.c, map[string]string{"version": l})
+						var se *connector.StatusError
 						a.Post(func() {
-							if err != nil {
+							if errors.As(err, &se) {
 								a.SayError(err)
+							} else {
+								a.Say("The harness is restarting")
 							}
 						})
 					})

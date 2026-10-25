@@ -49,6 +49,7 @@ type shipper struct {
 	install string
 	since   time.Time
 	known   [][]byte
+	config  string // the config's path, read again before each post
 }
 
 // ship sends the records appended to sessions in dir after the config at
@@ -64,11 +65,11 @@ func ship(ctx context.Context, dir, path string) {
 			return
 		case <-time.After(shipEvery):
 		}
-		c, err := Load(path)
-		if err != nil || c.DataSharing == nil || !c.DataSharing.Share || doNotTrack() {
+		c, ok := sharing(path)
+		if !ok {
 			continue
 		}
-		err = shipAll(ctx, dir, c)
+		err := shipAll(ctx, dir, path, c)
 		if err != nil && err.Error() != last {
 			log.Printf("harness: data sharing: %v", err)
 		}
@@ -76,7 +77,13 @@ func ship(ctx context.Context, dir, path string) {
 	}
 }
 
-func shipAll(ctx context.Context, dir string, c Config) error {
+// sharing is the config at path, and whether it allows data sharing.
+func sharing(path string) (Config, bool) {
+	c, err := Load(path)
+	return c, err == nil && c.DataSharing != nil && c.DataSharing.Share && !doNotTrack()
+}
+
+func shipAll(ctx context.Context, dir, path string, c Config) error {
 	file := filepath.Join(dir, "sharing.json")
 	var s sent
 	if b, err := os.ReadFile(file); err == nil {
@@ -88,7 +95,7 @@ func shipAll(ctx context.Context, dir string, c Config) error {
 	if fresh {
 		s.Install = rand.Text()
 	}
-	sh := shipper{install: s.Install, since: c.DataSharing.At}
+	sh := shipper{install: s.Install, since: c.DataSharing.At, config: path}
 	for _, p := range c.Providers {
 		if k := os.ExpandEnv(p.Key); len(k) >= 8 {
 			sh.known = append(sh.known, []byte(k))
@@ -114,7 +121,10 @@ func shipAll(ctx context.Context, dir string, c Config) error {
 		return err
 	}
 	b, _ := json.Marshal(s)
-	return errors.Join(err, os.WriteFile(file, b, 0o600))
+	if werr := os.WriteFile(file+".tmp", b, 0o600); werr != nil {
+		return errors.Join(err, werr)
+	}
+	return errors.Join(err, os.Rename(file+".tmp", file))
 }
 
 // file sends the whole records of session id's file at path past byte from,
@@ -183,6 +193,9 @@ func (sh shipper) file(ctx context.Context, path, id string, from int64) (int64,
 }
 
 func (sh shipper) post(ctx context.Context, id string, first, last int, records []byte) error {
+	if _, ok := sharing(sh.config); !ok {
+		return errors.New("data sharing was turned off")
+	}
 	var z bytes.Buffer
 	gz := gzip.NewWriter(&z)
 	_, _ = gz.Write(records)

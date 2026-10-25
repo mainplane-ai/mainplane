@@ -49,7 +49,13 @@ func (a *api) settings(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	latest, _ := release.Latest()
+	// latest is optional: wait for it no longer than a connector waits
+	latest, l := "", make(chan string, 1)
+	go func() { v, _ := release.Latest(); l <- v }()
+	select {
+	case latest = <-l:
+	case <-time.After(5 * time.Second):
+	}
 	u := c.DataSharing
 	if doNotTrack() {
 		u = &DataSharing{Via: "DO_NOT_TRACK"}
