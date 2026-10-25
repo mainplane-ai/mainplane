@@ -3,6 +3,8 @@ package worker
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -47,4 +49,18 @@ func update(v string) (string, error) {
 		failed.v, failed.err, failed.at, failed.wait = v, err, time.Now(), wait
 	}
 	return exe, err
+}
+
+// updateServer makes the harness installed beside this binary release v,
+// which restarts it.
+func updateServer(v string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	out, err := exec.Command(filepath.Join(filepath.Dir(exe), "mainplane-server"+filepath.Ext(exe)), "update", v).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, out)
+	}
+	return nil
 }

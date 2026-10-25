@@ -49,6 +49,10 @@ const (
 //	PUT    /drives/{name}  {"server","workers"} -> 204: saved in the config and applied;
 //	                          refused when its server cannot serve it now
 //	DELETE /drives/{name}  -> 204
+//	GET    /settings       -> {"version":{"current","latest"},"data_sharing"}
+//	POST   /settings       {"data_sharing":{"share","via","text"}} -> 204: saved in the config
+//	                       {"version"} -> the admin worker makes the harness that release
+//	                          and restarts it, so a success never answers
 type api struct {
 	dir, path string
 	k         ed25519.PrivateKey
@@ -66,6 +70,8 @@ func (a *api) handle(mux *http.ServeMux) {
 	mux.HandleFunc("GET /drives", a.drives)
 	mux.HandleFunc("PUT /drives/{name}", a.setDrive)
 	mux.HandleFunc("DELETE /drives/{name}", a.deleteDrive)
+	mux.HandleFunc("GET /settings", a.settings)
+	mux.HandleFunc("POST /settings", a.setSettings)
 }
 
 func (a *api) root(w http.ResponseWriter, r *http.Request) {

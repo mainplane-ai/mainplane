@@ -56,11 +56,12 @@ const maxKey = 4 << 10
 // tunnel are there, and sessions in sessions/ under it, the one directory a
 // drive may ever share.
 type Config struct {
-	HTTP      string                       `json:"http"`             // loopback address the tunnel carries connectors and workers to
-	Tunnel    *Tunnel                      `json:"tunnel,omitempty"` // the user's own; none is a quick tunnel
-	Providers map[string]Provider          `json:"providers"`
-	Links     [][2]string                  `json:"links,omitempty"`  // pairs of workers, by name, that reach each other on the mesh
-	Drives    map[string]coordinator.Drive `json:"drives,omitempty"` // by name: each one's server and workers
+	HTTP        string                       `json:"http"`             // loopback address the tunnel carries connectors and workers to
+	Tunnel      *Tunnel                      `json:"tunnel,omitempty"` // the user's own; none is a quick tunnel
+	Providers   map[string]Provider          `json:"providers"`
+	Links       [][2]string                  `json:"links,omitempty"`        // pairs of workers, by name, that reach each other on the mesh
+	Drives      map[string]coordinator.Drive `json:"drives,omitempty"`       // by name: each one's server and workers
+	DataSharing *DataSharing                 `json:"data_sharing,omitempty"` // whether the user has opted in to data sharing; none: not asked yet
 }
 
 // Tunnel is a tunnel the user made in Cloudflare, which routes URL to it and
@@ -240,6 +241,7 @@ func Harness(ctx context.Context, path string) error {
 	routes.HandleFunc("GET /providers/{name}/login", logins.get)
 	a := &api{dir: dir, path: path, k: k, at: func() string { return at.Load().(string) }, coord: coord, pool: pool}
 	a.handle(routes)
+	go ship(ctx, dir, path)
 	api := store.Bearer(limit, routes)
 	mux.Handle("/", api)
 	srv := &http.Server{Addr: c.HTTP, Handler: mux}

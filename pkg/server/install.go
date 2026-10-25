@@ -117,6 +117,9 @@ func Install(c *Config, keep bool) error {
 			return err
 		}
 	} else {
+		if doNotTrack() {
+			c.DataSharing = &DataSharing{Via: "DO_NOT_TRACK"}
+		}
 		b, err := json.MarshalIndent(c, "", "  ")
 		if err != nil {
 			return err

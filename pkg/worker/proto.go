@@ -64,7 +64,7 @@ type Header struct {
 	Interp  string `json:"interp,omitempty"`  // run: empty means the worker's first
 	Timeout int    `json:"timeout,omitempty"` // run: seconds before the environment is killed
 	Job     string `json:"job,omitempty"`     // run: a background job of this id, in an interpreter of its own
-	Path    string `json:"path,omitempty"`    // read, write; started, result: a job's log
+	Path    string `json:"path,omitempty"`    // read, write; started, result: a job's log; update: mainplane-server, to update the harness beside the worker
 	Pid     int    `json:"pid,omitempty"`     // started
 
 	Exit int    `json:"exit,omitempty"` // result

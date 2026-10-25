@@ -27,7 +27,6 @@ const qsWidth = 100
 // The quickstart's words, all here, to be rewritten together. A step's words
 // are markdown, drawn as the transcript draws the agent's text.
 const (
-	qsTelemetry   = "Mainplane sends anonymous usage data. Set DO_NOT_TRACK=1 to turn it off."
 	qsAnyKey      = "Press any key to get started"
 	qsProviders   = "Connect a model provider to begin"
 	qsWorkers     = "## OPTIONAL: Connect workers\n\nA worker is a machine your agents use. Run this one-line install on a machine to connect it."
@@ -71,16 +70,16 @@ type quickstart struct {
 	key       string // the api key minted for a connector
 	minting   bool
 
-	root, splash, steps, col, tel *Node
-	plane                         *plane
-	words                         string // the step's words, which body shows
-	body                          *Node  // the words in a Scrollbox, to select and copy as in the transcript
-	input                         *Input // the providers step's, which takes only /providers
-	slash                         *slash // its list of commands, which is /providers alone
-	slashRow                      *Node
-	inputRow                      *Node
-	hint                          *Node
-	left, right                   *Glyphs // the keys, as the status line under the input
+	root, splash, steps, col *Node
+	plane                    *plane
+	words                    string // the step's words, which body shows
+	body                     *Node  // the words in a Scrollbox, to select and copy as in the transcript
+	input                    *Input // the providers step's, which takes only /providers
+	slash                    *slash // its list of commands, which is /providers alone
+	slashRow                 *Node
+	inputRow                 *Node
+	hint                     *Node
+	left, right              *Glyphs // the keys, as the status line under the input
 }
 
 func newQuickstart(a *App, c connector.Client) *quickstart {
@@ -97,12 +96,11 @@ func newQuickstart(a *App, c connector.Client) *quickstart {
 	}
 	q.slash = &slash{s: q.s, in: q.input, all: []command{cmd}}
 	q.input.insert(textElems(qsCommand)...)
-	q.tel = &Node{View: &Text{S: qsTelemetry, Center: true, Style: a.Theme.muted()}}
 	q.splash = Box(&Node{Dir: Col, Grow: 1}, &Node{Grow: 1},
 		&Node{View: Wordmark{}}, &Node{Fixed: 1},
 		&Node{View: &Text{S: qsAnyKey, Center: true, Style: a.Theme.text()}},
-		&Node{Grow: 1}, q.tel, &Node{Fixed: 1})
-	q.plane = &plane{tel: q.tel, on: func() bool { return q.step == stepSplash }}
+		&Node{Grow: 1})
+	q.plane = &plane{on: func() bool { return q.step == stepSplash }}
 	q.slashRow = Box(&Node{Dir: Row}, &Node{Fixed: 1, View: bar{a.Theme.Muted}}, &Node{Grow: 1, BG: a.Theme.Panel, View: q.slash})
 	q.inputRow = Box(&Node{Dir: Col, Pad: [4]int{0, 1, 0, 0}}, inputBox(a, q.input))
 	q.hint = Box(&Node{Dir: Row, Pad: [4]int{margin, 0, 0, 0}}, &Node{Grow: 1, View: q.left}, &Node{View: q.right})
@@ -160,11 +158,6 @@ func (q *quickstart) Root() *Node { return q.root }
 
 func (q *quickstart) Size(a *App, w, h int) {
 	q.splash.Hidden, q.steps.Hidden = q.step != stepSplash, q.step == stepSplash
-	pad := 2
-	if w < 44 {
-		pad = 1
-	}
-	q.tel.Pad = [4]int{pad, 0, pad, 0}
 	q.col.Fixed = min(qsWidth, w-4)
 	q.layout(a)
 	q.body.Hidden = true
@@ -313,8 +306,12 @@ func (q *quickstart) to(a *App, n int) {
 }
 
 // next opens the step after this one; the drives step only when a worker
-// can serve one. After the last, the session.
+// can serve one. After the last, the session. Leaving the providers step
+// asks for data sharing permission.
 func (q *quickstart) next(a *App) {
+	if q.step == stepProviders {
+		askSharing(a, q.s.c)
+	}
 	if q.step == stepDrives || q.step == stepConnectors && len(q.servers()) == 0 {
 		q.finish(a)
 		return

@@ -98,6 +98,7 @@ func (s *login) submit(a *App, key string) {
 				a.Quit()
 			default:
 				a.SetScreen(newSession(a, newSessionList(a, c), ""))
+				askSharing(a, c)
 			}
 		})
 	})

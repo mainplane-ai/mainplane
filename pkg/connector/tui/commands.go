@@ -57,6 +57,7 @@ func commands() []command {
 		{"fork", nil, "Fork into a new session", "", (*session).fork},
 		{"rollback", []string{"revert", "rewind"}, "Roll back to before a message", "", (*session).rollback},
 		{"workers", nil, "Workers", "ctrl+e", (*session).workers},
+		{"settings", nil, "Settings", "", (*session).settingsMenu},
 		{"stop", nil, "Stop the session", "esc esc", (*session).halt},
 		{"info", []string{"debug", "id"}, "Session info", "", (*session).infoMenu},
 		{"log", nil, "Save the session's log file", "", (*session).saveLog},

@@ -137,7 +137,6 @@ var loadPlane = sync.OnceValue(func() *planeMesh {
 // a run of up to 3 spaces between glyphs counts as text, so a line stays
 // solid and the gaps in the wordmark open.
 type plane struct {
-	tel      *Node // text at the bottom: the plane fits in the rows above it; nil is every row
 	on       func() bool
 	t        float64 // seconds of animation so far, which stops while the terminal is blurred
 	last     time.Time
@@ -179,9 +178,6 @@ func (p *plane) Draw(a *App, c *Canvas, r Rect) {
 	p.t += dt
 	bank, turn, d, f, done := p.flight()
 	area := r.H
-	if p.tel != nil {
-		area = p.tel.Rect.Y - r.Y
-	}
 	if !p.on() || done || area <= 0 {
 		return
 	}
