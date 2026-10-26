@@ -89,8 +89,14 @@ func question(a *App, title, words, yesLabel, noLabel string, yes func(*App), no
 		yes(a)
 	})},
 		&Node{View: &Text{S: words, Style: a.Theme.text()}}, &Node{Fixed: 1},
-		&Node{View: &Glyphs{Gs: cat(run("enter", key), run(" "+yesLabel+"   ", muted), run("esc", key), run(" "+noLabel, muted))}}))
+		hint(cat(run("esc", key), run(" "+noLabel, muted)), cat(run("enter", key), run(" "+yesLabel, muted)))))
 	l.Esc = no
+}
+
+// hint is a row of left on the left and right on the right, as under the
+// quickstart: esc on the left, enter on the right.
+func hint(left, right []Glyph) *Node {
+	return Box(&Node{Dir: Row, Fixed: 1}, &Node{Grow: 1, View: &Glyphs{Gs: left}}, &Node{Fixed: gwidth(right), View: &Glyphs{Gs: right}})
 }
 
 // newer is whether release latest is newer than current; a local build is
