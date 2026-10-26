@@ -2,6 +2,11 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.5.7
+
+- The terminal app asks to update when the harness is behind the latest release: "Mainplane vX is available. Update now?" Enter updates the harness, waits for it to come back, then updates the app and opens it again. Esc skips that release until a newer one. /settings still updates anytime, and offers only a newer release, never an older one
+- `POST /settings` answers a failed update with 500, not 502, since a proxy answers 502 while the harness restarts
+
 ## v0.5.6
 
 - Data sharing permission: the quickstart, after the providers step, and the terminal app, on first open, ask "Help improve Mainplane": allow the use of your sessions to improve Mainplane and train AI models. Nothing is shared until the user allows it. When allowed, the harness sends the session records written after that to data.mainplane.ai, with provider keys and common key formats in text bodies replaced. With DO_NOT_TRACK set, there is no question and nothing is sent. The quickstart's line about anonymous usage data is gone

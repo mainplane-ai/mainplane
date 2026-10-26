@@ -310,7 +310,7 @@ func (q *quickstart) to(a *App, n int) {
 // asks for data sharing permission.
 func (q *quickstart) next(a *App) {
 	if q.step == stepProviders {
-		askSharing(a, q.s.c)
+		askHarness(a, q.s.c)
 	}
 	if q.step == stepDrives || q.step == stepConnectors && len(q.servers()) == 0 {
 		q.finish(a)
