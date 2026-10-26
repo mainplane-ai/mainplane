@@ -2,21 +2,14 @@
   <source media="(max-width: 700px), (hover: none) and (pointer: coarse)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/hero-mobile.svg">
   <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/hero-desktop.svg" alt="Mainplane, with the biplane flying over the clouds" width="960">
 </picture>
-<h3>Mainplane is an open-source agent harness built for performance at scale.</h3>
+<h3>The open-source agent ecosystem</h3>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/architecture-3d-dark.svg">
   <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/architecture-3d-light.svg" alt="The Mainplane Architecture: connectors reach Mainplane Server, which holds secrets and controls, observability and the file server; the network joins the server and every worker" width="960">
 </picture>
 <br/><br/>
 
-<a>
-> Run hundreds of durable agents with computer/browser use <br/>
-> Connect your own devices, your agents can drive them remotely <br/>
-> Secrets and controls stay safely isolated  <br/>
-> Chat from anywhere, everything syncs  <br/>
-</a>
-
-## Self-Hosting Quickstart
+# Self-Hosting Quickstart
 
 Run this command on your server machine (any always-on machine will do):
 
@@ -28,12 +21,44 @@ curl -fsSL https://mainplane.ai/install | sh -s -- server quickstart
 & ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) server quickstart
 ```
 
-The quickstart walks you through adding a provider, workers (devices your agents control) and connectors (ways to message your agents).
+The quickstart walks you through adding a provider, workers (computers your agents control) and connectors (ways to message your agents).
 
 Read more in [docs/self-hosting.md](docs/self-hosting.md).
 <br/><br/>
 
-## FAQ
+# Features
+### Always-on
+- Mainplane turns any computers into an always-on local AI shed. Agents keep working when your laptop is closed.
+
+### Bring your keys and subscriptions
+- Use the regular limits of a Claude Code or ChatGPT Codex subscription, or an API key with any model.
+
+### Chat from anywhere
+- Use Mainplane's first-class TUI or the sessions API. All messages stay synced. 
+
+### Private mesh network 
+- Mainplane connects agents and computers with fine-grained security controls. No Tailscale needed.
+
+### Shared file drives
+- A remote filesystem that multiple agents can access concurrently without risk of de-sync. 
+
+### Context and cost efficient
+- Mainplane uses just 3k tokens of system context. Agents see their own context usage and optimize it. 
+
+### Browser and computer use
+- Mainplane drives real browsers with their logins and has native computer use.
+
+### Control plane security
+- API keys stay on your server isolated from the other workers where agents run.
+
+### Durable and observable sessions
+- Agent state = one readable file that can be resumed if stopped.
+
+### Performant and open-source
+- Mainplane runs as one Go binary, source code is under MIT license.
+
+
+# FAQ
 
 <details>
 <summary>Do I need more than one device?</summary>
