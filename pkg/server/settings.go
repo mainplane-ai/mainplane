@@ -86,8 +86,10 @@ func (a *api) setSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if in.Version != "" {
+		// not 502, which a connector reads as the proxy losing the harness
+		// to its restart
 		if err := a.update(r.Context(), in.Version); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}

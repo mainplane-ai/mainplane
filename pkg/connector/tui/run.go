@@ -28,7 +28,7 @@ func Run(c *connector.Client, id string, quick bool) (update string, err error) 
 		a.SetScreen(newSession(a, newSessionList(a, *c), id))
 	}
 	if c != nil && !quick {
-		askSharing(a, *c)
+		askHarness(a, *c)
 	}
 	a.Run()
 	return a.Update, nil
