@@ -137,7 +137,7 @@ func update(a *App, c connector.Client, v string) {
 		// it ends with no error, a network error, or a proxy's 502 or 52x.
 		// The harness's own failures are other codes.
 		err := postSettings(c, map[string]string{"version": v})
-		if se := (*connector.StatusError)(nil); !errors.As(err, &se) || se.Code == http.StatusBadGateway || se.Code >= 520 {
+		if se := (*connector.StatusError)(nil); !errors.As(err, &se) || se.Code == http.StatusBadGateway || se.Code >= 520 && se.Code <= 529 {
 			err = waitFor(c, v)
 		}
 		a.Post(func() {
@@ -165,7 +165,7 @@ func waitFor(c connector.Client, v string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("Mainplane did not come back on %s within %s", v, updateWait)
+	return fmt.Errorf("the harness did not come back on %s within %s", v, updateWait)
 }
 
 // onEnter runs on Enter.
