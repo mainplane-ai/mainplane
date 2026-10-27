@@ -662,7 +662,7 @@ func (c *Coordinator) name(hi *tailcfg.Hostinfo) string {
 	for i := 2; name == "xn" || name == worker.Harness || name == worker.Admin || c.byName(name) != nil; i++ {
 		name = fmt.Sprintf("%s-%d", base, i)
 	}
-	if name != base && c.byName(base) != nil {
+	if name != base && base != worker.Harness && base != worker.Admin && c.byName(base) != nil {
 		log.Printf("coordinator: worker %s exists, so this machine joins as %s. If %s is this machine with lost keys: mainplane worker remove %s, then uninstall and install on it", base, name, base, base)
 	}
 	return name
