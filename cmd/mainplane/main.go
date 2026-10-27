@@ -148,7 +148,7 @@ func app(id string, quick bool) {
 			}
 			quick = len(ps) == 0
 		}
-		cp = &c
+		cp = c
 	case errors.Is(err, fs.ErrNotExist) && id == "" && !quick:
 	case errors.Is(err, fs.ErrNotExist):
 		log.Fatal("not logged in: mainplane login <api key>")

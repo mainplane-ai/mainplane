@@ -202,7 +202,7 @@ func (c client) signin(name string) {
 
 // client is the harness API with every failure the harness's own words on
 // stderr and exit 1.
-type client struct{ connector.Client }
+type client struct{ *connector.Client }
 
 func login() (client, error) {
 	c, err := connector.Load(context.Background())

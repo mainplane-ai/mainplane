@@ -23,12 +23,12 @@ func Run(c *connector.Client, id string, quick bool) (update string, err error) 
 	case c == nil:
 		a.SetScreen(newLogin(a))
 	case quick:
-		a.SetScreen(newQuickstart(a, *c))
+		a.SetScreen(newQuickstart(a, c))
 	default:
-		a.SetScreen(newSession(a, newSessionList(a, *c), id))
+		a.SetScreen(newSession(a, newSessionList(a, c), id))
 	}
 	if c != nil && !quick {
-		askHarness(a, *c)
+		askHarness(a, c)
 	}
 	a.Run()
 	return a.Update, nil

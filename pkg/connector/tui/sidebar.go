@@ -29,7 +29,7 @@ const (
 // sessionsEvery. It outlives the session screens: the sidebar shows it and
 // Ctrl+Up/Down step through it.
 type sessionList struct {
-	c      connector.Client
+	c      *connector.Client
 	cat    *catalog.Catalog // nil until loaded
 	cur    *session         // the screen showing now
 	infos  []harness.Info
@@ -42,7 +42,7 @@ type sessionList struct {
 
 // newSessionList starts reading the sessions and loads the catalog. A session is unread once it
 // changes after the first read, so a fresh start shows none unread.
-func newSessionList(a *App, c connector.Client) *sessionList {
+func newSessionList(a *App, c *connector.Client) *sessionList {
 	l := &sessionList{c: c, seen: map[string]time.Time{}, drafts: map[string][]elem{}}
 	loadCatalog(a, l)
 	a.Go(func() {
