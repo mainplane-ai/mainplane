@@ -44,7 +44,7 @@ func doNotTrack() bool {
 }
 
 func (a *api) settings(w http.ResponseWriter, r *http.Request) {
-	c, err := Load(a.path)
+	c, err := loadConfig(a.path)
 	if err != nil {
 		fail(w, err)
 		return
@@ -117,9 +117,5 @@ func (a *api) save(fn func(*Config)) error {
 		return err
 	}
 	fn(&c)
-	b, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(a.path, b, 0o600)
+	return saveConfig(a.path, c)
 }

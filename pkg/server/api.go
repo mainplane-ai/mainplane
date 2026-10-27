@@ -133,7 +133,7 @@ func (a *api) key(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) drives(w http.ResponseWriter, r *http.Request) {
-	c, err := Load(a.path)
+	c, err := loadConfig(a.path)
 	if err != nil {
 		fail(w, err)
 		return
@@ -210,11 +210,7 @@ func (a *api) edit(fn func(map[string]coordinator.Drive) error) error {
 	if err := fn(c.Drives); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(a.path, b, 0o600); err != nil {
+	if err := saveConfig(a.path, c); err != nil {
 		return err
 	}
 	setDrives(a.coord, a.pool, c.Drives)
