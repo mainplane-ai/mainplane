@@ -359,27 +359,51 @@ func (s *session) sessions(a *App) {
 // session's workers at once, from its next step on; on a blank screen, the
 // workers of the config it makes its session with.
 func (s *session) workers(a *App) {
-	if s.id != "" {
+	switch {
+	case s.creating:
+		a.Say("The session is being made")
+		return
+	case s.id != "":
 		s.listWorkers(a, func(listed []connector.Worker) { s.workerMenu(a, listed, s.info.Config.Workers, s.setWorkers) })
+		return
+	case s.cfg != nil:
+		s.homeWorkers(a, *s.cfg)
 		return
 	}
 	s.withProviders(a, func(cat *catalog.Catalog, ps []harness.ProviderInfo) {
-		cf := s.base()
-		if s.cfg == nil {
-			d, err := defaultConf(cat, ps, s.list.infos)
-			if err != nil {
-				a.SayError(err)
+		d, err := defaultConf(cat, ps, s.list.infos)
+		if err != nil {
+			a.SayError(err)
+			return
+		}
+		s.homeWorkers(a, d)
+	})
+}
+
+// homeWorkers is the menu of workers of a blank screen, whose session is made
+// with the config chosen there, else with cf. A toggle while the session is
+// being made is refused; once it is made, a toggle sets its workers.
+func (s *session) homeWorkers(a *App, cf statefile.Conf) {
+	s.listWorkers(a, func(listed []connector.Worker) {
+		if s.cfg != nil {
+			cf = *s.cfg
+		}
+		s.workerMenu(a, listed, cf.Workers, func(a *App, ws []statefile.Worker, done func(error)) {
+			switch {
+			case s.id != "":
+				s.setWorkers(a, ws, done)
+				return
+			case s.creating:
+				done(errors.New("the session is being made"))
 				return
 			}
-			cf = d
-		}
-		s.listWorkers(a, func(listed []connector.Worker) {
-			s.workerMenu(a, listed, cf.Workers, func(a *App, ws []statefile.Worker, done func(error)) {
-				cf.Workers = ws
-				next := cf
-				s.cfg = &next
-				done(nil)
-			})
+			next := cf
+			if s.cfg != nil {
+				next = *s.cfg
+			}
+			next.Workers = ws
+			s.cfg = &next
+			done(nil)
 		})
 	})
 }
