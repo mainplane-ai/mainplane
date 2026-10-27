@@ -444,6 +444,9 @@ func (s *session) show(r statefile.Record) {
 // send posts the text. From home the screen turns to the session at once;
 // the session is made in the background and the text posted when it is.
 func (s *session) send(a *App, text string) {
+	if s.id == "" && !s.started {
+		delete(s.list.drafts, "") // home's draft is sent: the next home starts empty
+	}
 	s.started = true
 	if s.id != "" {
 		s.outbox <- text
