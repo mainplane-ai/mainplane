@@ -296,7 +296,7 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 		return "", err
 	}
 	if p := statefile.ContextUsed(chain); p > conf.ContextLimit {
-		h.killAll(ctx, id, conf)
+		h.killAll(ctx, id, chain)
 		_, err := h.append(s, errorRecord("", fmt.Sprintf("context %d exceeds limit %d", p, conf.ContextLimit)))
 		return statefile.StatusFailed, err
 	}
