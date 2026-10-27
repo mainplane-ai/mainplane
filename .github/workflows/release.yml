@@ -54,6 +54,19 @@ jobs:
           [ "$(dist/mainplane-linux-amd64 version)" = "$TAG" ]
           for s in install.sh install.ps1; do sed "s/@VERSION@/$TAG/g" "install/$s" > "dist/$s"; done
           cp docs/CHANGELOG.md dist/
+      # BSD and MIT licenses of code in the binaries (Go, tailscale, headscale
+      # in pkg/coordinator) require their notices with binary redistributions.
+      # Dependencies differ by platform, so every target is scanned.
+      - name: THIRD_PARTY_NOTICES
+        run: |
+          set -o pipefail
+          GOBIN=$RUNNER_TEMP go install github.com/google/go-licenses/v2@v2.0.1
+          printf %s '{{range .}}{{.Name}} {{.LicensePath}}{{"\n"}}{{end}}' > "$RUNNER_TEMP/notices.tpl"
+          { echo "Go $(go env GOROOT)/LICENSE"
+            for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+              GOOS=${t%/*} GOARCH=${t#*/} "$RUNNER_TEMP/go-licenses" report --template "$RUNNER_TEMP/notices.tpl" ./cmd/mainplane ./cmd/mainplane-server
+            done
+          } | sort -u | while read -r name path; do printf '%s\n\n' "$name"; cat "$path"; printf '\n\n'; done > dist/THIRD_PARTY_NOTICES
       # macOS keeps a privacy grant (Network Volumes, Screen Recording,
       # Accessibility) for the code's designated requirement. An ad-hoc
       # signature's is its cdhash, so each release asked again, and the first
@@ -126,7 +139,7 @@ jobs:
           echo "::add-mask::$secret"
           for f in dist/*; do
             ct=application/octet-stream
-            case $f in *.sh | *.ps1 | *.md | */SHA256SUMS) ct="text/plain; charset=utf-8" ;; esac
+            case $f in *.sh | *.ps1 | *.md | */SHA256SUMS | */THIRD_PARTY_NOTICES) ct="text/plain; charset=utf-8" ;; esac
             curl -fsS --aws-sigv4 aws:amz:auto:s3 --user "$id:$secret" -H "Content-Type: $ct" -T "$f" "https://$ACCOUNT.r2.cloudflarestorage.com/$BUCKET/$TAG/${f#dist/}"
           done
           cur=$(curl -fsS https://dl.mainplane.ai/latest || true)
