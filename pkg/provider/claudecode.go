@@ -216,8 +216,9 @@ func turnKey(req ccReq, frames []ccFrame) (string, error) {
 
 // resumable is the turn to resume for frames and the frames after it, if a
 // step before ended at exactly this context and claude still has its
-// transcript.
-// key names the turn resumed, for its removal once a step made the next.
+// transcript. It claims the turn: another step from the same context, as in a
+// second fork of the session, replays instead of resuming a transcript this
+// step removes. A failed step gives the claim back with release.
 func resumable(dir string, req ccReq) (turn ccTurn, rest []ccFrame, key string, err error) {
 	k := len(req.Frames) - 1
 	for k >= 0 && req.Frames[k].Type != "assistant" {
@@ -242,7 +243,21 @@ func resumable(dir string, req ccReq) (turn ccTurn, rest []ccFrame, key string, 
 	if t, _ := filepath.Glob(transcript(dir, turn.Session)); len(t) == 0 {
 		return ccTurn{}, req.Frames, "", nil
 	}
+	if err := os.Remove(filepath.Join(dir, "turns", key)); errors.Is(err, fs.ErrNotExist) {
+		return ccTurn{}, req.Frames, "", nil
+	} else if err != nil {
+		return ccTurn{}, nil, "", err
+	}
 	return turn, req.Frames[k+1:], key, nil
+}
+
+// release gives back the claim on a turn.
+func release(dir string, turn ccTurn, key string) error {
+	b, err := json.Marshal(turn)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "turns", key), b, 0o600)
 }
 
 // transcript is the glob of a session's transcript: claude keeps it under a
@@ -252,9 +267,8 @@ func transcript(dir, session string) string {
 }
 
 // keepTurn notes where this step's turn ends, for the next step to resume,
-// and drops the turn it resumed: claude forked that transcript into this
-// one.
-func keepTurn(dir string, req ccReq, recs []statefile.Record, end ccTurn, resumed ccTurn, key string) error {
+// and drops the transcript it resumed: claude forked it into this one.
+func keepTurn(dir string, req ccReq, recs []statefile.Record, end ccTurn, resumed ccTurn) error {
 	f, err := ccAssistant(recs)
 	if err != nil {
 		return err
@@ -274,11 +288,11 @@ func keepTurn(dir string, req ccReq, recs []statefile.Record, end ccTurn, resume
 	if err := os.WriteFile(filepath.Join(turns, next), b, 0o600); err != nil {
 		return err
 	}
-	if key == "" {
+	if resumed.Session == "" {
 		return nil
 	}
 	old, _ := filepath.Glob(transcript(dir, resumed.Session))
-	for _, p := range append(old, filepath.Join(turns, key)) {
+	for _, p := range old {
 		if err := os.Remove(p); err != nil {
 			return err
 		}
@@ -288,7 +302,7 @@ func keepTurn(dir string, req ccReq, recs []statefile.Record, end ccTurn, resume
 
 // runClaude is one step: claude installed, the inert MCP server and the hook
 // on a loopback port, the frames replayed, the stream read to its result.
-func runClaude(ctx context.Context, dir string, body []byte, emit func(statefile.Record)) (statefile.Header, error) {
+func runClaude(ctx context.Context, dir string, body []byte, emit func(statefile.Record)) (_ statefile.Header, err error) {
 	var req ccReq
 	if err := json.Unmarshal(body, &req); err != nil {
 		return statefile.Header{}, err
@@ -300,6 +314,13 @@ func runClaude(ctx context.Context, dir string, body []byte, emit func(statefile
 	resumed, frames, key, err := resumable(dir, req)
 	if err != nil {
 		return statefile.Header{}, err
+	}
+	if key != "" {
+		defer func() {
+			if err != nil {
+				err = errors.Join(err, release(dir, resumed, key))
+			}
+		}()
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -374,7 +395,7 @@ func runClaude(ctx context.Context, dir string, body []byte, emit func(statefile
 	if err != nil {
 		return statefile.Header{}, fmt.Errorf("%w; claude stderr: %s", err, stderr.b.Bytes())
 	}
-	return h, keepTurn(dir, req, recs, end, resumed, key)
+	return h, keepTurn(dir, req, recs, end, resumed)
 }
 
 // replay sends the frames one by one, waiting for claude to take each
