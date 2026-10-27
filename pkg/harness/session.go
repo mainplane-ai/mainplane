@@ -225,6 +225,10 @@ func (h *Harness) SetName(id, via, n string) (int, error) {
 func (h *Harness) Delete(ctx context.Context, id, via string) error {
 	s := h.session(id)
 	h.mu.Lock()
+	if s.deleting {
+		h.mu.Unlock()
+		return fmt.Errorf("session %s is already being deleted", id)
+	}
 	s.deleting = true
 	h.mu.Unlock()
 	defer func() {
