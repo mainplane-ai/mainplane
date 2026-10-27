@@ -39,7 +39,8 @@ curl -fsSL https://mainplane.ai/install | sh -s -- your-network XXXX-XXXX
 & ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) your-network XXXX-XXXX
 ```
 
-Log in from anywhere. A logged-in machine can message agents.
+Log in from anywhere. A logged-in machine can message agents. It needs no
+worker. `mainplane-server key new <name>` prints these lines with a new key.
 
 ```shell
 # Linux, macOS
