@@ -82,7 +82,7 @@ type quickstart struct {
 	left, right              *Glyphs // the keys, as the status line under the input
 }
 
-func newQuickstart(a *App, c connector.Client) *quickstart {
+func newQuickstart(a *App, c *connector.Client) *quickstart {
 	q := &quickstart{s: newSession(a, newSessionList(a, c), ""), input: NewInput(), body: &Node{}, left: &Glyphs{}, right: &Glyphs{}}
 	q.ctx, q.cancel = context.WithCancel(context.Background())
 	q.input.Placeholder, q.input.Before = qsCommand, q.connect

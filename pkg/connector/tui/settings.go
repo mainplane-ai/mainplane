@@ -40,7 +40,7 @@ type settings struct {
 	} `json:"data_sharing"`
 }
 
-func getSettings(c connector.Client) (settings, error) {
+func getSettings(c *connector.Client) (settings, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), callTime)
 	defer cancel()
 	var s settings
@@ -48,7 +48,7 @@ func getSettings(c connector.Client) (settings, error) {
 }
 
 // postSettings is bounded by the harness's own time for an update.
-func postSettings(c connector.Client, v any) error {
+func postSettings(c *connector.Client, v any) error {
 	b, _ := json.Marshal(v)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -59,7 +59,7 @@ func postSettings(c connector.Client, v any) error {
 // latest release, unless the user skipped that release, and data sharing
 // permission, unless it was answered, DO_NOT_TRACK is set, or the harness is
 // a local build. The sharing question comes first. Enter says yes, Esc no.
-func askHarness(a *App, c connector.Client) {
+func askHarness(a *App, c *connector.Client) {
 	a.Go(func() {
 		s, err := getSettings(c)
 		if err != nil {
@@ -136,7 +136,7 @@ func skip(a *App, v string) {
 
 // update makes the harness release v and waits until it answers on v. Then
 // the app ends to become v too, and main opens it again.
-func update(a *App, c connector.Client, v string) {
+func update(a *App, c *connector.Client, v string) {
 	a.Say("Updating Mainplane to " + v)
 	a.Go(func() {
 		// A success restarts the harness, so the call seldom gets its answer:
@@ -158,14 +158,11 @@ func update(a *App, c connector.Client, v string) {
 }
 
 // waitFor polls the harness until it is release v. A harness that restarted
-// may be at a new URL.
-func waitFor(c connector.Client, v string) error {
+// may be at a new URL, which a failed call finds.
+func waitFor(c *connector.Client, v string) error {
 	for end := time.Now().Add(updateWait); time.Now().Before(end); time.Sleep(2 * time.Second) {
 		ctx, cancel := context.WithTimeout(context.Background(), callTime)
 		got, err := c.Version(ctx)
-		if err != nil {
-			_ = c.Find(ctx)
-		}
 		cancel()
 		if err == nil && got == v {
 			return nil
@@ -187,7 +184,7 @@ func (f onEnter) Key(a *App, k term.Key) bool {
 	return true
 }
 
-func setSharing(a *App, c connector.Client, share bool) {
+func setSharing(a *App, c *connector.Client, share bool) {
 	a.Go(func() {
 		err := postSettings(c, map[string]any{"data_sharing": map[string]any{"share": share, "via": via, "text": sharingText}})
 		a.Post(func() {

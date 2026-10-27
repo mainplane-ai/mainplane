@@ -44,7 +44,7 @@ const (
 // sidebar when wide. With no message yet it is the wordmark above the input.
 // With no id it is home: the first message makes the session.
 type session struct {
-	c      connector.Client
+	c      *connector.Client
 	list   *sessionList
 	id     string
 	info   harness.Info
