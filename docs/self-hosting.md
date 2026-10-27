@@ -228,9 +228,9 @@ Nothing listens on that port outside the mesh.
   registered, and the machine joins again as `<name>-2`:
   `mainplane worker remove <name>` before the install avoids it. A worker
   other than `admin` keeps its name while it is offline, until it is
-  removed. A machine that
-  came back as `<name>-2` gets its name back with `mainplane worker remove
-  <name>`, then `mainplane uninstall` and install on it again.
+  removed. A machine that came back as `<name>-2` gets its name back with
+  `mainplane worker remove <name>`, then `mainplane uninstall` and install on
+  it again.
 - Paths: two workers talk direct, UDP to UDP, when their NATs let them. This
   is usual on one LAN and common across the internet. When they cannot, their
   traffic goes through the relay in the harness, through the tunnel: it works,
