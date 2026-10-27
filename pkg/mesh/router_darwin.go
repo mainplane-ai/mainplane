@@ -29,9 +29,23 @@ func add(tun string, a netip.Prefix) error {
 		return err
 	}
 	if h != tun {
-		return fmt.Errorf("%s holds the route to %s: another worker runs on this machine", h, p)
+		return taken(h, p)
 	}
 	return nil
+}
+
+// alone fails while another worker's utun holds the route to the mesh.
+func alone() error {
+	p := Prefix.String()
+	h, err := holder(p)
+	if err != nil || h == "" {
+		return err
+	}
+	return taken(h, p)
+}
+
+func taken(h, p string) error {
+	return fmt.Errorf("%s holds the route to %s: another worker runs on this machine", h, p)
 }
 
 // keep routes a's /48 to tun again when the route is gone, as when a
@@ -43,7 +57,7 @@ func keep(tun string, a netip.Prefix) error {
 		return err
 	}
 	if h != "" {
-		return fmt.Errorf("%s holds the route to %s: another worker runs on this machine", h, p)
+		return taken(h, p)
 	}
 	if err := run("route", "-q", "-n", "add", "-inet6", p, "-iface", tun); err != nil {
 		return err

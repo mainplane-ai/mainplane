@@ -40,6 +40,10 @@ func Network() (netip.Prefix, error) {
 	return netip.Prefix{}, errors.New("no address on the mesh yet")
 }
 
+// alone has nothing to check: a second worker's TUN of the same name fails
+// as busy.
+func alone() error { return nil }
+
 func (r *osRouter) Up() error { return run("ip", "link", "set", "dev", r.tun, "up") }
 
 // add gives tun address a, and the rule and route that send a's /48 to it.
