@@ -177,7 +177,7 @@ func anthAssistant(name string, recs []statefile.Record) ([]any, error) {
 type anthEvent struct {
 	Type         string     `json:"type"`
 	Index        int        `json:"index"`
-	Message      *anthStart `json:"message"`
+	Message      anthStart  `json:"message"`
 	ContentBlock *anthPart  `json:"content_block"`
 	Delta        *anthDelta `json:"delta"`
 	Usage        *anthUsage `json:"usage"`
@@ -279,9 +279,7 @@ func (anthropic) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.
 		case "error":
 			return fmt.Errorf("anthropic: %s", data)
 		case "message_start":
-			if e.Message != nil {
-				e.Message.Usage.apply(&usage)
-			}
+			e.Message.Usage.apply(&usage)
 		case "message_delta":
 			if e.Usage != nil {
 				e.Usage.apply(&usage)
