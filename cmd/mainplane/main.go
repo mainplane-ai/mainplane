@@ -304,10 +304,10 @@ func update(v string) {
 		_ = f.Close()
 		_ = os.Remove(f.Name())
 	}
+	fmt.Printf("mainplane %s -> %s, your mainplane-server's release: downloading\n", version.V, v)
 	if err := release.Install(exe, "mainplane", v); err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("mainplane %s -> %s\n", version.V, v)
 }
 
 // status prints the harness this CLI is logged in to, if any, then what the
