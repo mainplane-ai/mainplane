@@ -57,6 +57,7 @@ type env struct {
 	pipe io.Closer // our end of the output pipe
 	out  *bufio.Reader
 	mu   sync.Mutex // one run at a time
+	reap sync.Once
 }
 
 func start(it interp, op *user.User, session string) (*env, error) {
@@ -90,7 +91,11 @@ func (e *env) kill() {
 	killTree(e.cmd.Process)
 	_ = e.cmd.Process.Kill()
 	_ = e.pipe.Close()
+	go e.wait()
 }
+
+// wait reaps the process. kill and run both call it, and only the first waits.
+func (e *env) wait() { e.reap.Do(func() { _ = e.cmd.Wait() }) }
 
 // run feeds code and the done line, emits output until the mark, and returns
 // the exit code. If the process ends first, alive is false and exit is the
@@ -102,7 +107,7 @@ func (e *env) run(ctx context.Context, code, mark string, emit func([]byte) erro
 		code = e.it.wrap(code)
 	}
 	if _, err := fmt.Fprintf(e.in, "%s\n%s\n", code, fmt.Sprintf(e.it.done, mark)); err != nil {
-		_ = e.cmd.Wait()
+		e.wait()
 		return e.cmd.ProcessState.ExitCode(), false, nil
 	}
 	var buf []byte
@@ -131,7 +136,7 @@ func (e *env) run(ctx context.Context, code, mark string, emit func([]byte) erro
 			}
 		}
 		if rerr != nil {
-			_ = e.cmd.Wait()
+			e.wait()
 			if ctx.Err() != nil {
 				return 0, false, ctx.Err()
 			}
