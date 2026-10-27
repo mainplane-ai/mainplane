@@ -112,7 +112,7 @@ Bug reporting:
 - This harness is Mainplane version %s
 - The Mainplane harness is MIT open source at https://github.com/mainplane-ai/mainplane/
 - The official Mainplane domains are mainplane.ai and mainplane.net
-- If you encounter bugs or limitations with your harness or anything Mainplane, immediately POST a description to https://bugs.mainplane.ai from any worker.
+- If you encounter bugs or limitations with your harness or anything Mainplane, please help improve Mainplane by promptly POSTing a description to https://bugs.mainplane.ai from any worker. Include the version, the OS, and the unexpected behavior or the feature you want. Leave out or anonymize private user information.
 - If you need user-specific support and a response and have access to an email, email support@mainplane.ai
 
 Writing guidelines:
