@@ -243,6 +243,9 @@ func (openai) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Hea
 				emit(r)
 			}
 		case "response.completed", "response.incomplete":
+			if e.Response == nil || e.Response.Usage == nil {
+				return fmt.Errorf("openai: %s without usage: %.200s", e.Type, data)
+			}
 			done = true
 			stop = e.Response.Status
 			if d := e.Response.IncompleteDetails; d != nil {

@@ -260,7 +260,10 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 		}
 		text.WriteString(d.Content)
 		for _, tc := range d.ToolCalls {
-			for len(calls) <= tc.Index {
+			if tc.Index < 0 || tc.Index > len(calls) {
+				return fmt.Errorf("openai-chat: tool call index %d out of order: %.200s", tc.Index, data)
+			}
+			if tc.Index == len(calls) {
 				calls = append(calls, &chatToolCall{})
 			}
 			call := calls[tc.Index]
