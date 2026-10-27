@@ -119,7 +119,8 @@ its integrity, and runs it once per step with the harness's tools; Claude Code
 makes the request with its own login. Use it only on a harness you host for
 yourself. To sign in, run `mainplane signin claude-code`, or pick Claude
 subscription in the app's /providers. Open the URL it gives, sign in on
-claude.ai, and paste back the code the page shows. Claude Code keeps its login
+claude.ai, and paste back the address of the page the browser lands on: a page
+on localhost that does not load. Claude Code keeps its login
 itself, in that directory or the macOS keychain; the harness never reads it. Turn off extra usage on the
 Claude account, so a step that the plan does not cover fails instead of billing.
 
