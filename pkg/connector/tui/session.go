@@ -455,17 +455,26 @@ func (s *session) send(a *App, text string) {
 	}
 }
 
-// postAll starts the one goroutine that posts what is sent, in the order it
-// was sent. A text that fails goes back to the input.
-func (s *session) postAll(a *App) {
+// postAll starts the one goroutine that posts texts, then what is sent, in
+// the order it was sent. What was sent before the screen left the session is
+// still posted. A text that fails goes back to the input.
+func (s *session) postAll(a *App, texts ...string) {
 	id := s.id
 	a.Go(func() {
 		for {
 			var text string
-			select {
-			case <-s.ctx.Done():
-				return
-			case text = <-s.outbox:
+			if len(texts) > 0 {
+				text, texts = texts[0], texts[1:]
+			} else {
+				select {
+				case text = <-s.outbox:
+				case <-s.ctx.Done():
+					select {
+					case text = <-s.outbox:
+					default:
+						return
+					}
+				}
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), callTime)
 			_, err := s.c.Post(ctx, id, via, text, nil)
@@ -481,8 +490,11 @@ func (s *session) postAll(a *App) {
 // unless something new was typed there.
 func (s *session) failed(a *App, text string, err error) {
 	a.SayError(err)
-	if len(s.input.els) == 0 {
+	switch _, kept := s.list.drafts[s.id]; {
+	case s.ctx.Err() == nil && len(s.input.els) == 0:
 		s.input.Paste(a, text)
+	case s.ctx.Err() != nil && !kept:
+		s.list.drafts[s.id] = textElems(text) // the screen moved on: back in its draft
 	}
 }
 
@@ -506,10 +518,7 @@ func (s *session) create(a *App) {
 			s.id = id
 			s.title(a)
 			s.follow(a)
-			s.postAll(a)
-			for _, t := range texts {
-				s.outbox <- t
-			}
+			s.postAll(a, texts...)
 		})
 	})
 }
