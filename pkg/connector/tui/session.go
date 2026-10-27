@@ -490,8 +490,11 @@ func (s *session) postAll(a *App, texts ...string) {
 // unless something new was typed there.
 func (s *session) failed(a *App, text string, err error) {
 	a.SayError(err)
-	if len(s.input.els) == 0 {
+	switch _, kept := s.list.drafts[s.id]; {
+	case s.ctx.Err() == nil && len(s.input.els) == 0:
 		s.input.Paste(a, text)
+	case s.ctx.Err() != nil && !kept:
+		s.list.drafts[s.id] = textElems(text) // the screen moved on: back in its draft
 	}
 }
 
