@@ -52,7 +52,6 @@ func (s *server) job(f Frame, it interp) (Frame, error) {
 	}
 	defer func() {
 		e.kill()
-		_ = e.cmd.Wait() // reap it; an error is a wait run already did
 		jobs.Lock()
 		delete(jobs.m, e)
 		jobs.Unlock()
