@@ -225,6 +225,10 @@ func (h *Harness) SetName(id, via, n string) (int, error) {
 func (h *Harness) Delete(ctx context.Context, id, via string) error {
 	s := h.session(id)
 	h.mu.Lock()
+	if s.deleting {
+		h.mu.Unlock()
+		return fmt.Errorf("session %s is already being deleted", id)
+	}
 	s.deleting = true
 	h.mu.Unlock()
 	defer func() {
@@ -248,20 +252,23 @@ func (h *Harness) Delete(ctx context.Context, id, via string) error {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	h.mu.Unlock()
-	if err := os.Remove(h.Sessions.Path(id)); errors.Is(err, fs.ErrNotExist) {
+	err := os.Remove(h.Sessions.Path(id))
+	if err == nil {
+		h.lockIndex()
+		delete(h.index, id)
+		delete(h.dirty, id)
+		h.gone[id] = true
+		h.imu.Unlock()
+		close(s.changed) // long polls end, and read that it is gone
+		s.changed = make(chan struct{})
+	}
+	s.mu.Unlock() // before h.mu: the order is h.mu then s.mu, never the reverse
+	if errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("no session %s", id)
 	} else if err != nil {
 		return err
 	}
-	h.lockIndex()
-	delete(h.index, id)
-	delete(h.dirty, id)
-	h.gone[id] = true
-	h.imu.Unlock()
-	close(s.changed) // long polls end, and read that it is gone
-	s.changed = make(chan struct{})
 	h.mu.Lock()
 	delete(h.s, id)
 	h.mu.Unlock()
