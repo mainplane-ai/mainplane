@@ -110,19 +110,30 @@ func Load(ctx context.Context) (*Client, error) {
 // Find proves the harness at its URL, or finds it again through the pointer
 // and saves it.
 func (c *Client) Find(ctx context.Context) error {
+	if moved, err := c.find(ctx); !moved {
+		return err
+	}
+	return c.Save()
+}
+
+// find proves the harness at its URL, or finds it again through the pointer,
+// and says whether it moved.
+func (c *Client) find(ctx context.Context) (bool, error) {
 	at := c.At()
 	u, err := pointer.Find(ctx, c.Harness, at)
 	if err != nil || u == at {
-		return unreachable(err)
+		return false, unreachable(err)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.URL = u
-	return c.Save()
+	return true, nil
 }
 
 func (c *Client) Save() error {
+	c.mu.Lock()
 	b, err := json.Marshal(c)
+	c.mu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -170,8 +181,9 @@ func (c *Client) Do(ctx context.Context, method, path, ctype string, body io.Rea
 	// Cloudflare answers 502, then 530, for a quick tunnel whose harness is
 	// down, and a harness down for long comes back at a new URL: find it, so
 	// the next call goes there. The call's own failure is what it returns.
+	// Unsaved: a login saves only once its key works, and Load finds it again.
 	if c.Local == "" && c.Mesh == "" && (err != nil || resp.StatusCode >= 500) {
-		_ = c.Find(ctx)
+		_, _ = c.find(ctx)
 	}
 	if err != nil {
 		return nil, unreachable(err)

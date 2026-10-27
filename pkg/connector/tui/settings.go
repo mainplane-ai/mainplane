@@ -140,10 +140,10 @@ func update(a *App, c *connector.Client, v string) {
 	a.Say("Updating Mainplane to " + v)
 	a.Go(func() {
 		// A success restarts the harness, so the call seldom gets its answer:
-		// it ends with no error, a network error, or a proxy's 502 or 52x.
+		// it ends with no error, a network error, or a proxy's 502, 52x or 530.
 		// The harness's own failures are other codes.
 		err := postSettings(c, map[string]string{"version": v})
-		if se := (*connector.StatusError)(nil); !errors.As(err, &se) || se.Code == http.StatusBadGateway || se.Code >= 520 && se.Code <= 529 {
+		if se := (*connector.StatusError)(nil); !errors.As(err, &se) || se.Code == http.StatusBadGateway || se.Code >= 520 && se.Code <= 530 {
 			err = waitFor(c, v)
 		}
 		a.Post(func() {
