@@ -113,7 +113,13 @@ func saveConfig(path string, c Config) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path+".tmp", b, 0o600); err != nil {
+	f, err := os.OpenFile(path+".tmp", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(b)
+	// synced before the rename, so a power loss never leaves an empty config
+	if err = errors.Join(err, f.Sync(), f.Close()); err != nil {
 		return err
 	}
 	return os.Rename(path+".tmp", path)
