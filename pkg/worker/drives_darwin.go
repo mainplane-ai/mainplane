@@ -170,7 +170,11 @@ func unmount(p string, force bool) error {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "umount", args...).CombinedOutput()
 	if _, ok := mountpoints()[p]; ok {
-		return fmt.Errorf("umount: %w: %s", err, bytes.TrimSpace(out))
+		var hint string
+		if bytes.Contains(out, []byte("Operation not permitted")) {
+			hint = " (macOS will not unmount some drives, such as one whose server is not responding; restarting the Mac clears it)"
+		}
+		return fmt.Errorf("umount: %w: %s%s", err, bytes.TrimSpace(out), hint)
 	}
 	if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
