@@ -393,10 +393,16 @@ func (c *Coordinator) admit(machine key.MachinePublic, secret, addr string, ephe
 	}
 	// The node that had the name gives it up: a reserved one always, any
 	// other once offline past idle (see name). A removed one keeps its keys
-	// refused.
-	c.st.Nodes = slices.DeleteFunc(c.st.Nodes, func(p *node) bool { return p.Name == name && (reserved != "" || !p.Removed) })
+	// refused. The new node takes its address too, so a drive mounted from
+	// a server that was installed again still reaches it.
+	gives := func(p *node) bool { return p.Name == name && (reserved != "" || !p.Removed) }
 	n := &node{ID: c.st.Next, Name: name, Machine: machine, Ephemeral: ephemeral}
-	c.st.Next++
+	if i := slices.IndexFunc(c.st.Nodes, gives); i >= 0 {
+		n.ID = c.st.Nodes[i].ID
+	} else {
+		c.st.Next++
+	}
+	c.st.Nodes = slices.DeleteFunc(c.st.Nodes, gives)
 	c.st.Nodes = append(c.st.Nodes, n)
 	c.expire(n)
 	return n, nil
