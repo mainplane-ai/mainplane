@@ -354,13 +354,62 @@ func (s *session) sessions(a *App) {
 	})
 }
 
-// workers is the menu of workers, checked for those of this session. Each
-// toggle sets the session's workers at once, from its next step on.
+// workers is the menu of workers, checked for those of this session, or on
+// a blank screen for those its session is made with. Each toggle sets the
+// session's workers at once, from its next step on; on a blank screen, the
+// workers of the config it makes its session with.
 func (s *session) workers(a *App) {
-	if s.id == "" {
-		a.Say("No session yet: workers are set once it is made")
+	switch {
+	case s.creating:
+		a.Say("The session is being made")
+		return
+	case s.id != "":
+		s.listWorkers(a, func(listed []connector.Worker) { s.workerMenu(a, listed, s.info.Config.Workers, s.setWorkers) })
+		return
+	case s.cfg != nil:
+		s.homeWorkers(a, *s.cfg)
 		return
 	}
+	s.withProviders(a, func(cat *catalog.Catalog, ps []harness.ProviderInfo) {
+		d, err := defaultConf(cat, ps, s.list.infos)
+		if err != nil {
+			a.SayError(err)
+			return
+		}
+		s.homeWorkers(a, d)
+	})
+}
+
+// homeWorkers is the menu of workers of a blank screen, whose session is made
+// with the config chosen there, else with cf. A toggle while the session is
+// being made is refused; once it is made, a toggle sets its workers.
+func (s *session) homeWorkers(a *App, cf statefile.Conf) {
+	s.listWorkers(a, func(listed []connector.Worker) {
+		if s.cfg != nil {
+			cf = *s.cfg
+		}
+		s.workerMenu(a, listed, cf.Workers, func(a *App, ws []statefile.Worker, done func(error)) {
+			switch {
+			case s.id != "":
+				s.setWorkers(a, ws, done)
+				return
+			case s.creating:
+				done(errors.New("the session is being made"))
+				return
+			}
+			next := cf
+			if s.cfg != nil {
+				next = *s.cfg
+			}
+			next.Workers = ws
+			s.cfg = &next
+			done(nil)
+		})
+	})
+}
+
+// listWorkers calls then with the workers the harness lists.
+func (s *session) listWorkers(a *App, then func([]connector.Worker)) {
 	a.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), callTime)
 		defer cancel()
@@ -373,7 +422,7 @@ func (s *session) workers(a *App) {
 				a.SayError(err)
 				return
 			}
-			s.workerMenu(a, listed)
+			then(listed)
 		})
 	})
 }
@@ -399,14 +448,17 @@ func workerStates(listed []connector.Worker, own []statefile.Worker) ([]string, 
 	return names, state
 }
 
-func (s *session) workerMenu(a *App, listed []connector.Worker) {
+// workerMenu is the menu of the workers listed and own, checked for own.
+// Each toggle gives the workers checked to set, which calls done with how it
+// went; on an error the checks go back.
+func (s *session) workerMenu(a *App, listed []connector.Worker, own []statefile.Worker, set func(*App, []statefile.Worker, func(error))) {
 	m := &Menu{Checks: true}
 	have := map[string]statefile.Worker{}
-	for _, w := range s.info.Config.Workers {
+	for _, w := range own {
 		have[w.Name] = w
 	}
-	names, state := workerStates(listed, s.info.Config.Workers)
-	set := func(a *App, _ *MenuItem) {
+	names, state := workerStates(listed, own)
+	pick := func(a *App, _ *MenuItem) {
 		var ws []statefile.Worker
 		for _, x := range m.Items {
 			if x.On {
@@ -417,36 +469,42 @@ func (s *session) workerMenu(a *App, listed []connector.Worker) {
 				ws = append(ws, w)
 			}
 		}
-		id, n := s.id, s.workerSets.Add(1)
-		a.Go(func() {
-			s.workerSet.Lock()
-			defer s.workerSet.Unlock()
-			if s.workerSets.Load() != n {
-				return // a newer toggle sends its own list
+		set(a, ws, func(err error) {
+			if err != nil {
+				for i := range m.Items {
+					_, m.Items[i].On = have[m.Items[i].Label]
+				}
+				a.SayError(err)
+				return
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), callTime)
-			defer cancel()
-			err := s.c.SetWorkers(ctx, id, via, ws)
-			a.Post(func() {
-				if err != nil {
-					for i := range m.Items {
-						_, m.Items[i].On = have[m.Items[i].Label]
-					}
-					a.SayError(err)
-					return
-				}
-				have = map[string]statefile.Worker{}
-				for _, w := range ws {
-					have[w.Name] = w
-				}
-			})
+			have = map[string]statefile.Worker{}
+			for _, w := range ws {
+				have[w.Name] = w
+			}
 		})
 	}
 	for _, n := range names {
 		_, on := have[n]
-		m.Items = append(m.Items, MenuItem{Label: n, Hint: state[n], On: on, Pick: set})
+		m.Items = append(m.Items, MenuItem{Label: n, Hint: state[n], On: on, Pick: pick})
 	}
 	a.OpenMenu("Workers", m)
+}
+
+// setWorkers sets the session's workers, then calls done on the screen's
+// goroutine. Only the newest of toggles in flight is sent.
+func (s *session) setWorkers(a *App, ws []statefile.Worker, done func(error)) {
+	id, n := s.id, s.workerSets.Add(1)
+	a.Go(func() {
+		s.workerSet.Lock()
+		defer s.workerSet.Unlock()
+		if s.workerSets.Load() != n {
+			return // a newer toggle sends its own list
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), callTime)
+		defer cancel()
+		err := s.c.SetWorkers(ctx, id, via, ws)
+		a.Post(func() { done(err) })
+	})
 }
 
 // fork copies the whole session into a new one and opens it. The harness
