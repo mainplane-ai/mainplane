@@ -391,11 +391,10 @@ func (c *Coordinator) admit(machine key.MachinePublic, secret, addr string, ephe
 	if name == "" {
 		name = c.name(hi)
 	}
-	// The node that had the name gives it up: a reserved one always, any
-	// other once offline past idle (see name). A removed one keeps its keys
-	// refused. The new node takes its address too, so a drive mounted from
-	// a server that was installed again still reaches it.
-	gives := func(p *node) bool { return p.Name == name && (reserved != "" || !p.Removed) }
+	// The node that had a reserved name gives it up, and the new node takes
+	// its address too, so a drive mounted from a server that was installed
+	// again still reaches it. Any other name is free (see name).
+	gives := func(p *node) bool { return reserved != "" && p.Name == name }
 	n := &node{ID: c.st.Next, Name: name, Machine: machine, Ephemeral: ephemeral}
 	if i := slices.IndexFunc(c.st.Nodes, gives); i >= 0 {
 		n.ID = c.st.Nodes[i].ID
@@ -636,11 +635,11 @@ func write(w http.ResponseWriter, compress string, r *tailcfg.MapResponse) error
 }
 
 // name is the hostname's first label in lower case letters, digits and
-// single dashes, made unique with -2, -3 among nodes not removed and not
-// offline past idle: the same machine joining again with new keys, as after
-// a move to another harness and back, takes its name back. No name has "--", the separator of
-// long names, none is "xn", because a label starting "xn--" is punycode, and
-// none is the harness's or admin's.
+// single dashes, made unique with -2, -3 among nodes not removed, online or
+// not: links, drives and sessions name a worker, so a machine that joins with
+// new keys takes a name only once the operator removed the node that had it.
+// No name has "--", the separator of long names, none is "xn", because a
+// label starting "xn--" is punycode, and none is the harness's or admin's.
 func (c *Coordinator) name(hi *tailcfg.Hostinfo) string {
 	var h string
 	if hi != nil {
@@ -660,10 +659,11 @@ func (c *Coordinator) name(hi *tailcfg.Hostinfo) string {
 		base = "worker"
 	}
 	name := base
-	for i := 2; name == "xn" || name == worker.Harness || name == worker.Admin || slices.ContainsFunc(c.st.Nodes, func(p *node) bool {
-		return p.Name == name && !p.Removed && (p.streams > 0 || time.Since(p.quiet) < idle)
-	}); i++ {
+	for i := 2; name == "xn" || name == worker.Harness || name == worker.Admin || c.byName(name) != nil; i++ {
 		name = fmt.Sprintf("%s-%d", base, i)
+	}
+	if name != base && base != worker.Harness && base != worker.Admin && c.byName(base) != nil {
+		log.Printf("coordinator: worker %s exists, so this machine joins as %s. If %s is this machine with lost keys: mainplane worker remove %s, then uninstall and install on it", base, name, base, base)
 	}
 	return name
 }
