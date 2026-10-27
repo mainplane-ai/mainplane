@@ -261,8 +261,10 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 			return err
 		}
 		text.WriteString(d.Content)
-		calls, err = addCalls(calls, d.ToolCalls)
-		return err
+		if calls, err = addCalls(calls, d.ToolCalls); err != nil {
+			return fmt.Errorf("%w: %.200s", err, data)
+		}
+		return nil
 	})
 	if err == nil && !done {
 		err = fmt.Errorf("openai-chat: stream ended before [DONE]")
