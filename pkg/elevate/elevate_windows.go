@@ -31,6 +31,12 @@ var (
 	freeConsole    = windows.NewLazySystemDLL("kernel32.dll").NewProc("FreeConsole")
 )
 
+// stale keeps the os.Stdout and os.Stderr that init replaces reachable.
+// FreeConsole closed their handles, and new handles reuse the numbers: the
+// finalizer of either would close one of those, the runtime's or the
+// console's, and a console child would then fail with 0xc0000142.
+var stale []*os.File
+
 // shellExecuteInfo is SHELLEXECUTEINFOW, whose layout Go's alignment matches.
 type shellExecuteInfo struct {
 	size       uint32
@@ -67,6 +73,7 @@ func init() {
 	}
 	_ = windows.SetStdHandle(windows.STD_OUTPUT_HANDLE, windows.Handle(out.Fd()))
 	_ = windows.SetStdHandle(windows.STD_ERROR_HANDLE, windows.Handle(out.Fd()))
+	stale = []*os.File{os.Stdout, os.Stderr}
 	os.Stdout, os.Stderr = out, out
 	log.SetOutput(out)
 }
