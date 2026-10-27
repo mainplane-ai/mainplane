@@ -28,6 +28,7 @@ $sums = Get-Content (Join-Path $d SHA256SUMS)
 function Fetch($name) {
   $f = "$name-windows-$arch.exe"
   $t = Join-Path $d "$name.exe"
+  Write-Host "downloading $name @VERSION@"
   Download "$dl/$f" $t
   $want = ($sums | Where-Object { $_ -match " $([regex]::Escape($f))$" }) -split ' ' | Select-Object -First 1
   if ($want -ne (Get-FileHash $t).Hash.ToLower()) { throw "$f does not match SHA256SUMS" }

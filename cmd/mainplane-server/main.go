@@ -306,6 +306,7 @@ func join(args []string) {
 	}
 	fatal(err)
 	fmt.Print(installLines(auth.Join, n.String()))
+	fmt.Println("the CLI and TUI only, no worker: mainplane-server key new <name> prints its log-in lines")
 }
 
 func table(args []string) {

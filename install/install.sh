@@ -33,6 +33,7 @@ fetch "$dl/SHA256SUMS"
 # get fetches this machine's build of release binary $1 as ./$1, checked against SHA256SUMS. Modes are
 # set here, since root's umask may be narrower than every user running the CLI.
 get() {
+  echo "downloading $1 $v"
   fetch "$dl/$1-$os-$arch"
   grep " $1-$os-$arch\$" SHA256SUMS > sum || { echo "release $v has no $1-$os-$arch" >&2; exit 1; }
   if command -v sha256sum > /dev/null; then sha256sum --quiet -c sum; else shasum -a 256 --quiet -c sum; fi
