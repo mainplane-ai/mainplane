@@ -177,20 +177,14 @@ func anthAssistant(name string, recs []statefile.Record) ([]any, error) {
 type anthEvent struct {
 	Type         string     `json:"type"`
 	Index        int        `json:"index"`
-	Message      *anthStart `json:"message"`
+	Message      anthStart  `json:"message"`
 	ContentBlock *anthPart  `json:"content_block"`
 	Delta        *anthDelta `json:"delta"`
 	Usage        *anthUsage `json:"usage"`
-	Error        *anthError `json:"error"`
 }
 
 type anthStart struct {
 	Usage anthUsage `json:"usage"`
-}
-
-type anthError struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
 }
 
 // anthPart is a content block under assembly. Deltas append to the fields.
@@ -283,7 +277,7 @@ func (anthropic) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.
 		}
 		switch e.Type {
 		case "error":
-			return fmt.Errorf("anthropic: %s: %s", e.Error.Type, e.Error.Message)
+			return fmt.Errorf("anthropic: %s", data)
 		case "message_start":
 			e.Message.Usage.apply(&usage)
 		case "message_delta":
@@ -294,10 +288,19 @@ func (anthropic) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.
 				stop = e.Delta.StopReason
 			}
 		case "content_block_start":
+			if e.ContentBlock == nil {
+				return fmt.Errorf("anthropic: block start without a block: %.200s", data)
+			}
 			parts[e.Index] = e.ContentBlock
 		case "content_block_delta":
+			if parts[e.Index] == nil || e.Delta == nil {
+				return fmt.Errorf("anthropic: delta without a started block: %.200s", data)
+			}
 			parts[e.Index].add(*e.Delta)
 		case "content_block_stop":
+			if parts[e.Index] == nil {
+				return fmt.Errorf("anthropic: stop without a started block: %.200s", data)
+			}
 			r, ok, err := parts[e.Index].record()
 			if err != nil {
 				return err

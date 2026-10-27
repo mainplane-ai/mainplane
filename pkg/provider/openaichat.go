@@ -192,11 +192,7 @@ type chatChunk struct {
 			Reasoning string                       `json:"reasoning_content"`
 			Alias     string                       `json:"reasoning"`         // OpenRouter, OpenCode Go
 			Details   []map[string]json.RawMessage `json:"reasoning_details"` // OpenRouter
-			ToolCalls []struct {
-				Index    int          `json:"index"`
-				ID       string       `json:"id"`
-				Function chatCallBody `json:"function"`
-			} `json:"tool_calls"`
+			ToolCalls []chatCallDelta              `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -212,6 +208,12 @@ type chatChunk struct {
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+type chatCallDelta struct {
+	Index    int          `json:"index"`
+	ID       string       `json:"id"`
+	Function chatCallBody `json:"function"`
 }
 
 // Stream accumulates reasoning, text and tool call deltas by index and emits
@@ -259,14 +261,8 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 			return err
 		}
 		text.WriteString(d.Content)
-		for _, tc := range d.ToolCalls {
-			for len(calls) <= tc.Index {
-				calls = append(calls, &chatToolCall{})
-			}
-			call := calls[tc.Index]
-			call.ID += tc.ID
-			call.Function.Name += tc.Function.Name
-			call.Function.Arguments += tc.Function.Arguments
+		if calls, err = addCalls(calls, d.ToolCalls); err != nil {
+			return fmt.Errorf("%w: %.200s", err, data)
 		}
 		return nil
 	})
@@ -361,4 +357,22 @@ func addDetails(all []*detail, ds []map[string]json.RawMessage) ([]*detail, erro
 		}
 	}
 	return all, nil
+}
+
+// addCalls appends tool call deltas to the calls by index. Servers stream the
+// calls in order, so a new index is the next call.
+func addCalls(calls []*chatToolCall, ds []chatCallDelta) ([]*chatToolCall, error) {
+	for _, d := range ds {
+		if d.Index < 0 || d.Index > len(calls) {
+			return nil, fmt.Errorf("openai-chat: tool call index %d out of order", d.Index)
+		}
+		if d.Index == len(calls) {
+			calls = append(calls, &chatToolCall{})
+		}
+		c := calls[d.Index]
+		c.ID += d.ID
+		c.Function.Name += d.Function.Name
+		c.Function.Arguments += d.Function.Arguments
+	}
+	return calls, nil
 }
