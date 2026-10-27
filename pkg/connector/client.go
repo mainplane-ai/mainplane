@@ -124,6 +124,9 @@ func (c *Client) find(ctx context.Context) (bool, error) {
 	at := c.At()
 	u, err := pointer.Find(ctx, c.Harness, at)
 	if err != nil && u != "" {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return false, err // slow, not gone
+		}
 		return false, fmt.Errorf("the harness of this login is not at %s, where it last was: it is down, or gone; to log in to another: mainplane login <api key> (%w)", u, err)
 	}
 	if err != nil || u == at {
