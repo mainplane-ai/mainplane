@@ -112,9 +112,9 @@ func shipAll(ctx context.Context, dir, path string, c Config) error {
 	s.Sessions = map[string]int64{}
 	for _, p := range paths {
 		id := strings.TrimSuffix(filepath.Base(p), ".state")
-		s.Sessions[id], err = sh.file(ctx, p, id, was[id])
-		if err != nil {
-			break
+		s.Sessions[id] = was[id]
+		if err == nil {
+			s.Sessions[id], err = sh.file(ctx, p, id, was[id])
 		}
 	}
 	if !fresh && maps.Equal(s.Sessions, was) {
