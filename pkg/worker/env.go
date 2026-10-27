@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -110,7 +111,7 @@ func (e *env) run(ctx context.Context, code, mark string, emit func([]byte) erro
 		e.wait()
 		return e.cmd.ProcessState.ExitCode(), false, nil
 	}
-	var buf []byte
+	var buf, line []byte
 	flush := func() error {
 		if len(buf) == 0 {
 			return nil
@@ -121,15 +122,26 @@ func (e *env) run(ctx context.Context, code, mark string, emit func([]byte) erro
 	}
 	sentinel := []byte(mark + " ")
 	for {
-		line, rerr := e.out.ReadBytes('\n')
-		// the sentinel may share a line with output that had no newline
-		if i := bytes.Index(line, sentinel); i >= 0 {
-			if n, err := strconv.Atoi(strings.TrimSpace(string(line[i+len(sentinel):]))); err == nil {
-				buf = append(buf, line[:i]...)
-				return n, true, flush()
+		piece, rerr := e.out.ReadSlice('\n')
+		line = append(line, piece...)
+		if errors.Is(rerr, bufio.ErrBufferFull) {
+			// A line longer than the reader's buffer goes on as it comes, all
+			// but its end, where the sentinel and an exit code may be.
+			n := max(len(line)-len(sentinel)-20, 0)
+			buf = append(buf, line[:n]...)
+			line = append(line[:0], line[n:]...)
+			rerr = nil
+		} else {
+			// the sentinel may share a line with output that had no newline
+			if i := bytes.Index(line, sentinel); i >= 0 {
+				if n, err := strconv.Atoi(strings.TrimSpace(string(line[i+len(sentinel):]))); err == nil {
+					buf = append(buf, line[:i]...)
+					return n, true, flush()
+				}
 			}
+			buf = append(buf, line...)
+			line = line[:0]
 		}
-		buf = append(buf, line...)
 		if len(buf) >= chunk || rerr != nil {
 			if err := flush(); err != nil {
 				return 0, true, err
