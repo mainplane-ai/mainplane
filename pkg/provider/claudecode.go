@@ -267,8 +267,7 @@ func transcript(dir, session string) string {
 }
 
 // keepTurn notes where this step's turn ends, for the next step to resume,
-// and drops the transcript it resumed: claude forked it into this
-// one.
+// and drops the transcript it resumed: claude forked it into this one.
 func keepTurn(dir string, req ccReq, recs []statefile.Record, end ccTurn, resumed ccTurn) error {
 	f, err := ccAssistant(recs)
 	if err != nil {
