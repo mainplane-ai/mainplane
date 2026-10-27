@@ -110,7 +110,7 @@ func (e *env) run(ctx context.Context, code, mark string, emit func([]byte) erro
 		e.wait()
 		return e.cmd.ProcessState.ExitCode(), false, nil
 	}
-	var buf []byte
+	var buf, line []byte
 	flush := func() error {
 		if len(buf) == 0 {
 			return nil
@@ -121,7 +121,22 @@ func (e *env) run(ctx context.Context, code, mark string, emit func([]byte) erro
 	}
 	sentinel := []byte(mark + " ")
 	for {
-		line, rerr := e.out.ReadBytes('\n')
+		piece, rerr := e.out.ReadSlice('\n')
+		line = append(line, piece...)
+		if rerr == bufio.ErrBufferFull {
+			// A line longer than the reader's buffer goes on as it comes, all
+			// but its end, where the sentinel and an exit code may be.
+			if n := len(line) - len(sentinel) - 20; n > 0 {
+				buf = append(buf, line[:n]...)
+				line = append(line[:0], line[n:]...)
+			}
+			if len(buf) >= chunk {
+				if err := flush(); err != nil {
+					return 0, true, err
+				}
+			}
+			continue
+		}
 		// the sentinel may share a line with output that had no newline
 		if i := bytes.Index(line, sentinel); i >= 0 {
 			if n, err := strconv.Atoi(strings.TrimSpace(string(line[i+len(sentinel):]))); err == nil {
@@ -130,6 +145,7 @@ func (e *env) run(ctx context.Context, code, mark string, emit func([]byte) erro
 			}
 		}
 		buf = append(buf, line...)
+		line = line[:0]
 		if len(buf) >= chunk || rerr != nil {
 			if err := flush(); err != nil {
 				return 0, true, err

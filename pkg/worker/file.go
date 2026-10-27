@@ -16,9 +16,28 @@ import (
 // binary as the operator, `mainplane file read|write <path>`, with the file on
 // stdout or stdin. A worker that is its operator does the work itself.
 
+// maxRead bounds a read. It is far over any file an agent edits or views as
+// media, and far under what the worker and the harness can hold: a read of a
+// huge log, a FIFO or /dev/zero fails instead of filling memory. Only the
+// first maxRead+1 bytes are read, to tell a file over it.
+const maxRead = 64 << 20
+
 func (s *server) read(path string) ([]byte, error) {
+	b, err := s.readHead(path)
+	if err == nil && len(b) > maxRead {
+		return nil, fmt.Errorf("%s is over the %d byte read limit: read parts of it with run", path, maxRead)
+	}
+	return b, err
+}
+
+func (s *server) readHead(path string) ([]byte, error) {
 	if s.Operator == nil {
-		return os.ReadFile(path)
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = f.Close() }()
+		return io.ReadAll(io.LimitReader(f, maxRead+1))
 	}
 	cmd, err := s.file("read", path)
 	if err != nil {
@@ -85,7 +104,8 @@ func fail(err error, stderr *bytes.Buffer) error {
 }
 
 // File is the helper's side, run as the operator: read copies path to stdout,
-// write copies stdin to path and makes its directory.
+// up to the bytes that tell it over maxRead, write copies stdin to path and
+// makes its directory.
 func File(op, path string) error {
 	switch op {
 	case "read":
@@ -94,7 +114,7 @@ func File(op, path string) error {
 			return err
 		}
 		defer func() { _ = f.Close() }()
-		_, err = io.Copy(os.Stdout, f)
+		_, err = io.Copy(os.Stdout, io.LimitReader(f, maxRead+1))
 		return err
 	case "write":
 		f, err := createFile(path)

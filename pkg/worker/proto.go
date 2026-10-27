@@ -55,6 +55,11 @@ const (
 	Status  = "status"  // no id: the worker's drives changed
 )
 
+// maxFrame bounds a frame's body, so a bad header cannot make the reader
+// allocate without end. The largest is a write after an edit: a file of up to
+// maxRead and what the edit added.
+const maxFrame = 2 * maxRead
+
 type Header struct {
 	ID   string `json:"id,omitempty"`
 	Kind string `json:"kind"`
@@ -109,7 +114,7 @@ func Decode(br *bufio.Reader) (Frame, error) {
 	if err := json.Unmarshal(line, &f.Header); err != nil {
 		return Frame{}, fmt.Errorf("frame header: %w", err)
 	}
-	if f.Len < 0 {
+	if f.Len < 0 || f.Len > maxFrame {
 		return Frame{}, fmt.Errorf("frame header: len %d", f.Len)
 	}
 	f.Body = make([]byte, f.Len)
