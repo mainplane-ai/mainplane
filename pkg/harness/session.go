@@ -373,16 +373,12 @@ func (h *Harness) Stop(ctx context.Context, id, via string) error {
 	if err != nil {
 		return err
 	}
-	conf, err := config(chain)
-	if err != nil {
-		return err
-	}
 	if !running {
 		if err := h.note(s, id, system("stop", fmt.Sprintf(idleStop, via))); err != nil {
 			return err
 		}
 	}
-	h.killAll(ctx, id, conf)
+	h.killAll(ctx, id, chain)
 	return nil
 }
 
@@ -402,12 +398,25 @@ func (h *Harness) note(s *session, id string, r statefile.Record) error {
 	return err
 }
 
-// killAll ends the session's environments on every connected worker its
-// config lists.
-func (h *Harness) killAll(ctx context.Context, id string, conf statefile.Conf) {
-	for _, w := range conf.Workers {
-		if r, ok := h.Workers.Get(w.Name); ok {
-			kill(ctx, r, id)
+// killAll ends the session's environments on every connected worker any of
+// its configs lists, so a worker taken out of the session loses what the
+// session started there too.
+func (h *Harness) killAll(ctx context.Context, id string, chain []statefile.Record) {
+	seen := map[string]bool{}
+	for _, r := range chain {
+		if r.Kind != statefile.Config {
+			continue
+		}
+		var conf statefile.Conf
+		if err := json.Unmarshal(r.Body, &conf); err != nil {
+			log.Printf("session %s: config record %d: %v", id, r.N, err)
+			continue
+		}
+		for _, w := range conf.Workers {
+			if rem, ok := h.Workers.Get(w.Name); ok && !seen[w.Name] {
+				seen[w.Name] = true
+				kill(ctx, rem, id)
+			}
 		}
 	}
 }
