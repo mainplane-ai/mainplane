@@ -35,6 +35,10 @@ func init() {
 	tun.WintunStaticRequestedGUID = &guid
 }
 
+// alone has nothing to check: a second worker's adapter of the same GUID
+// fails as one that exists.
+func alone() error { return nil }
+
 // Up has nothing to do: wintun's adapter is up once made.
 func (r *osRouter) Up() error { return nil }
 

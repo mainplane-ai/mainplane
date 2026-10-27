@@ -106,6 +106,11 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 			log.Printf("mesh: "+format, a...)
 		}
 	}
+	// Every project has the same prefix: a second worker on this machine
+	// would reach the first one's harness as the first one.
+	if err := alone(); err != nil {
+		return nil, err
+	}
 	dev, tun, err := tstun.New(logf, tunName)
 	if err != nil {
 		return nil, err
