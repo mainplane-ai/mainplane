@@ -58,8 +58,11 @@ type Table map[string][]Entry
 type Store struct{ Path string }
 
 // writes holds each read and rewrite of a table whole, so two at once in
-// this process, such as two POST /keys, never drop an entry.
-var writes sync.Mutex
+// this process, such as two POST /keys, never drop an entry, and a Check
+// never reads a table half written. The table is rewritten in place, not
+// renamed over, since root writes it at install and the file must stay the
+// harness user's.
+var writes sync.RWMutex
 
 func (s Store) Load() (Table, error) {
 	t := Table{}
@@ -129,7 +132,9 @@ func (s Store) Revoke(kind, name string) error {
 
 // Check is whether secret is a live entry of kind.
 func (s Store) Check(kind, secret string) bool {
+	writes.RLock()
 	t, err := s.Load()
+	writes.RUnlock()
 	if err != nil {
 		log.Printf("auth: %v", err)
 		return false

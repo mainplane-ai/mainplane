@@ -104,6 +104,27 @@ func Load(path string) (Config, error) {
 	return c, err
 }
 
+// saveConfig writes c over the config at path through a file beside it, so a
+// read or a crash meets the old config or the new one, never half of one.
+// Only the running harness calls it, under keyMu: the new file is its user's,
+// as the old one was.
+func saveConfig(path string, c Config) error {
+	b, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path+".tmp", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(b)
+	// synced before the rename, so a power loss never leaves an empty config
+	if err = errors.Join(err, f.Sync(), f.Close()); err != nil {
+		return err
+	}
+	return os.Rename(path+".tmp", path)
+}
+
 // named gives a provider with no shape its name as its shape, as each had in
 // v0.5.3, so a config from then still loads.
 func (c Config) named() {
@@ -308,8 +329,16 @@ func Harness(ctx context.Context, path string) error {
 }
 
 // keyMu keeps two config writes at once, of providers or drives, from
-// writing over each other.
-var keyMu sync.Mutex
+// writing over each other, and keeps reads apart from them: Windows fails a
+// rename over a file that is open.
+var keyMu sync.RWMutex
+
+// loadConfig is Load for a reader in the running harness.
+func loadConfig(path string) (Config, error) {
+	keyMu.RLock()
+	defer keyMu.RUnlock()
+	return Load(path)
+}
 
 // setProvider makes the body, a Provider, the provider name in the config at
 // path: the fields it sets replace the ones there, so a key alone renews the
@@ -356,11 +385,7 @@ func saveProvider(path, name string, in Provider, serve func(map[string]provider
 	if err != nil {
 		return err
 	}
-	out, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(path, out, 0o600); err != nil {
+	if err := saveConfig(path, c); err != nil {
 		return err
 	}
 	serve(ps)
@@ -420,7 +445,7 @@ func watch(ctx context.Context, path string, apply func(Config) error) {
 			continue
 		}
 		mod = fi.ModTime()
-		c, err := Load(path)
+		c, err := loadConfig(path)
 		if err == nil {
 			err = apply(c)
 		}

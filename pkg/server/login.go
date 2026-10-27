@@ -62,7 +62,7 @@ func (ls *logins) start(w http.ResponseWriter, r *http.Request) {
 		fail(w, fmt.Errorf("provider %q: a name is one path element", name))
 		return
 	}
-	c, err := Load(ls.path)
+	c, err := loadConfig(ls.path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

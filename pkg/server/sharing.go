@@ -79,7 +79,7 @@ func ship(ctx context.Context, dir, path string) {
 
 // sharing is the config at path, and whether it allows data sharing.
 func sharing(path string) (Config, bool) {
-	c, err := Load(path)
+	c, err := loadConfig(path)
 	return c, err == nil && c.DataSharing != nil && c.DataSharing.Share && !doNotTrack()
 }
 
