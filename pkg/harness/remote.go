@@ -31,6 +31,16 @@ const maxTimeout = 24 * time.Hour
 // three downloads of up to five minutes each.
 const updateTimeout = 20 * time.Minute
 
+// writeStall bounds a frame write that makes no progress. A worker reads every
+// frame at once, so a stall is a peer that stopped: asleep, frozen or cut off.
+// Unbounded, its write holds wmu, and with it the worker's calls and every
+// Pool.Resend, until TCP gives up.
+const writeStall = 30 * time.Second
+
+// writeChunk is the most written under one deadline, so a large frame on a
+// slow link is bounded by its progress and not its size.
+const writeChunk = 64 << 10
+
 // password finds SMB passwords in a drives frame, which the log leaves out.
 var password = regexp.MustCompile(`"password":"[^"]*"`)
 
@@ -112,12 +122,41 @@ func (r *Remote) desire(want worker.Desired) error {
 	if bytes.Equal(b, r.sent) {
 		return nil
 	}
-	err = worker.Encode(r.conn, worker.Frame{Header: worker.Header{Kind: worker.Drives}, Body: b})
+	err = r.send(worker.Frame{Header: worker.Header{Kind: worker.Drives}, Body: b})
 	if err == nil {
 		r.sent = b
 		log.Printf("worker %s: drives %s", r.Name, password.ReplaceAll(b, []byte(`"password":"-"`)))
 	}
 	return err
+}
+
+// send writes f under wmu, which the caller holds. A failed write leaves part
+// of a frame on the connection, so it ends the connection, and recv fails
+// every call on it.
+func (r *Remote) send(f worker.Frame) error {
+	err := worker.Encode(stallWriter{r.conn}, f)
+	if err != nil {
+		_ = r.conn.Close()
+	}
+	return err
+}
+
+// stallWriter writes in chunks, each under a fresh writeStall deadline.
+type stallWriter struct{ net.Conn }
+
+func (w stallWriter) Write(p []byte) (int, error) {
+	n := 0
+	for n < len(p) {
+		if err := w.SetWriteDeadline(time.Now().Add(writeStall)); err != nil {
+			return n, err
+		}
+		m, err := w.Conn.Write(p[n:min(len(p), n+writeChunk)])
+		n += m
+		if err != nil {
+			return n, err
+		}
+	}
+	return n, nil
 }
 
 // update tells a worker to become this release and waits for its answer. The
@@ -191,7 +230,7 @@ func (r *Remote) call(ctx context.Context, h worker.Header, body []byte, on func
 	}()
 	h.ID = id
 	r.wmu.Lock()
-	err := worker.Encode(r.conn, worker.Frame{Header: h, Body: body})
+	err := r.send(worker.Frame{Header: h, Body: body})
 	r.wmu.Unlock()
 	if err != nil {
 		return err
