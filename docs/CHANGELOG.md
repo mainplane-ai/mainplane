@@ -2,6 +2,15 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.5.8
+
+- Quickstart: the update and data sharing questions cover the screen, one at a time, instead of dimming the step behind them. A new session with nothing chosen takes its provider's middle model, such as Claude Sonnet 5.5 or GPT-6.1 Sol, marked in the catalog's new `self-hosted-default` group; before, it took Claude Opus 5.5 or the provider's first model. The first message typed is now "Quickly explain to me how Mainplane works, what computers you have access to, and what you can do with ASCII diagrams"
+- Terminal app: /workers on a new session's screen sets the workers it is made with. A sent home draft no longer comes back on every new session. A message sent from a new session is posted even if the screen leaves before the session is made
+- Workers and drives: an offline worker keeps its name until it is removed. A node that takes a name over takes its address too, so mounts of a reinstalled drive server reach it. A macOS worker refuses to start while another worker's utun holds the mesh route, and says how to clear a drive macOS will not unmount. Workers bound reads, frame lengths and long output lines, and reap killed interpreters
+- Harness: stop kills on every worker the session ever listed. Frame writes to a worker that stopped reading are bounded. A config or auth table is never read half written. Deleting one session twice at once no longer deadlocks. Data sharing keeps its offsets after a failed post
+- Providers: claude-code claims the turn it resumes, so two forks of one context do not race. Malformed stream events return errors instead of panicking
+- Onboarding: a stale login says so, downloads say they start, and the connector finds the harness again when a call fails at its tunnel URL. Releases ship THIRD_PARTY_NOTICES
+
 ## v0.5.7
 
 - The terminal app asks to update when the harness is behind the latest release: "Mainplane vX is available. Update now?" Enter updates the harness, waits for it to come back, then updates the app and opens it again. Esc skips that release until a newer one. /settings still updates anytime, and offers only a newer release, never an older one
