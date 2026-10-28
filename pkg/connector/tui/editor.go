@@ -298,7 +298,7 @@ func (s *Input) edit(a *App, k term.Key) bool {
 			s.els = append(s.els[:s.cur-1], s.els[s.cur:]...)
 			s.cur--
 		}
-	case "super+backspace":
+	case "super+backspace", "ctrl+u": // Cmd+Delete: Ghostty, iTerm2 and kitty send it as Ctrl+U
 		if !s.deleteSelection() {
 			h := s.index(rows, r, 0)
 			s.els = append(s.els[:h], s.els[s.cur:]...)
