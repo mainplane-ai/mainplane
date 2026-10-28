@@ -204,7 +204,13 @@ func (a *App) draw() {
 	root.Layout(Rect{0, 0, a.W, a.H})
 	root.Draw(a, c)
 	for _, l := range a.layers {
-		if l.Modal {
+		switch {
+		case l.Cover:
+			for i := range b.Cells {
+				b.Cells[i] = term.Cell{G: " ", W: 1, Style: term.Style{BG: a.Theme.BG}}
+			}
+			b.Cursor = false
+		case l.Modal:
 			for i := range b.Cells {
 				b.Cells[i].FG = b.Cells[i].FG.Blend(term.RGB(0, 0, 0), dim)
 				b.Cells[i].BG = b.Cells[i].BG.Blend(term.RGB(0, 0, 0), dim)

@@ -250,10 +250,11 @@ func (n *Node) Hit(x, y int) *Node {
 
 // Layer is a tree drawn over the ones below it: the screen, a dialog. Place
 // gives its rect for a screen size. A modal layer takes every key and click
-// and dims what is under it.
+// and dims what is under it. A covering layer hides it: one thing at a time.
 type Layer struct {
 	Root  *Node
 	Modal bool
+	Cover bool
 	Place func(w, h int) Rect
 	Esc   func() // runs when Esc closes a dialog
 }
