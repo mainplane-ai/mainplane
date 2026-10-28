@@ -43,9 +43,13 @@ const jpegQuality = 85
 // shrink is each further scale of an image still over Bytes as a JPEG.
 const shrink = 0.75
 
-// fittedMax bounds the bytes of scaled images the cache holds. A long session
-// sends the same images every step; past this the cache starts over.
-const fittedMax = 256 << 20
+// The cache of fitted images starts over past fittedMax bytes of scaled
+// images or fittedCount entries. A long session sends the same images every
+// step, most of them unscaled and nearly free to hold.
+const (
+	fittedMax   = 256 << 20
+	fittedCount = 4096
+)
 
 // maxDecode bounds the pixels of an image fit decodes, 4 bytes each: a small
 // compressed file can claim any size. A larger image is sent as text.
@@ -154,7 +158,7 @@ func fitOne(r statefile.Record, l Limits) fitted {
 	}
 	f = fitImage(r.Body, l)
 	fitCache.Lock()
-	if fitCache.bytes+len(f.body) > fittedMax {
+	if fitCache.bytes+len(f.body) > fittedMax || len(fitCache.m) >= fittedCount {
 		clear(fitCache.m)
 		fitCache.bytes = 0
 	}
