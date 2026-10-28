@@ -19,16 +19,26 @@ async function main() {
     goos === "windows" ? process.env.LOCALAPPDATA
     : goos === "darwin" ? path.join(os.homedir(), "Library", "Caches")
     : process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache");
-  const bin = path.join(cache, "mainplane", v, goos === "windows" ? "mainplane.exe" : "mainplane");
-  if (!fs.existsSync(bin)) {
+  const bin = path.join(cache, "mainplane", v, `${goos}-${arch}`, goos === "windows" ? "mainplane.exe" : "mainplane");
+  const sum = line.split(" ")[0];
+  const hash = (b) => createHash("sha256").update(b).digest("hex");
+  if (!fs.existsSync(bin) || hash(fs.readFileSync(bin)) !== sum) {
     const url = `https://dl.mainplane.ai/${v}/${name}`;
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(300000) });
     if (!res.ok) throw new Error(`${url}: ${res.status}`);
     const b = Buffer.from(await res.arrayBuffer());
-    if (createHash("sha256").update(b).digest("hex") !== line.split(" ")[0]) throw new Error(`${url} does not match SHA256SUMS`);
+    if (hash(b) !== sum) throw new Error(`${url} does not match SHA256SUMS`);
     fs.mkdirSync(path.dirname(bin), { recursive: true });
-    fs.writeFileSync(bin + ".tmp", b, { mode: 0o755 });
-    fs.renameSync(bin + ".tmp", bin);
+    // A temporary file per process, since first runs may race; the loser keeps the winner's identical file.
+    const tmp = `${bin}.${process.pid}`;
+    fs.writeFileSync(tmp, b);
+    fs.chmodSync(tmp, 0o755);
+    try {
+      fs.renameSync(tmp, bin);
+    } catch (e) {
+      fs.rmSync(tmp);
+      if (!fs.existsSync(bin)) throw e;
+    }
   }
   const r = spawnSync(bin, process.argv.slice(2), { stdio: "inherit" });
   if (r.error) throw r.error;

@@ -28,18 +28,25 @@ def main():
         cache = Path.home() / "Library" / "Caches"
     else:
         cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
-    bin = cache / "mainplane" / v / ("mainplane.exe" if goos == "windows" else "mainplane")
-    if not bin.exists():
+    bin = cache / "mainplane" / v / f"{goos}-{arch}" / ("mainplane.exe" if goos == "windows" else "mainplane")
+    sum = line.split(" ")[0]
+    if not bin.exists() or hashlib.sha256(bin.read_bytes()).hexdigest() != sum:
         url = f"https://dl.mainplane.ai/{v}/{name}"
         # Cloudflare refuses the default Python-urllib user agent
-        b = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "mainplane-pypi/" + v})).read()
-        if hashlib.sha256(b).hexdigest() != line.split(" ")[0]:
+        b = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "mainplane-pypi/" + v}), timeout=300).read()
+        if hashlib.sha256(b).hexdigest() != sum:
             sys.exit(f"mainplane: {url} does not match SHA256SUMS")
         bin.parent.mkdir(parents=True, exist_ok=True)
-        tmp = bin.with_name(bin.name + ".tmp")
+        # A temporary file per process, since first runs may race; the loser keeps the winner's identical file.
+        tmp = bin.with_name(f"{bin.name}.{os.getpid()}")
         tmp.write_bytes(b)
         tmp.chmod(0o755)
-        os.replace(tmp, bin)
+        try:
+            os.replace(tmp, bin)
+        except OSError:
+            tmp.unlink()
+            if not bin.exists():
+                raise
     if goos == "windows":
         sys.exit(subprocess.call([str(bin), *sys.argv[1:]]))
     os.execv(bin, [str(bin), *sys.argv[1:]])
