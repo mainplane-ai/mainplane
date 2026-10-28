@@ -49,7 +49,8 @@ Tools:
 - One run call is bounded at 10 minutes, or at its timeout argument in seconds. On timeout or crash, the next run's output begins with "environment was reset"
 - A run with background true is a job. Its result is at once: "started job <call id> on <worker>, pid <pid>, log <scratch>/jobs/<call id>.log". The job runs in a new interpreter process with no state from the persistent one and no timeout, its output going to the log
 - A job ends when its code finishes, and then its processes are killed. To keep a server up, keep the code running in the foreground (in js: await new Promise(() => {}))
-- When a job ends, a message via job arrives with its exit code, time, and the tail of its log. If the harness loses contact with the job, the message says so: it may or may not still be running; the log's last line is [exit N] when it ended
+- When a job exits, a message via job arrives with its exit code, time, and the tail of its log
+- If the harness loses contact with a job, it may or may not still be running; the log's last line is [exit N] when it ended. A note says so, but it does not wake you: it comes with the next message
 - Cancel a job by killing its process group: kill -- -<pid> on linux and macOS, taskkill /T /F /PID <pid> on Windows. A stop of the session kills all of its jobs and environments, and sends no message for them
 - A run result over 50 KiB or 2000 lines keeps its tail. The full output goes to a file, and the first line names its path, which will look like: <scratch>/output/<call id>
 - A read result over the same limits keeps its head. Its last line says how many lines were cut
@@ -189,7 +190,7 @@ func Tools(name string, input []string) []provider.Tool {
 func schema(s string) json.RawMessage { return json.RawMessage(s) }
 
 var (
-	run   = provider.Tool{Name: "run", Description: "Execute code on a worker in the specified interpreter", Schema: schema(fmt.Sprintf(`{"type":"object","properties":{"worker":{"type":"string"},"code":{"type":"string"},"interpreter":{"type":"string"},"timeout":{"type":"integer","description":"seconds, default %d"},"background":{"type":"boolean","description":"run as a job; its end arrives later as a message"}},"required":["worker","code"]}`, int(runTimeout.Seconds())))}
+	run   = provider.Tool{Name: "run", Description: "Execute code on a worker in the specified interpreter", Schema: schema(fmt.Sprintf(`{"type":"object","properties":{"worker":{"type":"string"},"code":{"type":"string"},"interpreter":{"type":"string"},"timeout":{"type":"integer","description":"seconds, default %d"},"background":{"type":"boolean","description":"run as a job; its exit arrives later as a message"}},"required":["worker","code"]}`, int(runTimeout.Seconds())))}
 	write = provider.Tool{Name: "write", Description: "Write a file on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"},"content":{"type":"string"}},"required":["worker","path","content"]}`)}
 	edit  = provider.Tool{Name: "edit", Description: "Edit a file with replacement on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"},"old":{"type":"string"},"new":{"type":"string"}},"required":["worker","path","old","new"]}`)}
 	patch = provider.Tool{Name: "patch", Description: "Apply a patch in the apply_patch format on a worker", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"input":{"type":"string"}},"required":["worker","input"]}`)}

@@ -440,14 +440,16 @@ func (h *Harness) Resume(ctx context.Context) error {
 			h.Kick(ctx, id)
 		}
 	}
-	go h.lostJobs(ctx, ids)
+	go h.lostJobs(ids)
 	return nil
 }
 
 // lostJobs tells each session of the jobs a harness before this one started
 // and never heard the end of: their calls ended with that harness, so no
-// message will come. A job's message is keyed by its call's id.
-func (h *Harness) lostJobs(ctx context.Context, ids []string) {
+// message will come. Each gets a system record from job, keyed by its call's
+// id, which opens nothing: a restart must not wake every session that once
+// started a server.
+func (h *Harness) lostJobs(ids []string) {
 	for _, id := range ids {
 		chain, err := h.Sessions.Load(id)
 		if err != nil {
@@ -459,7 +461,7 @@ func (h *Harness) lostJobs(ctx context.Context, ids []string) {
 			var c provider.Call
 			var a args
 			switch {
-			case r.Kind == statefile.Message && r.Via == "job":
+			case r.Kind == statefile.Message && r.Via == "job" || r.Kind == statefile.System && r.Source == "job":
 				told[r.IdempotencyKey] = true
 			case r.Kind == statefile.Call && json.Unmarshal(r.Body, &c) == nil && c.Name == "run" && json.Unmarshal(c.Arguments, &a) == nil:
 				background[r.ID] = a.Background
@@ -471,8 +473,9 @@ func (h *Harness) lostJobs(ctx context.Context, ids []string) {
 			if r.Kind != statefile.Result || !background[r.For] || told[r.For] || !strings.HasPrefix(string(r.Body), "started job ") {
 				continue
 			}
-			text := fmt.Sprintf("[%s: the harness restarted, so it lost contact. It may or may not still be running: check the pid and the log, whose last line is [exit N] once it ended]", r.Body)
-			if _, err := h.Post(ctx, id, "job", r.For, []Part{{Type: "text/plain", Body: []byte(text)}}); err != nil {
+			n := system("job", fmt.Sprintf("[%s: the harness restarted, so it lost contact. It may or may not still be running: check the pid and the log, whose last line is [exit N] once it ended]", r.Body))
+			n.IdempotencyKey = r.For
+			if err := h.note(h.session(id), id, n); err != nil {
 				log.Printf("session %s: job %s: %v", id, r.For, err)
 			}
 		}
