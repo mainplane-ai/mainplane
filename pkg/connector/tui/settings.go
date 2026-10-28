@@ -80,7 +80,8 @@ func askHarness(a *App, c *connector.Client) {
 	})
 }
 
-// question is a dialog of words that runs yes on Enter and no on Esc.
+// question is a dialog of words that runs yes on Enter and no on Esc, alone
+// on the screen.
 func question(a *App, title, words, yesLabel, noLabel string, yes func(*App), no func()) {
 	key, muted := term.Style{FG: a.Theme.Text, Attr: term.Bold}, a.Theme.muted()
 	var l *Layer
@@ -90,7 +91,7 @@ func question(a *App, title, words, yesLabel, noLabel string, yes func(*App), no
 	})},
 		&Node{View: &Text{S: words, Style: a.Theme.text()}}, &Node{Fixed: 1},
 		hint(cat(run("esc", key), run(" "+noLabel, muted)), cat(run("enter", key), run(" "+yesLabel, muted)))))
-	l.Esc = no
+	l.Esc, l.Cover = no, true
 }
 
 // hint is a row of left on the left and right on the right, as under the

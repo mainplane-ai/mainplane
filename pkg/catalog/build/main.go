@@ -61,6 +61,7 @@ type sourcePreset struct {
 	Params   map[string]any `json:"params"`       // this preset's own, merged over the provider's and the effort's
 	Price    float64        `json:"price"`        // a variant's price as a multiple of the model's
 	Source   string         `json:"price_source"` // where a variant's price is published
+	Default  bool           `json:"default"`      // the provider's model for a new session when none is chosen: its middle one, quick to answer
 }
 
 type devProvider struct {
@@ -107,6 +108,7 @@ func run() error {
 	for id, p := range src.Providers {
 		c.Providers[id] = p.Provider
 	}
+	defaults := map[string]string{}
 	for _, s := range src.Presets {
 		pr, err := preset(src, dev, s)
 		if err != nil {
@@ -121,6 +123,13 @@ func run() error {
 		}
 		c.Presets[id] = pr
 		c.Groups["self-hosted-all"] = append(c.Groups["self-hosted-all"], id)
+		if s.Default {
+			if d, twice := defaults[s.Provider]; twice {
+				return fmt.Errorf("%s: a second default for %s, after %s", id, s.Provider, d)
+			}
+			defaults[s.Provider] = id
+			c.Groups["self-hosted-default"] = append(c.Groups["self-hosted-default"], id)
+		}
 	}
 	out := json.NewEncoder(os.Stdout)
 	out.SetIndent("", "  ")

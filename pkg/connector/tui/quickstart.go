@@ -39,7 +39,7 @@ const (
 	qsKeyName     = "tui-%d" // the api key a quickstart mints, the first number free
 	qsDriveName   = "shared"
 	qsCommand     = "/providers"
-	qsPrompt      = "Tell me what devices you have access to and what you can do"
+	qsPrompt      = "Quickly explain to me how Mainplane works, what computers you have access to, and what you can do with ASCII diagrams"
 )
 
 // The quickstart's steps, in order.

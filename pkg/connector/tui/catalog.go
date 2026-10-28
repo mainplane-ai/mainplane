@@ -19,9 +19,10 @@ import (
 const (
 	// group is the catalog's list of presets this app shows as models.
 	group = "self-hosted-all"
-	// defaultPreset is the model a new session takes when none is chosen and
-	// no session names one this harness serves.
-	defaultPreset = "anthropic/claude-opus-5-5"
+	// defaults is the catalog's list of the model a new session takes when none
+	// is chosen and no session names one this harness serves: one per provider,
+	// its middle one, so the first answer comes quickly.
+	defaults = "self-hosted-default"
 	// catalogGet bounds the fetch at start; the kept copy shows meanwhile.
 	catalogGet = 30 * time.Second
 )
@@ -89,7 +90,7 @@ func connected(cat *catalog.Catalog, ps []harness.ProviderInfo) []string {
 }
 
 // defaultConf is the config of a session made with nothing chosen: the
-// preset of the newest session, else defaultPreset, else the first one
+// preset of the newest session, else the first of defaults, else the first one
 // connected, each only when the harness serves its provider. The workers are
 // the newest session's.
 func defaultConf(cat *catalog.Catalog, ps []harness.ProviderInfo, newest []harness.Info) (statefile.Conf, error) {
@@ -97,11 +98,11 @@ func defaultConf(cat *catalog.Catalog, ps []harness.ProviderInfo, newest []harne
 	if len(ids) == 0 {
 		return statefile.Conf{}, errors.New("no provider of the catalog is connected: /providers")
 	}
-	want := []string{defaultPreset}
+	want := cat.Groups[defaults]
 	var workers []statefile.Worker
 	if len(newest) > 0 {
 		cf := newest[0].Config
-		want, workers = []string{cf.Preset, cf.Model, defaultPreset}, cf.Workers
+		want, workers = append([]string{cf.Preset, cf.Model}, want...), cf.Workers
 	}
 	pick := ids[0]
 	for _, id := range want {
