@@ -29,9 +29,10 @@ type Limits struct {
 	Bytes   int // one image
 	Count   int // images in one request
 	Request int // all images in one request
-	// Bound is set where the model signs its thinking over the request before
-	// it, as Claude Opus 5.5 does: thinking after an image fit changed would be
-	// rejected, so it is not replayed.
+	// Bound is set where the model may sign its thinking over the request
+	// before it, as Claude Opus 5.5 does: signed thinking after an image fit
+	// changed would be rejected, so it is not replayed. Plain reasoning text
+	// carries no signature and stays.
 	Bound bool
 }
 
@@ -42,9 +43,13 @@ const jpegQuality = 85
 // shrink is each further scale of an image still over Bytes as a JPEG.
 const shrink = 0.75
 
-// fittedMax bounds the cache of fitted images. A long session sends the same
-// images every step; past this many the cache starts over.
-const fittedMax = 256
+// fittedMax bounds the bytes of scaled images the cache holds. A long session
+// sends the same images every step; past this the cache starts over.
+const fittedMax = 256 << 20
+
+// maxDecode bounds the pixels of an image fit decodes, 4 bytes each: a small
+// compressed file can claim any size. A larger image is sent as text.
+const maxDecode = 64_000_000
 
 type fitKey struct {
 	id     string
@@ -64,7 +69,8 @@ type fitted struct {
 
 var fitCache = struct {
 	sync.Mutex
-	m map[fitKey]fitted
+	m     map[fitKey]fitted
+	bytes int
 }{m: map[fitKey]fitted{}}
 
 // fit holds the images of rest under l, so an image the harness took never
@@ -115,11 +121,11 @@ func fit(rest []statefile.Record, l Limits) []statefile.Record {
 		f, ok := fits[i]
 		changed = changed || ok && (f.err != nil || evicted[i] || f.body != nil)
 		switch {
-		case r.Kind == statefile.Thinking && changed && l.Bound:
+		case r.Kind == statefile.Thinking && r.Type != "text/plain" && changed && l.Bound:
 			continue
 		case !ok:
 		case f.err != nil:
-			r.Type, r.Body = "text/plain", fmt.Appendf(nil, "[image not sent: it does not decode as %s: %v]", r.Type, f.err)
+			r.Type, r.Body = "text/plain", fmt.Appendf(nil, "[image not sent: %s: %v]", r.Type, f.err)
 		case evicted[i]:
 			r.Type, r.Body = "text/plain", fmt.Appendf(nil, "[image omitted to fit the provider's limits: %dx%d %s, %d KB. Read the file again to see it.]", f.ow, f.oh, r.Type, len(r.Body)/1000)
 		case f.body != nil:
@@ -148,10 +154,12 @@ func fitOne(r statefile.Record, l Limits) fitted {
 	}
 	f = fitImage(r.Body, l)
 	fitCache.Lock()
-	if len(fitCache.m) >= fittedMax {
+	if fitCache.bytes+len(f.body) > fittedMax {
 		clear(fitCache.m)
+		fitCache.bytes = 0
 	}
 	fitCache.m[k] = f
+	fitCache.bytes += len(f.body)
 	fitCache.Unlock()
 	return f
 }
@@ -169,6 +177,9 @@ func fitImage(b []byte, l Limits) fitted {
 	if s == 1 && len(b) <= l.Bytes {
 		return f
 	}
+	if f.ow*f.oh > maxDecode {
+		return fitted{err: fmt.Errorf("%dx%d is over the %d pixels the harness decodes", f.ow, f.oh, maxDecode)}
+	}
 	src, _, err := image.Decode(bytes.NewReader(b))
 	if err != nil {
 		return fitted{err: err}
@@ -176,6 +187,9 @@ func fitImage(b []byte, l Limits) fitted {
 	asPNG := format == "png" || format == "gif"
 	for {
 		f.w, f.h = max(1, int(math.Round(float64(f.ow)*s))), max(1, int(math.Round(float64(f.oh)*s)))
+		if max(f.w, f.h) > l.Side || f.w*f.h > l.Pixels { // rounding up went over: floor stays under
+			f.w, f.h = max(1, int(float64(f.ow)*s)), max(1, int(float64(f.oh)*s))
+		}
 		img := image.NewRGBA(image.Rect(0, 0, f.w, f.h))
 		if !asPNG { // JPEG has no alpha: transparent pixels go white
 			draw.Draw(img, img.Bounds(), image.NewUniform(color.White), image.Point{}, draw.Src)
