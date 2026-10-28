@@ -67,7 +67,7 @@ type Header struct {
 	FullOutput string `json:"full_output,omitempty"` // result: path in worker scratch
 
 	Via            string `json:"via,omitempty"`             // message: connector name. error: who stopped the session. config: who changed it
-	IdempotencyKey string `json:"idempotency_key,omitempty"` // message: the poster's key; a repost with it appends nothing
+	IdempotencyKey string `json:"idempotency_key,omitempty"` // message: the poster's key; a repost with it appends nothing. job system record: the job's call id
 	Source         string `json:"source,omitempty"`          // system: where the text came from
 
 	Upto    int             `json:"upto,omitempty"`    // step: last record in its context

@@ -460,9 +460,13 @@ func (h *Harness) Run(ctx context.Context, id string) (statefile.Status, error) 
 	}
 }
 
-// job starts a background run and answers its call at once. The job's end
+// job starts a background run and answers its call at once. The job's exit
 // comes later as a message from job, keyed by the call's id so it is posted
-// once. Neither the job nor its message ends with the step that started it.
+// once, and opens the session. A lost connection is a system record from job
+// instead: it opens nothing and reaches the model with the next turn, since a
+// server that lives until its machine restarts would otherwise wake a session
+// with nothing left to do. Neither the job nor its end ends with the step that
+// started it.
 func (h *Harness) job(ctx context.Context, id, call string, w Worker, a args) statefile.Record {
 	if a.Timeout != 0 {
 		return result(call, "error: a background run has no timeout; cancel it by its pid")
@@ -477,11 +481,16 @@ func (h *Harness) job(ctx context.Context, id, call string, w Worker, a args) st
 	var path string
 	pid, path, err := w.Job(ctx, id, a.Interpreter, a.Code, call, func(o Output, err error) {
 		<-ready
-		text := fmt.Sprintf("[job %s on %s: %v. It may or may not still be running: check pid %d and the log %s, whose last line is [exit N] once it ended]", call, a.Worker, err, pid, path)
-		if err == nil {
-			tail, _ := clip(o.Body, true)
-			text = fmt.Sprintf("[job %s on %s exited %d after %s. Log: %s]\n%s", call, a.Worker, o.Exit, time.Since(start).Round(time.Second), o.Full, tail)
+		if err != nil {
+			r := system("job", fmt.Sprintf("[job %s on %s: %v. It may or may not still be running: check pid %d and the log %s, whose last line is [exit N] once it ended]", call, a.Worker, err, pid, path))
+			r.IdempotencyKey = call
+			if err := h.note(h.session(id), id, r); err != nil {
+				log.Printf("session %s: job %s: %v", id, call, err)
+			}
+			return
 		}
+		tail, _ := clip(o.Body, true)
+		text := fmt.Sprintf("[job %s on %s exited %d after %s. Log: %s]\n%s", call, a.Worker, o.Exit, time.Since(start).Round(time.Second), o.Full, tail)
 		if _, err := h.Post(ctx, id, "job", call, []Part{{Type: "text/plain", Body: []byte(text)}}); err != nil {
 			log.Printf("session %s: job %s: %v", id, call, err)
 		}
