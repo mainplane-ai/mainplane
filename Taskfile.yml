@@ -18,6 +18,29 @@ tasks:
   ci:
     deps: [lint, test, vuln]
 
+  # macOS binaries signed like a release but with your own certificate, so a privacy
+  # grant (Accessibility, Screen Recording, Network Volumes) survives rebuilds. Grant once
+  # per Mac; going between a dev build and a release needs the grant again.
+  # MAINPLANE_DEV_PEM is a file with your self-signed certificate and its key. Make it once,
+  # like the release one: rcodesign generate-self-signed-certificate --person-name "Mainplane Dev"
+  #   --algorithm ecdsa --validity-days 7300 --pem-unified-file dev-signing.pem
+  build-mac:
+    platforms: [darwin/arm64]
+    requires:
+      vars: [MAINPLANE_DEV_PEM]
+    vars:
+      RCODESIGN: working_dir/apple-codesign-0.29.0-aarch64-apple-darwin/rcodesign
+    cmds:
+      - mkdir -p working_dir
+      - |
+        test -x {{.RCODESIGN}} || {
+          curl -fsSLo working_dir/rcodesign.tgz https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/apple-codesign-0.29.0-aarch64-apple-darwin.tar.gz
+          echo "d1a532150adaf90048260d76359261aa716abafc45c53c5dc18845029184334a  working_dir/rcodesign.tgz" | shasum -a 256 -c
+          tar -xzf working_dir/rcodesign.tgz -C working_dir
+        }
+      - go build -o working_dir/ ./cmd/mainplane ./cmd/mainplane-server
+      - for b in mainplane mainplane-server; do {{.RCODESIGN}} sign --pem-file "{{.MAINPLANE_DEV_PEM}}" --binary-identifier ai.mainplane.$b --timestamp-url none working_dir/$b; done
+
   # The release gate, on real machines, with OPENAI_API_KEY set: task e2e -- <v> <prev> <port> <os>=<ssh target>...
   e2e:
     cmds:
