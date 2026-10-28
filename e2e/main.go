@@ -237,7 +237,7 @@ shot 3 | grep -q 'mp_key_' && sudo -n /usr/local/bin/mainplane-server key list |
 tmux send-keys -t qs Enter
 shot 2 | grep -q 'Host a shared drive' && echo drives-ok
 tmux send-keys -t qs Escape
-shot 3 | grep -q 'Tell me what devices you have access to and what you can do' && echo session-ok
+shot 3 | grep -q 'Quickly explain to me how Mainplane works' && echo session-ok
 tmux kill-session -t qs
 tmux new-session -d -s qs -x 120 -y 40 /usr/local/bin/mainplane
 s=$(shot 4); echo "$s" | grep -q 'Ask anything' && ! echo "$s" | grep -q 'Press any key' && ! echo "$s" | grep -q 'Help improve Mainplane' && echo again-ok
