@@ -11,6 +11,14 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
+// anthLimits are what the Messages API rejected past, measured: a side over
+// 8000 px, or over 3000 px once a request has more than 20 images (the docs
+// say 2000); an image over 10 MiB of base64; more than 100 images on 200k
+// context models (600 on others); a body near 128 MiB (the docs say 32 MB).
+// 3000 px holds at any count, and Claude scales anything over 2576 px itself.
+// claude -p sends to the same API.
+var anthLimits = Limits{Side: 3000, Pixels: 3000 * 3000, Bytes: 10 << 20 * 3 / 4, Count: 100, Request: 80_000_000, Bound: true}
+
 // The body carries only what the session builds. max_tokens, which the
 // Messages API requires, thinking, and effort come from params: the API, not
 // the harness, says what each model takes.
@@ -85,6 +93,7 @@ var ephemeral = &anthCache{Type: "ephemeral"}
 
 func (e anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
+	rest = fit(rest, anthLimits)
 	body := anthReq{Model: req.Model, Stream: true, Messages: []anthMsg{}}
 	var marks []string
 	if len(system) > 0 {

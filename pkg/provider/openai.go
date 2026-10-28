@@ -11,6 +11,13 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
+// respLimits: the Responses API rejects an image of over 30000 patches of
+// 32x32 px, counted with each side rounded up (5537x5537 is 30276), and more
+// than 1500 images. 28 M pixels stays under the patch limit at any aspect up
+// to the 65535 px side. A 60 MB image passed; the docs say 512 MB a request.
+// chatgpt uses this envelope.
+var respLimits = Limits{Side: 65535, Pixels: 28_000_000, Bytes: 50_000_000, Count: 1500, Request: 300_000_000}
+
 func OpenAI(url, key string) Provider {
 	return Provider{
 		URL:      base(url, "https://api.openai.com/v1") + "/responses",
@@ -78,6 +85,7 @@ type respOutput struct {
 
 func (e openai) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
+	rest = fit(rest, respLimits)
 	body := respReq{
 		Model:        req.Model,
 		CacheKey:     req.Key,
