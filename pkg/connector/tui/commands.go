@@ -48,7 +48,7 @@ func commands() []command {
 	return []command{
 		{"new", []string{"clear"}, "New session", "ctrl+n", (*session).fresh},
 		{"sessions", []string{"resume"}, "Sessions", "ctrl+o", (*session).sessions},
-		{"continue", []string{"compact"}, "Continue in a new session", "ctrl+k", (*session).carryOn},
+		{"continue", []string{"compact"}, "Continue in a new session", "", (*session).carryOn},
 		{"config", nil, "Config for a new session", "", (*session).config},
 		{"rename", nil, "Rename the session", "", (*session).renameDialog},
 		{"model", nil, "Model for a new session", "", (*session).models},
@@ -56,7 +56,7 @@ func commands() []command {
 		{"goto", []string{"jump", "timeline"}, "Go to a message", "", (*session).goTo},
 		{"fork", nil, "Fork into a new session", "", (*session).fork},
 		{"rollback", []string{"revert", "rewind"}, "Roll back to before a message", "", (*session).rollback},
-		{"workers", nil, "Workers", "ctrl+e", (*session).workers},
+		{"workers", nil, "Workers", "", (*session).workers},
 		{"settings", nil, "Settings", "", (*session).settingsMenu},
 		{"stop", nil, "Stop the session", "esc esc", (*session).halt},
 		{"info", []string{"debug", "id"}, "Session info", "", (*session).infoMenu},
@@ -240,20 +240,31 @@ func (s *session) palette(a *App) {
 			a.Copy(s.id)
 		}
 	})
+	pick := func(mac, other string) string {
+		if runtime.GOOS == "darwin" {
+			return mac
+		}
+		return other
+	}
 	add("Input", "Send", "enter", nil)
-	add("Input", "New line", "shift+enter, ctrl+j", nil)
+	add("Input", "New line", pick("shift+enter, opt+enter, ctrl+j", "shift+enter, ctrl+enter, ctrl+j"), nil)
 	add("Input", "Slash commands", "/", func(a *App) {
 		s.input.cur, s.input.anchor = 0, -1
 		s.input.insert(textElems("/")...)
 	})
-	add("Input", "Select", "shift+arrows", nil)
-	add("Input", "Undo", "ctrl+z", nil)
-	add("Input", "Redo", "ctrl+y, ctrl+shift+z", nil)
-	add("Input", "Cut the selection", "ctrl+x", nil)
-	add("Input", "Delete to the start of the line", "cmd+backspace, ctrl+u", nil)
-	add("Input", "Delete the word before", "alt+backspace, ctrl+backspace, ctrl+w", nil)
-	add("Input", "Delete the next word", "ctrl+delete", nil)
-	add("Input", "Start or end of the line", "home, end", nil)
+	add("Input", "Select", pick("shift+arrows, with opt for words", "shift+arrows, with ctrl for words"), nil)
+	if runtime.GOOS == "windows" {
+		add("Input", "Select all", "ctrl+a", nil)
+	}
+	add("Input", "Undo", pick("ctrl+z, cmd+z", "ctrl+z"), nil)
+	add("Input", "Redo", pick("ctrl+shift+z, cmd+shift+z, ctrl+y", "ctrl+y, ctrl+shift+z"), nil)
+	add("Input", "Cut the selection", pick("cmd+x, ctrl+x", "ctrl+x"), nil)
+	add("Input", "Word left or right", pick("opt+left, opt+right", "ctrl+left, ctrl+right"), nil)
+	add("Input", "Start or end of the line", pick("cmd+left, cmd+right, ctrl+a, ctrl+e", "home, end"), nil)
+	add("Input", "Delete the word before", pick("opt+delete, ctrl+w", "ctrl+backspace, ctrl+w"), nil)
+	add("Input", "Delete the next word", pick("opt+fn+delete", "ctrl+delete"), nil)
+	add("Input", "Delete to the start of the line", pick("cmd+delete, ctrl+u", "ctrl+u"), nil)
+	add("Input", "Delete to the end of the line", "ctrl+k", nil)
 	add("Transcript", "Page up", "pgup", func(a *App) { s.transcript.Scroll(-s.transcript.Page()) })
 	add("Transcript", "Page down", "pgdn", func(a *App) { s.transcript.Scroll(s.transcript.Page()) })
 	add("Transcript", "Top", "ctrl+home", func(a *App) { s.transcript.Scroll(-1 << 30) })

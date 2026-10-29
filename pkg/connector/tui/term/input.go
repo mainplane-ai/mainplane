@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -127,6 +129,7 @@ type (
 	da1Reply   struct{}
 	bgReply    struct{ r, g, b float64 }
 	pasteStart struct{}
+	surrogate  struct{ r rune } // half of a UTF-16 pair from a win32 key record
 )
 
 func (c bgReply) luma() float64 { return 0.2126*c.r + 0.7152*c.g + 0.0722*c.b }
@@ -137,6 +140,7 @@ type decoder struct {
 	buf     []byte
 	pasting bool
 	paste   []byte
+	high    rune // the first half of a surrogate pair
 }
 
 func (d *decoder) wait() time.Duration {
@@ -171,7 +175,7 @@ func (d *decoder) parse(emit func(Event), force bool) {
 				return
 			}
 			d.paste = append(d.paste, d.buf[:i]...)
-			emit(Paste{Text: strings.ReplaceAll(strings.ReplaceAll(string(d.paste), "\r\n", "\n"), "\r", "\n")})
+			emit(Paste{Text: strings.ReplaceAll(strings.ReplaceAll(unrecord(string(d.paste)), "\r\n", "\n"), "\r", "\n")})
 			d.buf, d.paste, d.pasting = d.buf[i+len(pasteEnd):], nil, false
 			continue
 		}
@@ -190,6 +194,14 @@ func (d *decoder) parse(emit func(Event), force bool) {
 		case nil:
 		case pasteStart:
 			d.pasting = true
+		case surrogate:
+			r := ev.(surrogate).r
+			if utf16.IsSurrogate(r) && r < 0xdc00 {
+				d.high = r
+			} else if d.high != 0 {
+				emit(Key{Code: utf16.DecodeRune(d.high, r)})
+				d.high = 0
+			}
 		default:
 			emit(ev)
 		}
@@ -239,6 +251,16 @@ func parseOne(b []byte) (int, Event) {
 		}
 		return 3, nil
 	case 0x1b:
+		if len(b) > 2 && (b[2] == '[' || b[2] == 'O') { // Alt+arrow as ESC and the arrow: Terminal.app with Option as Meta
+			n, ev := parseOne(b[1:])
+			if n == 0 {
+				return 0, nil
+			}
+			if k, ok := ev.(Key); ok {
+				k.Mod |= Alt
+				return n + 1, k
+			}
+		}
 		return 1, Key{Code: KeyEsc}
 	}
 	n, ev := char(b, 1)
@@ -306,6 +328,8 @@ func csi(p string, f byte) Event {
 		return da1Reply{}
 	case prefix != 0:
 		return nil
+	case f == '_':
+		return record(n)
 	case f == 'I' || f == 'O':
 		return Focus{In: f == 'I'}
 	case f == 'Z':
@@ -396,4 +420,61 @@ func osc(s string) Event {
 		c[i] = float64(v) / float64(uint64(1)<<(4*len(p))-1)
 	}
 	return bgReply{c[0], c[1], c[2]}
+}
+
+// vkCode maps the virtual key of a win32 key record that is not text.
+var vkCode = map[int]rune{13: KeyEnter, 9: KeyTab, 8: KeyBackspace, 27: KeyEsc, 33: KeyPgUp, 34: KeyPgDn, 35: KeyEnd,
+	36: KeyHome, 37: KeyLeft, 38: KeyUp, 39: KeyRight, 40: KeyDown, 45: KeyInsert, 46: KeyDelete, 112: KeyF1}
+
+// record decodes a win32-input-mode key record, Vk;Sc;Uc;Kd;Cs;Rc. Key ups
+// and lone modifiers are nil. Ctrl with Alt and a character is AltGr: text.
+func record(n []int) Event {
+	if len(n) < 5 || n[3] == 0 {
+		return nil
+	}
+	vk, uc, cs := n[0], rune(n[2]), n[4]
+	var mod Mod
+	if cs&0x10 != 0 {
+		mod |= Shift
+	}
+	if cs&0x3 != 0 {
+		mod |= Alt
+	}
+	if cs&0xc != 0 {
+		mod |= Ctrl
+	}
+	switch {
+	case vkCode[vk] != 0:
+		return Key{Code: vkCode[vk], Mod: mod}
+	case utf16.IsSurrogate(uc):
+		return surrogate{uc}
+	case uc >= ' ' && mod&(Ctrl|Alt) == Ctrl|Alt, uc >= ' ' && mod&(Ctrl|Alt) == 0:
+		return Key{Code: uc}
+	case vk == ' ' || vk >= '0' && vk <= '9' || vk >= 'A' && vk <= 'Z':
+		return Key{Code: unicode.ToLower(rune(vk)), Mod: mod}
+	case uc >= ' ':
+		return Key{Code: uc, Mod: mod &^ Shift}
+	}
+	return nil
+}
+
+// unrecord turns the win32 key records in pasted text back into text: the
+// console encodes a pasted line break as a record.
+func unrecord(s string) string {
+	var b strings.Builder
+	for {
+		i := strings.Index(s, "\x1b[")
+		if i < 0 {
+			return b.String() + s
+		}
+		j := strings.IndexByte(s[i:], '_')
+		if j < 0 {
+			return b.String() + s
+		}
+		b.WriteString(s[:i])
+		if n := nums(s[i+2 : i+j]); len(n) >= 4 && n[3] != 0 {
+			b.WriteRune(rune(n[2]))
+		}
+		s = s[i+j+1:]
+	}
 }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -242,16 +243,16 @@ func (s *Input) word(dir int) int {
 	return i
 }
 
-// Key edits the input. Ctrl+Z undoes a change; a word typed, with the space
-// after it, is one change. Ctrl+Y redoes, and Ctrl+Shift+Z where the
-// terminal tells it from Ctrl+Z: with the kitty protocol, not in Windows
-// Terminal, whose console sends both as the same byte.
+// Key edits the input. Ctrl+Z (Cmd+Z) undoes a change; a word typed, with
+// the space after it, is one change. Ctrl+Y redoes, and Ctrl+Shift+Z
+// (Cmd+Shift+Z) where the terminal tells it from Ctrl+Z: with the kitty
+// protocol or win32-input-mode.
 func (s *Input) Key(a *App, k term.Key) bool {
 	if s.Before != nil && s.Before(a, k) {
 		return true
 	}
-	if k := k.String(); k == "ctrl+z" || k == "ctrl+shift+z" || k == "ctrl+y" {
-		if k == "ctrl+z" {
+	if k := k.String(); slices.Contains([]string{"ctrl+z", "super+z", "ctrl+shift+z", "super+shift+z", "ctrl+y"}, k) {
+		if k == "ctrl+z" || k == "super+z" {
 			s.restore(&s.undo, &s.redo)
 		} else {
 			s.restore(&s.redo, &s.undo)
@@ -278,6 +279,11 @@ func (s *Input) Key(a *App, k term.Key) bool {
 	return took
 }
 
+// edit follows the platform's text fields: Ctrl moves and deletes by word on
+// Windows and Linux; on a Mac, Option by word and Cmd by line, and the Emacs
+// keys Ctrl+A, E and K, with Ctrl+U and W of the shells. Ctrl+A selects all
+// on Windows. Mac terminals send Option+arrows as Alt+B and Alt+F, Cmd+arrows
+// as Ctrl+A and Ctrl+E, and Cmd+Delete as Ctrl+U.
 func (s *Input) edit(a *App, k term.Key) bool {
 	rows := s.rows(s.view.W)
 	r, col := s.at(rows, s.cur)
@@ -291,7 +297,7 @@ func (s *Input) edit(a *App, k term.Key) bool {
 			s.Clear()
 			s.OnSubmit(a, t)
 		}
-	case "ctrl+j", "alt+enter":
+	case "ctrl+enter", "ctrl+j", "alt+enter":
 		s.insert(elem{g: "\n"})
 	case "backspace":
 		if !s.deleteSelection() && s.cur > 0 {
@@ -314,9 +320,13 @@ func (s *Input) edit(a *App, k term.Key) bool {
 		if !s.deleteSelection() && s.cur < len(s.els) {
 			s.els = append(s.els[:s.cur], s.els[s.cur+1:]...)
 		}
-	case "ctrl+delete", "alt+delete":
+	case "ctrl+delete", "alt+delete", "alt+d":
 		if !s.deleteSelection() {
 			s.els = append(s.els[:s.cur], s.els[s.word(1):]...)
+		}
+	case "ctrl+k":
+		if !s.deleteSelection() {
+			s.els = append(s.els[:s.cur], s.els[s.index(rows, r, 1<<30):]...)
 		}
 	case "ctrl+x", "super+x":
 		if t := s.Selected(); t != "" {
@@ -327,17 +337,26 @@ func (s *Input) edit(a *App, k term.Key) bool {
 		s.move(a, s.cur-1, sel)
 	case "right":
 		s.move(a, s.cur+1, sel)
-	case "ctrl+left", "alt+left":
+	case "ctrl+left", "alt+left", "alt+b":
 		s.move(a, s.word(-1), sel)
-	case "ctrl+right", "alt+right":
+	case "ctrl+right", "alt+right", "alt+f":
 		s.move(a, s.word(1), sel)
 	case "up":
 		s.move(a, s.index(rows, r-1, col), sel)
 	case "down":
 		s.move(a, s.index(rows, r+1, col), sel)
+	case "ctrl+a":
+		if runtime.GOOS != "windows" {
+			s.move(a, s.index(rows, r, 0), sel)
+			break
+		}
+		fallthrough
+	case "super+a":
+		s.move(a, 0, false)
+		s.move(a, len(s.els), true)
 	case "home", "super+left":
 		s.move(a, s.index(rows, r, 0), sel)
-	case "end", "super+right":
+	case "end", "super+right", "ctrl+e":
 		s.move(a, s.index(rows, r, 1<<30), sel)
 	default:
 		t := k.Text()
