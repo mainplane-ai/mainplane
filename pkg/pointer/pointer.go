@@ -16,6 +16,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -188,7 +189,32 @@ func Find(ctx context.Context, key, cached string) (string, error) {
 	if err := verify(key, recordMsg(key, r.URL, r.Seq), r.Sig); err != nil {
 		return "", fmt.Errorf("the pointer's record: %w", err)
 	}
-	return r.URL, Prove(ctx, key, r.URL)
+	return r.URL, why(Prove(ctx, key, r.URL))
+}
+
+// why names what most likely failed at the harness URL the pointer gave. The
+// pointer answered, so this machine is online.
+func why(err error) error {
+	var dns *net.DNSError
+	var cert *tls.CertificateVerificationError
+	var st Status
+	var op *net.OpError
+	var ne net.Error
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return err // slow, which says nothing of the URL
+	case errors.As(err, &dns):
+		return fmt.Errorf("this machine cannot resolve the harness URL: its tunnel is gone, or this machine's DNS does not know the name, which every device needs: %w", err)
+	case errors.As(err, &cert):
+		return fmt.Errorf("the harness URL's certificate is not trusted here; it needs one every device trusts, such as Let's Encrypt's: %w", err)
+	case errors.As(err, &st) && st == 530:
+		return fmt.Errorf("the harness's Cloudflare tunnel is not connected: the harness is down, or its cloudflared cannot reach Cloudflare: %w", err)
+	case errors.As(err, &st) && st >= 500:
+		return fmt.Errorf("the proxy or tunnel at the harness URL cannot reach the harness on its loopback port: %w", err)
+	case errors.As(err, &op), errors.As(err, &ne) && ne.Timeout():
+		return fmt.Errorf("nothing answers at the harness URL; is the harness, or its proxy or tunnel, running? %w", err)
+	}
+	return err
 }
 
 // Prove is nil when the harness at url holds key. It signs a fresh nonce with
