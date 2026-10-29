@@ -1,0 +1,22 @@
+{
+  "name": "mainplane",
+  "version": "0.0.0",
+  "description": "The open-source agent ecosystem. Agents that work across all your computers, browsers and files.",
+  "homepage": "https://mainplane.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mainplane-ai/mainplane.git"
+  },
+  "license": "MIT",
+  "bin": {
+    "mainplane": "mainplane.js"
+  },
+  "files": [
+    "mainplane.js",
+    "SHA256SUMS",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
