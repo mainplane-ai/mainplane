@@ -152,6 +152,10 @@ func (d *decoder) wait() time.Duration {
 }
 
 func (d *decoder) feed(b []byte, emit func(Event)) {
+	if len(d.buf) == 0 && !d.pasting && bareDA1.Match(b) {
+		emit(da1Reply{})
+		return
+	}
 	d.buf = synthetic.ReplaceAllFunc(append(d.buf, b...), d.text)
 	tail := bytes.Clone(cut.Find(d.buf)) // a CSI the read cut, maybe a record: out of the parse until it ends
 	d.buf = d.buf[:len(d.buf)-len(tail)]
@@ -160,6 +164,10 @@ func (d *decoder) feed(b []byte, emit func(Event)) {
 }
 
 var cut = regexp.MustCompile(`\x1b(\[[\d;]*)?$`)
+
+// bareDA1 is a DA1 reply that lost its ESC, which conhost sometimes sends. It
+// comes in one read; typed keys come one per read, and a paste in markers.
+var bareDA1 = regexp.MustCompile(`^\[\?[\d;]+c$`)
 
 // synthetic matches the win32 key records conhost makes up for text with no
 // key: Vk 0 (the paste markers, and characters a paste does not find on the
