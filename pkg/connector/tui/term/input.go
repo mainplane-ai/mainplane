@@ -2,6 +2,7 @@ package term
 
 import (
 	"bytes"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -151,8 +152,35 @@ func (d *decoder) wait() time.Duration {
 }
 
 func (d *decoder) feed(b []byte, emit func(Event)) {
-	d.buf = append(d.buf, b...)
+	d.buf = synthetic.ReplaceAllFunc(append(d.buf, b...), d.text)
+	tail := bytes.Clone(cut.Find(d.buf)) // a CSI the read cut, maybe a record: out of the parse until it ends
+	d.buf = d.buf[:len(d.buf)-len(tail)]
 	d.parse(emit, false)
+	d.buf = append(d.buf, tail...)
+}
+
+var cut = regexp.MustCompile(`\x1b(\[[\d;]*)?$`)
+
+// synthetic matches the win32 key records conhost makes up for text with no
+// key: Vk 0 (the paste markers, and characters a paste does not find on the
+// keyboard layout), or Alt (18), whose key up carries a pasted emoji.
+var synthetic = regexp.MustCompile(`\x1b\[(?:0|18);\d+;\d+;[01];\d+;\d+_`)
+
+// text turns a synthetic record into its character, so that a paste's
+// markers are plain bytes again. Other records of these keys become nothing.
+func (d *decoder) text(rec []byte) []byte {
+	n := nums(string(rec[2 : len(rec)-1]))
+	switch r := rune(n[2]); {
+	case r == 0 || (n[0] == 0) != (n[3] == 1):
+		return nil
+	case utf16.IsSurrogate(r) && r < 0xdc00:
+		d.high = r
+		return nil
+	case utf16.IsSurrogate(r):
+		return utf8.AppendRune(nil, utf16.DecodeRune(d.high, r))
+	default:
+		return utf8.AppendRune(nil, r)
+	}
 }
 
 // timeout is called when no byte came within wait: what is held is complete.
@@ -263,7 +291,10 @@ func parseOne(b []byte) (int, Event) {
 // escKey decodes ESC ESC: Esc, or Alt and a CSI or SS3 key, as Terminal.app
 // with Option as Meta sends Option+arrows.
 func escKey(b []byte) (int, Event) {
-	if len(b) > 2 && (b[2] == '[' || b[2] == 'O') {
+	if len(b) == 2 {
+		return 0, nil
+	}
+	if b[2] == '[' || b[2] == 'O' {
 		n, ev := parseOne(b[1:])
 		if n == 0 {
 			return 0, nil
