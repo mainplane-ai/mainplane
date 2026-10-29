@@ -2,19 +2,23 @@
 # Installs the mainplane CLI, unless this machine has one; with an api key it logs this user's CLI in.
 # With a network name and device code it makes this Linux or macOS machine a worker. With server it makes this machine
 # the harness instead, from the provider keys set in this shell, and logs the CLI in to it; server quickstart then
-# opens the quickstart in the TUI, on the terminal even under curl | sh. Run it
+# opens the quickstart in the TUI, on the terminal even under curl | sh, and --url <url> last reaches the harness
+# at url, which your own proxy carries to it, with no tunnel. Run it
 # without sudo, so the login is yours and those keys reach it; it asks for sudo itself. In a root shell
 # with no sudo, all run as root, and code runs as root. The release stamps its version.
-#   curl -fsSL https://dl.mainplane.ai/@VERSION@/install.sh | sh -s -- [api key | <network> <device code> | server [quickstart]]
+#   curl -fsSL https://dl.mainplane.ai/@VERSION@/install.sh | sh -s -- [api key | <network> <device code> | server [quickstart] [--url <url>]]
 set -eu
 v=@VERSION@
 dl=https://dl.mainplane.ai/$v
-case $#:${1:-} in
-0: | 1:mp_key_* | 2:* | 1:server) ;;
-*)
-  echo "usage: curl -fsSL $dl/install.sh | sh -s -- [api key | <network> <device code> | server [quickstart]]" >&2
+usage() {
+  echo "usage: curl -fsSL $dl/install.sh | sh -s -- [api key | <network> <device code> | server [quickstart] [--url <url>]]" >&2
   exit 2
-  ;;
+}
+case $#:${1:-}:${2:-}:${3:-} in
+0::: | 1:mp_key_*:: | 1:server:: | 3:server:--url:* | 4:server:quickstart:--url) ;;
+2:server:--url:) usage ;;
+2:*) ;;
+*) usage ;;
 esac
 case $(uname -m) in
 x86_64 | amd64) arch=amd64 ;;
@@ -40,17 +44,18 @@ get() {
   chmod 755 "$1-$os-$arch"
   mv "$1-$os-$arch" "$1"
 }
-case $#:${1:-}:${2:-} in
-1:server: | 2:server:quickstart)
+case $#:${1:-}:${2:-}:${3:-} in
+1:server:: | 2:server:quickstart: | 3:server:--url:* | 4:server:quickstart:--url)
   get mainplane
   get mainplane-server
   # install places mainplane-server, runs it as a service, makes this machine the worker admin with the
   # mainplane beside it, which places that in /usr/local/bin, and logs it in. Under curl | sh stdin is
   # the script, so the quickstart's TUI reads the terminal, when there is one.
-  if [ $# -eq 2 ] && (true < /dev/tty) 2> /dev/null; then
-    ./mainplane-server install quickstart < /dev/tty
+  shift
+  if [ "${1:-}" = quickstart ] && (true < /dev/tty) 2> /dev/null; then
+    ./mainplane-server install ${1+"$@"} < /dev/tty
   else
-    ./mainplane-server install ${2:-}
+    ./mainplane-server install ${1+"$@"}
   fi
   ;;
 2:*)

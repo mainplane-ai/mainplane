@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,10 +29,13 @@ import (
 const (
 	startWait  = 10 * time.Second
 	tunnelWait = 3 * time.Minute
+	// Behind the user's own proxy nothing has to start: the URL answers at
+	// once, or a part the user set up is wrong.
+	urlWait = 20 * time.Second
 )
 
 // tunnelFailed, in Dir, is why the harness's tunnel last stopped it. Install
-// and SetTunnel remove it before they start the harness, and Reached fails
+// and Move remove it before they start the harness, and Reached fails
 // with it at once.
 const tunnelFailed = "tunnel-failed.txt"
 
@@ -103,8 +107,8 @@ func (c *Config) Expand() error {
 }
 
 // Install makes this machine run the harness at every boot, from a copy of an
-// expanded c at Conf, or with keep from the config already there, as it is,
-// which c becomes, and makes it the worker admin. It returns while the tunnel
+// expanded c at Conf, or with keep from the config already there, as it is
+// but for c's URL, which c becomes, and makes it the worker admin. It returns while the tunnel
 // starts: the tokens it prints name no URL, and Reached waits for one. Dir is
 // root's and the operator's alone: the config holds the keys, and admin runs
 // code as the operator so that it may read and edit them.
@@ -112,14 +116,20 @@ func Install(c *Config, keep bool) error {
 	if err := prepare(); err != nil {
 		return err
 	}
-	if _, err := os.Stat(Conf); keep && err == nil {
+	_, err := os.Stat(Conf)
+	write := !keep || err != nil
+	if !write {
+		url := c.URL
 		if *c, err = Load(Conf); err != nil {
 			return err
 		}
-	} else {
-		if doNotTrack() {
-			c.DataSharing = &DataSharing{Via: "DO_NOT_TRACK"}
+		if write = url != ""; write { // a URL given to install replaces how the kept config is reached
+			c.URL, c.Tunnel = url, nil
 		}
+	} else if doNotTrack() {
+		c.DataSharing = &DataSharing{Via: "DO_NOT_TRACK"}
+	}
+	if write {
 		b, err := json.MarshalIndent(c, "", "  ")
 		if err != nil {
 			return err
@@ -224,15 +234,16 @@ func run(name string, args ...string) error {
 	return nil
 }
 
-// SetTunnel makes the installed harness reached through t, or through a quick
-// tunnel when t is nil, restarts it, and returns its URL once it answers
-// there. Workers follow through the pointer.
-func SetTunnel(t *Tunnel) (string, error) {
+// Move makes the installed harness reached at url, behind the user's own
+// proxy, or through t, or through a quick tunnel when both are none, restarts
+// it, and returns its URL once workers can reach it there. Workers follow
+// through the pointer.
+func Move(url string, t *Tunnel) (string, error) {
 	c, err := Load(Conf)
 	if err != nil {
 		return "", fmt.Errorf("no installed harness: %w", err)
 	}
-	c.Tunnel = t
+	c.URL, c.Tunnel = url, t
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return "", err
@@ -250,25 +261,82 @@ func SetTunnel(t *Tunnel) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return Reached(pointer.Encode(k))
+	return Reached(pointer.Encode(k), url)
 }
 
-// Reached waits for the pointer to name a URL where the harness with key
-// proves it, through Cloudflare, as a worker finds it, and returns that URL.
-// A tunnel that stops the harness fails it at once.
-func Reached(key string) (string, error) {
-	for end := time.Now().Add(tunnelWait); ; time.Sleep(time.Second) {
+// Reached waits until workers can reach the harness with key where they find
+// it, at url when the user's own proxy carries it, and returns that URL. A
+// tunnel that stops the harness fails it at once.
+func Reached(key, url string) (string, error) {
+	wait := tunnelWait
+	if url != "" {
+		wait = urlWait
+	}
+	for end := time.Now().Add(wait); ; time.Sleep(time.Second) {
 		if b, err := os.ReadFile(filepath.Join(Dir, tunnelFailed)); err == nil {
 			return "", fmt.Errorf("the harness could not start its tunnel: %s", b)
 		}
-		url, err := pointer.Find(context.Background(), key, "")
+		u, err := reach(context.Background(), key)
+		if err == nil && url != "" && u != url {
+			err = fmt.Errorf("the pointer names %s, not yet %s", u, url)
+		}
 		if err == nil {
-			return url, nil
+			return u, nil
 		}
 		if time.Now().After(end) {
-			return "", fmt.Errorf("the harness did not answer through its tunnel in %s: %w; its log says why", tunnelWait, err)
+			return "", fmt.Errorf("workers cannot reach the harness after %s: %w", wait, err)
 		}
 	}
+}
+
+// reach is the URL a worker finds the harness with key at, once the harness
+// proves its key there and passes the WebSocket upgrade, as a worker needs.
+// An error at the URL says what most likely set it off.
+func reach(ctx context.Context, key string) (string, error) {
+	u, err := pointer.Find(ctx, key, "")
+	if u == "" { // the pointer's own error
+		return u, err
+	}
+	if err == nil {
+		err = upgrades(ctx, u)
+	}
+	var dns *net.DNSError
+	var cert *tls.CertificateVerificationError
+	var st pointer.Status
+	var op *net.OpError
+	var ne net.Error
+	switch {
+	case errors.As(err, &dns):
+		err = fmt.Errorf("this machine cannot resolve the harness URL; every device, this one too, must: %w", err)
+	case errors.As(err, &cert):
+		err = fmt.Errorf("the harness URL's certificate is not trusted here; it needs one every device trusts, such as Let's Encrypt's: %w", err)
+	case errors.As(err, &st) && st >= 500:
+		err = fmt.Errorf("the proxy or tunnel at the harness URL cannot reach the harness on its loopback port: %w", err)
+	case errors.As(err, &op), errors.As(err, &ne) && ne.Timeout():
+		err = fmt.Errorf("nothing answers at the harness URL; is its proxy or tunnel running? %w", err)
+	}
+	return u, err
+}
+
+// upgrades is nil when u passes a WebSocket upgrade through to the relay:
+// workers reach the relay and the coordinator only through one.
+func upgrades(ctx context.Context, u string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u+"/derp", nil)
+	if err != nil {
+		return err
+	}
+	for k, v := range map[string]string{"Connection": "Upgrade", "Upgrade": "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Protocol": "derp"} {
+		req.Header.Set(k, v)
+	}
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		return fmt.Errorf("%s/derp answered %s to a WebSocket upgrade: the proxy must pass upgrades through, which workers need", u, resp.Status)
+	}
+	return nil
 }
 
 // answers waits for the harness to answer at addr as only it does: 401 to a

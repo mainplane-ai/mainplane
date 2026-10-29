@@ -84,16 +84,16 @@ func (a *api) root(w http.ResponseWriter, r *http.Request) {
 	reply(w, map[string]string{"version": version.V, "network": network})
 }
 
-// prove marks url reached once a worker can find the harness there, as
-// joining does: the pointer names url and url proves the harness key. It
-// gives up when the harness moves to another URL. A tunnel that starts
-// again at the same URL proves it once.
+// prove marks url reached once a worker can find the harness there and get
+// on the mesh: the pointer names url, url proves the harness key and passes
+// the WebSocket upgrade the coordinator and the relay need. It gives up when the harness moves to another URL. A
+// tunnel that starts again at the same URL proves it once.
 func (a *api) prove(ctx context.Context, url string) {
 	if old, _ := a.proving.Swap(url).(string); old == url {
 		return
 	}
 	for a.at() == url {
-		if u, err := pointer.Find(ctx, pointer.Encode(a.k), ""); err == nil && u == url {
+		if u, err := reach(ctx, pointer.Encode(a.k)); err == nil && u == url {
 			a.reached.Store(url)
 			return
 		}
