@@ -26,8 +26,8 @@ The quickstart walks you through adding a provider, workers (computers your agen
 Read more in [docs/self-hosting.md](docs/self-hosting.md).
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/tui-dark.png">
-  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/tui-light.png" alt="The Mainplane TUI: a sidebar of sessions on different models, and an agent that moves a Qwen fine-tune from a GPU server to a Mac Studio and quantizes it to run there" width="960">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/tui-dark.svg">
+  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/tui-light.svg" alt="The Mainplane TUI: a sidebar of sessions on different models, and an agent that moves a Qwen fine-tune from a GPU server to a Mac Studio and quantizes it to run there" width="960">
 </picture>
 <br/><br/>
 
