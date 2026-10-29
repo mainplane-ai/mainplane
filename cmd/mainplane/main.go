@@ -196,6 +196,11 @@ func attached(exe string, args ...string) *exec.Cmd {
 // and the install asks for no root. A token goes to the elevated install, and
 // admin's install passes one, but no person types it.
 func work(install bool, args []string) {
+	// A Linux service is a systemd unit. Without systemd, as in most
+	// containers, the worker runs by hand, before anything is written.
+	if fi, err := os.Stat("/run/systemd/system"); install && runtime.GOOS == "linux" && (err != nil || !fi.IsDir()) {
+		log.Fatalf("mainplane install needs systemd to run the worker at every boot, and this machine has none.\nUse: mainplane worker %s   (keep it running with your own supervisor)", strings.Join(args, " "))
+	}
 	token, op := "", (*user.User)(nil)
 	var err error
 	switch len(args) {
