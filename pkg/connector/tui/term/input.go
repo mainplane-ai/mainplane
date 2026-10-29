@@ -500,7 +500,6 @@ func record(n []int) Event {
 // console encodes a pasted line break as a record.
 func unrecord(s string) string {
 	var b strings.Builder
-	var high rune
 	for {
 		i := strings.Index(s, "\x1b[")
 		if i < 0 {
@@ -514,15 +513,7 @@ func unrecord(s string) string {
 		}
 		b.WriteString(s[:i])
 		if n := nums(s[i+2 : i+j]); len(n) >= 4 && n[3] != 0 {
-			switch r := rune(n[2]); {
-			case utf16.IsSurrogate(r) && r < 0xdc00:
-				high = r
-			case utf16.IsSurrogate(r):
-				b.WriteRune(utf16.DecodeRune(high, r))
-				high = 0
-			default:
-				b.WriteRune(r)
-			}
+			b.WriteRune(rune(n[2]))
 		}
 		s = s[i+j+1:]
 	}
