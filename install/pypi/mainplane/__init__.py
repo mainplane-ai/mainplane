@@ -45,7 +45,7 @@ def main():
             os.replace(tmp, bin)
         except OSError:
             tmp.unlink()
-            if not bin.exists():
+            if not bin.exists() or hashlib.sha256(bin.read_bytes()).hexdigest() != sum:
                 raise
     if goos == "windows":
         sys.exit(subprocess.call([str(bin), *sys.argv[1:]]))

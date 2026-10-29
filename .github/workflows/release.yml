@@ -155,12 +155,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           pre=; [[ $TAG == *-rc.* ]] && pre=--prerelease
-          # a rerun after a registry failure finds the release made
-          gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" dist/* --title "$TAG" --notes-file notes.md $pre
+          gh release create "$TAG" dist/* --title "$TAG" --notes-file notes.md $pre
       # The npm and PyPI packages run the release binary, checked against the
       # SHA256SUMS packed in them. Stable releases only, and last, so a registry
       # failure cannot hold back the release. Both registries trust this
-      # workflow and environment (trusted publishing): no token.
+      # workflow and environment (trusted publishing): no token. A rerun would
+      # rebuild and re-sign the binaries, so a failed publish is redone by hand
+      # from the released SHA256SUMS, or by the next tag.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: ${{ !contains(github.ref_name, '-rc.') }}
         with:
@@ -173,5 +174,5 @@ jobs:
         run: |
           cp dist/SHA256SUMS install/npm/
           cp dist/SHA256SUMS install/pypi/mainplane/
-          (cd install/npm && npm version --no-git-tag-version "${TAG#v}" && { npm view "mainplane@${TAG#v}" version | grep -q . || npm publish --provenance --access public; })
-          (cd install/pypi && sed -i "s/^version = \"0.0.0\"/version = \"${TAG#v}\"/" pyproject.toml && uv build && uv publish --trusted-publishing always --check-url https://pypi.org/simple/)
+          (cd install/npm && npm version --no-git-tag-version "${TAG#v}" && npm publish --provenance --access public)
+          (cd install/pypi && sed -i "s/^version = \"0.0.0\"/version = \"${TAG#v}\"/" pyproject.toml && uv build && uv publish --trusted-publishing always)

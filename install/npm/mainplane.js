@@ -37,7 +37,7 @@ async function main() {
       fs.renameSync(tmp, bin);
     } catch (e) {
       fs.rmSync(tmp);
-      if (!fs.existsSync(bin)) throw e;
+      if (!fs.existsSync(bin) || hash(fs.readFileSync(bin)) !== sum) throw e;
     }
   }
   const r = spawnSync(bin, process.argv.slice(2), { stdio: "inherit" });
