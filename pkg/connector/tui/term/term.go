@@ -109,7 +109,6 @@ func Open() (*Terminal, error) {
 	t.Flush()
 	t.Caps = Caps{Truecolor: truecolor(), Dark: true, Progress: progress()}
 	deadline := time.After(queryWait)
-	da1 := false
 	for done := false; !done; {
 		select {
 		case r := <-t.replies:
@@ -119,7 +118,7 @@ func Open() (*Terminal, error) {
 			case bgReply:
 				t.Caps.Dark = r.luma() < 0.5
 			case da1Reply:
-				done, da1 = true, true
+				done = true
 			}
 		case <-deadline:
 			done = true
@@ -128,9 +127,7 @@ func Open() (*Terminal, error) {
 	if t.Caps.Kitty {
 		t.Write(kittyPush)
 	}
-	if da1 { // after the replies: conhost drops the ESC of a reply that comes in win32-input-mode
-		t.Write(keysOn)
-	}
+	t.Write(keysOn) // after the replies: conhost drops their ESC in win32-input-mode
 	t.Flush()
 	return t, nil
 }
