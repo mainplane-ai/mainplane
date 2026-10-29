@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"mime"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,10 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
+
+// tableWord is the most a long word in a table cell holds its column open
+// for; a longer word breaks, so one URL does not force the stacked layout.
+const tableWord = 12
 
 // The transcript shows messages, text, errors, and each call with its
 // result. Start, config, system, name, thinking and step records are not
@@ -180,7 +185,7 @@ var (
 )
 
 // markdown is a small subset: headings, bold, inline code, lists, quotes,
-// rules and fenced code. Tables and the rest show as written.
+// rules, tables and fenced code. The rest shows as written.
 func markdown(a *App, s string, w int) []Line {
 	text, muted := a.Theme.text(), a.Theme.muted()
 	var rows []Line
@@ -189,9 +194,9 @@ func markdown(a *App, s string, w int) []Line {
 	ls := lines(s)
 	for i := 0; i < len(ls); i++ {
 		l := ls[i]
-		if !code && strings.HasPrefix(strings.TrimSpace(l), "|") {
-			j := i
-			for j < len(ls) && strings.HasPrefix(strings.TrimSpace(ls[j]), "|") {
+		if !code && isTable(ls, i) {
+			j := i + 2
+			for j < len(ls) && strings.TrimSpace(ls[j]) != "" && strings.Contains(ls[j], "|") {
 				j++
 			}
 			rows = append(rows, table(a, ls[i:j], w)...)
@@ -238,75 +243,210 @@ func markdown(a *App, s string, w int) []Line {
 	return rows
 }
 
-var tableRule = regexp.MustCompile(`^\s*\|?(\s*:?-+:?\s*\|)+\s*:?-*:?\s*$`)
+var tableRule = regexp.MustCompile(`^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$`)
 
-// table lines up the cells of a markdown table in columns three spaces
-// apart, the header in bold over a rule. A table too wide for w shows as
-// written.
+// isTable says a table starts at ls[i]: a row of cells, then a rule with as
+// many and at least one pipe.
+func isTable(ls []string, i int) bool {
+	return i+1 < len(ls) && strings.Contains(ls[i+1], "|") && tableRule.MatchString(ls[i+1]) && len(cells(ls[i])) == len(cells(ls[i+1]))
+}
+
+// cells is a table row split at its pipes; \| is a pipe in a cell.
+func cells(l string) []string {
+	l = strings.TrimPrefix(strings.TrimSpace(l), "|")
+	if strings.HasSuffix(l, "|") && !strings.HasSuffix(l, `\|`) {
+		l = l[:len(l)-1]
+	}
+	var cs []string
+	var c strings.Builder
+	for i := 0; i < len(l); i++ {
+		switch {
+		case strings.HasPrefix(l[i:], `\|`):
+			c.WriteByte('|')
+			i++
+		case l[i] == '|':
+			cs = append(cs, strings.TrimSpace(c.String()))
+			c.Reset()
+		default:
+			c.WriteByte(l[i])
+		}
+	}
+	return append(cs, strings.TrimSpace(c.String()))
+}
+
+// table draws a markdown table in a muted box, the header in bold, each cell
+// wrapped in its column. When even the narrowest columns do not fit w, or
+// the box would be taller, each row is a stack of header: value lines
+// instead. Borders are not copied.
 func table(a *App, ls []string, w int) []Line {
-	cells, head := tableCells(a, ls)
-	var widths []int
-	for _, row := range cells {
-		for i, c := range row {
-			if i == len(widths) {
-				widths = append(widths, 0)
+	n := len(cells(ls[0]))
+	var grid [][][]Glyph
+	for r, l := range append([]string{ls[0]}, ls[2:]...) {
+		st := a.Theme.text()
+		if r == 0 {
+			st.Attr |= term.Bold
+		}
+		cs := cells(l)
+		row := make([][]Glyph, n)
+		for c := range min(n, len(cs)) {
+			row[c] = inline(a, cs[c], st)
+		}
+		grid = append(grid, row)
+	}
+	nat, least := make([]int, n), make([]int, n)
+	for _, row := range grid {
+		for c, g := range row {
+			nat[c] = max(nat[c], gwidth(g), 1)
+			least[c] = max(least[c], min(longestWord(g), tableWord), 1)
+		}
+	}
+	st := stacked(a, grid, w)
+	widths := fit(nat, least, w-3*n-1)
+	if widths == nil {
+		return st
+	}
+	if bx := box(a, grid, widths, cells(ls[1])); len(bx) <= len(st) {
+		return bx
+	}
+	return st
+}
+
+// box draws grid in a muted box with columns widths wide, each cell wrapped
+// and aligned as its rule cell says. A row of the box holds a piece of each
+// cell, so it copies as its own line.
+func box(a *App, grid [][][]Glyph, widths []int, aligns []string) []Line {
+	muted := a.Theme.muted()
+	border := func(l, m, r string) Line {
+		s := l
+		for c, cw := range widths {
+			if c > 0 {
+				s += m
 			}
-			widths[i] = max(widths[i], gwidth(c))
+			s += strings.Repeat("─", cw+2)
+		}
+		return Line{Gs: deco(s+r, muted)}
+	}
+	rows := []Line{border("┌", "┬", "┐")}
+	for r, row := range grid {
+		if r == 1 {
+			rows = append(rows, border("├", "┼", "┤"))
+		}
+		wrapped := make([][]Line, len(row))
+		h := 0
+		for c, g := range row {
+			wrapped[c] = flow(g, widths[c], nil, nil)
+			h = max(h, len(wrapped[c]))
+		}
+		for k := range h {
+			gs := deco("│", muted)
+			for c := range row {
+				var cell []Glyph
+				if k < len(wrapped[c]) {
+					cell = wrapped[c][k].Gs
+				}
+				gs = cat(gs, align(cell, widths[c], aligns[c]), deco("│", muted))
+			}
+			rows = append(rows, Line{Gs: copyTrim(gs)})
 		}
 	}
-	total := 3 * (len(widths) - 1)
-	for _, cw := range widths {
-		total += cw
+	return append(rows, border("└", "┴", "┘"))
+}
+
+// align pads cell to w cells, plus one on each side, where its rule cell
+// puts it: :-: centers and -: goes right.
+func align(cell []Glyph, w int, rule string) []Glyph {
+	for len(cell) > 0 && cell[len(cell)-1].G == " " {
+		cell = cell[:len(cell)-1]
 	}
-	if total > w {
-		var rows []Line
-		for _, l := range ls {
-			rows = append(rows, flow(run(l, a.Theme.text()), w, nil, nil)...)
+	pad, left := w-gwidth(cell), 0
+	switch {
+	case strings.HasPrefix(rule, ":") && strings.HasSuffix(rule, ":"):
+		left = pad / 2
+	case strings.HasSuffix(rule, ":"):
+		left = pad
+	}
+	return cat(run(strings.Repeat(" ", left+1), term.Style{}), cell, run(strings.Repeat(" ", pad-left+1), term.Style{}))
+}
+
+// copyTrim makes the spaces at either end of gs deco, so a copied row of a
+// table has the cells' text with spaces only between them.
+func copyTrim(gs []Glyph) []Glyph {
+	for i := 0; i < len(gs) && (gs[i].Deco || gs[i].G == " "); i++ {
+		gs[i].Deco = true
+	}
+	for i := len(gs) - 1; i >= 0 && (gs[i].Deco || gs[i].G == " "); i-- {
+		gs[i].Deco = true
+	}
+	return gs
+}
+
+func longestWord(gs []Glyph) int {
+	most, x := 0, 0
+	for _, g := range gs {
+		if x = x + g.W; g.G == " " {
+			x = 0
 		}
-		return rows
+		most = max(most, x)
+	}
+	return most
+}
+
+// fit is the column widths that fill avail cells: natural widths when they
+// fit, else the least widths plus the rest shared in proportion to how far
+// each column is short of natural, as a browser lays out a table. Nil when
+// even least does not fit.
+func fit(nat, least []int, avail int) []int {
+	if sum(nat) <= avail {
+		return nat
+	}
+	if sum(least) > avail {
+		return nil
+	}
+	widths := slices.Clone(least)
+	for range avail - sum(least) {
+		i := -1
+		for j := range widths {
+			if widths[j] < nat[j] && (i < 0 || (widths[j]-least[j])*(nat[i]-least[i]) < (widths[i]-least[i])*(nat[j]-least[j])) {
+				i = j
+			}
+		}
+		widths[i]++
+	}
+	return widths
+}
+
+func sum(xs []int) int {
+	t := 0
+	for _, x := range xs {
+		t += x
+	}
+	return t
+}
+
+// stacked draws each row of a table as header: value lines, the values
+// lined up and wrapped under themselves, a muted rule between rows.
+func stacked(a *App, grid [][][]Glyph, w int) []Line {
+	label := 0
+	for _, h := range grid[0] {
+		label = max(label, gwidth(h)+2)
+	}
+	label = min(label, w/2)
+	body := grid[1:]
+	if len(body) == 0 {
+		body = grid
 	}
 	var rows []Line
-	for r, row := range cells {
-		var gs []Glyph
-		for i, c := range row {
-			if i > 0 {
-				gs = append(gs, run("   ", term.Style{})...)
-			}
-			gs = append(gs, c...)
-			if i < len(row)-1 {
-				gs = append(gs, run(strings.Repeat(" ", widths[i]-gwidth(c)), term.Style{})...)
-			}
+	for r, row := range body {
+		if r > 0 {
+			rows = append(rows, Line{Gs: deco(strings.Repeat("─", w), a.Theme.muted())})
 		}
-		rows = append(rows, Line{Gs: gs})
-		if r == 0 && head {
-			rows = append(rows, Line{Gs: deco(strings.Repeat("─", total), a.Theme.muted())})
+		for c, v := range row {
+			h := mute(a, cat(clip(slices.Clone(grid[0][c]), label-2), run(":", term.Style{})))
+			first := cat(h, run(strings.Repeat(" ", max(1, label-gwidth(h))), term.Style{}))
+			rows = append(rows, flow(v, w, first, deco(strings.Repeat(" ", gwidth(first)), term.Style{}))...)
 		}
 	}
 	return rows
-}
-
-// tableCells is the table's rows of cells, and whether a rule follows the
-// first, making it the header, in bold.
-func tableCells(a *App, ls []string) (cells [][][]Glyph, head bool) {
-	for _, l := range ls {
-		if tableRule.MatchString(l) {
-			head = head || len(cells) == 1
-			continue
-		}
-		var row [][]Glyph
-		for _, c := range strings.Split(strings.Trim(strings.TrimSpace(l), "|"), "|") {
-			row = append(row, inline(a, strings.TrimSpace(c), a.Theme.text()))
-		}
-		cells = append(cells, row)
-	}
-	if head {
-		for _, c := range cells[0] {
-			for k := range c {
-				c[k].St.Attr |= term.Bold
-			}
-		}
-	}
-	return cells, head
 }
 
 // inline styles **bold** and `code` and drops their marks; a mark with no
