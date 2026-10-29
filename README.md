@@ -24,7 +24,11 @@ curl -fsSL https://mainplane.ai/install | sh -s -- server quickstart
 The quickstart walks you through adding a provider, workers (computers your agents control) and connectors (ways to message your agents).
 
 Read more in [docs/self-hosting.md](docs/self-hosting.md).
-<br/><br/>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/tui-dark.svg">
+  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/tui-light.svg" alt="The Mainplane TUI: a sidebar of sessions on different models, and an agent that moves a Qwen fine-tune from a GPU server to a Mac Studio and quantizes it to run there" width="960">
+</picture>
 
 # Features
 ### Always-on
