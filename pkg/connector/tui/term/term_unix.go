@@ -13,6 +13,8 @@ import (
 
 const isWindows = false
 
+const keysOn, keysOff = "", ""
+
 func save(in, out *os.File) (func(), error) { return func() {}, nil }
 
 func setup(in, out *os.File) (func(), error) { return func() {}, nil }

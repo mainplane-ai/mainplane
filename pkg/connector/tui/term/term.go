@@ -34,7 +34,7 @@ const (
 	query = "\x1b[?u" + // kitty keyboard flags
 		"\x1b]11;?\x1b\\" + // background color
 		"\x1b[c" // DA1, answered by all: the end of the replies
-	leave = "\x1b[?1004l\x1b[?2004l" +
+	leave = keysOff + "\x1b[?1004l\x1b[?2004l" +
 		"\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l" +
 		"\x1b[0m\x1b[?7h\x1b[?25h" +
 		"\x1b[?1049l" +
@@ -126,8 +126,9 @@ func Open() (*Terminal, error) {
 	}
 	if t.Caps.Kitty {
 		t.Write(kittyPush)
-		t.Flush()
 	}
+	t.Write(keysOn) // after the replies: conhost drops their ESC in win32-input-mode
+	t.Flush()
 	return t, nil
 }
 

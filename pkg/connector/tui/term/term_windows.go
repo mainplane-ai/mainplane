@@ -10,6 +10,10 @@ import (
 
 const isWindows = true
 
+// keysOn turns on win32-input-mode: every key comes as a record with its
+// modifiers, so Shift+Enter is not a plain CR.
+const keysOn, keysOff = "\x1b[?9001h", "\x1b[?9001l"
+
 // resizePoll is how often the size is checked. A console in VT input mode
 // does not report resizes through ReadFile.
 const resizePoll = 100 * time.Millisecond
