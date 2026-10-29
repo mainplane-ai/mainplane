@@ -190,16 +190,15 @@ func (d *decoder) parse(emit func(Event), force bool) {
 			}
 		}
 		d.buf = d.buf[n:]
-		switch ev.(type) {
+		switch e := ev.(type) {
 		case nil:
 		case pasteStart:
 			d.pasting = true
 		case surrogate:
-			r := ev.(surrogate).r
-			if utf16.IsSurrogate(r) && r < 0xdc00 {
-				d.high = r
+			if e.r < 0xdc00 {
+				d.high = e.r
 			} else if d.high != 0 {
-				emit(Key{Code: utf16.DecodeRune(d.high, r)})
+				emit(Key{Code: utf16.DecodeRune(d.high, e.r)})
 				d.high = 0
 			}
 		default:
@@ -251,17 +250,7 @@ func parseOne(b []byte) (int, Event) {
 		}
 		return 3, nil
 	case 0x1b:
-		if len(b) > 2 && (b[2] == '[' || b[2] == 'O') { // Alt+arrow as ESC and the arrow: Terminal.app with Option as Meta
-			n, ev := parseOne(b[1:])
-			if n == 0 {
-				return 0, nil
-			}
-			if k, ok := ev.(Key); ok {
-				k.Mod |= Alt
-				return n + 1, k
-			}
-		}
-		return 1, Key{Code: KeyEsc}
+		return escKey(b)
 	}
 	n, ev := char(b, 1)
 	if k, ok := ev.(Key); ok {
@@ -269,6 +258,22 @@ func parseOne(b []byte) (int, Event) {
 		ev = k
 	}
 	return n, ev
+}
+
+// escKey decodes ESC ESC: Esc, or Alt and a CSI or SS3 key, as Terminal.app
+// with Option as Meta sends Option+arrows.
+func escKey(b []byte) (int, Event) {
+	if len(b) > 2 && (b[2] == '[' || b[2] == 'O') {
+		n, ev := parseOne(b[1:])
+		if n == 0 {
+			return 0, nil
+		}
+		if k, ok := ev.(Key); ok {
+			k.Mod |= Alt
+			return n + 1, k
+		}
+	}
+	return 1, Key{Code: KeyEsc}
 }
 
 // char decodes one control byte or rune at b[i:].
@@ -423,8 +428,10 @@ func osc(s string) Event {
 }
 
 // vkCode maps the virtual key of a win32 key record that is not text.
-var vkCode = map[int]rune{13: KeyEnter, 9: KeyTab, 8: KeyBackspace, 27: KeyEsc, 33: KeyPgUp, 34: KeyPgDn, 35: KeyEnd,
-	36: KeyHome, 37: KeyLeft, 38: KeyUp, 39: KeyRight, 40: KeyDown, 45: KeyInsert, 46: KeyDelete, 112: KeyF1}
+var vkCode = map[int]rune{
+	13: KeyEnter, 9: KeyTab, 8: KeyBackspace, 27: KeyEsc, 33: KeyPgUp, 34: KeyPgDn, 35: KeyEnd,
+	36: KeyHome, 37: KeyLeft, 38: KeyUp, 39: KeyRight, 40: KeyDown, 45: KeyInsert, 46: KeyDelete, 112: KeyF1,
+}
 
 // record decodes a win32-input-mode key record, Vk;Sc;Uc;Kd;Cs;Rc. Key ups
 // and lone modifiers are nil. Ctrl with Alt and a character is AltGr: text.
@@ -462,18 +469,29 @@ func record(n []int) Event {
 // console encodes a pasted line break as a record.
 func unrecord(s string) string {
 	var b strings.Builder
+	var high rune
 	for {
 		i := strings.Index(s, "\x1b[")
 		if i < 0 {
 			return b.String() + s
 		}
 		j := strings.IndexByte(s[i:], '_')
-		if j < 0 {
-			return b.String() + s
+		if j < 0 || strings.Trim(s[i+2:i+j], "0123456789;") != "" {
+			b.WriteString(s[:i+2])
+			s = s[i+2:]
+			continue
 		}
 		b.WriteString(s[:i])
 		if n := nums(s[i+2 : i+j]); len(n) >= 4 && n[3] != 0 {
-			b.WriteRune(rune(n[2]))
+			switch r := rune(n[2]); {
+			case utf16.IsSurrogate(r) && r < 0xdc00:
+				high = r
+			case high != 0:
+				b.WriteRune(utf16.DecodeRune(high, r))
+				high = 0
+			default:
+				b.WriteRune(r)
+			}
 		}
 		s = s[i+j+1:]
 	}
