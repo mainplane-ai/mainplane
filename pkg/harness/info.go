@@ -120,7 +120,13 @@ func (h *Harness) List() ([]Info, error) {
 // <scratch>/logs/<id>.log, the bodies the envelope takes as media dropped so
 // rg works on it. A
 // worker not connected is skipped; the session's next stop writes again.
-func (h *Harness) copyLogs(ctx context.Context, id string) {
+func (h *Harness) copyLogs(ctx context.Context, s *session) {
+	id, n := s.id, s.exports.Add(1)
+	s.logs.Lock()
+	defer s.logs.Unlock()
+	if s.exports.Load() != n {
+		return // a newer call waits and writes a newer snapshot
+	}
 	chain, err := h.Sessions.Load(id)
 	if err != nil {
 		log.Printf("session %s: log copy: %v", id, err)

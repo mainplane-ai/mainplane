@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode"
 	"unicode/utf8"
 
@@ -29,6 +30,8 @@ type session struct {
 	changed chan struct{}   // closed and replaced on every append
 	retry   bool            // a run asked to step past a failed tip
 	stopped string          // who asked for the stop, while one is in flight
+	logs    sync.Mutex      // held by copyLogs from Load to the last Write, so an older copy never lands last
+	exports atomic.Int64    // copyLogs calls asked for; a waiting one leaves to a newer one
 
 	// under Harness.mu
 	running  bool               // a runner goroutine is stepping this session
@@ -314,7 +317,7 @@ func (h *Harness) Kick(ctx context.Context, id string) {
 				h.mu.Unlock()
 				h.touch(id)
 				if st == statefile.StatusClosed || st == statefile.StatusFailed {
-					h.copyLogs(ctx, id)
+					h.copyLogs(ctx, s)
 				}
 				close(done)
 				return
