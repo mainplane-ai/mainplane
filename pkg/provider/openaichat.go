@@ -12,6 +12,12 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
+// chatLimits are the tightest of the vendors seen behind Chat Completions:
+// Claude's sizes as anthLimits, which are under the OpenAI patch limit and
+// past what Gemini uses, Bedrock's documented 3.75 MB, Anthropic's 100 images,
+// and OpenRouter's 30 MB of base64 images a request.
+var chatLimits = Limits{Side: 2576, Pixels: 3_700_000, Bytes: 3_750_000, Count: 100, Request: 15_000_000}
+
 // OpenAIChat is the Chat Completions envelope for OpenAI-compatible endpoints.
 // Thinking is reasoning_content, the field DeepSeek, Kimi, GLM and MiMo stream
 // and want back in a tool loop. OpenRouter and OpenCode Go stream it as
@@ -97,6 +103,7 @@ type chatCallBody struct {
 
 func (e openaiChat) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
+	rest = fit(e.Name(), rest, chatLimits)
 	body := chatReq{Model: req.Model, Stream: true, StreamOptions: chatStreamOptions{IncludeUsage: true}, CacheKey: req.Key, Messages: []chatMsg{}}
 	if len(system) > 0 {
 		body.Messages = append(body.Messages, chatMsg{Role: "system", Content: systemText(system)})

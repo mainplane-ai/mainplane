@@ -15,6 +15,11 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
+// bedLimits are Claude's sizes, as anthLimits, and what Converse rejected past,
+// measured: an image over 5 MiB of base64 (the docs say 3.75 MB), more than 100
+// images, a body over about 32 MB (the docs say 20 MB).
+var bedLimits = Limits{Side: 2576, Pixels: 3_700_000, Bytes: 5 << 20 * 3 / 4, Count: 100, Request: 20_000_000}
+
 // The body carries only what the session builds. inferenceConfig and
 // additionalModelRequestFields, where Claude's thinking goes, come from params.
 const bedrockCacheTTL = 300 // the default cachePoint: 5 minutes, refreshed on every hit
@@ -121,6 +126,7 @@ var cachePoint = &bedCachePoint{Type: "default"}
 
 func (e bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
+	rest = fit(e.Name(), rest, bedLimits)
 	body := bedReq{Messages: []bedMsg{}}
 	var marks []string
 	if len(system) > 0 {

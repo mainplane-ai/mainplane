@@ -202,8 +202,8 @@ type args struct {
 	Background                                                bool
 }
 
-// maxMedia bounds a file read as media. Anthropic's per-image limit, the
-// tightest of the five envelopes.
+// maxMedia bounds a file read as media, as a sanity cap on the state file.
+// Each envelope fits images to its vendor's limits when it builds a request.
 const maxMedia = 5 << 20
 
 // execute runs one tool on a worker. A failure is a result the model reads.

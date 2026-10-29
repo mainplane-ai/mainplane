@@ -11,6 +11,12 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
+// gemLimits are the largest seen to pass: Gemini documents no pixel limit but
+// failed to process a 65000x50 or a 16000x16000 image, while 30000x50 and
+// 12000x12000 passed, as did a 19 MB image and 78 MB of inline images. The
+// docs say 3600 images.
+var gemLimits = Limits{Side: 30000, Pixels: 12000 * 12000, Bytes: 19_000_000, Count: 3600, Request: 78_000_000}
+
 func Gemini(url, key string) Provider {
 	return Provider{
 		URL:      base(url, "https://generativelanguage.googleapis.com") + "/v1beta/models",
@@ -91,6 +97,7 @@ type gemInline struct {
 
 func (e gemini) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
+	rest = fit(e.Name(), rest, gemLimits)
 	body := gemReq{Contents: []gemContent{}}
 	if len(system) > 0 {
 		body.SystemInstruction = &gemContent{Parts: []gemPart{{Text: systemText(system)}}}
