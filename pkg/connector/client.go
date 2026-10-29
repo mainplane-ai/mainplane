@@ -64,8 +64,12 @@ func Login(ctx context.Context, token string) (c *Client, old *Client, version s
 	}
 	c, old = &Client{Key: key, Harness: h, Local: pointer.Local(ctx, h)}, &Client{}
 	if c.Local == "" {
-		if c.URL, err = pointer.Find(ctx, h, ""); err != nil {
-			return c, old, "", unreachable(err)
+		// a URL means the pointer answered, and the error says what failed there
+		if c.URL, err = pointer.Find(ctx, h, ""); c.URL == "" {
+			err = unreachable(err)
+		}
+		if err != nil {
+			return c, old, "", err
 		}
 	}
 	if version, err = c.Version(ctx); err != nil {
@@ -127,7 +131,7 @@ func (c *Client) find(ctx context.Context) (bool, error) {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return false, err // slow, not gone
 		}
-		return false, fmt.Errorf("the harness of this login is not at %s, where it last was: it is down, or gone; to log in to another: mainplane login <api key> (%w)", u, err)
+		return false, fmt.Errorf("the harness of this login does not answer at %s, where it last was: %w; to log in to another: mainplane login <api key>", u, err)
 	}
 	if err != nil || u == at {
 		return false, unreachable(err)
@@ -188,13 +192,15 @@ func (c *Client) Do(ctx context.Context, method, path, ctype string, body io.Rea
 	resp, err := http.DefaultClient.Do(req)
 	// Cloudflare answers 502, then 530, for a quick tunnel whose harness is
 	// down, and a harness down for long comes back at a new URL: find it, so
-	// the next call goes there. The call's own failure is what it returns.
+	// the next call goes there. The call's own failure is what it returns,
+	// unless finding it failed too, which says why.
 	// Unsaved: a login saves only once its key works, and Load finds it again.
+	var ferr error
 	if c.Local == "" && c.Mesh == "" && (err != nil || resp.StatusCode >= 500) {
-		_, _ = c.find(ctx)
+		_, ferr = c.find(ctx)
 	}
 	if err != nil {
-		return nil, unreachable(err)
+		return nil, cmp.Or(ferr, unreachable(err))
 	}
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(resp.Body)

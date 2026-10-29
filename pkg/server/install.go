@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -291,29 +290,10 @@ func Reached(key, url string) (string, error) {
 
 // reach is the URL a worker finds the harness with key at, once the harness
 // proves its key there and passes the WebSocket upgrade, as a worker needs.
-// An error at the URL says what most likely set it off.
 func reach(ctx context.Context, key string) (string, error) {
 	u, err := pointer.Find(ctx, key, "")
-	if u == "" { // the pointer's own error
-		return u, err
-	}
 	if err == nil {
 		err = upgrades(ctx, u)
-	}
-	var dns *net.DNSError
-	var cert *tls.CertificateVerificationError
-	var st pointer.Status
-	var op *net.OpError
-	var ne net.Error
-	switch {
-	case errors.As(err, &dns):
-		err = fmt.Errorf("this machine cannot resolve the harness URL; every device, this one too, must: %w", err)
-	case errors.As(err, &cert):
-		err = fmt.Errorf("the harness URL's certificate is not trusted here; it needs one every device trusts, such as Let's Encrypt's: %w", err)
-	case errors.As(err, &st) && st >= 500:
-		err = fmt.Errorf("the proxy or tunnel at the harness URL cannot reach the harness on its loopback port: %w", err)
-	case errors.As(err, &op), errors.As(err, &ne) && ne.Timeout():
-		err = fmt.Errorf("nothing answers at the harness URL; is its proxy or tunnel running? %w", err)
 	}
 	return u, err
 }
