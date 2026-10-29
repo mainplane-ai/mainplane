@@ -152,7 +152,7 @@ func (d *decoder) wait() time.Duration {
 }
 
 func (d *decoder) feed(b []byte, emit func(Event)) {
-	if len(d.buf) == 0 && !d.pasting && bareDA1.Match(b) {
+	if isWindows && len(d.buf) == 0 && !d.pasting && bareDA1.Match(b) {
 		emit(da1Reply{})
 		return
 	}
