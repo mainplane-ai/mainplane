@@ -229,8 +229,16 @@ Nothing listens on that port outside the mesh.
   `mainplane worker remove <name>` before the install avoids it. A worker
   other than `admin` keeps its name while it is offline, until it is
   removed. A machine that came back as `<name>-2` gets its name back with
-  `mainplane worker remove <name>`, then `mainplane uninstall` and install on
-  it again.
+  `mainplane worker remove <name>`, then `mainplane worker rename <name>-2
+  <name>`.
+- `mainplane worker rename <name> <new>` renames a worker in place: it keeps
+  its keys and address, and its peers and hosts blocks follow within seconds.
+  Nothing else changes. Links, drives and sessions name workers, so they
+  follow the name: the worker gets the links and drives of `<new>`, and
+  sessions that named `<name>` find it not connected until their workers are
+  set again. The new name is refused when a worker holds it, offline or not,
+  and the worker is refused while the config names it as a drive's server.
+  A machine that logs out and joins again takes its hostname.
 - Paths: two workers talk direct, UDP to UDP, when their NATs let them. This
   is usual on one LAN and common across the internet. When they cannot, their
   traffic goes through the relay in the harness, through the tunnel: it works,
