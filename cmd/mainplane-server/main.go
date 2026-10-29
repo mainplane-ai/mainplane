@@ -4,10 +4,12 @@
 //
 //	mainplane-server up   <config.json>
 //	mainplane-server install [config.json]    and again at every boot, as a service, behind a quick tunnel; asks for sudo or admin itself;
+//	                                          with --url <url> last, at the harness URL url that the user's own proxy carries;
 //	                                          with none, keeps an installed config; prints the join lines, with the network name and
 //	                                          device code made at the first install, and a new api key "default", the ones before it kept
 //	mainplane-server install quickstart       the same with none, then opens the TUI's quickstart on this terminal
 //	mainplane-server tunnel <url> <cloudflared token> | quick   the installed harness moves to the user's own tunnel, or back
+//	mainplane-server url <url>                the installed harness moves to url, carried by the user's own proxy
 //	mainplane-server key  new <name> | revoke <name> | list    on the installed harness, as root
 //	mainplane-server join [cycle]             the join lines, with a new device code after cycle
 //	mainplane-server rename <name>            the network name
@@ -57,9 +59,9 @@ func main() {
 	case verb == "up" && len(args) == 2:
 		fatal(server.Up(args[1]))
 	case verb == "install":
-		quick := len(args) == 2 && args[1] == "quickstart"
+		quick := len(args) >= 2 && args[1] == "quickstart"
 		if quick {
-			args = args[:1]
+			args = append(args[:1], args[2:]...)
 		}
 		h, fresh := config(args[1:])
 		fatal(h.Expand())
@@ -101,7 +103,7 @@ func main() {
 			logIn(h)
 		}
 		finish(h, quick) // quick only with no config file, so fresh
-	case verb == "tunnel":
+	case verb == "tunnel" || verb == "url":
 		move(args)
 	case verb == auth.Key && (len(args) == 2 && args[1] == "list" || len(args) == 3 && (args[1] == "new" || args[1] == "revoke")):
 		elevate.Root(args...)
@@ -131,11 +133,15 @@ type handover struct {
 }
 
 // config is what install's arguments name: the default config with a fresh
-// key, or a config file.
+// key, reached at a URL after --url, or a config file.
 func config(args []string) (h handover, fresh bool) {
 	switch {
 	case len(args) == 0:
 		return handover{Config: server.Default(), Key: rand.Text()}, true
+	case len(args) == 2 && args[0] == "--url":
+		h, fresh = config(nil)
+		h.URL = harnessURL(args[1], "the URL your proxy carries to http://localhost:8080")
+		return h, fresh
 	case len(args) == 1:
 		b, err := os.ReadFile(args[0])
 		fatal(err)
@@ -179,6 +185,9 @@ func logIn(h handover) {
 // tunnel meanwhile, and the TUI says while it does.
 func finish(h handover, quick bool) {
 	if quick && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
+		if h.URL != "" { // the TUI would only say the network is starting
+			network(h)
+		}
 		tui := exec.Command(worker.Bin, "quickstart")
 		tui.Stdin, tui.Stdout, tui.Stderr = os.Stdin, os.Stdout, os.Stderr
 		if err := tui.Run(); err != nil && tui.ProcessState == nil {
@@ -192,13 +201,13 @@ func finish(h handover, quick bool) {
 	}
 }
 
-// network waits, behind the spinner, until workers can find the harness
-// through its tunnel, after the lines are printed: they name no URL, and the
-// wait is the first start's.
+// network waits, behind the spinner, until workers can reach the harness,
+// after the lines are printed: they name no URL, and the wait is the first
+// start's.
 func network(h handover) {
 	fmt.Println()
 	stop := spin("initializing network")
-	if _, err := server.Reached(h.Harness); err != nil {
+	if _, err := server.Reached(h.Harness, h.URL); err != nil {
 		stop("")
 		fatal(err)
 	}
@@ -261,28 +270,37 @@ func spin(label string) (stop func(end string)) {
 	}
 }
 
-// move moves the installed harness to the user's own tunnel, or back to a
-// quick one.
+// move moves the installed harness to the user's own proxy or tunnel, or
+// back to a quick tunnel.
 func move(args []string) {
+	var url string
 	var t *server.Tunnel
 	switch {
-	case len(args) == 2 && args[1] == "quick":
-	case len(args) == 3:
-		u, err := neturl.Parse(args[1])
-		if err != nil || u.Scheme != "https" || u.Host == "" {
-			log.Fatalf("%s: the URL is https://<the name Cloudflare routes to the tunnel>", args[1])
-		}
+	case len(args) == 2 && args[0] == "tunnel" && args[1] == "quick":
+	case len(args) == 2 && args[0] == "url":
+		url = harnessURL(args[1], "the URL your proxy carries to http://localhost:8080")
+	case len(args) == 3 && args[0] == "tunnel":
 		if strings.TrimSpace(args[2]) == "" {
 			log.Fatalf("the cloudflared token is empty: copy it from the tunnel's page in Cloudflare")
 		}
-		t = &server.Tunnel{URL: strings.TrimSuffix(args[1], "/"), Token: args[2]}
+		t = &server.Tunnel{URL: harnessURL(args[1], "the name Cloudflare routes to the tunnel"), Token: args[2]}
 	default:
 		usage()
 	}
 	elevate.Root(args...)
-	url, err := server.SetTunnel(t)
+	u, err := server.Move(url, t)
 	fatal(err)
-	fmt.Printf("harness reached at %s; workers follow in about a minute\n", url)
+	fmt.Printf("harness reached at %s; workers follow in about a minute\n", u)
+}
+
+// harnessURL is s, an https URL on port 443, with no trailing slash; what
+// names its host. Workers reach the coordinator on 443 only.
+func harnessURL(s, what string) string {
+	u, err := neturl.Parse(s)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.Port() != "" {
+		log.Fatalf("%s: the URL is https://<%s>, on port 443", s, what)
+	}
+	return strings.TrimSuffix(s, "/")
 }
 
 // join prints the lines that make a machine a worker, after a new device
@@ -345,6 +363,8 @@ func usage() {
                                           admin and logs its CLI in. A config already installed stays as it is.
                                           Providers and links in the config apply when it is saved
   install   quickstart                    the same, then open the quickstart in the TUI on this terminal
+  install   [quickstart] --url <url>      either, reached at url, which your own proxy carries to
+                                          http://localhost:8080: no tunnel
   install   <config.json>                 run it at every boot from a root-only copy of the config
                                           Either install prints the line that makes a machine a worker, with the
                                           network name and device code the first install made, and a new api key
@@ -353,6 +373,8 @@ func usage() {
   tunnel    <url> <cloudflared token>     reach the installed harness at url, through a tunnel you made in Cloudflare
                                           that routes url to http://localhost:8080; workers follow
   tunnel    quick                         back to a quick tunnel
+  url       <url>                         reach the installed harness at url, which your own proxy carries to
+                                          http://localhost:8080; workers follow
   key       new <name> | revoke <name> | list   api keys of the installed harness: what a connector needs to call it
   join                                    the line that makes a machine a worker: the network name and device code
   join      cycle                         a new device code; the one before joins no more. Workers stay until
@@ -364,7 +386,7 @@ func usage() {
                                           auth table stay
   version                                 the release this binary was built from
 
-key, join, rename, tunnel, update and uninstall ask for sudo or admin themselves.
+key, join, rename, tunnel, url, update and uninstall ask for sudo or admin themselves.
 `)
 	os.Exit(2)
 }

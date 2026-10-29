@@ -254,7 +254,12 @@ func get(ctx context.Context, url string, v any) error {
 	}
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("GET %s: %s: %s", url, resp.Status, bytes.TrimSpace(b))
+		return fmt.Errorf("GET %s: %w: %s", url, Status(resp.StatusCode), bytes.TrimSpace(b))
 	}
 	return json.NewDecoder(resp.Body).Decode(v)
 }
+
+// Status is an HTTP status a GET got in place of 200.
+type Status int
+
+func (s Status) Error() string { return fmt.Sprintf("%d %s", s, http.StatusText(int(s))) }

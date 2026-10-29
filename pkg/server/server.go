@@ -15,6 +15,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -56,8 +57,9 @@ const maxKey = 4 << 10
 // tunnel are there, and sessions in sessions/ under it, the one directory a
 // drive may ever share.
 type Config struct {
-	HTTP        string                       `json:"http"`             // loopback address the tunnel carries connectors and workers to
-	Tunnel      *Tunnel                      `json:"tunnel,omitempty"` // the user's own; none is a quick tunnel
+	HTTP        string                       `json:"http"`             // loopback address the tunnel or the user's proxy carries connectors and workers to
+	URL         string                       `json:"url,omitempty"`    // the harness URL, which the user's own proxy carries to HTTP: no tunnel
+	Tunnel      *Tunnel                      `json:"tunnel,omitempty"` // the user's own; none, and no URL, is a quick tunnel
 	Providers   map[string]Provider          `json:"providers"`
 	Links       [][2]string                  `json:"links,omitempty"`        // pairs of workers, by name, that reach each other on the mesh
 	Drives      map[string]coordinator.Drive `json:"drives,omitempty"`       // by name: each one's server and workers
@@ -157,12 +159,12 @@ func providers(dir string, cfg map[string]Provider) (map[string]provider.Provide
 }
 
 // Harness runs the harness role on one loopback port, behind the user's own
-// tunnel or a quick one, until ctx ends or the listener, the mesh node or the
-// tunnel fails: /id proves the harness key to anyone before they send a
+// proxy, the user's own tunnel or a quick one, until ctx ends or the listener,
+// the mesh node or the tunnel fails: /id proves the harness key to anyone before they send a
 // secret, /ts2021 coordinates the mesh, /derp relays between its nodes,
 // connectors call every other route with an api key, every session that was
 // open on start resumes. The harness joins its own mesh, and workers dial it
-// there. The pointer and the relay map follow the tunnel's URL. The config
+// there. The pointer and the relay map follow the harness URL. The config
 // at path is read again when it changes: providers, links and drives apply
 // at once.
 func Harness(ctx context.Context, path string) error {
@@ -170,8 +172,8 @@ func Harness(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	if host, _, _ := net.SplitHostPort(c.HTTP); !net.ParseIP(host).IsLoopback() {
-		return fmt.Errorf("http %q: the harness listens on loopback only, such as 127.0.0.1:8080; the tunnel is the one way in", c.HTTP)
+	if err := c.way(); err != nil {
+		return err
 	}
 	dir := filepath.Dir(path)
 	ps, err := providers(dir, c.Providers)
@@ -266,6 +268,9 @@ func Harness(ctx context.Context, path string) error {
 	api := store.Bearer(limit, routes)
 	mux.Handle("/", api)
 	srv := &http.Server{Addr: c.HTTP, Handler: mux}
+	if c.URL != "" {
+		srv.Handler = proxied(mux)
+	}
 	go func() {
 		<-ctx.Done()
 		_ = srv.Close()
@@ -310,12 +315,7 @@ func Harness(ctx context.Context, path string) error {
 		urls <- url
 	}
 	go func() {
-		var err error
-		if c.Tunnel != nil {
-			err = tunnel.Own(ctx, dir, c.Tunnel.URL, c.Tunnel.Token, "http://"+c.HTTP, up)
-		} else {
-			err = tunnel.Quick(ctx, dir, "http://"+c.HTTP, up)
-		}
+		err := reached(ctx, c, dir, up)
 		// for Reached, which a service's log does not reach
 		if ctx.Err() == nil {
 			_ = os.WriteFile(filepath.Join(dir, tunnelFailed), []byte(err.Error()), 0o600)
@@ -326,6 +326,46 @@ func Harness(ctx context.Context, path string) error {
 		return err
 	}
 	return nil
+}
+
+// way is why c gives the harness no one way in, if it does not.
+func (c Config) way() error {
+	if host, _, _ := net.SplitHostPort(c.HTTP); !net.ParseIP(host).IsLoopback() {
+		return fmt.Errorf("http %q: the harness listens on loopback only, such as 127.0.0.1:8080; the tunnel or your proxy is the one way in", c.HTTP)
+	}
+	if u, err := url.Parse(c.URL); c.URL != "" && (c.Tunnel != nil || err != nil || u.Scheme != "https" || u.Port() != "") {
+		return fmt.Errorf("url %q: an https URL on port 443 that your proxy carries to http, with no tunnel beside it", c.URL)
+	}
+	return nil
+}
+
+// reached carries the harness URL to the harness until ctx ends, and calls up
+// with the URL each time it is: the user's own proxy does at once, a tunnel
+// each time cloudflared starts.
+func reached(ctx context.Context, c Config, dir string, up func(url string)) error {
+	switch {
+	case c.URL != "":
+		up(c.URL)
+		<-ctx.Done()
+		return ctx.Err()
+	case c.Tunnel != nil:
+		return tunnel.Own(ctx, dir, c.Tunnel.URL, c.Tunnel.Token, "http://"+c.HTTP, up)
+	}
+	return tunnel.Quick(ctx, dir, "http://"+c.HTTP, up)
+}
+
+// proxied is h behind the user's own proxy, not cloudflared, so a client may
+// send any CF-Connecting-IP: the proxy's own X-Forwarded-For hop, the last,
+// is the client.
+func proxied(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Header.Del("CF-Connecting-IP")
+		if f := r.Header.Values("X-Forwarded-For"); len(f) > 0 {
+			hops := strings.Split(f[len(f)-1], ",")
+			r.Header.Set("CF-Connecting-IP", strings.TrimSpace(hops[len(hops)-1]))
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 // keyMu keeps two config writes at once, of providers or drives, from

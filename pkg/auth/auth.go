@@ -224,7 +224,8 @@ func (l *Limit) Refused(addr string) {
 
 // Addr is who sent r: the client address cloudflared puts in
 // CF-Connecting-IP, else the peer. The harness listens on loopback only, so
-// every peer is cloudflared or this machine, and the header can be trusted.
+// every peer is cloudflared, the user's proxy or this machine, and behind a
+// proxy the harness sets the header itself.
 func Addr(r *http.Request) string {
 	if a := r.Header.Get("CF-Connecting-IP"); a != "" {
 		return a

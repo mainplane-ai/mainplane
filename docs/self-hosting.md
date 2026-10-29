@@ -7,7 +7,9 @@
 ```
 
 The harness opens no inbound port. It runs cloudflared as a child, and
-cloudflared carries one public HTTPS URL to the harness's loopback port. Tokens
+cloudflared carries one public HTTPS URL, the harness URL, to the harness's
+loopback port. Your own reverse proxy can carry it instead: see
+[Your own URL](#your-own-url). Tokens
 carry the harness key, not the URL. A worker or the CLI finds the URL through
 `pointer.mainplane.ai`, and the harness proves its key there before a secret
 goes to it.
@@ -187,6 +189,94 @@ the harness config, which only root and you can read (on Windows, also SYSTEM
 and Administrators). `mainplane-server tunnel quick`
 goes back to a quick tunnel.
 
+## Your own URL
+
+Your own reverse proxy can carry the harness URL in place of a tunnel. Then
+the harness starts no cloudflared and needs nothing from Cloudflare. Use it
+when a network blocks the tunnel (cloudflared needs outbound port 7844), when
+TLS must end on your own machine, or to reach the harness only through a
+private network such as Tailscale, NetBird or a VPN.
+
+```
+ worker, CLI --https--> your proxy --> 127.0.0.1:8080 harness
+                 |
+                 +-- pointer.mainplane.ai: harness key -> https://mp.example.com
+```
+
+The proxy must:
+
+- serve HTTPS on port 443, with a certificate every device's OS trusts, such
+  as one from Let's Encrypt. On a private network, get it with a DNS
+  challenge, or install your own CA on every device.
+- pass every path to `http://127.0.0.1:8080`, with WebSocket upgrades: workers
+  reach the coordinator and the relay only through them.
+- keep an idle connection open for at least 120 seconds.
+- set `X-Forwarded-For`. The harness counts refused credentials by its last
+  address.
+
+Every device, the harness machine too, must resolve the name and reach the
+URL, and reach `pointer.mainplane.ai`. The pointer stores the URL, so the name
+is public even when only your private network reaches it.
+
+Caddy gets and renews a Let's Encrypt certificate itself and passes upgrades:
+
+```
+mp.example.com {
+	reverse_proxy 127.0.0.1:8080
+}
+```
+
+On a tailnet with HTTPS on, `tailscale serve --bg 8080` serves the harness at
+`https://<machine>.<tailnet>.ts.net` to the tailnet only. nginx needs the
+upgrade headers and a longer timeout:
+
+```
+location / {
+	proxy_pass http://127.0.0.1:8080;
+	proxy_http_version 1.1;
+	proxy_set_header Upgrade $http_upgrade;
+	proxy_set_header Connection "upgrade";
+	proxy_set_header Host $host;
+	proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	proxy_read_timeout 1h;
+}
+```
+
+Install with the URL, so no quick tunnel starts:
+
+```shell
+# Linux, macOS
+curl -fsSL https://mainplane.ai/install | sh -s -- server --url https://mp.example.com
+
+# Windows
+& ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) server -Url https://mp.example.com
+```
+
+`server quickstart --url <url>` (`-Url` on Windows) opens the quickstart
+after. An installed harness moves to its own URL with
+`mainplane-server url https://mp.example.com`, and back with
+`mainplane-server tunnel quick`. Workers follow through the pointer.
+
+Both check the URL as a worker would and fail within 20 seconds with the
+likely cause: a name this machine cannot resolve, a certificate it does not
+trust, nothing answering, a proxy that cannot reach the harness (502), or a
+proxy that refuses WebSocket upgrades.
+
+## Air-gapped
+
+Not supported yet. A harness and workers with no internet at all would need
+these, which you would set up yourself:
+
+- The pointer: a device finds the harness through `pointer.mainplane.ai` at
+  join and when the URL changes.
+- Releases: install, update and the model list come from `dl.mainplane.ai`,
+  cloudflared and Bun (the js interpreter) from GitHub. Mirror them and
+  install by hand.
+- Models: a local model behind an OpenAI-compatible URL, as a provider with
+  shape `openai-chat` and its `url`.
+- Direct paths: STUN uses Cloudflare's and Google's servers. Devices on one
+  LAN still find each other, and the relay in the harness carries the rest.
+
 ## The mesh
 
 ```
@@ -311,7 +401,7 @@ server. Nothing is shared until the harness config names a drive:
 
 ## What Cloudflare can read
 
-TLS ends at Cloudflare, in both modes. Cloudflare can read all traffic between
+Through a tunnel, TLS ends at Cloudflare. Cloudflare can read all traffic between
 connectors and the harness: api keys, prompts, command output, and files. It
 cannot read the mesh or learn the device code: the code is never sent, the
 join secret comes back sealed under a key only the CPace exchange gives, and
@@ -319,7 +409,7 @@ goes to the coordinator inside Noise, to a key the harness key vouches for,
 and workers reach the harness and each other
 inside WireGuard, relayed through the tunnel or direct. Through the relay it
 sees how much encrypted traffic passes between which workers, and when. If
-this is not acceptable, do not self-host through a Cloudflare tunnel.
+this is not acceptable, use [your own URL](#your-own-url).
 
 The pointer stores only the harness key, the current URL, the network name,
 and signatures. It cannot redirect workers: a record needs the harness key's
