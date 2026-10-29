@@ -201,6 +201,8 @@ func why(err error) error {
 	var op *net.OpError
 	var ne net.Error
 	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return err // slow, which says nothing of the URL
 	case errors.As(err, &dns):
 		return fmt.Errorf("this machine cannot resolve the harness URL: its tunnel is gone, or this machine's DNS does not know the name, which every device needs: %w", err)
 	case errors.As(err, &cert):

@@ -192,15 +192,22 @@ func (c *Client) Do(ctx context.Context, method, path, ctype string, body io.Rea
 	resp, err := http.DefaultClient.Do(req)
 	// Cloudflare answers 502, then 530, for a quick tunnel whose harness is
 	// down, and a harness down for long comes back at a new URL: find it, so
-	// the next call goes there. The call's own failure is what it returns,
-	// unless finding it failed too, which says why.
+	// the next call goes there. When finding it fails, that says why; else
+	// the call's own failure is what it returns.
 	// Unsaved: a login saves only once its key works, and Load finds it again.
-	var ferr error
 	if c.Local == "" && c.Mesh == "" && (err != nil || resp.StatusCode >= 500) {
-		_, ferr = c.find(ctx)
+		if _, ferr := c.find(ctx); ferr != nil {
+			if err == nil {
+				_ = resp.Body.Close()
+			}
+			return nil, ferr
+		}
+		if err != nil {
+			return nil, err // found again, so this machine is online
+		}
 	}
 	if err != nil {
-		return nil, cmp.Or(ferr, unreachable(err))
+		return nil, unreachable(err)
 	}
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(resp.Body)
