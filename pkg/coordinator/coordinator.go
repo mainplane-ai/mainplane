@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"maps"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -264,6 +265,35 @@ func (c *Coordinator) Remove(name string) error {
 	return c.save()
 }
 
+// Rename gives the worker named old the name name, with its keys and
+// address. Links, drives and sessions name workers, so they follow the name,
+// not the machine, and none of them is changed. A drive's server is refused:
+// its mounts would hang. The name is held until the node leaves: a machine
+// that logs out and joins again takes its hostname.
+func (c *Coordinator) Rename(old, name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := c.byName(old)
+	if n == nil || old == worker.Harness || old == worker.Admin {
+		return fmt.Errorf("no worker %q to rename", old)
+	}
+	if name == "" || label(name) != name || name == "xn" || name == worker.Harness || name == worker.Admin {
+		return fmt.Errorf("%q is not a worker name: lower case letters, digits and single dashes, not xn, %s or %s", name, worker.Harness, worker.Admin)
+	}
+	if c.byName(name) != nil {
+		return fmt.Errorf("worker %q exists: mainplane worker remove %s first", name, name)
+	}
+	for _, d := range slices.Sorted(maps.Keys(c.drives)) {
+		if c.drives[d].Server == old {
+			return fmt.Errorf("worker %s serves drive %s: name another server for it in the config first", old, d)
+		}
+	}
+	n.Name = name
+	c.changed(n)
+	log.Printf("coordinator: %s renamed %s", old, name)
+	return c.save()
+}
+
 // expire marks n quiet from now, and deletes it, when ephemeral, once it has
 // been idle with no poll, unless it was removed, which keeps its keys
 // refused. The caller holds mu, or is alone.
@@ -499,17 +529,22 @@ func (c *Coordinator) update(n *node, req tailcfg.MapRequest) {
 	}
 }
 
-// delta is what n has not seen: every peer it sees whose version differs
-// from sent, peers gone from its sight since, and the relay map in the full
-// map and when the host moved from host. It is nil when there is nothing, and not ok once n itself
-// is gone, or removed since the full map, which told it so.
+// delta is what n has not seen: itself and every peer it sees whose version
+// differs from sent, peers gone from its sight since, and the relay map in
+// the full map and when the host moved from host. It is nil when there is
+// nothing, and not ok once n itself is gone, or removed since the full map,
+// which told it so.
 func (c *Coordinator) delta(n *node, sent map[tailcfg.NodeID]uint64, host *string, full bool) (*tailcfg.MapResponse, bool) {
 	if !slices.Contains(c.st.Nodes, n) || n.Removed && !full {
 		return nil, false
 	}
 	r := &tailcfg.MapResponse{}
-	if full {
+	live := map[tailcfg.NodeID]bool{n.ID: true}
+	if v, ok := sent[n.ID]; full || !ok || v != n.ver {
+		sent[n.ID] = n.ver
 		r.Node = tail(n)
+	}
+	if full {
 		r.Domain = project
 		r.PacketFilter = tailcfg.FilterAllowAll
 		r.UserProfiles = []tailcfg.UserProfile{{ID: user, LoginName: "mainplane", DisplayName: "mainplane"}}
@@ -518,7 +553,6 @@ func (c *Coordinator) delta(n *node, sent map[tailcfg.NodeID]uint64, host *strin
 		*host = c.host
 		r.DERPMap = c.relayMap()
 	}
-	live := map[tailcfg.NodeID]bool{}
 	for _, p := range c.st.Nodes {
 		if p == n || !c.sees(n, p) {
 			continue
@@ -540,7 +574,7 @@ func (c *Coordinator) delta(n *node, sent map[tailcfg.NodeID]uint64, host *strin
 			delete(sent, id)
 		}
 	}
-	if !full && r.DERPMap == nil && r.PeersChanged == nil && r.PeersRemoved == nil {
+	if !full && r.Node == nil && r.DERPMap == nil && r.PeersChanged == nil && r.PeersRemoved == nil {
 		return nil, true
 	}
 	return r, true
@@ -645,6 +679,23 @@ func (c *Coordinator) name(hi *tailcfg.Hostinfo) string {
 	if hi != nil {
 		h, _, _ = strings.Cut(strings.ToLower(hi.Hostname), ".")
 	}
+	base := label(h)
+	if base == "" {
+		base = "worker"
+	}
+	name := base
+	for i := 2; name == "xn" || name == worker.Harness || name == worker.Admin || c.byName(name) != nil; i++ {
+		name = fmt.Sprintf("%s-%d", base, i)
+	}
+	if name != base && base != worker.Harness && base != worker.Admin && c.byName(base) != nil {
+		log.Printf("coordinator: worker %s exists, so this machine joins as %s. If %s is this machine with lost keys: mainplane worker remove %s, then mainplane worker rename %s %s", base, name, base, base, name, base)
+	}
+	return name
+}
+
+// label is h with every run of characters other than lower case letters and
+// digits made one dash, and none at either end.
+func label(h string) string {
 	var b []byte
 	for _, r := range h {
 		switch {
@@ -654,18 +705,7 @@ func (c *Coordinator) name(hi *tailcfg.Hostinfo) string {
 			b = append(b, '-')
 		}
 	}
-	base := strings.TrimSuffix(string(b), "-")
-	if base == "" {
-		base = "worker"
-	}
-	name := base
-	for i := 2; name == "xn" || name == worker.Harness || name == worker.Admin || c.byName(name) != nil; i++ {
-		name = fmt.Sprintf("%s-%d", base, i)
-	}
-	if name != base && base != worker.Harness && base != worker.Admin && c.byName(base) != nil {
-		log.Printf("coordinator: worker %s exists, so this machine joins as %s. If %s is this machine with lost keys: mainplane worker remove %s, then uninstall and install on it", base, name, base, base)
-	}
-	return name
+	return strings.TrimSuffix(string(b), "-")
 }
 
 func address(id tailcfg.NodeID) netip.Addr {

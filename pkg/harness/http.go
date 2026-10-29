@@ -50,6 +50,8 @@ const MaxPost = 8 << 20
 //	                                     ones with the reason
 //	DELETE /workers/{name}            the worker leaves the mesh for good; its     -> 204
 //	                                  device code still joins new machines
+//	PUT  /workers/{name}/name         the new name as text. links, drives and      -> 204
+//	                                  sessions keep naming the old one
 //	GET  /providers                   -> [{"name","shape","url"}]: what this harness
 //	                                     serves as name/model; no secrets
 //
@@ -77,6 +79,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		h.Workers.Drop(r.PathValue("name"))
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("PUT /workers/{name}/name", h.serveRename)
 	mux.HandleFunc("GET /providers", func(w http.ResponseWriter, r *http.Request) {
 		ps := h.providers()
 		out := []ProviderInfo{}
@@ -218,6 +221,22 @@ func (h *Harness) serveDelete(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// serveRename hangs up on the worker it renamed, which dials again under
+// its new name.
+func (h *Harness) serveRename(w http.ResponseWriter, r *http.Request) {
+	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxPost))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	if err := h.Rename(r.PathValue("name"), string(b)); err != nil {
+		fail(w, err)
+		return
+	}
+	h.Workers.Drop(r.PathValue("name"))
 	w.WriteHeader(http.StatusNoContent)
 }
 

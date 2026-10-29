@@ -39,7 +39,8 @@ type Harness struct {
 	Sessions  statefile.Sessions
 	Providers map[string]provider.Provider // read and replaced under pmu once the harness runs
 	Workers   *Pool
-	Remove    func(name string) error // the coordinator's: the worker leaves the mesh for good
+	Remove    func(name string) error      // the coordinator's: the worker leaves the mesh for good
+	Rename    func(old, name string) error // the coordinator's: the worker takes another name
 
 	pmu sync.RWMutex
 	mu  sync.Mutex

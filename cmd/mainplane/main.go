@@ -48,8 +48,8 @@ func main() {
 		app(strings.Join(os.Args[1:], ""), false)
 		return
 	}
-	if len(os.Args) > 2 && os.Args[1] == "worker" && os.Args[2] == "remove" {
-		cli("worker remove", os.Args[3:])
+	if len(os.Args) > 2 && os.Args[1] == "worker" && (os.Args[2] == "remove" || os.Args[2] == "rename") {
+		cli("worker "+os.Args[2], os.Args[3:])
 		return
 	}
 	if len(os.Args) > 2 && os.Args[1] == "workers" {
@@ -398,6 +398,8 @@ func usage() {
   workers    <id> <name>...          PUT  /sessions/{id}/workers: the session's workers are these from its next step on
   worker     remove <name>           DELETE /workers/{name}: it leaves the mesh for good; mainplane-server join cycle
                                      too keeps the device code it had from joining machines again
+  worker     rename <name> <new>     PUT  /workers/{name}/name: same keys and address; links, drives and sessions
+                                     keep naming the old name. Refused for a drive's server
   providers                          GET  /providers: each one's name, shape and url
   key        <provider> <key>        PUT  /providers/{provider}: the harness saves the key, with the shape and url
                                      the catalog gives the provider, in its config, and serves it at once

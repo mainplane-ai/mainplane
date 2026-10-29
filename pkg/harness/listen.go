@@ -57,10 +57,12 @@ func (p *Pool) Add(r *Remote) {
 	p.mu.Unlock()
 }
 
-// Drop hangs up on the worker named name, when it is connected.
+// Drop hangs up on the worker named name, when it is connected, and forgets
+// why it was refused: the name is gone or another's.
 func (p *Pool) Drop(name string) {
 	p.mu.Lock()
 	r, ok := p.m[name]
+	delete(p.refused, name)
 	p.mu.Unlock()
 	if ok {
 		_ = r.conn.Close()

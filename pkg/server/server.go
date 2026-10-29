@@ -226,7 +226,7 @@ func Harness(ctx context.Context, path string) error {
 	coord.Gone = pool.Drop
 	coord.Link(c.Links)
 	setDrives(coord, pool, c.Drives)
-	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove}
+	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove, Rename: coord.Rename}
 	go watch(ctx, path, func(c Config) error {
 		ps, err := providers(dir, c.Providers)
 		if err == nil {
