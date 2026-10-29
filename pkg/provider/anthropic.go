@@ -11,13 +11,14 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
-// anthLimits are what the Messages API rejected past, measured: a side over
-// 8000 px, or over 3000 px once a request has more than 20 images (the docs
-// say 2000); an image over 10 MiB of base64; more than 100 images on 200k
-// context models (600 on others); a body near 128 MiB (the docs say 32 MB).
-// 3000 px holds at any count, and Claude scales anything over 2576 px itself.
-// claude -p sends to the same API.
-var anthLimits = Limits{Side: 3000, Pixels: 3000 * 3000, Bytes: 10 << 20 * 3 / 4, Count: 100, Request: 80_000_000, Bound: true}
+// anthLimits: Claude scales an image down to a 2576 px side and about 3.7 M
+// pixels itself (1568 px and 1.15 M on 4.5 models), so a larger one shows the
+// model nothing more; token counts stop growing there. That also keeps every
+// image under the 3000 px the Messages API allows once a request has over 20
+// images (8000 px below that). Measured past that: an image over 10 MiB of
+// base64, more than 100 images on 200k context models (600 on others), a body
+// near 128 MiB (the docs say 32 MB). claude -p sends to the same API.
+var anthLimits = Limits{Side: 2576, Pixels: 3_700_000, Bytes: 10 << 20 * 3 / 4, Count: 100, Request: 80_000_000}
 
 // The body carries only what the session builds. max_tokens, which the
 // Messages API requires, thinking, and effort come from params: the API, not
@@ -93,7 +94,7 @@ var ephemeral = &anthCache{Type: "ephemeral"}
 
 func (e anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
-	rest = fit(rest, anthLimits)
+	rest = fit(e.Name(), rest, anthLimits)
 	body := anthReq{Model: req.Model, Stream: true, Messages: []anthMsg{}}
 	var marks []string
 	if len(system) > 0 {

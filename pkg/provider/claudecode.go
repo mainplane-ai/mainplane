@@ -132,7 +132,7 @@ type ccFrame struct {
 
 func (e claudeCode) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
-	rest = fit(rest, anthLimits)
+	rest = fit(e.Name(), rest, anthLimits)
 	body := ccReq{Model: req.Model, System: systemText(system), Tools: []mcpTool{}}
 	if v, ok := req.Params["effort"]; ok {
 		if err := json.Unmarshal(v, &body.Effort); err != nil {

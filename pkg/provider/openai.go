@@ -85,7 +85,7 @@ type respOutput struct {
 
 func (e openai) Compile(req Request) ([]byte, json.RawMessage, error) {
 	system, rest := Split(req.Context)
-	rest = fit(rest, respLimits)
+	rest = fit(e.Name(), rest, respLimits)
 	body := respReq{
 		Model:        req.Model,
 		CacheKey:     req.Key,

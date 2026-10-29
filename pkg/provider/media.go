@@ -19,7 +19,8 @@ import (
 )
 
 // Limits are what one vendor's API takes of the images in one request. Each
-// envelope sets its own from what the API was seen to reject. Where a limit
+// envelope sets its own from what the API was seen to reject, or smaller where
+// the model scales an image down to that itself. Where a limit
 // tightens with the number of images, the envelope takes the tight one at any
 // number, so a new image never changes the ones sent before it. Bytes and
 // Request count raw image bytes; JSON bodies carry base64, 4/3 larger.
@@ -29,11 +30,6 @@ type Limits struct {
 	Bytes   int // one image
 	Count   int // images in one request
 	Request int // all images in one request
-	// Bound is set where the model may sign its thinking over the request
-	// before it, as Claude Opus 5.5 does: signed thinking after an image fit
-	// changed would be rejected, so it is not replayed. Plain reasoning text
-	// carries no signature and stays.
-	Bound bool
 }
 
 // jpegQuality is for an image that is a JPEG or WebP, or still over Bytes as
@@ -78,61 +74,34 @@ var fitCache = struct {
 }{m: map[fitKey]fitted{}}
 
 // fit holds the images of rest under l, so an image the harness took never
-// makes a later request invalid. Records keep their bytes; the request is a
-// pure function of them, as Compile must be. An image over a side, pixel or
-// byte limit is scaled and re-encoded, and the model is told the size it
-// sees. An image that does not decode is sent as text saying so. Past Count
-// or Request the oldest images become text: when the next image would not
-// fit, images go until it fits in half the budget, so the cached prefix
-// changes about once per Count/2 images, not every step. Where l.Bound,
-// replayed thinking after the first image fit changed is dropped, since the
-// image it was signed over may have gone as stored.
-func fit(rest []statefile.Record, l Limits) []statefile.Record {
-	var idx []int
-	for i, r := range rest {
-		if slices.Contains(images, r.Type) {
-			idx = append(idx, i)
-		}
-	}
-	if len(idx) == 0 {
-		return rest
-	}
-	fits := map[int]fitted{}
-	for _, i := range idx {
-		fits[i] = fitOne(rest[i], l)
-	}
-	evicted := map[int]bool{}
-	var window []int
-	sum := 0
-	for _, i := range idx {
-		f := fits[i]
-		if f.err != nil {
+// makes a later request invalid, and never changes an image sent before it.
+// Records keep their bytes; each image is fit from its own record alone, so
+// the request is a pure function of the records and grows only at its end.
+// An image over a side, pixel or byte limit is scaled and re-encoded, and
+// the model is told the size it sees. An image that does not decode goes as
+// text saying so. Once the next image would take the request past l.Count
+// or l.Request, it and every image after it go as text: the session's images
+// are full, and a new session takes more.
+func fit(name string, rest []statefile.Record, l Limits) []statefile.Record {
+	out := make([]statefile.Record, 0, len(rest))
+	count, sum, full := 0, 0, false
+	for _, r := range rest {
+		if !slices.Contains(images, r.Type) {
+			out = append(out, r)
 			continue
 		}
-		if len(window)+1 > l.Count || sum+f.size > l.Request {
-			for len(window) > 0 && (len(window)+1 > l.Count/2 || sum+f.size > l.Request/2) {
-				evicted[window[0]] = true
-				sum -= fits[window[0]].size
-				window = window[1:]
-			}
+		var f fitted
+		if !full {
+			f = fitOne(r, l)
+			full = f.err == nil && (count+1 > l.Count || sum+f.size > l.Request)
 		}
-		window = append(window, i)
-		sum += f.size
-	}
-	out := make([]statefile.Record, 0, len(rest)+len(idx))
-	changed := false
-	for i, r := range rest {
-		f, ok := fits[i]
-		changed = changed || ok && (f.err != nil || evicted[i] || f.body != nil)
 		switch {
-		case r.Kind == statefile.Thinking && r.Type != "text/plain" && changed && l.Bound:
-			continue
-		case !ok:
+		case full:
+			r.Type, r.Body = "text/plain", fmt.Appendf(nil, "[image not sent: this session is at %s's image limit of %d images or %d MB per request. Continue in a new session to see more images.]", name, l.Count, l.Request/1_000_000)
 		case f.err != nil:
 			r.Type, r.Body = "text/plain", fmt.Appendf(nil, "[image not sent: %s: %v]", r.Type, f.err)
-		case evicted[i]:
-			r.Type, r.Body = "text/plain", fmt.Appendf(nil, "[image omitted to fit the provider's limits: %dx%d %s, %d KB. Read the file again to see it.]", f.ow, f.oh, r.Type, len(r.Body)/1000)
 		case f.body != nil:
+			count, sum = count+1, sum+f.size
 			r.Type, r.Body = f.typ, f.body
 			note := fmt.Sprintf("shown at %dx%d, file is %dx%d", f.w, f.h, f.ow, f.oh)
 			if r.Kind == statefile.Result {
@@ -141,6 +110,8 @@ func fit(rest []statefile.Record, l Limits) []statefile.Record {
 				out = append(out, r)
 				r = statefile.Record{Header: statefile.Header{Kind: statefile.System, ID: r.ID, Type: "text/plain"}, Body: []byte(note)}
 			}
+		default:
+			count, sum = count+1, sum+f.size
 		}
 		out = append(out, r)
 	}
