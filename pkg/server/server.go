@@ -333,8 +333,8 @@ func (c Config) way() error {
 	if host, _, _ := net.SplitHostPort(c.HTTP); !net.ParseIP(host).IsLoopback() {
 		return fmt.Errorf("http %q: the harness listens on loopback only, such as 127.0.0.1:8080; the tunnel or your proxy is the one way in", c.HTTP)
 	}
-	if u, err := url.Parse(c.URL); c.URL != "" && (c.Tunnel != nil || err != nil || u.Scheme != "https" || u.Port() != "") {
-		return fmt.Errorf("url %q: an https URL on port 443 that your proxy carries to http, with no tunnel beside it", c.URL)
+	if u, err := url.Parse(c.URL); c.URL != "" && (c.Tunnel != nil || err != nil || u.Hostname() == "" || c.URL != "https://"+u.Hostname()) {
+		return fmt.Errorf("url %q: https://<host>, with no port or path, that your proxy carries to http, and no tunnel beside it", c.URL)
 	}
 	return nil
 }

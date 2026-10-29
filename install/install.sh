@@ -10,12 +10,15 @@
 set -eu
 v=@VERSION@
 dl=https://dl.mainplane.ai/$v
-case $#:${1:-}:${2:-}:${3:-} in
-0::: | 1:mp_key_*:: | 2:* | 1:server:: | 3:server:--url:* | 4:server:quickstart:--url) ;;
-*)
+usage() {
   echo "usage: curl -fsSL $dl/install.sh | sh -s -- [api key | <network> <device code> | server [quickstart] [--url <url>]]" >&2
   exit 2
-  ;;
+}
+case $#:${1:-}:${2:-}:${3:-} in
+0::: | 1:mp_key_*:: | 1:server:: | 3:server:--url:* | 4:server:quickstart:--url) ;;
+2:server:--url:) usage ;;
+2:*) ;;
+*) usage ;;
 esac
 case $(uname -m) in
 x86_64 | amd64) arch=amd64 ;;
@@ -50,9 +53,9 @@ case $#:${1:-}:${2:-}:${3:-} in
   # the script, so the quickstart's TUI reads the terminal, when there is one.
   shift
   if [ "${1:-}" = quickstart ] && (true < /dev/tty) 2> /dev/null; then
-    ./mainplane-server install "$@" < /dev/tty
+    ./mainplane-server install ${1+"$@"} < /dev/tty
   else
-    ./mainplane-server install "$@"
+    ./mainplane-server install ${1+"$@"}
   fi
   ;;
 2:*)

@@ -270,7 +270,7 @@ these, which you would set up yourself:
 - The pointer: a device finds the harness through `pointer.mainplane.ai` at
   join and when the URL changes.
 - Releases: install, update and the model list come from `dl.mainplane.ai`,
-  cloudflared and Bun (the js interpreter) from GitHub. Mirror them and
+  and Bun (the js interpreter) from GitHub. Mirror them and
   install by hand.
 - Models: a local model behind an OpenAI-compatible URL, as a provider with
   shape `openai-chat` and its `url`.

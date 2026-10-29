@@ -59,11 +59,7 @@ func main() {
 	case verb == "up" && len(args) == 2:
 		fatal(server.Up(args[1]))
 	case verb == "install":
-		quick := len(args) >= 2 && args[1] == "quickstart"
-		if quick {
-			args = append(args[:1], args[2:]...)
-		}
-		h, fresh := config(args[1:])
+		h, fresh, quick := config(args[1:])
 		fatal(h.Expand())
 		if !elevate.Is() {
 			var code int
@@ -133,23 +129,27 @@ type handover struct {
 }
 
 // config is what install's arguments name: the default config with a fresh
-// key, reached at a URL after --url, or a config file.
-func config(args []string) (h handover, fresh bool) {
+// key, reached at a URL after --url, or a config file; and whether the
+// quickstart opens after.
+func config(args []string) (h handover, fresh, quick bool) {
+	if quick = len(args) > 0 && args[0] == "quickstart"; quick {
+		args = args[1:]
+	}
 	switch {
 	case len(args) == 0:
-		return handover{Config: server.Default(), Key: rand.Text()}, true
+		return handover{Config: server.Default(), Key: rand.Text()}, true, quick
 	case len(args) == 2 && args[0] == "--url":
-		h, fresh = config(nil)
+		h, fresh, _ = config(nil)
 		h.URL = harnessURL(args[1], "the URL your proxy carries to http://localhost:8080")
-		return h, fresh
-	case len(args) == 1:
+		return h, fresh, quick
+	case len(args) == 1 && !quick:
 		b, err := os.ReadFile(args[0])
 		fatal(err)
 		fatal(json.Unmarshal(b, &h))
-		return h, false
+		return h, false, false
 	}
 	usage()
-	return h, false
+	return h, false, false
 }
 
 // install hands the expanded config to an elevated install through a file
@@ -168,7 +168,7 @@ func install(h handover) (handover, int) {
 	if code := elevate.Run("install", f); code != 0 {
 		return h, code
 	}
-	h, _ = config([]string{f})
+	h, _, _ = config([]string{f})
 	return h, 0
 }
 
@@ -293,14 +293,14 @@ func move(args []string) {
 	fmt.Printf("harness reached at %s; workers follow in about a minute\n", u)
 }
 
-// harnessURL is s, an https URL on port 443, with no trailing slash; what
-// names its host. Workers reach the coordinator on 443 only.
+// harnessURL is s, https://<host> with nothing more; what names the host.
+// Workers reach the coordinator on port 443 only.
 func harnessURL(s, what string) string {
-	u, err := neturl.Parse(s)
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.Port() != "" {
-		log.Fatalf("%s: the URL is https://<%s>, on port 443", s, what)
+	s = strings.TrimSuffix(s, "/")
+	if u, err := neturl.Parse(s); err != nil || u.Hostname() == "" || s != "https://"+u.Hostname() {
+		log.Fatalf("%s: the URL is https://<%s>, with no port or path", s, what)
 	}
-	return strings.TrimSuffix(s, "/")
+	return s
 }
 
 // join prints the lines that make a machine a worker, after a new device
