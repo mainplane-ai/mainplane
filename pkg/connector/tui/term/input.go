@@ -486,7 +486,7 @@ func unrecord(s string) string {
 			switch r := rune(n[2]); {
 			case utf16.IsSurrogate(r) && r < 0xdc00:
 				high = r
-			case high != 0:
+			case utf16.IsSurrogate(r):
 				b.WriteRune(utf16.DecodeRune(high, r))
 				high = 0
 			default:
