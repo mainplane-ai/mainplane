@@ -238,7 +238,7 @@ Nothing listens on that port outside the mesh.
   sessions that named `<name>` find it not connected until their workers are
   set again. The new name is refused when a worker holds it, offline or not,
   and the worker is refused while the config names it as a drive's server.
-  A machine that logs out and joins again takes its hostname.
+  A renamed worker that logs out and joins again takes its hostname.
 - Paths: two workers talk direct, UDP to UDP, when their NATs let them. This
   is usual on one LAN and common across the internet. When they cannot, their
   traffic goes through the relay in the harness, through the tunnel: it works,
