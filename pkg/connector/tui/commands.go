@@ -49,7 +49,7 @@ func commands() []command {
 		{"new", []string{"clear"}, "New session", "ctrl+n", (*session).fresh},
 		{"sessions", []string{"resume"}, "Sessions", "ctrl+o", (*session).sessions},
 		{"continue", []string{"compact"}, "Continue in a new session", "", (*session).carryOn},
-		{"config", nil, "Config for a new session", "", (*session).config},
+		{"config", []string{"effort"}, "Config for a new session", "", (*session).config},
 		{"rename", nil, "Rename the session", "", (*session).renameDialog},
 		{"model", nil, "Model for a new session", "", (*session).models},
 		{"providers", []string{"connect"}, "Connect a provider", "", (*session).providers},
