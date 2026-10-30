@@ -108,6 +108,8 @@
     {"provider": "chatgpt", "model": "gpt-6-astra", "effort": "medium", "tools": "patch", "variant": "fast", "params": {"service_tier": "priority"}, "price": 2, "price_source": "https://developers.openai.com/api/docs/pricing (fast: 2x the standard price; the plan provider's cost is 0, so this stays 0)"},
     {"provider": "chatgpt", "model": "gpt-6.1-sol", "effort": "medium", "tools": "patch", "default": true},
     {"provider": "chatgpt", "model": "gpt-6.1-sol", "effort": "medium", "tools": "patch", "variant": "fast", "params": {"service_tier": "priority"}, "price": 2, "price_source": "https://developers.openai.com/api/docs/pricing (fast: 2x the standard price; the plan provider's cost is 0, so this stays 0)"},
+    {"provider": "chatgpt", "model": "gpt-6.1-terra", "effort": "medium", "tools": "patch"},
+    {"provider": "chatgpt", "model": "gpt-6.1-terra", "effort": "medium", "tools": "patch", "variant": "fast", "params": {"service_tier": "priority"}, "price": 2, "price_source": "https://developers.openai.com/api/docs/pricing (fast: 2x the standard price; the plan provider's cost is 0, so this stays 0)"},
     {"provider": "chatgpt", "model": "gpt-6-luna", "effort": "medium", "tools": "patch"},
     {"provider": "chatgpt", "model": "gpt-6-luna", "effort": "medium", "tools": "patch", "variant": "fast", "params": {"service_tier": "priority"}, "price": 2, "price_source": "https://developers.openai.com/api/docs/pricing (fast: 2x the standard price; the plan provider's cost is 0, so this stays 0)"},
     {"provider": "opencode-go", "model": "deepseek-v4-pro", "effort": "high"},
