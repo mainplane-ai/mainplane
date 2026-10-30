@@ -156,23 +156,33 @@ jobs:
         run: |
           pre=; [[ $TAG == *-rc.* ]] && pre=--prerelease
           gh release create "$TAG" dist/* --title "$TAG" --notes-file notes.md $pre
-      # The npm and PyPI packages run the release binary, checked against the
-      # SHA256SUMS packed in them. Stable releases only, and last, so a registry
-      # failure cannot hold back the release. Both registries trust this
-      # workflow and environment (trusted publishing): no token. A rerun would
-      # rebuild and re-sign the binaries, so a failed publish is redone by hand
-      # from the released SHA256SUMS, or by the next tag.
+  # The npm and PyPI packages run the release binary, checked against the
+  # SHA256SUMS packed in them. Stable releases only, after the release, so a
+  # registry failure cannot hold it back. Both registries trust this workflow
+  # and environment (trusted publishing): no token. npm takes trusted publishing
+  # and provenance only from a GitHub-hosted runner. A failed publish is redone
+  # by rerunning this job alone; each registry skips a version it already has.
+  packages:
+    needs: release
+    if: ${{ !contains(github.ref_name, '-rc.') }}
+    runs-on: ubuntu-24.04
+    environment: release-signing
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: ${{ !contains(github.ref_name, '-rc.') }}
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        if: ${{ !contains(github.ref_name, '-rc.') }}
       - name: npm and PyPI packages
-        if: ${{ !contains(github.ref_name, '-rc.') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          cp dist/SHA256SUMS install/npm/
-          cp dist/SHA256SUMS install/pypi/mainplane/
-          (cd install/npm && npm version --no-git-tag-version "${TAG#v}" && npm publish --provenance --access public)
-          (cd install/pypi && sed -i "s/^version = \"0.0.0\"/version = \"${TAG#v}\"/" pyproject.toml && uv build && uv publish --trusted-publishing always)
+          gh release download "$TAG" -p SHA256SUMS
+          cp SHA256SUMS install/npm/
+          cp SHA256SUMS install/pypi/mainplane/
+          (cd install/npm && npm version --no-git-tag-version "${TAG#v}" && { npm view "mainplane@${TAG#v}" version >/dev/null 2>&1 || npm publish --provenance --access public; })
+          (cd install/pypi && sed -i "s/^version = \"0.0.0\"/version = \"${TAG#v}\"/" pyproject.toml && uv build && uv publish --trusted-publishing always --check-url https://pypi.org/simple/)
