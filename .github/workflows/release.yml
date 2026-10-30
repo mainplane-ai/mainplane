@@ -161,7 +161,7 @@ jobs:
   # registry failure cannot hold it back. Both registries trust this workflow
   # and environment (trusted publishing): no token. npm takes trusted publishing
   # and provenance only from a GitHub-hosted runner. A failed publish is redone
-  # by rerunning this job alone.
+  # by rerunning this job alone; each registry skips a version it already has.
   packages:
     needs: release
     if: ${{ !contains(github.ref_name, '-rc.') }}
@@ -184,5 +184,5 @@ jobs:
           gh release download "$TAG" -p SHA256SUMS
           cp SHA256SUMS install/npm/
           cp SHA256SUMS install/pypi/mainplane/
-          (cd install/npm && npm version --no-git-tag-version "${TAG#v}" && npm publish --provenance --access public)
-          (cd install/pypi && sed -i "s/^version = \"0.0.0\"/version = \"${TAG#v}\"/" pyproject.toml && uv build && uv publish --trusted-publishing always)
+          (cd install/npm && npm version --no-git-tag-version "${TAG#v}" && { npm view "mainplane@${TAG#v}" version >/dev/null 2>&1 || npm publish --provenance --access public; })
+          (cd install/pypi && sed -i "s/^version = \"0.0.0\"/version = \"${TAG#v}\"/" pyproject.toml && uv build && uv publish --trusted-publishing always --check-url https://pypi.org/simple/)
