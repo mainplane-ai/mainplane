@@ -2,12 +2,11 @@
   <source media="(max-width: 700px), (hover: none) and (pointer: coarse)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/hero-mobile.svg">
   <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/hero-desktop.svg" alt="Mainplane, with the biplane flying over the clouds" width="960">
 </picture>
-<h3>The open-source agent ecosystem</h3>
+<div><h3>Mainplane is an open-source agent harness</h3></div>
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/architecture-3d-dark.svg">
-  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/architecture-3d-light.svg" alt="The Mainplane Architecture: connectors reach Mainplane Server, which holds secrets and controls, observability and the file server; the network joins the server and every worker" width="960">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/tui-dark.svg">
+  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/tui-light.svg" alt="The Mainplane TUI: a sidebar of sessions on different models, and an agent that moves a Qwen fine-tune from a GPU server to a Mac Studio and quantizes it to run there" width="960">
 </picture>
-<br/><br/>
 
 # Self-Hosting Quickstart
 
@@ -25,44 +24,41 @@ The quickstart walks you through adding a provider, workers (computers your agen
 
 Read more in [docs/self-hosting.md](docs/self-hosting.md).
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/tui-dark.svg">
-  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/tui-light.svg" alt="The Mainplane TUI: a sidebar of sessions on different models, and an agent that moves a Qwen fine-tune from a GPU server to a Mac Studio and quantizes it to run there" width="960">
-</picture>
+<br><br>
 
 # Features
-### Always-on
-- Mainplane turns any computers into an always-on local AI shed. Agents keep working when your laptop is closed.
+### Model agnostic
+- Mainplane can use any model from any provider, including Anthropic, OpenAI, Google, and more.
 
-### Bring your keys and subscriptions
-- Use the regular limits of a Claude Code or ChatGPT Codex subscription, or an API key with any model.
+### Context efficient
+- Mainplane agents have a restricted set of tools and manage their own context by retrieving key information from other sessions.
 
-### Chat from anywhere
-- Use Mainplane's first-class TUI or the sessions API. All messages stay synced. 
+### Connects all your devices
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/architecture-3d-dark.svg">
+  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/architecture-3d-light.svg" alt="The Mainplane Architecture: connectors reach Mainplane Server, which holds secrets and controls, observability and the file server; the network joins the server and every worker" width="960">
+</picture>
 
-### Private mesh network 
-- Mainplane connects agents and computers with fine-grained security controls. No Tailscale needed.
+- Mainplane links agents and computers with fine-grained security controls. No Tailscale needed.
 
 ### Shared file drives
-- A remote filesystem that multiple agents can access concurrently without risk of de-sync. 
-
-### Context and cost efficient
-- Mainplane uses just 3k tokens of system context. Agents see their own context usage and optimize it. 
+- Mainplane sets up a remote filesystem you can use concurrently without risk of de-sync.
 
 ### Browser and computer use
-- Mainplane drives real browsers with their logins and has native computer use.
-
-### Control plane security
-- API keys stay on your server isolated from the other workers where agents run.
-
-### Durable and observable sessions
-- Agent state = one readable file that can be resumed if stopped.
-
-### Performant and open-source
-- Mainplane runs as one Go binary, source code is under MIT license.
-
+- Mainplane drives your real browsers and applications with native computer use.
 
 # FAQ
+<details>
+<summary>Can I bring my Claude Code or ChatGPT subscription?</summary>
+
+Yes, Mainplane can use the regular limits of a Claude Code or ChatGPT Codex subscription, or an API key with any model.
+</details>
+
+<details>
+<summary>Does Mainplane share my data?</summary>
+
+No data is shared by default. Users can opt in to sharing data to improve Mainplane in /settings.
+</details>
 
 <details>
 <summary>Do I need more than one device?</summary>
@@ -73,13 +69,13 @@ No. Everything can run on one device.
 <details>
 <summary>Does mainplane-server need Linux?</summary>
 
-No. mainplane-server runs on macOS, Windows and Linux.
+No. mainplane-server runs on macOS, Windows and Linux. Hosting shared files requires a compatible connected Linux device.
 </details>
 
 <details>
 <summary>Do you take contributions?</summary>
 
-We welcome feedback as GitHub issues. Pull requests are open to collaborators only.
+We welcome feedback as GitHub issues. Pull requests are open to collaborators only. Any agent can POST plain text to https://bugs.mainplane.ai to report a bug.
 </details>
 
 <picture>
