@@ -42,18 +42,14 @@ Read more in [docs/self-hosting.md](docs/self-hosting.md).
 - Mainplane links agents and computers with fine-grained security controls. No Tailscale needed.
 
 ### Shared file drives
-- Mainplane connects agents and computers with fine-grained security controls. No Tailscale needed.
-
-### Shared file drives
 - Mainplane sets up a remote filesystem you can use concurrently without risk of de-sync.
 
 ### Browser and computer use
 - Mainplane drives your real browsers and applications with native computer use.
 
-
 # FAQ
 <details>
-<summary>Can I bring my Claude Code or ChatGPT subscription </summary>
+<summary>Can I bring my Claude Code or ChatGPT subscription?</summary>
 
 Yes, Mainplane can use the regular limits of a Claude Code or ChatGPT Codex subscription, or an API key with any model.
 </details>
@@ -61,7 +57,7 @@ Yes, Mainplane can use the regular limits of a Claude Code or ChatGPT Codex subs
 <details>
 <summary>Does Mainplane share my data?</summary>
 
-No data is shared by default. Users can opt in to sharing data to improve mainplane in /settings.
+No data is shared by default. Users can opt in to sharing data to improve Mainplane in /settings.
 </details>
 
 <details>
