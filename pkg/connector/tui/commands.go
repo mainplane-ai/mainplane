@@ -1132,7 +1132,8 @@ func (s *session) base() statefile.Conf {
 }
 
 // useModel opens a blank session screen that makes its session with the
-// model's config and this session's workers; on a blank screen, that one.
+// model's config and this session's workers, continuing this session; on a
+// blank screen, that one.
 func (s *session) useModel(a *App, m statefile.Conf) {
 	if s.id != "" && s.info.ID != s.id {
 		a.Say("The session is still loading")
@@ -1143,10 +1144,7 @@ func (s *session) useModel(a *App, m statefile.Conf) {
 		s.cfg, s.price = &m, nil
 		return
 	}
-	to := newSession(a, s.list, "")
-	to.cfg = &m
-	s.carry(to)
-	s.switchTo(a, to)
+	s.continueAs(a, m, nil)
 }
 
 // halt is /stop: Esc Esc, for whoever looks for it by name. A session that
