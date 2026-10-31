@@ -89,6 +89,11 @@ func parsePatch(input string) ([]section, error) {
 			case strings.HasPrefix(l, " "):
 				h.old, h.new = append(h.old, l[1:]), append(h.new, l[1:])
 			case l == "":
+				if h.eof {
+					// codex ignores blank lines after *** End of File; as context
+					// here they demand a trailing empty line the file rarely has.
+					continue
+				}
 				h.old, h.new = append(h.old, ""), append(h.new, "")
 			default:
 				return nil, fmt.Errorf("hunk line must start with +, -, or space: %q", l)
