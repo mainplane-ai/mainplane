@@ -1,6 +1,6 @@
 <picture>
   <source media="(max-width: 700px), (hover: none) and (pointer: coarse)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/hero-mobile.svg">
-  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/hero-desktop.svg" alt="Mainplane, with the biplane flying over the clouds" width="960">
+  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/hero-desktop-320.svg" alt="Mainplane, with the biplane flying over the clouds" width="960">
 </picture>
 <div><h3>Mainplane is an open-source agent harness</h3></div>
 <picture>
