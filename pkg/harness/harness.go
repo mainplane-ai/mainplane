@@ -116,27 +116,7 @@ func (h *Harness) Create(ctx context.Context, c Create, via string) (string, err
 		if c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Tools != "" || c.Input != nil || c.Params != nil || c.Preset != "" || c.Name != "" {
 			return "", fmt.Errorf("a copy takes no config and no name")
 		}
-		open, err := h.cut(c.From, c.N)
-		if err != nil {
-			return "", err
-		}
-		if err := h.Sessions.Copy(c.From, id, c.N); err != nil {
-			return "", err
-		}
-		h.touch(id)
-		if len(open) == 0 {
-			return id, nil
-		}
-		f, err := h.Sessions.Open(id)
-		if err != nil {
-			return "", err
-		}
-		for _, r := range open {
-			if err := f.Append(result(r.ID, "session was forked before this call returned")); err != nil {
-				return "", err
-			}
-		}
-		return id, f.Close()
+		return id, h.copy(c.From, id, c.N)
 	}
 	p, model, err := h.provider(c.Model)
 	if err != nil {
@@ -197,6 +177,30 @@ func (h *Harness) Create(ctx context.Context, c Create, via string) (string, err
 	return id, f.Close()
 }
 
+// copy copies session from up to record n as id, and answers each call the
+// cut leaves open.
+func (h *Harness) copy(from, id string, n int) error {
+	open, err := h.cut(from, n)
+	if err != nil {
+		return err
+	}
+	if err := h.Sessions.Copy(from, id, n); err != nil {
+		return err
+	}
+	defer h.touch(id)
+	f, err := h.Sessions.Open(id)
+	if err != nil {
+		return err
+	}
+	for _, r := range open {
+		if err := f.Append(result(r.ID, "session was forked before this call returned")); err != nil {
+			_ = f.Close()
+			return err
+		}
+	}
+	return f.Close()
+}
+
 // cut refuses a copy a provider would reject: the cut must fall before a
 // message record or at the tip, so no step is split. A tip cut needs the last
 // step record written and no error after it; the calls it leaves without a
@@ -225,10 +229,10 @@ func (h *Harness) cut(from string, n int) ([]statefile.Record, error) {
 		return nil, fmt.Errorf("session %s has %d records", from, len(chain))
 	}
 	for i := len(chain) - 1; i >= 0 && chain[i].Kind != statefile.Step; i-- {
-		switch chain[i].Kind {
-		case statefile.Text, statefile.Thinking, statefile.Call:
+		if k := chain[i].Kind; k == statefile.Text || k == statefile.Thinking || k == statefile.Call {
 			return nil, fmt.Errorf("session %s is streaming a step, a cut at the tip needs its step record", from)
-		case statefile.Error:
+		}
+		if chain[i].Kind == statefile.Error {
 			return nil, fmt.Errorf("session %s is failed, a cut at the tip needs no error after the last step", from)
 		}
 	}
