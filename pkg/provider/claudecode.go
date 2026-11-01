@@ -67,8 +67,15 @@ var claudeIntegrity = map[string]string{
 	"win32-x64":    "sha512-vCDHtsyHXelsub8+o6zvuvLiwfyuLqVrr0waO2mMGRsKaVpDVAfquMJLs5Odqx9W0HI6I6Cl3EeGBcg3GWNMiw==",
 }
 
-// claude names an MCP tool mcp__<server>__<tool>.
-const claudePrefix = "mcp__mainplane__"
+// claude names an MCP tool mcp__<server>__<tool>. The model at times drops
+// the mcp__ and calls <server>__<tool>. claude answers such a call "no such
+// tool" itself, without the hook, and stops at --max-turns. The call is still
+// ours, and resuming at its turn leaves claude's answer out.
+const (
+	claudeMCP    = "mcp__"
+	claudeServer = "mainplane__"
+	claudePrefix = claudeMCP + claudeServer
+)
 
 // claudeEnv keeps the step to one request with nothing of the machine's in
 // it: no update, telemetry or memory, no CLAUDE.md, no compaction (an extra
@@ -184,10 +191,11 @@ func ccAssistant(recs []statefile.Record) (ccFrame, error) {
 }
 
 // ccTurn is where a step's turn ends in claude's transcript: the session and
-// the uuid of its last assistant message.
+// the uuid of its last assistant message, and whether --max-turns ended it.
 type ccTurn struct {
-	Session string `json:"session"`
-	UUID    string `json:"uuid"`
+	Session  string `json:"session"`
+	UUID     string `json:"uuid"`
+	maxTurns bool
 }
 
 // turnKey names a context that ends with an assistant turn: the hash of the
@@ -390,7 +398,8 @@ func runClaude(ctx context.Context, dir string, body []byte, emit func(statefile
 	if cause := context.Cause(ctx); cause != nil && !errors.Is(cause, err) {
 		return statefile.Header{}, cause
 	}
-	if err == nil && werr != nil {
+	var exit *exec.ExitError
+	if err == nil && werr != nil && (!end.maxTurns || !errors.As(werr, &exit) || exit.ExitCode() != 1) {
 		err = werr
 	}
 	if err != nil {
@@ -489,7 +498,10 @@ func claudeStream(resp io.Reader, emit func(statefile.Record)) (statefile.Header
 				}
 			}
 		case "result":
-			if e.IsError {
+			// A call without mcp__ ends at --max-turns, not at the hook,
+			// and claude exits 1.
+			end.maxTurns = e.Subtype == "error_max_turns" && e.Stop == "tool_use"
+			if e.IsError && !end.maxTurns {
 				return statefile.Header{}, ccTurn{}, fmt.Errorf("claude-code: %s: %s", e.Subtype, e.Result)
 			}
 			var usage statefile.Usage
@@ -521,7 +533,7 @@ func claudeBlock(raw json.RawMessage) (statefile.Record, bool, error) {
 	case "thinking", "redacted_thinking":
 		return statefile.Record{Header: statefile.Header{Kind: statefile.Thinking, Type: "application/json", Provider: "claude-code"}, Body: raw}, true, nil
 	case "tool_use":
-		name, ok := strings.CutPrefix(b.Name, claudePrefix)
+		name, ok := strings.CutPrefix(strings.TrimPrefix(b.Name, claudeMCP), claudeServer)
 		if !ok {
 			return statefile.Record{}, false, fmt.Errorf("claude-code: claude called its own tool %q", b.Name)
 		}
