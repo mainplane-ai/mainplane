@@ -116,7 +116,10 @@ func (h *Harness) Create(ctx context.Context, c Create, via string) (string, err
 		if c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Tools != "" || c.Input != nil || c.Params != nil || c.Preset != "" || c.Name != "" {
 			return "", fmt.Errorf("a copy takes no config and no name")
 		}
-		return id, h.copy(c.From, id, c.N)
+		if err := h.copy(c.From, id, c.N); err != nil {
+			return "", err
+		}
+		return id, nil
 	}
 	p, model, err := h.provider(c.Model)
 	if err != nil {
