@@ -398,7 +398,8 @@ func runClaude(ctx context.Context, dir string, body []byte, emit func(statefile
 	if cause := context.Cause(ctx); cause != nil && !errors.Is(cause, err) {
 		return statefile.Header{}, cause
 	}
-	if err == nil && werr != nil && !end.maxTurns {
+	var exit *exec.ExitError
+	if err == nil && werr != nil && (!end.maxTurns || !errors.As(werr, &exit) || exit.ExitCode() != 1) {
 		err = werr
 	}
 	if err != nil {
