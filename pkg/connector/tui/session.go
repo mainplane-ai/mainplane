@@ -361,6 +361,7 @@ func (s *session) follow(a *App) {
 	id := s.id
 	a.Go(func() {
 		after, wait := 0, ""
+		var failed error // the last poll error, shown until a poll succeeds
 		for s.ctx.Err() == nil {
 			ctx, cancel := context.WithTimeout(s.ctx, pollWait+callTime)
 			recs, err := s.c.Records(ctx, id, after, wait)
@@ -373,6 +374,7 @@ func (s *session) follow(a *App) {
 				return
 			}
 			if err != nil {
+				failed = err
 				a.Post(func() { a.SayError(err) })
 				time.Sleep(retryIn)
 				continue
@@ -381,7 +383,14 @@ func (s *session) follow(a *App) {
 				after = recs[len(recs)-1].N
 			}
 			wait = pollWait.String()
-			a.Post(func() { s.add(a, recs, info) })
+			was := failed
+			failed = nil
+			a.Post(func() {
+				if was != nil && a.Status.S == was.Error() {
+					a.Status.S = ""
+				}
+				s.add(a, recs, info)
+			})
 		}
 	})
 }
