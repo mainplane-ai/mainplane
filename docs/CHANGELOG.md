@@ -2,6 +2,13 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.5.11
+
+- Install options for a more private harness, documented in the new `docs/privacy-and-security.md`. `--no-admin` (Windows: `-NoAdmin`) does not make the harness machine the worker `admin`, so no agent can read the config and the provider keys; on an existing install it also removes the `admin` worker. Update from /settings then says to run `mainplane-server update` on the harness's machine. `--no-pointer` (`-NoPointer`) never contacts pointer.mainplane.ai: join lines and api keys carry the harness URL (`mp_join_<key>.<secret>@https://<host>`), and devices with them must join again when the URL changes. Flags given to a later install are added to the kept config, never taken away
+- Harness: a session can be copied at its tip while calls are open. The copy keeps every result that already arrived, and each open call gets the result `session was forked before this call returned`
+- Terminal app: a poll error, such as `context deadline exceeded` after the machine sleeps, leaves the status line once the poll recovers
+- System prompt: bug reporting is stated as a capability the agent has, not a request
+
 ## v0.5.10
 
 - Terminal app: `/model` in an open session continues it in the new session, with a `[continue session <id>]` message, as `/config` does; before, the new session started blank. `/effort` opens `/config`, as an alias
