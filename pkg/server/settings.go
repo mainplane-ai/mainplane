@@ -101,7 +101,7 @@ func (a *api) setSettings(w http.ResponseWriter, r *http.Request) {
 func (a *api) update(ctx context.Context, v string) error {
 	r, ok := a.pool.Get(worker.Admin)
 	if !ok {
-		return errors.New("the admin worker is not connected")
+		return errors.New("the admin worker is not connected: update on the harness's machine with sudo mainplane-server update")
 	}
 	ctx, cancel := context.WithTimeout(ctx, updateTime)
 	defer cancel()

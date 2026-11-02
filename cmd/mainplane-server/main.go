@@ -20,6 +20,8 @@ package main
 
 import (
 	"cmp"
+	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -88,6 +90,9 @@ func main() {
 		n, err := server.LoadNetwork(server.Dir)
 		fatal(err)
 		h.Join = n.String()
+		if h.NoPointer { // done pins it once the harness has a URL
+			h.Join = auth.Token(auth.Join, h.Harness, auth.Secret(k, n.Code))
+		}
 		if keep && !fresh { // an unelevated install handed over; hand back what it prints
 			b, err := json.Marshal(h)
 			fatal(err)
@@ -129,20 +134,31 @@ type handover struct {
 }
 
 // config is what install's arguments name: the default config with a fresh
-// key, reached at a URL after --url, or a config file; and whether the
-// quickstart opens after.
+// key, with no pointer after --no-pointer, no admin worker after --no-admin,
+// reached at a URL after --url, or a config file; and whether the quickstart
+// opens after. The quickstart is the admin worker's CLI.
 func config(args []string) (h handover, fresh, quick bool) {
 	if quick = len(args) > 0 && args[0] == "quickstart"; quick {
 		args = args[1:]
 	}
+	var noPointer, noAdmin bool
+	for ; len(args) > 0 && (args[0] == "--no-pointer" || args[0] == "--no-admin"); args = args[1:] {
+		noPointer, noAdmin = noPointer || args[0] == "--no-pointer", noAdmin || args[0] == "--no-admin"
+	}
+	if noAdmin && quick {
+		log.Fatal("--no-admin has no quickstart: the quickstart runs on the admin worker's CLI")
+	}
 	switch {
 	case len(args) == 0:
-		return handover{Config: server.Default(), Key: rand.Text()}, true, quick
+		h = handover{Config: server.Default(), Key: rand.Text()}
+		h.NoPointer, h.NoAdmin = noPointer, noAdmin
+		return h, true, quick
 	case len(args) == 2 && args[0] == "--url":
 		h, fresh, _ = config(nil)
 		h.URL = harnessURL(args[1], "the URL your proxy carries to http://localhost:8080")
+		h.NoPointer, h.NoAdmin = noPointer, noAdmin
 		return h, fresh, quick
-	case len(args) == 1 && !quick:
+	case len(args) == 1 && !quick && !noPointer && !noAdmin:
 		b, err := os.ReadFile(args[0])
 		fatal(err)
 		fatal(json.Unmarshal(b, &h))
@@ -173,8 +189,12 @@ func install(h handover) (handover, int) {
 }
 
 // logIn logs in the CLI the admin install placed with the default api key.
-// It finds the harness on loopback, so it needs no tunnel.
+// It finds the harness on loopback, so it needs no tunnel. With no admin
+// worker there is no CLI.
 func logIn(h handover) {
+	if h.NoAdmin {
+		return
+	}
 	if out, err := exec.Command(worker.Bin, "login", auth.Token(auth.Key, h.Harness, h.Key)).CombinedOutput(); err != nil {
 		log.Fatalf("mainplane login: %v: %s", err, out)
 	}
@@ -185,7 +205,7 @@ func logIn(h handover) {
 // tunnel meanwhile, and the TUI says while it does.
 func finish(h handover, quick bool) {
 	if quick && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
-		if h.URL != "" { // the TUI would only say the network is starting
+		if h.URL != "" && !h.NoPointer { // the TUI would only say the network is starting; done waited with no pointer
 			network(h)
 		}
 		tui := exec.Command(worker.Bin, "quickstart")
@@ -195,29 +215,52 @@ func finish(h handover, quick bool) {
 		}
 		os.Exit(tui.ProcessState.ExitCode())
 	}
-	network(h)
+	if !h.NoPointer { // done waited
+		network(h)
+	}
 	if quick {
 		fmt.Println("no terminal: run mainplane to finish setup")
 	}
 }
 
 // network waits, behind the spinner, until workers can reach the harness,
-// after the lines are printed: they name no URL, and the wait is the first
-// start's.
-func network(h handover) {
+// and returns its URL. It comes after the lines are printed, since they name
+// no URL and the wait is the first start's, but with no pointer before them.
+func network(h handover) string {
 	fmt.Println()
 	stop := spin("initializing network")
-	if _, err := server.Reached(h.Harness, h.URL); err != nil {
+	u, err := server.Reached(h.Harness, h.URL, h.NoPointer)
+	if err != nil {
 		stop("")
 		fatal(err)
 	}
 	stop(" done")
+	return u
 }
 
 // done says the harness is installed, and how to make a machine a worker of
-// it or log its CLI in.
+// it or log its CLI in. With no pointer the lines carry the harness URL, so
+// it waits for one first.
 func done(h handover) {
-	fmt.Printf("%s\n%s\n%s", version.Installed(), installLines(auth.Join, h.Join), installLines(auth.Key, auth.Token(auth.Key, h.Harness, h.Key)))
+	join, key := h.Join, auth.Token(auth.Key, h.Harness, h.Key)
+	fmt.Print(version.Installed())
+	if h.NoPointer {
+		u := network(h)
+		join, key = auth.Pin(join, u), auth.Pin(key, u)
+		fmt.Printf("\nno pointer: these lines carry %s. When the harness URL changes, every worker and login must join again with new lines: mainplane-server join, mainplane-server key new\n", u)
+	}
+	fmt.Printf("\n%s\n%s", installLines(auth.Join, join), installLines(auth.Key, key))
+}
+
+// self is the URL the installed harness is reached at, for lines that carry
+// it when it has no pointer.
+func self(k ed25519.PrivateKey) string {
+	u, err := pointer.Self(context.Background(), pointer.Encode(k))
+	fatal(err)
+	if u == "" {
+		log.Fatal("the harness has no URL yet: its tunnel is starting; try again in a minute")
+	}
+	return u
 }
 
 // installLines are what token does and the lines that run the latest install
@@ -290,6 +333,10 @@ func move(args []string) {
 	elevate.Root(args...)
 	u, err := server.Move(url, t)
 	fatal(err)
+	if c, err := server.Load(server.Conf); err == nil && c.NoPointer {
+		fmt.Printf("harness reached at %s; with no pointer, workers and logins join again with new lines: mainplane-server join, mainplane-server key new\n", u)
+		return
+	}
 	fmt.Printf("harness reached at %s; workers follow in about a minute\n", u)
 }
 
@@ -323,7 +370,15 @@ func join(args []string) {
 		n, err = server.Cycle()
 	}
 	fatal(err)
-	fmt.Print(installLines(auth.Join, n.String()))
+	c, err := server.Load(server.Conf)
+	fatal(err)
+	k, err := server.Key(server.Dir)
+	fatal(err)
+	url := ""
+	if c.NoPointer {
+		url = self(k)
+	}
+	fmt.Print(installLines(auth.Join, n.Join(k, c.NoPointer, url)))
 }
 
 func table(args []string) {
@@ -335,6 +390,9 @@ func table(args []string) {
 		secret, err := store.Issue(auth.Key, args[1])
 		fatal(err)
 		token := auth.Token(auth.Key, pointer.Encode(k), secret)
+		if c, err := server.Load(server.Conf); err == nil && c.NoPointer {
+			token = auth.Pin(token, self(k))
+		}
 		fmt.Println(token)
 		fmt.Fprintf(os.Stderr, "\n%s", installLines(auth.Key, token)) // stderr, so stdout stays the token for scripts
 	case "revoke":

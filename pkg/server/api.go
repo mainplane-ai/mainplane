@@ -56,6 +56,7 @@ const (
 type api struct {
 	dir, path string
 	k         ed25519.PrivateKey
+	noPointer bool          // the config's NoPointer: join lines and keys carry the harness URL
 	at        func() string // the harness's URL, or none yet
 	proving   atomic.Value  // the URL prove last started on
 	reached   atomic.Value  // the URL a worker last found the harness at
@@ -93,7 +94,11 @@ func (a *api) prove(ctx context.Context, url string) {
 		return
 	}
 	for a.at() == url {
-		if u, err := reach(ctx, pointer.Encode(a.k)); err == nil && u == url {
+		pinned := ""
+		if a.noPointer {
+			pinned = url
+		}
+		if u, err := reach(ctx, pointer.Encode(a.k), pinned); err == nil && u == url {
 			a.reached.Store(url)
 			return
 		}
@@ -111,7 +116,11 @@ func (a *api) join(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	reply(w, map[string]string{"join": n.String()})
+	join := ""
+	if u := a.at(); !a.noPointer || u != "" { // none until the harness has a URL to pin
+		join = n.Join(a.k, a.noPointer, u)
+	}
+	reply(w, map[string]string{"join": join})
 }
 
 func (a *api) key(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +138,11 @@ func (a *api) key(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	reply(w, map[string]string{"name": in.Name, "key": auth.Token(auth.Key, pointer.Encode(a.k), secret)})
+	token := auth.Token(auth.Key, pointer.Encode(a.k), secret)
+	if a.noPointer {
+		token = auth.Pin(token, a.at())
+	}
+	reply(w, map[string]string{"name": in.Name, "key": token})
 }
 
 func (a *api) drives(w http.ResponseWriter, r *http.Request) {

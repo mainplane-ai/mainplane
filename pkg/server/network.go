@@ -39,9 +39,10 @@ func LoadNetwork(dir string) (Network, error) {
 	if err := json.Unmarshal(b, &n); err != nil {
 		return n, err
 	}
-	// an empty code would let anyone in who runs the exchange with one
-	if n.Name == "" || n.Code == "" {
-		return n, fmt.Errorf("%s has no name or no code", networkPath(dir))
+	// an empty code would let anyone in who runs the exchange with one; a
+	// harness with no pointer has no name
+	if n.Code == "" {
+		return n, fmt.Errorf("%s has no code", networkPath(dir))
 	}
 	return n, nil
 }
@@ -67,15 +68,18 @@ func adminSecret(k ed25519.PrivateKey, code string) string {
 	return auth.Secret(k, worker.Admin+" "+code)
 }
 
-// network gives the harness with k in dir a random name, claimed on the
-// pointer, and a device code, unless it has them. A name another harness
-// holds is passed over.
-func network(dir string, k ed25519.PrivateKey) error {
+// network gives the harness with k in dir a device code and, with claim, a
+// random name claimed on the pointer, unless it has them. A name another
+// harness holds is passed over.
+func network(dir string, k ed25519.PrivateKey, claim bool) error {
 	_, err := LoadNetwork(dir)
 	if !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	n := Network{Code: auth.NewCode()}
+	if !claim {
+		return n.save(dir)
+	}
 	for {
 		n.Name = fmt.Sprintf("%s-%03d", petname.Generate(2, "-"), rand.IntN(1000))
 		if err := pointer.Claim(context.Background(), k, n.Name); !errors.Is(err, pointer.ErrTaken) {
@@ -87,9 +91,26 @@ func network(dir string, k ed25519.PrivateKey) error {
 	}
 }
 
+// Join is what a device's install line takes to join the harness with k:
+// the network name and device code, or with no pointer, a join token pinned
+// to url, the harness URL.
+func (n Network) Join(k ed25519.PrivateKey, noPointer bool, url string) string {
+	if !noPointer {
+		return n.String()
+	}
+	return auth.Pin(auth.Token(auth.Join, pointer.Encode(k), auth.Secret(k, n.Code)), url)
+}
+
 // Rename makes name the installed harness's network name. Its workers stay:
 // they know the harness by its key.
 func Rename(name string) (Network, error) {
+	c, err := Load(Conf)
+	if err != nil {
+		return Network{}, err
+	}
+	if c.NoPointer {
+		return Network{}, errors.New("this harness has no pointer, so it has no network name: its join lines carry its URL")
+	}
 	n, err := LoadNetwork(Dir)
 	if err != nil {
 		return n, err

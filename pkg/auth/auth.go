@@ -243,6 +243,17 @@ func Token(kind, key, secret string) string {
 	return "mp_" + kind + "_" + key + "." + secret
 }
 
+// Pin is token with the harness URL it is used at, for a harness with no
+// pointer: the token alone names no URL.
+func Pin(token, url string) string { return token + "@" + url }
+
+// Unpin is a token and the URL it was pinned to, none for a token as Token
+// makes it.
+func Unpin(s string) (token, url string) {
+	token, url, _ = strings.Cut(s, "@")
+	return token, url
+}
+
 // Parse is a token's harness key and secret, refused when it is not of kind.
 func Parse(kind, token string) (key, secret string, err error) {
 	rest, ok := strings.CutPrefix(token, "mp_"+kind+"_")

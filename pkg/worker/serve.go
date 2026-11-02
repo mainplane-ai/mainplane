@@ -25,6 +25,7 @@ import (
 // user code runs and files are touched as; nil is the worker's own user.
 type Local struct {
 	Name     string
+	URL      string // the harness URL the join token was pinned to; none: found through the pointer
 	Secret   string
 	Scratch  string
 	Interps  []string

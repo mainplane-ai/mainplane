@@ -64,6 +64,8 @@ type Config struct {
 	Links       [][2]string                  `json:"links,omitempty"`        // pairs of workers, by name, that reach each other on the mesh
 	Drives      map[string]coordinator.Drive `json:"drives,omitempty"`       // by name: each one's server and workers
 	DataSharing *DataSharing                 `json:"data_sharing,omitempty"` // whether the user has opted in to data sharing; none: not asked yet
+	NoPointer   bool                         `json:"no_pointer,omitempty"`   // tokens carry the harness URL and nothing goes to pointer.mainplane.ai: workers join again when the URL changes
+	NoAdmin     bool                         `json:"no_admin,omitempty"`     // install makes this machine no worker: no agent can reach the config and keys
 }
 
 // Tunnel is a tunnel the user made in Cloudflare, which routes URL to it and
@@ -188,7 +190,7 @@ func Harness(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	if err := network(dir, k); err != nil {
+	if err := network(dir, k, !c.NoPointer); err != nil {
 		return err
 	}
 	store := Auth(dir)
@@ -241,7 +243,9 @@ func Harness(ctx context.Context, path string) error {
 	var at atomic.Value
 	at.Store("")
 	urls := make(chan string, 1)
-	go publish(ctx, dir, k, urls)
+	if !c.NoPointer {
+		go publish(ctx, dir, k, urls)
+	}
 	mux := http.NewServeMux()
 	mux.Handle("/id", pointer.ID(k, func() string { return at.Load().(string) }, coord.Public().String()))
 	mux.Handle("POST /join", auth.JoinHandler(k, pointer.Encode(k), code, limit))
@@ -262,7 +266,7 @@ func Harness(ctx context.Context, path string) error {
 	routes.HandleFunc("POST /providers/{name}/login", logins.start)
 	routes.HandleFunc("POST /providers/{name}/login/code", logins.paste)
 	routes.HandleFunc("GET /providers/{name}/login", logins.get)
-	a := &api{dir: dir, path: path, k: k, at: func() string { return at.Load().(string) }, coord: coord, pool: pool}
+	a := &api{dir: dir, path: path, k: k, noPointer: c.NoPointer, at: func() string { return at.Load().(string) }, coord: coord, pool: pool}
 	a.handle(routes)
 	go ship(ctx, dir, path)
 	api := store.Bearer(limit, routes)

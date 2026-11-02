@@ -41,6 +41,7 @@ import (
 // fails at URL finds the harness again, so one Client is shared, not copied.
 type Client struct {
 	URL     string     `json:"url"`
+	Pinned  bool       `json:"pinned,omitempty"` // URL came with the api key: the pointer is never asked
 	Key     string     `json:"key"`
 	Harness string     `json:"harness"`
 	Local   string     `json:"-"`
@@ -58,12 +59,17 @@ func Path() (string, error) {
 // pointer, checks that it takes the key, and saves both. It returns the client, the login it replaced (empty for none),
 // and the release the harness runs.
 func Login(ctx context.Context, token string) (c *Client, old *Client, version string, err error) {
+	token, url := auth.Unpin(token)
 	h, key, err := auth.Parse(auth.Key, token)
 	if err != nil {
 		return c, old, "", err
 	}
-	c, old = &Client{Key: key, Harness: h, Local: pointer.Local(ctx, h)}, &Client{}
-	if c.Local == "" {
+	c, old = &Client{URL: url, Pinned: url != "", Key: key, Harness: h, Local: pointer.Local(ctx, h)}, &Client{}
+	if c.Local == "" && c.Pinned {
+		if err := pointer.Prove(ctx, h, url); err != nil {
+			return c, old, "", unreachable(err)
+		}
+	} else if c.Local == "" {
 		// a URL means the pointer answered, and the error says what failed there
 		if c.URL, err = pointer.Find(ctx, h, ""); c.URL == "" {
 			err = unreachable(err)
@@ -126,6 +132,12 @@ func (c *Client) Find(ctx context.Context) error {
 // outlive its harness, as a quick tunnel's does.
 func (c *Client) find(ctx context.Context) (bool, error) {
 	at := c.At()
+	if c.Pinned {
+		if err := pointer.Prove(ctx, c.Harness, at); err != nil {
+			return false, fmt.Errorf("the harness of this login does not answer at %s, the URL its api key came with: %w; if its URL changed, log in again with a new key from mainplane-server key new", at, unreachable(err))
+		}
+		return false, nil
+	}
 	u, err := pointer.Find(ctx, c.Harness, at)
 	if err != nil && u != "" {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

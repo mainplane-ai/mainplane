@@ -110,7 +110,7 @@ func Work(key string, l Local) error {
 	if !ok {
 		stop := make(chan os.Signal, 1)
 		signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-		m, err := mesh.Up(filepath.Join(l.Scratch, "mesh"), key, l.Secret, l.Name)
+		m, err := mesh.Up(filepath.Join(l.Scratch, "mesh"), key, l.URL, l.Secret, l.Name)
 		if err != nil {
 			return err
 		}
@@ -139,7 +139,7 @@ type service struct {
 // mesh that fails to come up ends the process, and the service manager
 // starts it again.
 func (s service) Execute(_ []string, reqs <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
-	m, err := mesh.Up(filepath.Join(stateDir, "mesh"), s.key, s.l.Secret, s.l.Name)
+	m, err := mesh.Up(filepath.Join(stateDir, "mesh"), s.key, s.l.URL, s.l.Secret, s.l.Name)
 	if err != nil {
 		log.Fatalf("mesh: %v", err)
 	}

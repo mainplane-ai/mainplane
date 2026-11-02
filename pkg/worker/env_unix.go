@@ -75,7 +75,7 @@ func Work(key string, l Local) error {
 	// A stop while the mesh comes up waits for it, so Close still runs.
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
-	m, err := mesh.Up(dir, key, l.Secret, l.Name)
+	m, err := mesh.Up(dir, key, l.URL, l.Secret, l.Name)
 	if err != nil {
 		return err
 	}

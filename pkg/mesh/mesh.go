@@ -6,6 +6,7 @@
 package mesh
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -87,10 +88,11 @@ func (m *Mesh) Report(f func() string) { m.report.Store(&f) }
 // Up brings the node up with its state in dir: the TUN, then the engine.
 // It registers as name with the join secret on first start; the keys in
 // dir register again with none. It follows the harness with key harness
-// through the pointer and moves its control client when the harness moves.
+// through the pointer and moves its control client when the harness moves;
+// at url alone when its token was pinned to one.
 // On the harness's own machine, as admin, control is the harness on
 // loopback: no tunnel or pointer. Its relay is still the tunnel's.
-func Up(dir, harness, secret, name string) (*Mesh, error) {
+func Up(dir, harness, url, secret, name string) (*Mesh, error) {
 	// Cloudflare answers 400 to the native upgrades of both.
 	envknob.Setenv("TS_CONTROL_WEBSOCKET", "1")
 	envknob.Setenv("TS_DEBUG_DERP_WS_CLIENT", "1")
@@ -203,7 +205,7 @@ func Up(dir, harness, secret, name string) (*Mesh, error) {
 	}()
 	go func() {
 		defer close(m.follows)
-		follow(ctx, lb, m.health, harness, secret, name)
+		follow(ctx, lb, m.health, harness, url, secret, name)
 	}()
 	// A second worker on the machine finds the socket taken and goes without.
 	if m.sock, err = safesocket.Listen(socket); err != nil {
@@ -362,7 +364,7 @@ func run(name string, args ...string) error {
 // answers every poll with 404: the client starts again, which registers,
 // with the join secret when the keys are unknown. A harness on this machine
 // is at its loopback URL, which needs neither the tunnel nor the pointer.
-func follow(ctx context.Context, lb *ipnlocal.LocalBackend, h *health.Tracker, harness, secret, name string) {
+func follow(ctx context.Context, lb *ipnlocal.LocalBackend, h *health.Tracker, harness, pinned, secret, name string) {
 	var url string
 	var wait, backoff time.Duration
 	for {
@@ -375,7 +377,7 @@ func follow(ctx context.Context, lb *ipnlocal.LocalBackend, h *health.Tracker, h
 		if h.GetInPollNetMap() {
 			continue
 		}
-		u := pointer.Local(ctx, harness)
+		u := cmp.Or(pointer.Local(ctx, harness), pinned)
 		if u == "" && (url == "" || pointer.Prove(ctx, harness, url) != nil) {
 			var err error
 			if u, err = pointer.Find(ctx, harness, ""); err != nil {
