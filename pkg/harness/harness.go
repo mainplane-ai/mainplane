@@ -108,20 +108,17 @@ func system(source, body string) statefile.Record {
 // Create makes a session and returns its id. A fresh one starts with the
 // system prompt, the AGENTS.md scan, and the worker list, so all three reach
 // the provider as system text ahead of the first message. A copy is byte for byte and gets
-// nothing appended: it already holds both.
+// nothing appended but a result for each call still open at its cut. It
+// does not step until a message or retry comes.
 func (h *Harness) Create(ctx context.Context, c Create, via string) (string, error) {
 	id := statefile.NewID()
 	if c.From != "" {
 		if c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Tools != "" || c.Input != nil || c.Params != nil || c.Preset != "" || c.Name != "" {
 			return "", fmt.Errorf("a copy takes no config and no name")
 		}
-		if err := h.cut(c.From, c.N); err != nil {
+		if err := h.copy(c.From, id, c.N); err != nil {
 			return "", err
 		}
-		if err := h.Sessions.Copy(c.From, id, c.N); err != nil {
-			return "", err
-		}
-		h.touch(id)
 		return id, nil
 	}
 	p, model, err := h.provider(c.Model)
@@ -183,36 +180,66 @@ func (h *Harness) Create(ctx context.Context, c Create, via string) (string, err
 	return id, f.Close()
 }
 
-// cut refuses a copy a provider would reject: the cut must fall before a
-// message record or at the tip of a closed session, so no call is left
-// without its result and no step is split.
-func (h *Harness) cut(from string, n int) error {
-	if !statefile.ValidID(from) {
-		return fmt.Errorf("bad session id %q", from)
-	}
-	chain, err := h.Sessions.Load(from)
+// copy copies session from up to record n as id, and answers each call the
+// cut leaves open.
+func (h *Harness) copy(from, id string, n int) error {
+	open, err := h.cut(from, n)
 	if err != nil {
 		return err
 	}
+	if err := h.Sessions.Copy(from, id, n); err != nil {
+		return err
+	}
+	defer h.touch(id)
+	f, err := h.Sessions.Open(id)
+	if err != nil {
+		return err
+	}
+	for _, r := range open {
+		if err := f.Append(result(r.ID, "session was forked before this call returned")); err != nil {
+			_ = f.Close()
+			return err
+		}
+	}
+	return f.Close()
+}
+
+// cut refuses a copy a provider would reject: the cut must fall before a
+// message record or at the tip, so no step is split. A tip cut needs the last
+// step record written and no error after it; the calls it leaves without a
+// result are returned, for the copy to answer.
+func (h *Harness) cut(from string, n int) ([]statefile.Record, error) {
+	if !statefile.ValidID(from) {
+		return nil, fmt.Errorf("bad session id %q", from)
+	}
+	chain, err := h.Sessions.Load(from)
+	if err != nil {
+		return nil, err
+	}
 	if n <= 2 {
-		return fmt.Errorf("n must keep start and config")
+		return nil, fmt.Errorf("n must keep start and config")
 	}
 	if n <= len(chain) {
 		if chain[n-1].Kind != statefile.Message {
-			return fmt.Errorf("record %d is a %s, a cut must fall before a message or at a closed tip", n, chain[n-1].Kind)
+			return nil, fmt.Errorf("record %d is a %s, a cut must fall before a message or at the tip", n, chain[n-1].Kind)
 		}
 		if len(statefile.Waiting(chain[:n-1])) > 0 {
-			return fmt.Errorf("record %d was posted mid-step, a cut there leaves a call without its result", n)
+			return nil, fmt.Errorf("record %d was posted mid-step, a cut there leaves a call without its result", n)
 		}
-		return nil
+		return nil, nil
 	}
 	if n != len(chain)+1 {
-		return fmt.Errorf("session %s has %d records", from, len(chain))
+		return nil, fmt.Errorf("session %s has %d records", from, len(chain))
 	}
-	if st := h.status(from, chain); st != statefile.StatusClosed {
-		return fmt.Errorf("session %s is %s, a cut at the tip needs closed", from, st)
+	for i := len(chain) - 1; i >= 0 && chain[i].Kind != statefile.Step; i-- {
+		if k := chain[i].Kind; k == statefile.Text || k == statefile.Thinking || k == statefile.Call {
+			return nil, fmt.Errorf("session %s is streaming a step, a cut at the tip needs its step record", from)
+		}
+		if chain[i].Kind == statefile.Error {
+			return nil, fmt.Errorf("session %s is failed, a cut at the tip needs no error after the last step", from)
+		}
 	}
-	return nil
+	return statefile.Waiting(chain), nil
 }
 
 func config(chain []statefile.Record) (statefile.Conf, error) {
