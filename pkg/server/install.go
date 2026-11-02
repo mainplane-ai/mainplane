@@ -164,7 +164,10 @@ func Install(c *Config, keep bool) error {
 	if err := answers(c.HTTP); err != nil {
 		return err
 	}
-	if c.NoAdmin {
+	if c.NoAdmin { // an admin worker an earlier install made goes
+		if h, _, err := mesh.Joined(); err == nil && h == pointer.Encode(k) {
+			return uninstallAdmin()
+		}
 		return nil
 	}
 	if err := admin(k); err != nil {

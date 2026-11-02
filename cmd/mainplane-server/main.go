@@ -387,11 +387,15 @@ func table(args []string) {
 	case "new":
 		k, err := server.Key(server.Dir)
 		fatal(err)
+		url := ""
+		if c, err := server.Load(server.Conf); err == nil && c.NoPointer {
+			url = self(k) // before the key is issued, so a harness with no URL yet leaves no name taken
+		}
 		secret, err := store.Issue(auth.Key, args[1])
 		fatal(err)
 		token := auth.Token(auth.Key, pointer.Encode(k), secret)
-		if c, err := server.Load(server.Conf); err == nil && c.NoPointer {
-			token = auth.Pin(token, self(k))
+		if url != "" {
+			token = auth.Pin(token, url)
 		}
 		fmt.Println(token)
 		fmt.Fprintf(os.Stderr, "\n%s", installLines(auth.Key, token)) // stderr, so stdout stays the token for scripts

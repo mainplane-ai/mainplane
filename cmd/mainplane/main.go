@@ -218,7 +218,10 @@ func work(install bool, args []string) {
 		// arguments: the token, which a new code does not refuse
 		os.Args = []string{os.Args[0], os.Args[1], token}
 	}
-	join, url := auth.Unpin(token)
+	join, url, err := auth.Unpin(token)
+	if err != nil {
+		log.Fatal(err)
+	}
 	key, secret, err := auth.Parse(auth.Join, join)
 	if err != nil {
 		log.Fatal(err)

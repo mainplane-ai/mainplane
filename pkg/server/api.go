@@ -129,6 +129,10 @@ func (a *api) key(w http.ResponseWriter, r *http.Request) {
 		fail(w, errors.New(`the body is {"name"}, a name of one line`))
 		return
 	}
+	if a.noPointer && a.at() == "" {
+		http.Error(w, "the harness has no URL yet for the key to carry: its tunnel is starting", http.StatusServiceUnavailable)
+		return
+	}
 	secret, err := Auth(a.dir).Issue(auth.Key, in.Name)
 	if errors.Is(err, auth.ErrTaken) {
 		http.Error(w, err.Error(), http.StatusConflict)

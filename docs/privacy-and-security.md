@@ -38,7 +38,8 @@ What this means for where you connect a worker:
 - A machine that only sends messages to agents needs no worker. Log in with an
   API key ([without the quickstart](self-hosting.md#without-the-quickstart)).
 - The worker service, `mainplaned`, runs as root. Agent code runs as the user
-  who connected the worker, never as root. The root actions the harness can
+  who connected the worker, except on a machine with only a root shell and no
+  sudo, where it runs as root. The root actions the harness can
   ask for have fixed purposes: join the network, mount a drive, update to a
   signed release.
 - Two workers reach each other only when a link in the harness config names

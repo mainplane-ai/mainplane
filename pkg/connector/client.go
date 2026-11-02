@@ -59,7 +59,10 @@ func Path() (string, error) {
 // pointer, checks that it takes the key, and saves both. It returns the client, the login it replaced (empty for none),
 // and the release the harness runs.
 func Login(ctx context.Context, token string) (c *Client, old *Client, version string, err error) {
-	token, url := auth.Unpin(token)
+	token, url, err := auth.Unpin(token)
+	if err != nil {
+		return c, old, "", err
+	}
 	h, key, err := auth.Parse(auth.Key, token)
 	if err != nil {
 		return c, old, "", err
