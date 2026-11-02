@@ -22,9 +22,7 @@ curl -fsSL https://mainplane.ai/install | sh -s -- server quickstart
 
 The quickstart walks you through adding a provider, workers (computers your agents control) and connectors (ways to message your agents).
 
-Read more in [docs/self-hosting.md](docs/self-hosting.md).
-
-Read what agents can do on your machines and what data leaves them in [docs/privacy-and-security.md](docs/privacy-and-security.md).
+Read more in [docs/self-hosting.md](docs/self-hosting.md), and [docs/privacy-and-security.md](docs/privacy-and-security.md).
 
 <br><br>
 
