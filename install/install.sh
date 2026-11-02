@@ -6,17 +6,18 @@
 # at url, which your own proxy carries to it, with no tunnel. Run it
 # without sudo, so the login is yours and those keys reach it; it asks for sudo itself. In a root shell
 # with no sudo, all run as root, and code runs as root. The release stamps its version.
-#   curl -fsSL https://dl.mainplane.ai/@VERSION@/install.sh | sh -s -- [api key | <network> <device code> | server [quickstart] [--url <url>]]
+#   curl -fsSL https://dl.mainplane.ai/@VERSION@/install.sh | sh -s -- [api key | <network> <device code> | join token | server [quickstart] [--no-pointer] [--no-admin] [--url <url>]]
 set -eu
 v=@VERSION@
 dl=https://dl.mainplane.ai/$v
 usage() {
-  echo "usage: curl -fsSL $dl/install.sh | sh -s -- [api key | <network> <device code> | server [quickstart] [--url <url>]]" >&2
+  echo "usage: curl -fsSL $dl/install.sh | sh -s -- [api key | <network> <device code> | join token | server [quickstart] [--no-pointer] [--no-admin] [--url <url>]]" >&2
   exit 2
 }
 case $#:${1:-}:${2:-}:${3:-} in
-0::: | 1:mp_key_*:: | 1:server:: | 3:server:--url:* | 4:server:quickstart:--url) ;;
+0::: | 1:mp_key_*:: | 1:mp_join_*::) ;;
 2:server:--url:) usage ;;
+[1-6]:server:*) ;; # mainplane-server install checks the rest
 2:*) ;;
 *) usage ;;
 esac
@@ -45,7 +46,7 @@ get() {
   mv "$1-$os-$arch" "$1"
 }
 case $#:${1:-}:${2:-}:${3:-} in
-1:server:: | 2:server:quickstart: | 3:server:--url:* | 4:server:quickstart:--url)
+[1-6]:server:*)
   get mainplane
   get mainplane-server
   # install places mainplane-server, runs it as a service, makes this machine the worker admin with the
@@ -58,9 +59,9 @@ case $#:${1:-}:${2:-}:${3:-} in
     ./mainplane-server install ${1+"$@"}
   fi
   ;;
-2:*)
+2:* | 1:mp_join_*::)
   get mainplane
-  ./mainplane install "$1" "$2"
+  ./mainplane install "$@"
   ;;
 *)
   # A CLI this machine has is used: a worker's or harness's is root's to replace.

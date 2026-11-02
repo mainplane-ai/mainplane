@@ -21,6 +21,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -241,6 +242,21 @@ func Hash(secret string) string {
 
 func Token(kind, key, secret string) string {
 	return "mp_" + kind + "_" + key + "." + secret
+}
+
+// Pin is token with the harness URL it is used at, for a harness with no
+// pointer: the token alone names no URL.
+func Pin(token, url string) string { return token + "@" + url }
+
+// Unpin is a token and the URL it was pinned to, none for a token as Token
+// makes it. The URL is https://<host> alone, as a harness URL is: the key
+// proof trusts a loopback URL, so a token must not name one.
+func Unpin(s string) (token, url string, err error) {
+	token, url, _ = strings.Cut(s, "@")
+	if u, perr := neturl.Parse(url); url != "" && (perr != nil || url != "https://"+u.Hostname() || net.ParseIP(u.Hostname()).IsLoopback()) {
+		return "", "", fmt.Errorf("%s: the URL a token carries is https://<host>, not loopback, with no port or path", url)
+	}
+	return token, url, nil
 }
 
 // Parse is a token's harness key and secret, refused when it is not of kind.

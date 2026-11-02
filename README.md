@@ -24,6 +24,8 @@ The quickstart walks you through adding a provider, workers (computers your agen
 
 Read more in [docs/self-hosting.md](docs/self-hosting.md).
 
+Read what agents can do on your machines and what data leaves them in [docs/privacy-and-security.md](docs/privacy-and-security.md).
+
 <br><br>
 
 # Features
@@ -57,7 +59,7 @@ Yes, Mainplane can use the regular limits of a Claude Code or ChatGPT Codex subs
 <details>
 <summary>Does Mainplane share my data?</summary>
 
-No data is shared by default. Users can opt in to sharing data to improve Mainplane in /settings.
+Your chats are not shared by default. Users can opt in to sharing data to improve Mainplane in /settings.
 </details>
 
 <details>

@@ -118,12 +118,8 @@ func Install(c *Config, keep bool) error {
 	_, err := os.Stat(Conf)
 	write := !keep || err != nil
 	if !write {
-		url := c.URL
-		if *c, err = Load(Conf); err != nil {
+		if write, err = kept(c); err != nil {
 			return err
-		}
-		if write = url != ""; write { // a URL given to install replaces how the kept config is reached
-			c.URL, c.Tunnel = url, nil
 		}
 	} else if doNotTrack() {
 		c.DataSharing = &DataSharing{Via: "DO_NOT_TRACK"}
@@ -142,7 +138,7 @@ func Install(c *Config, keep bool) error {
 		return err
 	}
 	// before start, so it is the operator's, and before the lines that name it are printed
-	if err := network(Dir, k); err != nil {
+	if err := network(Dir, k, !c.NoPointer); err != nil {
 		return err
 	}
 	// Root writes the auth table after start gives Dir to the operator. A file
@@ -168,10 +164,33 @@ func Install(c *Config, keep bool) error {
 	if err := answers(c.HTTP); err != nil {
 		return err
 	}
+	if c.NoAdmin { // an admin worker an earlier install made goes
+		if h, _, err := mesh.Joined(); err == nil && h == pointer.Encode(k) {
+			return uninstallAdmin()
+		}
+		return nil
+	}
 	if err := admin(k); err != nil {
 		return err
 	}
 	return agents()
+}
+
+// kept makes c the installed config, but for what c adds to it, and says
+// whether that changed it. A URL given to install replaces how the kept
+// config is reached. A flag given to install is added, never taken away.
+func kept(c *Config) (bool, error) {
+	given := *c
+	var err error
+	if *c, err = Load(Conf); err != nil {
+		return false, err
+	}
+	if given.URL != "" {
+		c.URL, c.Tunnel = given.URL, nil
+	}
+	changed := given.URL != "" || given.NoPointer && !c.NoPointer || given.NoAdmin && !c.NoAdmin
+	c.NoPointer, c.NoAdmin = c.NoPointer || given.NoPointer, c.NoAdmin || given.NoAdmin
+	return changed, nil
 }
 
 // writeAgents writes adminAgents at path unless something is there: a file is
@@ -260,13 +279,14 @@ func Move(url string, t *Tunnel) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return Reached(pointer.Encode(k), url)
+	return Reached(pointer.Encode(k), url, c.NoPointer)
 }
 
 // Reached waits until workers can reach the harness with key where they find
-// it, at url when the user's own proxy carries it, and returns that URL. A
-// tunnel that stops the harness fails it at once.
-func Reached(key, url string) (string, error) {
+// it, at url when the user's own proxy carries it, and returns that URL. With
+// noPointer they find it where it says it is on loopback. A tunnel that stops
+// the harness fails it at once.
+func Reached(key, url string, noPointer bool) (string, error) {
 	wait := tunnelWait
 	if url != "" {
 		wait = urlWait
@@ -275,8 +295,17 @@ func Reached(key, url string) (string, error) {
 		if b, err := os.ReadFile(filepath.Join(Dir, tunnelFailed)); err == nil {
 			return "", fmt.Errorf("the harness could not start its tunnel: %s", b)
 		}
-		u, err := reach(context.Background(), key)
-		if err == nil && url != "" && u != url {
+		u, err := url, error(nil)
+		if noPointer {
+			if u == "" {
+				if u, err = pointer.Self(context.Background(), key); err == nil && u == "" {
+					err = errors.New("its tunnel is starting")
+				}
+			}
+			if err == nil {
+				u, err = reach(context.Background(), key, u)
+			}
+		} else if u, err = reach(context.Background(), key, ""); err == nil && url != "" && u != url {
 			err = fmt.Errorf("the pointer names %s, not yet %s", u, url)
 		}
 		if err == nil {
@@ -288,10 +317,16 @@ func Reached(key, url string) (string, error) {
 	}
 }
 
-// reach is the URL a worker finds the harness with key at, once the harness
-// proves its key there and passes the WebSocket upgrade, as a worker needs.
-func reach(ctx context.Context, key string) (string, error) {
-	u, err := pointer.Find(ctx, key, "")
+// reach is the URL a worker finds the harness with key at, url when its token
+// is pinned to one, else the pointer's, once the harness proves its key there
+// and passes the WebSocket upgrade, as a worker needs.
+func reach(ctx context.Context, key, url string) (string, error) {
+	u, err := url, error(nil)
+	if u == "" {
+		u, err = pointer.Find(ctx, key, "")
+	} else {
+		err = pointer.Prove(ctx, key, u)
+	}
 	if err == nil {
 		err = upgrades(ctx, u)
 	}

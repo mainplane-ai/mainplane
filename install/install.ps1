@@ -4,13 +4,14 @@
 # machine the harness, from the provider keys set in this shell, after a UAC prompt, and logs the CLI
 # in to it; server quickstart then opens the quickstart in the TUI, and -Url <url> reaches the harness at url,
 # which your own proxy carries to it, with no tunnel. The release stamps its version.
-#   & ([scriptblock]::Create((irm https://dl.mainplane.ai/@VERSION@/install.ps1))) [api key | <network> <device code> | server [quickstart] [-Url <url>]]
-param([Parameter(Position = 0)][string]$Token, [Parameter(Position = 1)][string]$Code, [string]$Url)
+#   & ([scriptblock]::Create((irm https://dl.mainplane.ai/@VERSION@/install.ps1))) [api key | <network> <device code> | join token | server [quickstart] [-NoPointer] [-NoAdmin] [-Url <url>]]
+param([Parameter(Position = 0)][string]$Token, [Parameter(Position = 1)][string]$Code, [string]$Url, [switch]$NoPointer, [switch]$NoAdmin)
 $ErrorActionPreference = 'Stop'
 $quick = $Token -eq 'server' -and $Code -eq 'quickstart'
 $withUrl = $PSBoundParameters.ContainsKey('Url')
-if (($Token -and !$Code -and $Token -ne 'server' -and $Token -notlike 'mp_key_*') -or ($withUrl -and ($Token -ne 'server' -or ($Code -and !$quick)))) {
-  throw 'usage: install.ps1 [api key | <network> <device code> | server [quickstart] [-Url <url>]]'
+$flags = $withUrl -or $NoPointer -or $NoAdmin
+if (($Token -and !$Code -and $Token -ne 'server' -and $Token -notlike 'mp_key_*' -and $Token -notlike 'mp_join_*') -or ($flags -and ($Token -ne 'server' -or ($Code -and !$quick)))) {
+  throw 'usage: install.ps1 [api key | <network> <device code> | join token | server [quickstart] [-NoPointer] [-NoAdmin] [-Url <url>]]'
 }
 $ProgressPreference = 'SilentlyContinue'
 $dl = 'https://dl.mainplane.ai/@VERSION@'
@@ -40,11 +41,11 @@ if ($Token -eq 'server' -and (!$Code -or $quick)) {
   # install places mainplane-server in Program Files, runs it as a service, makes this machine the
   # worker admin with the mainplane beside it, which places that in Program Files, and logs that in
   Fetch mainplane | Out-Null
-  & (Fetch mainplane-server) install @(if ($quick) { 'quickstart' }) @(if ($withUrl) { '--url', $Url })
+  & (Fetch mainplane-server) install @(if ($quick) { 'quickstart' }) @(if ($NoPointer) { '--no-pointer' }) @(if ($NoAdmin) { '--no-admin' }) @(if ($withUrl) { '--url', $Url })
   if ($LASTEXITCODE) { exit $LASTEXITCODE }
   $bin = "$env:ProgramFiles\mainplane"
-} elseif ($Code) {
-  & (Fetch mainplane) install $Token $Code
+} elseif ($Code -or $Token -like 'mp_join_*') {
+  & (Fetch mainplane) install $Token @(if ($Code) { $Code })
   if ($LASTEXITCODE) { exit $LASTEXITCODE }
   $bin = "$env:ProgramFiles\mainplane"
 } else {

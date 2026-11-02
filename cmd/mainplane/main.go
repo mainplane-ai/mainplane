@@ -218,7 +218,11 @@ func work(install bool, args []string) {
 		// arguments: the token, which a new code does not refuse
 		os.Args = []string{os.Args[0], os.Args[1], token}
 	}
-	key, secret, err := auth.Parse(auth.Join, token)
+	join, url, err := auth.Unpin(token)
+	if err != nil {
+		log.Fatal(err)
+	}
+	key, secret, err := auth.Parse(auth.Join, join)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -243,7 +247,7 @@ func work(install bool, args []string) {
 	} else {
 		dir = home()
 	}
-	if err := worker.Work(key, worker.Local{Name: name, Secret: secret, Scratch: filepath.Join(dir, ".mainplane"), Interps: worker.Default[runtime.GOOS], Operator: op}); err != nil {
+	if err := worker.Work(key, worker.Local{Name: name, URL: url, Secret: secret, Scratch: filepath.Join(dir, ".mainplane"), Interps: worker.Default[runtime.GOOS], Operator: op}); err != nil {
 		log.Fatal(err)
 	}
 }

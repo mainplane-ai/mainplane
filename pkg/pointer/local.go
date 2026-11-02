@@ -3,6 +3,7 @@ package pointer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/url"
 	"os"
@@ -29,6 +30,27 @@ var Dir = map[string]string{
 // this process may read its config and the harness proves key there; else
 // none. There it is reached with neither the tunnel nor the pointer.
 func Local(ctx context.Context, key string) string {
+	u := local()
+	if u == "" || Prove(ctx, key, u) != nil {
+		return ""
+	}
+	return u
+}
+
+// Self is the URL the harness installed on this machine is reached at, as it
+// proves on loopback: none before its tunnel is up.
+func Self(ctx context.Context, key string) (string, error) {
+	u := local()
+	if u == "" {
+		return "", errors.New("no harness installed on this machine, or this user may not read its config")
+	}
+	r, err := prove(ctx, key, u)
+	return r.URL, err
+}
+
+// local is the loopback URL in the config of the harness installed on this
+// machine, when this process may read it.
+func local() string {
 	var c struct {
 		HTTP string `json:"http"` // server.Config's
 	}
@@ -36,11 +58,7 @@ func Local(ctx context.Context, key string) string {
 	if err != nil || json.Unmarshal(b, &c) != nil || c.HTTP == "" {
 		return ""
 	}
-	u := "http://" + c.HTTP
-	if Prove(ctx, key, u) != nil {
-		return ""
-	}
-	return u
+	return "http://" + c.HTTP
 }
 
 // loopback is whether u is on this machine.
