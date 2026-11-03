@@ -257,7 +257,7 @@ func (s *session) promptDialog(a *App, lines []string) {
 		a.Pop(l)
 		setPrompt(a, s.c, map[string][]string{"lines": strings.Split(text, "\n")})
 	}
-	l = a.Dialog("Prompt for new sessions · enter saves, shift+enter new line", &Node{View: in})
+	l = a.Dialog("Prompt · enter saves, shift+enter new line", &Node{View: in})
 }
 
 func setPrompt(a *App, c *connector.Client, p any) {
