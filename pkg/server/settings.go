@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/release"
@@ -27,6 +28,15 @@ type DataSharing struct {
 type settings struct {
 	Version     *versions    `json:"version,omitempty"`
 	DataSharing *DataSharing `json:"data_sharing,omitempty"`
+	Prompt      *Prompt      `json:"prompt,omitempty"`
+}
+
+// Prompt is the lines new sessions get after the system prompt's mechanics,
+// and whether they are the release's default. Set, default drops the
+// config's own lines for the default.
+type Prompt struct {
+	Lines   []string `json:"lines"`
+	Default bool     `json:"default,omitempty"`
 }
 
 type versions struct {
@@ -36,6 +46,9 @@ type versions struct {
 
 // An update downloads one binary and restarts the harness.
 const updateTime = 5 * time.Minute
+
+// The default prompt is about 3 KiB; a user's may be a few times that.
+const maxSettings = 64 << 10
 
 // doNotTrack is DO_NOT_TRACK set to anything but 0 or false.
 func doNotTrack() bool {
@@ -60,7 +73,7 @@ func (a *api) settings(w http.ResponseWriter, r *http.Request) {
 	if doNotTrack() {
 		u = &DataSharing{Via: "DO_NOT_TRACK"}
 	}
-	reply(w, settings{&versions{version.V, latest}, u})
+	reply(w, settings{&versions{version.V, latest}, u, &Prompt{c.prompt(), c.Prompt == nil}})
 }
 
 func (a *api) setSettings(w http.ResponseWriter, r *http.Request) {
@@ -68,10 +81,10 @@ func (a *api) setSettings(w http.ResponseWriter, r *http.Request) {
 		settings
 		Version string `json:"version"`
 	}
-	dec := json.NewDecoder(io.LimitReader(r.Body, maxKey))
+	dec := json.NewDecoder(io.LimitReader(r.Body, maxSettings))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil {
-		fail(w, fmt.Errorf(`the body is {"data_sharing":{"share","via","text"}} or {"version"}: %w`, err))
+		fail(w, fmt.Errorf(`the body is {"data_sharing":{"share","via","text"}}, {"prompt":{"lines"}}, {"prompt":{"default":true}} or {"version"}: %w`, err))
 		return
 	}
 	if u := in.DataSharing; u != nil {
@@ -85,6 +98,16 @@ func (a *api) setSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if p := in.Prompt; p != nil {
+		if err := checkPrompt(*p); err != nil {
+			fail(w, err)
+			return
+		}
+		if err := a.save(func(c *Config) { c.Prompt = p.Lines }); err != nil {
+			fail(w, err)
+			return
+		}
+	}
 	if in.Version != "" {
 		// not 502, which a connector reads as the proxy losing the harness
 		// to its restart
@@ -94,6 +117,19 @@ func (a *api) setSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// checkPrompt takes lines, one line each, or the default with none.
+func checkPrompt(p Prompt) error {
+	if p.Default != (p.Lines == nil) {
+		return errors.New(`a prompt is {"lines":[...]} or {"default":true}`)
+	}
+	for _, l := range p.Lines {
+		if strings.ContainsAny(l, "\r\n") {
+			return fmt.Errorf("prompt line %q has a line break: give each line its own string", l)
+		}
+	}
+	return nil
 }
 
 // update has the admin worker, which runs as root on this machine, make the

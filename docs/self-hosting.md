@@ -127,8 +127,17 @@ on localhost that does not load. Claude Code keeps its login
 itself, in that directory or the macOS keychain; the harness never reads it. Turn off extra usage on the
 Claude account, so a step that the plan does not cover fails instead of billing.
 
-The harness applies providers, links and drives within seconds of a save; any other
-change applies at its next start.
+`prompt` holds the end of the system prompt new sessions get, one string per
+line: the AGENTS.md conventions, bug reports, and writing and coding
+guidelines. The start, how the harness, tools, drives and mesh work, is part
+of the release. With no `prompt`, each release's default applies. Once set,
+even to `[]` for none, it is yours, and no update changes it. Edit it in the
+app's /settings, or with `POST /settings` and `{"prompt":{"lines":[...]}}`
+(`{"prompt":{"default":true}}` goes back to the default), rather than in this
+file with its keys. A session keeps the prompt it was made with.
+
+The harness applies providers, links and drives within seconds of a save, and
+the prompt at the next new session; any other change applies at its next start.
 
 The install also makes the machine a worker named `admin`, which runs code as
 you, the user who installed (root, from a root shell with no sudo). The

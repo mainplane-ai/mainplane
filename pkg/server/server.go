@@ -66,6 +66,16 @@ type Config struct {
 	DataSharing *DataSharing                 `json:"data_sharing,omitempty"` // whether the user has opted in to data sharing; none: not asked yet
 	NoPointer   bool                         `json:"no_pointer,omitempty"`   // tokens carry the harness URL and nothing goes to pointer.mainplane.ai: workers join again when the URL changes
 	NoAdmin     bool                         `json:"no_admin,omitempty"`     // install makes this machine no worker: no agent can reach the config and keys
+	Prompt      []string                     `json:"prompt,omitzero"`        // the system prompt's lines after its mechanics; none: the release's default, [] is no lines
+}
+
+// prompt is the config's prompt lines, or the release's default when it has
+// none, so an unedited config gets each release's.
+func (c Config) prompt() []string {
+	if c.Prompt == nil {
+		return harness.DefaultPrompt
+	}
+	return c.Prompt
 }
 
 // Tunnel is a tunnel the user made in Cloudflare, which routes URL to it and
@@ -230,7 +240,11 @@ func Harness(ctx context.Context, path string) error {
 	coord.Gone = pool.Drop
 	coord.Link(c.Links)
 	setDrives(coord, pool, c.Drives)
-	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove, Rename: coord.Rename}
+	prompt := func() ([]string, error) {
+		c, err := loadConfig(path)
+		return c.prompt(), err
+	}
+	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove, Rename: coord.Rename, Prompt: prompt}
 	go watch(ctx, path, func(c Config) error {
 		ps, err := providers(dir, c.Providers)
 		if err == nil {

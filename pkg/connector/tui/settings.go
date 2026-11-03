@@ -38,6 +38,10 @@ type settings struct {
 		Share bool   `json:"share"`
 		Via   string `json:"via"`
 	} `json:"data_sharing"`
+	Prompt struct {
+		Lines   []string `json:"lines"`
+		Default bool     `json:"default"`
+	} `json:"prompt"`
 }
 
 func getSettings(c *connector.Client) (settings, error) {
@@ -196,8 +200,8 @@ func setSharing(a *App, c *connector.Client, share bool) {
 	})
 }
 
-// settingsMenu is the harness's version, with an update to the latest, and
-// whether it shares data.
+// settingsMenu is the harness's version, with an update to the latest,
+// whether it shares data, and the prompt new sessions get.
 func (s *session) settingsMenu(a *App) {
 	a.Go(func() {
 		st, err := getSettings(s.c)
@@ -222,8 +226,65 @@ func (s *session) settingsMenu(a *App) {
 			} else {
 				u.Pick = func(a *App, _ *MenuItem) { setSharing(a, s.c, !share) }
 			}
-			m.Items = []MenuItem{v, u}
+			p := st.Prompt
+			label := fmt.Sprintf("Custom, %d lines", len(p.Lines))
+			switch {
+			case p.Default:
+				label = fmt.Sprintf("Default, %d lines", len(p.Lines))
+			case len(p.Lines) == 0:
+				label = "None"
+			}
+			m.Items = []MenuItem{v, u, {
+				Section: "Prompt", Label: label, Hint: "Edit",
+				Pick: func(a *App, _ *MenuItem) { s.promptDialog(a, p.Lines) },
+			}}
+			if !p.Default {
+				m.Items = append(m.Items, MenuItem{Section: "Prompt", Label: "Use the default", Pick: func(a *App, _ *MenuItem) { setPrompt(a, s.c, map[string]bool{"default": true}, nil) }})
+			}
+			if len(p.Lines) > 0 {
+				m.Items = append(m.Items, MenuItem{Section: "Prompt", Label: "Use none", Pick: func(a *App, _ *MenuItem) { setPrompt(a, s.c, map[string][]string{"lines": {}}, nil) }})
+			}
 			a.OpenMenu("Settings", m)
+		})
+	})
+}
+
+// promptDialog edits the prompt lines new sessions get. Sessions made before
+// keep theirs.
+func (s *session) promptDialog(a *App, lines []string) {
+	in := NewInput()
+	in.Cursor, in.MaxRows = true, max(1, a.H-8)
+	in.insert(textElems(strings.Join(lines, "\n"))...)
+	var l *Layer
+	in.OnSubmit = func(a *App, text string) {
+		if text == strings.Join(lines, "\n") { // unchanged: the default stays the default
+			a.Pop(l)
+			return
+		}
+		setPrompt(a, s.c, map[string][]string{"lines": strings.Split(text, "\n")}, func(err error) {
+			if err != nil {
+				in.insert(textElems(text)...) // back to fix: a submit clears the input
+				return
+			}
+			a.Pop(l)
+		})
+	}
+	l = a.Dialog("Prompt · enter saves, shift+enter new line", &Node{View: in})
+}
+
+// setPrompt saves the prompt p, then calls done, if any, with the error.
+func setPrompt(a *App, c *connector.Client, p any, done func(error)) {
+	a.Go(func() {
+		err := postSettings(c, map[string]any{"prompt": p})
+		a.Post(func() {
+			if done != nil {
+				done(err)
+			}
+			if err != nil {
+				a.SayError(err)
+				return
+			}
+			a.Say("New sessions get the prompt")
 		})
 	})
 }
