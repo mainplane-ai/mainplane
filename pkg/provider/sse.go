@@ -6,12 +6,16 @@ import (
 	"strings"
 )
 
+// maxEvent is the largest event read, SSE or WebSocket: a reasoning item
+// carries its encrypted content whole.
+const maxEvent = 16 << 20
+
 // Events reads a server-sent event stream and calls fn once per event with
 // its name (may be empty) and joined data. Returns when the stream ends or fn
 // returns an error.
 func Events(r io.Reader, fn func(event, data string) error) error {
 	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	sc.Buffer(make([]byte, 0, 64*1024), maxEvent)
 	var event string
 	var data []string
 	flush := func() error {

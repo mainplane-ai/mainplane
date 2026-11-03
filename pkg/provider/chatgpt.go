@@ -83,6 +83,7 @@ func ChatGPT(url, dir string) Provider {
 		// The prompt cache hit every time with it and about half the time
 		// with prompt_cache_key alone; Codex and opencode send it.
 		Session: "session-id",
+		Socket:  base(url, resource) == openaiURL,
 	}
 }
 
