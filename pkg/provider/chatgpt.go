@@ -28,7 +28,7 @@ import (
 const (
 	issuer      = "https://auth.openai.com"
 	tokenURL    = issuer + "/api/accounts/oauth/token"
-	resource    = "https://api.openai.com/v1" // the audience of the token, and where requests go
+	resource    = openaiURL // the audience of the token, and where requests go
 	planScope   = "chatgpt.tokens.use.direct" // the grant to use the plan; a login without it can sign in but not infer
 	scopes      = "openid profile email offline_access resource.invoke " + planScope
 	agentName   = "Mainplane"

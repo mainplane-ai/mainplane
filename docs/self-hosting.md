@@ -94,8 +94,9 @@ vendor's official SDK takes, such as `https://openrouter.ai/api/v1` for
 is the vendor's own: `https://api.anthropic.com`, `https://api.openai.com/v1`
 (`openai`, `openai-chat`), `https://generativelanguage.googleapis.com`,
 `https://bedrock-runtime.<region>.amazonaws.com`. At OpenAI's own url, `openai`
-and `chatgpt` step over a WebSocket that a session keeps while it runs, and a
-step sends only the input the previous step did not. A `session` names a header
+and `chatgpt` step over a WebSocket that a session keeps while it runs. A step
+that continues the previous one on it sends only the new input; any other sends
+it all. A `session` names a header
 the harness sends each session's first record id in, which a copy shares with
 the session it copies, as it shares the prompt, for a server that routes its
 prompt cache by one, such as `x-opencode-session` for OpenCode Go. Connectors offer the
