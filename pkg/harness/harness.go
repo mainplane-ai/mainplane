@@ -41,6 +41,7 @@ type Harness struct {
 	Workers   *Pool
 	Remove    func(name string) error      // the coordinator's: the worker leaves the mesh for good
 	Rename    func(old, name string) error // the coordinator's: the worker takes another name
+	Prompt    func() ([]string, error)     // the config's prompt lines, read once per new session
 
 	pmu sync.RWMutex
 	mu  sync.Mutex
@@ -106,8 +107,9 @@ func system(source, body string) statefile.Record {
 }
 
 // Create makes a session and returns its id. A fresh one starts with the
-// system prompt, the AGENTS.md scan, and the worker list, so all three reach
-// the provider as system text ahead of the first message. A copy is byte for byte and gets
+// system prompt, ending in the config's prompt lines as they are now, the
+// AGENTS.md scan, and the worker list, so all three reach the provider as
+// system text ahead of the first message. A copy is byte for byte and gets
 // nothing appended but a result for each call still open at its cut. It
 // does not step until a message or retry comes.
 func (h *Harness) Create(ctx context.Context, c Create, via string) (string, error) {
@@ -158,11 +160,15 @@ func (h *Harness) Create(ctx context.Context, c Create, via string) (string, err
 	if err != nil {
 		return "", err
 	}
+	prompt, err := h.Prompt()
+	if err != nil {
+		return "", err
+	}
 	f, err := h.Sessions.Start(id, body)
 	if err != nil {
 		return "", err
 	}
-	if err := f.Append(system("harness", System(model))); err != nil {
+	if err := f.Append(system("harness", System(model, prompt))); err != nil {
 		return "", err
 	}
 	if err := f.Append(system("agents", h.agents(ctx, id, conf))); err != nil {
