@@ -54,7 +54,7 @@ func commands() []command {
 		{"model", nil, "Model for a new session", "", (*session).models},
 		{"providers", []string{"connect"}, "Connect a provider", "", (*session).providers},
 		{"goto", []string{"jump", "timeline"}, "Go to a message", "", (*session).goTo},
-		{"fork", nil, "Fork into a new session", "", (*session).fork},
+		{"fork", []string{"btw"}, "Fork into a new session", "", (*session).fork},
 		{"rollback", []string{"revert", "rewind"}, "Roll back to before a message", "", (*session).rollback},
 		{"workers", nil, "Workers", "", (*session).workers},
 		{"settings", nil, "Settings", "", (*session).settingsMenu},
@@ -519,16 +519,15 @@ func (s *session) setWorkers(a *App, ws []statefile.Worker, done func(error)) {
 	})
 }
 
-// fork copies the whole session into a new one and opens it. The harness
-// copies only a session that is done.
+// fork copies the whole session into a new one and opens it. A stepping
+// session is copied too: the harness answers its open calls in the copy and
+// refuses a cut while a step streams.
 func (s *session) fork(a *App) {
 	switch {
 	case s.id == "":
 		a.Say("No session to fork yet")
 	case s.info.ID != s.id:
 		a.Say("The session is still loading")
-	case s.stepping():
-		a.Say("Fork when the session is done: wait, or /stop it")
 	default:
 		els := s.input.els
 		s.input.Clear()
