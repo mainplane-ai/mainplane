@@ -227,12 +227,15 @@ func (s *session) settingsMenu(a *App) {
 				u.Pick = func(a *App, _ *MenuItem) { setSharing(a, s.c, !share) }
 			}
 			p := st.Prompt
-			kind := "Custom"
-			if p.Default {
-				kind = "Default"
+			label := fmt.Sprintf("Custom, %d lines", len(p.Lines))
+			switch {
+			case p.Default:
+				label = fmt.Sprintf("Default, %d lines", len(p.Lines))
+			case len(p.Lines) == 0:
+				label = "None"
 			}
 			m.Items = []MenuItem{v, u, {
-				Section: "Prompt", Label: fmt.Sprintf("%s, %d lines", kind, len(p.Lines)), Hint: "Edit",
+				Section: "Prompt", Label: label, Hint: "Edit",
 				Pick: func(a *App, _ *MenuItem) { s.promptDialog(a, p.Lines) },
 			}}
 			if !p.Default {
