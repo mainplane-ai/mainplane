@@ -239,10 +239,10 @@ func (s *session) settingsMenu(a *App) {
 				Pick: func(a *App, _ *MenuItem) { s.promptDialog(a, p.Lines) },
 			}}
 			if !p.Default {
-				m.Items = append(m.Items, MenuItem{Section: "Prompt", Label: "Use the default", Pick: func(a *App, _ *MenuItem) { setPrompt(a, s.c, map[string]bool{"default": true}) }})
+				m.Items = append(m.Items, MenuItem{Section: "Prompt", Label: "Use the default", Pick: func(a *App, _ *MenuItem) { setPrompt(a, s.c, map[string]bool{"default": true}, nil) }})
 			}
 			if len(p.Lines) > 0 {
-				m.Items = append(m.Items, MenuItem{Section: "Prompt", Label: "Use none", Pick: func(a *App, _ *MenuItem) { setPrompt(a, s.c, map[string][]string{"lines": {}}) }})
+				m.Items = append(m.Items, MenuItem{Section: "Prompt", Label: "Use none", Pick: func(a *App, _ *MenuItem) { setPrompt(a, s.c, map[string][]string{"lines": {}}, nil) }})
 			}
 			a.OpenMenu("Settings", m)
 		})
@@ -257,16 +257,29 @@ func (s *session) promptDialog(a *App, lines []string) {
 	in.insert(textElems(strings.Join(lines, "\n"))...)
 	var l *Layer
 	in.OnSubmit = func(a *App, text string) {
-		a.Pop(l)
-		setPrompt(a, s.c, map[string][]string{"lines": strings.Split(text, "\n")})
+		if text == strings.Join(lines, "\n") { // unchanged: the default stays the default
+			a.Pop(l)
+			return
+		}
+		setPrompt(a, s.c, map[string][]string{"lines": strings.Split(text, "\n")}, func(err error) {
+			if err != nil {
+				in.insert(textElems(text)...) // back to fix: a submit clears the input
+				return
+			}
+			a.Pop(l)
+		})
 	}
 	l = a.Dialog("Prompt · enter saves, shift+enter new line", &Node{View: in})
 }
 
-func setPrompt(a *App, c *connector.Client, p any) {
+// setPrompt saves the prompt p, then calls done, if any, with the error.
+func setPrompt(a *App, c *connector.Client, p any, done func(error)) {
 	a.Go(func() {
 		err := postSettings(c, map[string]any{"prompt": p})
 		a.Post(func() {
+			if done != nil {
+				done(err)
+			}
 			if err != nil {
 				a.SayError(err)
 				return

@@ -87,16 +87,6 @@ func (a *api) setSettings(w http.ResponseWriter, r *http.Request) {
 		fail(w, fmt.Errorf(`the body is {"data_sharing":{"share","via","text"}}, {"prompt":{"lines"}}, {"prompt":{"default":true}} or {"version"}: %w`, err))
 		return
 	}
-	if p := in.Prompt; p != nil {
-		if err := checkPrompt(*p); err != nil {
-			fail(w, err)
-			return
-		}
-		if err := a.save(func(c *Config) { c.Prompt = p.Lines }); err != nil {
-			fail(w, err)
-			return
-		}
-	}
 	if u := in.DataSharing; u != nil {
 		if u.Share && doNotTrack() {
 			http.Error(w, "DO_NOT_TRACK is set", http.StatusConflict)
@@ -104,6 +94,16 @@ func (a *api) setSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		u.At = time.Now().UTC()
 		if err := a.save(func(c *Config) { c.DataSharing = u }); err != nil {
+			fail(w, err)
+			return
+		}
+	}
+	if p := in.Prompt; p != nil {
+		if err := checkPrompt(*p); err != nil {
+			fail(w, err)
+			return
+		}
+		if err := a.save(func(c *Config) { c.Prompt = p.Lines }); err != nil {
 			fail(w, err)
 			return
 		}
