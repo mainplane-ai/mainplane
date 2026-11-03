@@ -147,6 +147,7 @@ type Provider struct {
 	Endpoint func(url, model string) string            // nil means URL as is
 	Token    func(ctx context.Context) (string, error) // the key of each request, for a login's key that expires; nil means Key
 	Session  string                                    // the header that carries Request.Key, where the vendor routes its cache on a header
+	Socket   bool                                      // steps go over the session's WebSocket, see Conn: the openai envelope at OpenAI's own endpoint
 	// Run, if set, makes the step instead of an HTTP request: claude-code's
 	// process. It retries what it can itself.
 	Run func(ctx context.Context, body []byte, emit func(statefile.Record)) (statefile.Header, error)
@@ -210,8 +211,9 @@ func retryAfter(h http.Header) time.Duration {
 }
 
 // Step is one LLM call. Blocks are emitted as they complete; the returned
-// header is the step record minus kind, id, and upto.
-func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Record)) (statefile.Header, error) {
+// header is the step record minus kind, id, and upto. conn is the session's,
+// which a Socket provider steps over.
+func (p Provider) Step(ctx context.Context, conn *Conn, req Request, emit func(statefile.Record)) (statefile.Header, error) {
 	body, cache, err := p.Envelope.Compile(req)
 	if err != nil {
 		return statefile.Header{}, err
@@ -235,7 +237,7 @@ func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Rec
 	}
 	for attempt := 0; ; attempt++ {
 		sent := time.Now().UTC().Truncate(time.Millisecond)
-		h, emitted, err := p.once(ctx, url, req.Key, body, emit)
+		h, emitted, err := p.once(ctx, conn, url, req.Key, body, emit)
 		if err == nil {
 			sum := sha256.Sum256(body)
 			h.Provider, h.Model, h.Request, h.Cache, h.Sent = p.Envelope.Name(), req.Model, "sha256:"+hex.EncodeToString(sum[:]), cache, sent
@@ -252,9 +254,13 @@ func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Rec
 	}
 }
 
-// once is one HTTP attempt. emitted reports whether any block reached emit.
-// An idle timeout cancels the request, and its cause is the error.
-func (p Provider) once(ctx context.Context, url, session string, body []byte, emit func(statefile.Record)) (h statefile.Header, emitted bool, err error) {
+// once is one HTTP attempt, or a Socket provider's over conn. emitted reports
+// whether any block reached emit. An idle timeout cancels the request, and its
+// cause is the error.
+func (p Provider) once(ctx context.Context, conn *Conn, url, session string, body []byte, emit func(statefile.Record)) (h statefile.Header, emitted bool, err error) {
+	if p.Socket {
+		return p.socket(ctx, conn, url, session, body, emit)
+	}
 	name := p.Envelope.Name()
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
@@ -270,16 +276,8 @@ func (p Provider) once(ctx context.Context, url, session string, body []byte, em
 		return h, false, err
 	}
 	hr.Header.Set("Content-Type", "application/json")
-	hr.Header.Set("User-Agent", "mainplane/"+version.V) // servers that watch for abuse ask clients to name themselves
-	key := p.Key
-	if p.Token != nil {
-		if key, err = p.Token(ctx); err != nil {
-			return h, false, err
-		}
-	}
-	p.Headers(hr, key)
-	if p.Session != "" {
-		hr.Header.Set(p.Session, session)
+	if err := p.header(ctx, hr, session); err != nil {
+		return h, false, err
 	}
 	resp, err := http.DefaultClient.Do(hr)
 	if err != nil {
@@ -301,6 +299,23 @@ func (p Provider) once(ctx context.Context, url, session string, body []byte, em
 	}
 	h, err = p.Envelope.Stream(rb, tagged)
 	return h, emitted, err
+}
+
+// header sets the request's name, auth and session headers.
+func (p Provider) header(ctx context.Context, hr *http.Request, session string) error {
+	hr.Header.Set("User-Agent", "mainplane/"+version.V) // servers that watch for abuse ask clients to name themselves
+	key := p.Key
+	if p.Token != nil {
+		var err error
+		if key, err = p.Token(ctx); err != nil {
+			return err
+		}
+	}
+	p.Headers(hr, key)
+	if p.Session != "" {
+		hr.Header.Set(p.Session, session)
+	}
+	return nil
 }
 
 // idleReader restarts the idle timer on every read that returns bytes.

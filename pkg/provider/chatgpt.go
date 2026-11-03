@@ -28,7 +28,7 @@ import (
 const (
 	issuer      = "https://auth.openai.com"
 	tokenURL    = issuer + "/api/accounts/oauth/token"
-	resource    = "https://api.openai.com/v1" // the audience of the token, and where requests go
+	resource    = openaiURL                   // the audience of the token, and where requests go
 	planScope   = "chatgpt.tokens.use.direct" // the grant to use the plan; a login without it can sign in but not infer
 	scopes      = "openid profile email offline_access resource.invoke " + planScope
 	agentName   = "Mainplane"
@@ -83,6 +83,7 @@ func ChatGPT(url, dir string) Provider {
 		// The prompt cache hit every time with it and about half the time
 		// with prompt_cache_key alone; Codex and opencode send it.
 		Session: "session-id",
+		Socket:  base(url, resource) == openaiURL,
 	}
 }
 

@@ -397,7 +397,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 	var calls []statefile.Record
 	var appendErr error
 	req := provider.Request{Model: model, Key: chain[0].ID, Tools: Tools(conf.Tools, conf.Input), Context: records, Params: conf.Params}
-	hdr, err := p.Step(ctx, req, func(r statefile.Record) {
+	hdr, err := p.Step(ctx, &s.conn, req, func(r statefile.Record) {
 		r.Step = stepID
 		if r.ID == "" {
 			r.ID = statefile.NewID()

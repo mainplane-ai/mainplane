@@ -6,6 +6,7 @@ toolchain go1.27.3
 
 require (
 	filippo.io/cpace v0.0.0-20210101143347-24d601e2e469
+	github.com/coder/websocket v1.8.15
 	github.com/dustinkirkland/golang-petname v0.0.0-20260929120758-6e3915f1a6a8
 	github.com/rivo/uniseg v0.4.7
 	github.com/tailscale/wireguard-go v0.0.0-20260715223240-2e01ba5b00f0
@@ -23,7 +24,6 @@ require (
 	github.com/akutz/memconn v0.1.0 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
 	github.com/axiomhq/hyperloglog v0.0.0-20240319100328-84253e514e02 // indirect
-	github.com/coder/websocket v1.8.15 // indirect
 	github.com/creachadair/msync v0.8.1 // indirect
 	github.com/dblohm7/wingoes v0.0.0-20240119213807-a09d6be7affa // indirect
 	github.com/dgryski/go-metro v0.0.0-20180109044635-280f6062b5bc // indirect

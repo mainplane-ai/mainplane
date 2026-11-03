@@ -20,12 +20,17 @@ var respLimits = Limits{Side: 65535, Pixels: 28_000_000, Bytes: 50_000_000, Coun
 
 func OpenAI(url, key string) Provider {
 	return Provider{
-		URL:      base(url, "https://api.openai.com/v1") + "/responses",
+		URL:      base(url, openaiURL) + "/responses",
 		Key:      key,
 		Envelope: openai{},
 		Headers:  bearer,
+		Socket:   base(url, openaiURL) == openaiURL,
 	}
 }
+
+// openaiURL is OpenAI's own API, the one endpoint known to speak Responses
+// over a WebSocket. Other vendors take the openai shape with their own url.
+const openaiURL = "https://api.openai.com/v1"
 
 func bearer(r *http.Request, key string) { r.Header.Set("Authorization", "Bearer "+key) }
 
@@ -180,6 +185,7 @@ type respEvent struct {
 }
 
 type respResponse struct {
+	ID                string `json:"id"`
 	Status            string `json:"status"`
 	IncompleteDetails *struct {
 		Reason string `json:"reason"`
@@ -231,46 +237,57 @@ func respRecord(raw json.RawMessage) (statefile.Record, bool, error) {
 }
 
 func (openai) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
-	var usage statefile.Usage
-	var stop string
-	var done bool
-	err := Events(resp, func(_, data string) error {
-		var e respEvent
-		if err := json.Unmarshal([]byte(data), &e); err != nil {
-			return err
-		}
-		switch e.Type {
-		case "error", "response.failed":
-			return fmt.Errorf("openai: %s", data)
-		case "response.output_item.done":
-			r, ok, err := respRecord(e.Item)
-			if err != nil {
-				return err
-			}
-			if ok {
-				emit(r)
-			}
-		case "response.completed", "response.incomplete":
-			if e.Response == nil || e.Response.Usage == nil {
-				return fmt.Errorf("openai: %s without usage: %.200s", e.Type, data)
-			}
-			done = true
-			stop = e.Response.Status
-			if d := e.Response.IncompleteDetails; d != nil {
-				stop = d.Reason
-			}
-			u := e.Response.Usage
-			usage = statefile.Usage{
-				Input:      u.InputTokens - u.InputTokensDetails.CachedTokens - u.InputTokensDetails.CacheWriteTokens,
-				Output:     u.OutputTokens,
-				CacheRead:  u.InputTokensDetails.CachedTokens,
-				CacheWrite: u.InputTokensDetails.CacheWriteTokens,
-			}
-		}
-		return nil
-	})
-	if err == nil && !done {
+	var s respStream
+	err := Events(resp, func(_, data string) error { return s.event([]byte(data), emit) })
+	if err == nil && !s.done {
 		err = fmt.Errorf("openai: stream ended before response.completed")
 	}
-	return statefile.Header{Usage: &usage, Stop: stop}, err
+	return s.header(), err
+}
+
+// respStream folds the Responses API's events into records and the step
+// header. Server-sent events and the WebSocket carry the same events.
+type respStream struct {
+	usage    statefile.Usage
+	stop, id string // id is the response's, which a WebSocket step chains from
+	done     bool
+}
+
+func (s *respStream) event(data []byte, emit func(statefile.Record)) error {
+	var e respEvent
+	if err := json.Unmarshal(data, &e); err != nil {
+		return err
+	}
+	switch e.Type {
+	case "error", "response.failed":
+		return fmt.Errorf("openai: %s", data)
+	case "response.output_item.done":
+		r, ok, err := respRecord(e.Item)
+		if err != nil {
+			return err
+		}
+		if ok {
+			emit(r)
+		}
+	case "response.completed", "response.incomplete":
+		if e.Response == nil || e.Response.Usage == nil {
+			return fmt.Errorf("openai: %s without usage: %.200s", e.Type, data)
+		}
+		s.done, s.id, s.stop = true, e.Response.ID, e.Response.Status
+		if d := e.Response.IncompleteDetails; d != nil {
+			s.stop = d.Reason
+		}
+		u := e.Response.Usage
+		s.usage = statefile.Usage{
+			Input:      u.InputTokens - u.InputTokensDetails.CachedTokens - u.InputTokensDetails.CacheWriteTokens,
+			Output:     u.OutputTokens,
+			CacheRead:  u.InputTokensDetails.CachedTokens,
+			CacheWrite: u.InputTokensDetails.CacheWriteTokens,
+		}
+	}
+	return nil
+}
+
+func (s *respStream) header() statefile.Header {
+	return statefile.Header{Usage: &s.usage, Stop: s.stop}
 }
