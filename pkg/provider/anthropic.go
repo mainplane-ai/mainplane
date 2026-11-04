@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
@@ -23,7 +24,17 @@ var anthLimits = Limits{Side: 2576, Pixels: 3_700_000, Bytes: 10 << 20 * 3 / 4, 
 // The body carries only what the session builds. max_tokens, which the
 // Messages API requires, thinking, and effort come from params: the API, not
 // the harness, says what each model takes.
-const anthCacheTTL = 300 // ephemeral: 5 minutes from the start of the request that writes or reads it
+//
+// Claude caches for 1 hour, not the default 5 minutes: replayed over a month
+// of real sessions, the 2x write of 1h cost 15% of no caching against 18% for
+// 5m (10% against 13% where reads cost 0.05x), since pauses of 5-60 minutes
+// rewrite the whole prefix under 5m. The clock runs from the start of the
+// request that writes or reads it.
+const anthCacheTTL = 3600
+
+// claude reports whether a model takes Claude's cache marks. Only Claude
+// does: MiniMax behind the anthropic shape ignores them.
+func claude(model string) bool { return strings.Contains(model, "claude") }
 
 func Anthropic(url, key string) Provider {
 	return Provider{
@@ -44,7 +55,7 @@ func (anthropic) Name() string { return "anthropic" }
 func (anthropic) Accepts(typ string) bool { return slices.Contains(images, typ) }
 
 func (anthropic) Owns(field string) bool {
-	return slices.Contains([]string{"model", "stream", "system", "tools", "messages"}, field)
+	return slices.Contains([]string{"model", "stream", "system", "tools", "messages", "cache_control"}, field)
 }
 
 type anthReq struct {
@@ -70,6 +81,7 @@ type anthMsg struct {
 
 type anthCache struct {
 	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 type anthSource struct {
@@ -90,43 +102,63 @@ type anthBlock struct {
 	CacheControl *anthCache      `json:"cache_control,omitempty"`
 }
 
-var ephemeral = &anthCache{Type: "ephemeral"}
+var ephemeral = &anthCache{Type: "ephemeral", TTL: "1h"}
 
-func (e anthropic) Compile(req Request) ([]byte, json.RawMessage, error) {
+// Compile marks the system prompt, the last user block, and the previous
+// step's last user block: a read looks back only 20 blocks from a mark, and a
+// step with 10 or more parallel calls adds more than that.
+func (e anthropic) Compile(req Request) ([]byte, Cache, error) {
 	system, rest := Split(req.Context)
 	rest = fit(e.Name(), rest, anthLimits)
 	body := anthReq{Model: req.Model, Stream: true, Messages: []anthMsg{}}
-	var marks []string
+	mark := claude(req.Model)
+	var cache Cache
+	if mark {
+		cache = Cache{TTL: anthCacheTTL, Anchor: "start"}
+	}
 	if len(system) > 0 {
-		body.System = []anthBlock{{Type: "text", Text: systemText(system), CacheControl: ephemeral}}
-		marks = append(marks, system[len(system)-1].ID)
+		body.System = []anthBlock{{Type: "text", Text: systemText(system)}}
+		if mark {
+			body.System[0].CacheControl = ephemeral
+			cache.Marks = append(cache.Marks, system[len(system)-1].ID)
+		}
 	}
 	for _, t := range req.Tools {
 		body.Tools = append(body.Tools, anthTool{Name: t.Name, Description: t.Description, InputSchema: t.Schema})
 	}
 	turns := Turns(rest)
+	marked := userMarks(turns)
 	for i, t := range turns {
 		if t.Assistant {
 			content, err := anthAssistant(e.Name(), t.Records)
 			if err != nil {
-				return nil, nil, err
+				return nil, Cache{}, err
 			}
 			body.Messages = append(body.Messages, anthMsg{Role: "assistant", Content: content})
 			continue
 		}
 		blocks := anthUser(t.Records)
-		if i == len(turns)-1 {
+		if mark && slices.Contains(marked, i) {
 			blocks[len(blocks)-1].CacheControl = ephemeral
-			marks = append(marks, t.Records[len(t.Records)-1].ID)
+			cache.Marks = append(cache.Marks, t.Records[len(t.Records)-1].ID)
 		}
 		body.Messages = append(body.Messages, anthMsg{Role: "user", Content: blocks})
 	}
-	cache, err := cacheHeader(anthCacheTTL, marks...)
-	if err != nil {
-		return nil, nil, err
-	}
 	b, err := encode(body, req.Params)
 	return b, cache, err
+}
+
+// userMarks are the indexes of the turns whose last block takes a mark: the
+// last turn, a user turn, and the user turn before it, which the previous step
+// ended with.
+func userMarks(turns []Turn) []int {
+	var user []int
+	for i, t := range turns {
+		if !t.Assistant {
+			user = append(user, i)
+		}
+	}
+	return user[max(len(user)-2, 0):]
 }
 
 func anthUser(recs []statefile.Record) []anthBlock {
@@ -194,7 +226,7 @@ type anthEvent struct {
 }
 
 type anthStart struct {
-	Usage anthUsage `json:"usage"`
+	Usage json.RawMessage `json:"usage"` // the only one that splits cache writes by TTL
 }
 
 // anthPart is a content block under assembly. Deltas append to the fields.
@@ -223,6 +255,10 @@ type anthUsage struct {
 	OutputTokens             *int `json:"output_tokens"`
 	CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
 	CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+	CacheCreation            *struct {
+		Ephemeral5m int `json:"ephemeral_5m_input_tokens"`
+		Ephemeral1h int `json:"ephemeral_1h_input_tokens"`
+	} `json:"cache_creation"`
 }
 
 func (u anthUsage) apply(to *statefile.Usage) {
@@ -235,6 +271,21 @@ func (u anthUsage) apply(to *statefile.Usage) {
 	set(&to.Output, u.OutputTokens)
 	set(&to.CacheRead, u.CacheReadInputTokens)
 	set(&to.CacheWrite, u.CacheCreationInputTokens)
+}
+
+// anthApply sets to from a raw usage object, if any, and keeps it as the
+// vendor's.
+func anthApply(raw json.RawMessage, to *statefile.Usage) error {
+	if raw == nil {
+		return nil
+	}
+	var u anthUsage
+	if err := json.Unmarshal(raw, &u); err != nil {
+		return fmt.Errorf("usage: %w: %.200s", err, raw)
+	}
+	u.apply(to)
+	to.Vendor = raw
+	return nil
 }
 
 func (p *anthPart) add(d anthDelta) {
@@ -275,7 +326,7 @@ func (p *anthPart) record() (statefile.Record, bool, error) {
 	return r, err == nil, err
 }
 
-func (anthropic) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
+func (anthropic) Stream(resp io.Reader, cache *Cache, emit func(statefile.Record)) (statefile.Header, error) {
 	parts := map[int]*anthPart{}
 	var usage statefile.Usage
 	var stop string
@@ -289,7 +340,7 @@ func (anthropic) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.
 		case "error":
 			return fmt.Errorf("anthropic: %s", data)
 		case "message_start":
-			e.Message.Usage.apply(&usage)
+			return anthApply(e.Message.Usage, &usage)
 		case "message_delta":
 			if e.Usage != nil {
 				e.Usage.apply(&usage)
@@ -327,5 +378,6 @@ func (anthropic) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.
 	if err == nil && !done {
 		err = fmt.Errorf("anthropic: stream ended before message_stop")
 	}
+	cache.settle(usage, stop)
 	return statefile.Header{Usage: &usage, Stop: stop}, err
 }

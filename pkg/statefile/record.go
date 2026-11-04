@@ -32,12 +32,17 @@ const (
 )
 
 // Usage counts tokens. Input excludes cache reads and writes on every
-// provider, so Input + CacheRead + CacheWrite is the prompt.
+// provider, so Input + CacheRead + CacheWrite is the prompt. Vendor is the
+// usage object as the vendor sent it, where it holds more than these counts:
+// the split of cache writes by TTL, Bedrock's cacheDetails. Anthropic's is
+// the one at the stream's start, which alone splits writes; its output count
+// is not final. OpenAI's is its cache_write_tokens_details alone.
 type Usage struct {
-	Input      int `json:"input"`
-	Output     int `json:"output"`
-	CacheRead  int `json:"cache_read,omitempty"`
-	CacheWrite int `json:"cache_write,omitempty"`
+	Input      int             `json:"input"`
+	Output     int             `json:"output"`
+	CacheRead  int             `json:"cache_read,omitempty"`
+	CacheWrite int             `json:"cache_write,omitempty"`
+	Vendor     json.RawMessage `json:"vendor,omitempty"`
 }
 
 // Prompt is the size of the prompt the step was built from.
