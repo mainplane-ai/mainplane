@@ -127,15 +127,23 @@ type bedReasoningText struct {
 
 var cachePoint = &bedCachePoint{Type: "default", TTL: "1h"}
 
-// Compile marks what the anthropic envelope marks, for the same reason.
+// Compile marks what the anthropic envelope marks, for the same reason, on
+// Claude models only, as it does.
 func (e bedrock) Compile(req Request) ([]byte, Cache, error) {
 	system, rest := Split(req.Context)
 	rest = fit(e.Name(), rest, bedLimits)
 	body := bedReq{Messages: []bedMsg{}}
-	cache := Cache{TTL: bedrockCacheTTL, Anchor: "end"}
+	mark := claude(req.Model)
+	var cache Cache
+	if mark {
+		cache = Cache{TTL: bedrockCacheTTL, Anchor: "end"}
+	}
 	if len(system) > 0 {
-		body.System = []bedBlock{{Text: systemText(system)}, {CachePoint: cachePoint}}
-		cache.Marks = append(cache.Marks, system[len(system)-1].ID)
+		body.System = []bedBlock{{Text: systemText(system)}}
+		if mark {
+			body.System = append(body.System, bedBlock{CachePoint: cachePoint})
+			cache.Marks = append(cache.Marks, system[len(system)-1].ID)
+		}
 	}
 	if len(req.Tools) > 0 {
 		body.ToolConfig = &bedToolConfig{}
@@ -159,7 +167,7 @@ func (e bedrock) Compile(req Request) ([]byte, Cache, error) {
 			continue
 		}
 		blocks := bedUser(t.Records)
-		if slices.Contains(marked, i) {
+		if mark && slices.Contains(marked, i) {
 			blocks = append(blocks, bedBlock{CachePoint: cachePoint})
 			cache.Marks = append(cache.Marks, t.Records[len(t.Records)-1].ID)
 		}

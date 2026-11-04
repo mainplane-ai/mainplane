@@ -34,7 +34,9 @@ const (
 // Usage counts tokens. Input excludes cache reads and writes on every
 // provider, so Input + CacheRead + CacheWrite is the prompt. Vendor is the
 // usage object as the vendor sent it, where it holds more than these counts:
-// the split of cache writes by TTL, Bedrock's cacheDetails.
+// the split of cache writes by TTL, Bedrock's cacheDetails. Anthropic's is
+// the one at the stream's start, which alone splits writes; its output count
+// is not final.
 type Usage struct {
 	Input      int             `json:"input"`
 	Output     int             `json:"output"`

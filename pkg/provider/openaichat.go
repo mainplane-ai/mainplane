@@ -63,7 +63,10 @@ func (openaiChat) Owns(field string) bool {
 //
 // Gemini through OpenRouter is left implicit: with marks, a growing session
 // read nothing on most steps.
-const qwenCacheTTL = 300
+const (
+	qwenCacheTTL = 300
+	kimiCacheTTL = 3600 // kimiOptions' 1h
+)
 
 var (
 	qwenMark    = &anthCache{Type: "ephemeral"}
@@ -144,7 +147,7 @@ func (e openaiChat) Compile(req Request) ([]byte, Cache, error) {
 		mark, cache = qwenMark, Cache{TTL: qwenCacheTTL}
 	case e.moonshot && strings.HasPrefix(req.Model, "kimi-k3"):
 		body.CacheOptions = kimiOptions
-		cache = Cache{TTL: 3600, Marks: []string{req.Context[len(req.Context)-1].ID}}
+		cache = Cache{TTL: kimiCacheTTL, Marks: []string{req.Context[len(req.Context)-1].ID}}
 	}
 	if len(system) > 0 {
 		m := chatMsg{Role: "system", Content: systemText(system)}
@@ -164,7 +167,7 @@ func (e openaiChat) Compile(req Request) ([]byte, Cache, error) {
 			msgs := chatUser(t.Records)
 			if mark != nil && slices.Contains(marked, i) {
 				chatMark(&msgs[len(msgs)-1], mark)
-				cache.Marks = append(cache.Marks, t.Records[len(t.Records)-1].ID)
+				cache.Marks = append(cache.Marks, chatLast(t.Records).ID)
 			}
 			body.Messages = append(body.Messages, msgs...)
 			continue
@@ -187,6 +190,22 @@ func chatMark(m *chatMsg, mark *anthCache) {
 	}
 	parts := m.Content.([]chatPart)
 	parts[len(parts)-1].CacheControl = mark
+}
+
+// chatLast is the record that ends chatUser's last message: the source of the
+// user message's last part if it has parts, else the last result.
+func chatLast(recs []statefile.Record) statefile.Record {
+	var last statefile.Record
+	for _, r := range slices.Backward(recs) {
+		switch {
+		case r.Kind == statefile.Message || r.Kind == statefile.System || r.Kind == statefile.Error,
+			r.Kind == statefile.Result && slices.Contains(images, r.Type):
+			return r
+		case r.Kind == statefile.Result && last.ID == "":
+			last = r
+		}
+	}
+	return last
 }
 
 // chatUser emits one tool message per result, then one user message holding

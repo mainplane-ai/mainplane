@@ -310,7 +310,7 @@ func (s *respStream) event(data []byte, emit func(statefile.Record)) error {
 			emit(r)
 		}
 	case "response.completed", "response.incomplete":
-		if e.Response == nil || e.Response.Usage == nil {
+		if e.Response == nil || e.Response.Usage == nil || string(e.Response.Usage) == "null" {
 			return fmt.Errorf("openai: %s without usage: %.200s", e.Type, data)
 		}
 		s.done, s.id, s.stop = true, e.Response.ID, e.Response.Status

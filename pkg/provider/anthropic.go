@@ -336,6 +336,9 @@ func (anthropic) Stream(resp io.Reader, cache *Cache, emit func(statefile.Record
 		case "error":
 			return fmt.Errorf("anthropic: %s", data)
 		case "message_start":
+			if e.Message.Usage == nil {
+				return nil
+			}
 			return anthApply(e.Message.Usage, &usage)
 		case "message_delta":
 			if e.Usage != nil {

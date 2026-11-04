@@ -37,7 +37,7 @@ var geminiMedia = slices.Concat(images, []string{"application/pdf", "audio/mpeg"
 func (gemini) Accepts(typ string) bool { return slices.Contains(geminiMedia, typ) }
 
 func (gemini) Owns(field string) bool {
-	return slices.Contains([]string{"systemInstruction", "contents", "tools", "cachedContent"}, field)
+	return slices.Contains([]string{"systemInstruction", "contents", "tools", "cachedContent", "cached_content"}, field)
 }
 
 // gemCacheTTL: Gemini caches a prefix by itself and evicts it by load: a read
