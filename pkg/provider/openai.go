@@ -273,7 +273,12 @@ func respRecord(raw json.RawMessage) (statefile.Record, bool, error) {
 
 func (openai) Stream(resp io.Reader, _ *Cache, emit func(statefile.Record)) (statefile.Header, error) {
 	var s respStream
-	err := Events(resp, func(_, data string) error { return s.event([]byte(data), emit) })
+	err := Events(resp, func(_, data string) error {
+		if data == "[DONE]" { // Meta ends its stream with Chat Completions' end marker
+			return nil
+		}
+		return s.event([]byte(data), emit)
+	})
 	if err == nil && !s.done {
 		err = fmt.Errorf("openai: stream ended before response.completed")
 	}
