@@ -30,12 +30,17 @@ func OpenAIChat(url, key string) Provider {
 	return Provider{
 		URL:      base(url, "https://api.openai.com/v1") + "/chat/completions",
 		Key:      key,
-		Envelope: openaiChat{},
+		Envelope: openaiChat{moonshot: base(url, "") == moonshotURL},
 		Headers:  bearer,
 	}
 }
 
-type openaiChat struct{}
+// openaiChat is the Chat Completions envelope. moonshot is Moonshot's own
+// API, the one endpoint known to take Kimi K3's prompt_cache_options: other
+// vendors that serve kimi-k3 are untested with it.
+type openaiChat struct{ moonshot bool }
+
+const moonshotURL = "https://api.moonshot.ai/v1"
 
 func (openaiChat) Name() string { return "openai-chat" }
 
@@ -52,7 +57,7 @@ func (openaiChat) Owns(field string) bool {
 //   - Qwen caches what cache_control marks for 5 minutes, at 1.25x a write
 //     and 0.1x a read, against 0.2x for an implicit read that may miss. Clock
 //     not measured.
-//   - Kimi K3 takes prompt_cache_options: 1 hour at 2x a write instead of 5
+//   - Kimi K3 on Moonshot's own API takes prompt_cache_options: 1 hour at 2x a write instead of 5
 //     minutes at 1x, which replayed over a month of real sessions cost 4%
 //     less. Clock not measured.
 //
@@ -137,7 +142,7 @@ func (e openaiChat) Compile(req Request) ([]byte, Cache, error) {
 		mark, cache = ephemeral, Cache{TTL: anthCacheTTL, Anchor: "start"}
 	case strings.Contains(req.Model, "qwen"):
 		mark, cache = qwenMark, Cache{TTL: qwenCacheTTL}
-	case strings.HasPrefix(req.Model, "kimi-k3"):
+	case e.moonshot && strings.HasPrefix(req.Model, "kimi-k3"):
 		body.CacheOptions = kimiOptions
 		cache = Cache{TTL: 3600, Marks: []string{req.Context[len(req.Context)-1].ID}}
 	}
@@ -268,7 +273,8 @@ type chatChunk struct {
 		CacheHitTokens      int `json:"prompt_cache_hit_tokens"` // DeepSeek's name for cached_tokens
 		PromptTokensDetails struct {
 			CachedTokens     int `json:"cached_tokens"`
-			CacheWriteTokens int `json:"cache_write_tokens"` // Kimi
+			CacheWriteTokens int `json:"cache_write_tokens"`          // Kimi, OpenRouter
+			CacheCreation    int `json:"cache_creation_input_tokens"` // Qwen
 		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
 	Error *struct {
@@ -308,11 +314,12 @@ func (openaiChat) Stream(resp io.Reader, cache *Cache, emit func(statefile.Recor
 		if c.Usage != nil {
 			u := c.Usage
 			read := max(u.PromptTokensDetails.CachedTokens, u.CacheHitTokens)
+			write := max(u.PromptTokensDetails.CacheWriteTokens, u.PromptTokensDetails.CacheCreation)
 			usage = statefile.Usage{
-				Input:      u.PromptTokens - read - u.PromptTokensDetails.CacheWriteTokens,
+				Input:      u.PromptTokens - read - write,
 				Output:     u.CompletionTokens,
 				CacheRead:  read,
-				CacheWrite: u.PromptTokensDetails.CacheWriteTokens,
+				CacheWrite: write,
 			}
 		}
 		if len(c.Choices) == 0 {

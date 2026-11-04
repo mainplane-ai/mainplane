@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
@@ -33,13 +34,16 @@ func OpenAI(url, key string) Provider {
 // minutes from the start of the last request that read or wrote it; 12 hours
 // costs 2.5x a write instead of 1.25x, which replayed over a month of real
 // sessions cost 12% more. Meta evicts by load before a hard 30 minutes from
-// the start. xAI evicts by load: nothing read past 30 minutes (grok-4.20 past
-// 23, grok-4.7 past 15), clock not measured. ChatGPT's is its own, below.
+// the start. xAI evicts by load: grok-4.20 reads 75% of the time to 20
+// minutes and rarely past 25, grok-4.7 to 10 minutes and rarely past 20 (see
+// grok47TTL); clock not measured. ChatGPT's is its own, below.
 var respCache = map[string]openai{
 	openaiURL:                {ttl: 1800, anchor: "start", options: true},
 	"https://api.meta.ai/v1": {ttl: 1800, anchor: "start"},
-	"https://api.x.ai/v1":    {ttl: 1800},
+	"https://api.x.ai/v1":    {ttl: 1200},
 }
+
+const grok47TTL = 600
 
 // openaiURL is OpenAI's own API, the one endpoint known to speak Responses
 // over a WebSocket. Other vendors take the openai shape with their own url.
@@ -145,7 +149,11 @@ func (e openai) Compile(req Request) ([]byte, Cache, error) {
 		body.Input = append(body.Input, items...)
 	}
 	b, err := encode(body, req.Params)
-	return b, Cache{TTL: e.ttl, Anchor: e.anchor, Marks: []string{req.Context[len(req.Context)-1].ID}}, err
+	ttl := e.ttl
+	if strings.HasPrefix(req.Model, "grok-4.7") {
+		ttl = grok47TTL
+	}
+	return b, Cache{TTL: ttl, Anchor: e.anchor, Marks: []string{req.Context[len(req.Context)-1].ID}}, err
 }
 
 func imageURL(r statefile.Record) string {
