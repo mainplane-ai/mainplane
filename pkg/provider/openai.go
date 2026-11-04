@@ -232,7 +232,7 @@ type respUsage struct {
 	InputTokens        int `json:"input_tokens"`
 	OutputTokens       int `json:"output_tokens"`
 	InputTokensDetails struct {
-		CachedTokens     int `json:"cached_tokens"`
+		CachedTokens     int             `json:"cached_tokens"`
 		CacheWriteTokens int             `json:"cache_write_tokens"`
 		WritesByTTL      json.RawMessage `json:"cache_write_tokens_details"` // OpenAI, with prompt_cache_options
 	} `json:"input_tokens_details"`

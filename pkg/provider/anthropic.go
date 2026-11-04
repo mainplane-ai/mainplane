@@ -273,8 +273,12 @@ func (u anthUsage) apply(to *statefile.Usage) {
 	set(&to.CacheWrite, u.CacheCreationInputTokens)
 }
 
-// anthApply sets to from a raw usage object and keeps it as the vendor's.
+// anthApply sets to from a raw usage object, if any, and keeps it as the
+// vendor's.
 func anthApply(raw json.RawMessage, to *statefile.Usage) error {
+	if raw == nil {
+		return nil
+	}
 	var u anthUsage
 	if err := json.Unmarshal(raw, &u); err != nil {
 		return fmt.Errorf("usage: %w: %.200s", err, raw)
@@ -336,9 +340,6 @@ func (anthropic) Stream(resp io.Reader, cache *Cache, emit func(statefile.Record
 		case "error":
 			return fmt.Errorf("anthropic: %s", data)
 		case "message_start":
-			if e.Message.Usage == nil {
-				return nil
-			}
 			return anthApply(e.Message.Usage, &usage)
 		case "message_delta":
 			if e.Usage != nil {
