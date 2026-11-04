@@ -36,7 +36,7 @@ const (
 // usage object as the vendor sent it, where it holds more than these counts:
 // the split of cache writes by TTL, Bedrock's cacheDetails. Anthropic's is
 // the one at the stream's start, which alone splits writes; its output count
-// is not final.
+// is not final. OpenAI's is its cache_write_tokens_details alone.
 type Usage struct {
 	Input      int             `json:"input"`
 	Output     int             `json:"output"`

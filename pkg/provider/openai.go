@@ -225,7 +225,7 @@ type respResponse struct {
 	IncompleteDetails *struct {
 		Reason string `json:"reason"`
 	} `json:"incomplete_details"`
-	Usage json.RawMessage `json:"usage"`
+	Usage *respUsage `json:"usage"`
 }
 
 type respUsage struct {
@@ -233,7 +233,8 @@ type respUsage struct {
 	OutputTokens       int `json:"output_tokens"`
 	InputTokensDetails struct {
 		CachedTokens     int `json:"cached_tokens"`
-		CacheWriteTokens int `json:"cache_write_tokens"`
+		CacheWriteTokens int             `json:"cache_write_tokens"`
+		WritesByTTL      json.RawMessage `json:"cache_write_tokens_details"` // OpenAI, with prompt_cache_options
 	} `json:"input_tokens_details"`
 }
 
@@ -310,23 +311,20 @@ func (s *respStream) event(data []byte, emit func(statefile.Record)) error {
 			emit(r)
 		}
 	case "response.completed", "response.incomplete":
-		if e.Response == nil || e.Response.Usage == nil || string(e.Response.Usage) == "null" {
+		if e.Response == nil || e.Response.Usage == nil {
 			return fmt.Errorf("openai: %s without usage: %.200s", e.Type, data)
 		}
 		s.done, s.id, s.stop = true, e.Response.ID, e.Response.Status
 		if d := e.Response.IncompleteDetails; d != nil {
 			s.stop = d.Reason
 		}
-		var u respUsage
-		if err := json.Unmarshal(e.Response.Usage, &u); err != nil {
-			return fmt.Errorf("openai: usage: %w", err)
-		}
+		u := e.Response.Usage
 		s.usage = statefile.Usage{
 			Input:      u.InputTokens - u.InputTokensDetails.CachedTokens - u.InputTokensDetails.CacheWriteTokens,
 			Output:     u.OutputTokens,
 			CacheRead:  u.InputTokensDetails.CachedTokens,
 			CacheWrite: u.InputTokensDetails.CacheWriteTokens,
-			Vendor:     e.Response.Usage, // OpenAI's cache_write_tokens_details: the writes by TTL
+			Vendor:     u.InputTokensDetails.WritesByTTL, // not the whole usage: ChatGPT's grows with every input item
 		}
 	}
 	return nil
