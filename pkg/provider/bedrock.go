@@ -22,7 +22,9 @@ var bedLimits = Limits{Side: 2576, Pixels: 3_700_000, Bytes: 5 << 20 * 3 / 4, Co
 
 // The body carries only what the session builds. inferenceConfig and
 // additionalModelRequestFields, where Claude's thinking goes, come from params.
-const bedrockCacheTTL = 300 // the default cachePoint: 5 minutes, refreshed on every hit
+// Claude on Bedrock caches for 1 hour, as anthCacheTTL says why. Unlike the
+// Messages API, the clock runs from the end of the response.
+const bedrockCacheTTL = 3600
 
 // Bedrock authenticates with a Bedrock API key (AWS_BEARER_TOKEN_BEDROCK),
 // not SigV4. Model is an inference profile id such as
@@ -109,6 +111,7 @@ type bedToolResult struct {
 
 type bedCachePoint struct {
 	Type string `json:"type"`
+	TTL  string `json:"ttl"`
 }
 
 // bedReasoning is the shape of a Bedrock thinking record body.
@@ -122,16 +125,17 @@ type bedReasoningText struct {
 	Signature string `json:"signature,omitempty"`
 }
 
-var cachePoint = &bedCachePoint{Type: "default"}
+var cachePoint = &bedCachePoint{Type: "default", TTL: "1h"}
 
-func (e bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
+// Compile marks what the anthropic envelope marks, for the same reason.
+func (e bedrock) Compile(req Request) ([]byte, Cache, error) {
 	system, rest := Split(req.Context)
 	rest = fit(e.Name(), rest, bedLimits)
 	body := bedReq{Messages: []bedMsg{}}
-	var marks []string
+	cache := Cache{TTL: bedrockCacheTTL, Anchor: "end"}
 	if len(system) > 0 {
 		body.System = []bedBlock{{Text: systemText(system)}, {CachePoint: cachePoint}}
-		marks = append(marks, system[len(system)-1].ID)
+		cache.Marks = append(cache.Marks, system[len(system)-1].ID)
 	}
 	if len(req.Tools) > 0 {
 		body.ToolConfig = &bedToolConfig{}
@@ -142,11 +146,12 @@ func (e bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
 		}
 	}
 	turns := Turns(rest)
+	marked := userMarks(turns)
 	for i, t := range turns {
 		if t.Assistant {
 			content, err := e.assistant(t.Records)
 			if err != nil {
-				return nil, nil, err
+				return nil, Cache{}, err
 			}
 			if len(content) > 0 {
 				body.Messages = append(body.Messages, bedMsg{Role: "assistant", Content: content})
@@ -154,15 +159,11 @@ func (e bedrock) Compile(req Request) ([]byte, json.RawMessage, error) {
 			continue
 		}
 		blocks := bedUser(t.Records)
-		if i == len(turns)-1 {
+		if slices.Contains(marked, i) {
 			blocks = append(blocks, bedBlock{CachePoint: cachePoint})
-			marks = append(marks, t.Records[len(t.Records)-1].ID)
+			cache.Marks = append(cache.Marks, t.Records[len(t.Records)-1].ID)
 		}
 		body.Messages = append(body.Messages, bedMsg{Role: "user", Content: blocks})
-	}
-	cache, err := cacheHeader(bedrockCacheTTL, marks...)
-	if err != nil {
-		return nil, nil, err
 	}
 	b, err := encode(body, req.Params)
 	return b, cache, err
@@ -234,15 +235,10 @@ type bedEvent struct {
 			Name      string `json:"name"`
 		} `json:"toolUse"`
 	} `json:"start"`
-	Delta bedDelta `json:"delta"`
-	Usage *struct {
-		InputTokens           int `json:"inputTokens"`
-		OutputTokens          int `json:"outputTokens"`
-		CacheReadInputTokens  int `json:"cacheReadInputTokens"`
-		CacheWriteInputTokens int `json:"cacheWriteInputTokens"`
-	} `json:"usage"`
-	Message    string `json:"message"`    // exceptions
-	StopReason string `json:"stopReason"` // messageStop
+	Delta      bedDelta        `json:"delta"`
+	Usage      json.RawMessage `json:"usage"`
+	Message    string          `json:"message"`    // exceptions
+	StopReason string          `json:"stopReason"` // messageStop
 }
 
 type bedDelta struct {
@@ -306,7 +302,7 @@ func (p *bedPart) record() (statefile.Record, bool, error) {
 	return r, err == nil, err
 }
 
-func (bedrock) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
+func (bedrock) Stream(resp io.Reader, cache *Cache, emit func(statefile.Record)) (statefile.Header, error) {
 	parts := map[int]*bedPart{}
 	var stop string
 	for {
@@ -350,16 +346,31 @@ func (bedrock) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.He
 		case "messageStop":
 			stop = e.StopReason
 		case "metadata": // the last event
-			var usage statefile.Usage
-			if e.Usage != nil {
-				usage = statefile.Usage{
-					Input: e.Usage.InputTokens, Output: e.Usage.OutputTokens,
-					CacheRead: e.Usage.CacheReadInputTokens, CacheWrite: e.Usage.CacheWriteInputTokens,
-				}
-			}
-			return statefile.Header{Usage: &usage, Stop: stop}, nil
+			usage, err := bedUsage(e.Usage)
+			cache.settle(usage, stop)
+			return statefile.Header{Usage: &usage, Stop: stop}, err
 		}
 	}
+}
+
+// bedUsage reads the metadata event's usage, kept whole for its cacheDetails:
+// the writes by TTL.
+func bedUsage(raw json.RawMessage) (statefile.Usage, error) {
+	var u struct {
+		InputTokens           int `json:"inputTokens"`
+		OutputTokens          int `json:"outputTokens"`
+		CacheReadInputTokens  int `json:"cacheReadInputTokens"`
+		CacheWriteInputTokens int `json:"cacheWriteInputTokens"`
+	}
+	if raw != nil {
+		if err := json.Unmarshal(raw, &u); err != nil {
+			return statefile.Usage{}, fmt.Errorf("bedrock: usage: %w", err)
+		}
+	}
+	return statefile.Usage{
+		Input: u.InputTokens, Output: u.OutputTokens,
+		CacheRead: u.CacheReadInputTokens, CacheWrite: u.CacheWriteInputTokens, Vendor: raw,
+	}, nil
 }
 
 // readFrame decodes one AWS event-stream message: a 12 byte prelude (total

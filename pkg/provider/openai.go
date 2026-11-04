@@ -22,10 +22,23 @@ func OpenAI(url, key string) Provider {
 	return Provider{
 		URL:      base(url, openaiURL) + "/responses",
 		Key:      key,
-		Envelope: openai{},
+		Envelope: respCache[base(url, openaiURL)],
 		Headers:  bearer,
 		Socket:   base(url, openaiURL) == openaiURL,
 	}
+}
+
+// respCache is the cache of each vendor behind the Responses shape, by base
+// url, measured. Each keeps a prefix by prompt_cache_key. OpenAI keeps it 30
+// minutes from the start of the last request that read or wrote it; 12 hours
+// costs 2.5x a write instead of 1.25x, which replayed over a month of real
+// sessions cost 12% more. Meta evicts by load before a hard 30 minutes from
+// the start. xAI evicts by load: nothing read past 30 minutes (grok-4.20 past
+// 23, grok-4.7 past 15), clock not measured. ChatGPT's is its own, below.
+var respCache = map[string]openai{
+	openaiURL:                {ttl: 1800, anchor: "start", options: true},
+	"https://api.meta.ai/v1": {ttl: 1800, anchor: "start"},
+	"https://api.x.ai/v1":    {ttl: 1800},
 }
 
 // openaiURL is OpenAI's own API, the one endpoint known to speak Responses
@@ -34,20 +47,35 @@ const openaiURL = "https://api.openai.com/v1"
 
 func bearer(r *http.Request, key string) { r.Header.Set("Authorization", "Bearer "+key) }
 
-type openai struct{}
+// openai is the Responses envelope. ttl and anchor are its vendor's cache, as
+// Cache has them. options sends prompt_cache_options, which only OpenAI's own
+// API takes: ChatGPT answers 400, and Meta and xAI ignore it.
+type openai struct {
+	ttl     int
+	anchor  string
+	options bool
+}
+
+// respOptions makes OpenAI report cache writes by TTL in usage; the TTL is
+// its default.
+var respOptions = &struct {
+	Mode string `json:"mode"`
+	TTL  string `json:"ttl"`
+}{"implicit", "30m"}
 
 func (openai) Name() string { return "openai" }
 
 func (openai) Accepts(typ string) bool { return slices.Contains(images, typ) }
 
 func (openai) Owns(field string) bool {
-	return slices.Contains([]string{"model", "store", "prompt_cache_key", "stream", "include", "instructions", "tools", "input"}, field)
+	return slices.Contains([]string{"model", "store", "prompt_cache_key", "prompt_cache_options", "prompt_cache_retention", "stream", "include", "instructions", "tools", "input"}, field)
 }
 
 type respReq struct {
 	Model        string     `json:"model"`
 	Store        bool       `json:"store"`
 	CacheKey     string     `json:"prompt_cache_key,omitempty"`
+	CacheOptions any        `json:"prompt_cache_options,omitempty"`
 	Stream       bool       `json:"stream"`
 	Include      []string   `json:"include"`
 	Instructions string     `json:"instructions,omitempty"`
@@ -88,7 +116,7 @@ type respOutput struct {
 	Output any    `json:"output"`
 }
 
-func (e openai) Compile(req Request) ([]byte, json.RawMessage, error) {
+func (e openai) Compile(req Request) ([]byte, Cache, error) {
 	system, rest := Split(req.Context)
 	rest = fit(e.Name(), rest, respLimits)
 	body := respReq{
@@ -98,6 +126,9 @@ func (e openai) Compile(req Request) ([]byte, json.RawMessage, error) {
 		Include:      []string{"reasoning.encrypted_content"},
 		Instructions: systemText(system),
 		Input:        []any{},
+	}
+	if e.options {
+		body.CacheOptions = respOptions
 	}
 	for _, t := range req.Tools {
 		body.Tools = append(body.Tools, respTool{Type: "function", Name: t.Name, Description: t.Description, Parameters: t.Schema})
@@ -109,16 +140,12 @@ func (e openai) Compile(req Request) ([]byte, json.RawMessage, error) {
 		}
 		items, err := e.assistant(t.Records)
 		if err != nil {
-			return nil, nil, err
+			return nil, Cache{}, err
 		}
 		body.Input = append(body.Input, items...)
 	}
-	cache, err := cacheHeader(0, req.Context[len(req.Context)-1].ID)
-	if err != nil {
-		return nil, nil, err
-	}
 	b, err := encode(body, req.Params)
-	return b, cache, err
+	return b, Cache{TTL: e.ttl, Anchor: e.anchor, Marks: []string{req.Context[len(req.Context)-1].ID}}, err
 }
 
 func imageURL(r statefile.Record) string {
@@ -190,7 +217,7 @@ type respResponse struct {
 	IncompleteDetails *struct {
 		Reason string `json:"reason"`
 	} `json:"incomplete_details"`
-	Usage *respUsage `json:"usage"`
+	Usage json.RawMessage `json:"usage"`
 }
 
 type respUsage struct {
@@ -236,7 +263,7 @@ func respRecord(raw json.RawMessage) (statefile.Record, bool, error) {
 	return r, true, nil
 }
 
-func (openai) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
+func (openai) Stream(resp io.Reader, _ *Cache, emit func(statefile.Record)) (statefile.Header, error) {
 	var s respStream
 	err := Events(resp, func(_, data string) error { return s.event([]byte(data), emit) })
 	if err == nil && !s.done {
@@ -277,12 +304,16 @@ func (s *respStream) event(data []byte, emit func(statefile.Record)) error {
 		if d := e.Response.IncompleteDetails; d != nil {
 			s.stop = d.Reason
 		}
-		u := e.Response.Usage
+		var u respUsage
+		if err := json.Unmarshal(e.Response.Usage, &u); err != nil {
+			return fmt.Errorf("openai: usage: %w", err)
+		}
 		s.usage = statefile.Usage{
 			Input:      u.InputTokens - u.InputTokensDetails.CachedTokens - u.InputTokensDetails.CacheWriteTokens,
 			Output:     u.OutputTokens,
 			CacheRead:  u.InputTokensDetails.CachedTokens,
 			CacheWrite: u.InputTokensDetails.CacheWriteTokens,
+			Vendor:     e.Response.Usage, // OpenAI's cache_write_tokens_details: the writes by TTL
 		}
 	}
 	return nil

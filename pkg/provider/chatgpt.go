@@ -76,8 +76,10 @@ type tokenResponse struct {
 
 func ChatGPT(url, dir string) Provider {
 	return Provider{
-		URL:      base(url, resource) + "/responses",
-		Envelope: openai{},
+		URL: base(url, resource) + "/responses",
+		// ChatGPT evicts by load: a read hits 40-75% of the time in its
+		// first 30 minutes and never after 60. Clock not measured.
+		Envelope: openai{ttl: 3600},
 		Headers:  bearer,
 		Token:    func(ctx context.Context) (string, error) { return chatgptToken(ctx, dir) },
 		// The prompt cache hit every time with it and about half the time

@@ -42,14 +42,38 @@ func (openaiChat) Name() string { return "openai-chat" }
 func (openaiChat) Accepts(typ string) bool { return slices.Contains(images, typ) }
 
 func (openaiChat) Owns(field string) bool {
-	return slices.Contains([]string{"model", "stream", "stream_options", "prompt_cache_key", "messages", "tools"}, field)
+	return slices.Contains([]string{"model", "stream", "stream_options", "prompt_cache_key", "prompt_cache_options", "prompt_cache_retention", "cache_control", "messages", "tools"}, field)
 }
+
+// Most vendors behind Chat Completions cache by themselves, and the model id
+// says which take more, measured:
+//   - Claude (through OpenRouter) caches only what cache_control marks, as
+//     the anthropic envelope marks it, for anthCacheTTL from the request start.
+//   - Qwen caches what cache_control marks for 5 minutes, at 1.25x a write
+//     and 0.1x a read, against 0.2x for an implicit read that may miss. Clock
+//     not measured.
+//   - Kimi K3 takes prompt_cache_options: 1 hour at 2x a write instead of 5
+//     minutes at 1x, which replayed over a month of real sessions cost 4%
+//     less. Clock not measured.
+//
+// Gemini through OpenRouter is left implicit: with marks, a growing session
+// read nothing on most steps.
+const qwenCacheTTL = 300
+
+var (
+	qwenMark    = &anthCache{Type: "ephemeral"}
+	kimiOptions = &struct {
+		Mode string `json:"mode"`
+		TTL  string `json:"ttl"`
+	}{"implicit", "1h"}
+)
 
 type chatReq struct {
 	Model         string            `json:"model"`
 	Stream        bool              `json:"stream"`
 	StreamOptions chatStreamOptions `json:"stream_options"`
 	CacheKey      string            `json:"prompt_cache_key,omitempty"`
+	CacheOptions  any               `json:"prompt_cache_options,omitempty"`
 	Messages      []chatMsg         `json:"messages"`
 	Tools         []chatTool        `json:"tools,omitempty"`
 }
@@ -81,9 +105,10 @@ type chatMsg struct {
 }
 
 type chatPart struct {
-	Type     string        `json:"type"`
-	Text     string        `json:"text,omitempty"`
-	ImageURL *chatImageURL `json:"image_url,omitempty"`
+	Type         string        `json:"type"`
+	Text         string        `json:"text,omitempty"`
+	ImageURL     *chatImageURL `json:"image_url,omitempty"`
+	CacheControl *anthCache    `json:"cache_control,omitempty"`
 }
 
 type chatImageURL struct {
@@ -101,29 +126,62 @@ type chatCallBody struct {
 	Arguments string `json:"arguments"`
 }
 
-func (e openaiChat) Compile(req Request) ([]byte, json.RawMessage, error) {
+func (e openaiChat) Compile(req Request) ([]byte, Cache, error) {
 	system, rest := Split(req.Context)
 	rest = fit(e.Name(), rest, chatLimits)
 	body := chatReq{Model: req.Model, Stream: true, StreamOptions: chatStreamOptions{IncludeUsage: true}, CacheKey: req.Key, Messages: []chatMsg{}}
+	var cache Cache // other vendors: prompt_cache_key routes to the prefix the server caches itself
+	var mark *anthCache
+	switch {
+	case claude(req.Model):
+		mark, cache = ephemeral, Cache{TTL: anthCacheTTL, Anchor: "start"}
+	case strings.Contains(req.Model, "qwen"):
+		mark, cache = qwenMark, Cache{TTL: qwenCacheTTL}
+	case strings.HasPrefix(req.Model, "kimi-k3"):
+		body.CacheOptions = kimiOptions
+		cache = Cache{TTL: 3600, Marks: []string{req.Context[len(req.Context)-1].ID}}
+	}
 	if len(system) > 0 {
-		body.Messages = append(body.Messages, chatMsg{Role: "system", Content: systemText(system)})
+		m := chatMsg{Role: "system", Content: systemText(system)}
+		if mark != nil {
+			m.Content = []chatPart{{Type: "text", Text: systemText(system), CacheControl: mark}}
+			cache.Marks = append(cache.Marks, system[len(system)-1].ID)
+		}
+		body.Messages = append(body.Messages, m)
 	}
 	for _, t := range req.Tools {
 		body.Tools = append(body.Tools, chatTool{Type: "function", Function: chatFunction{t.Name, t.Description, t.Schema}})
 	}
-	for _, t := range Turns(rest) {
+	turns := Turns(rest)
+	marked := userMarks(turns)
+	for i, t := range turns {
 		if !t.Assistant {
-			body.Messages = append(body.Messages, chatUser(t.Records)...)
+			msgs := chatUser(t.Records)
+			if mark != nil && slices.Contains(marked, i) {
+				chatMark(&msgs[len(msgs)-1], mark)
+				cache.Marks = append(cache.Marks, t.Records[len(t.Records)-1].ID)
+			}
+			body.Messages = append(body.Messages, msgs...)
 			continue
 		}
 		m, err := e.assistant(t.Records)
 		if err != nil {
-			return nil, nil, err
+			return nil, Cache{}, err
 		}
 		body.Messages = append(body.Messages, m)
 	}
-	b, err := encode(body, req.Params) // no cache header: the server caches the prefix itself, prompt_cache_key routes to it
-	return b, nil, err
+	b, err := encode(body, req.Params)
+	return b, cache, err
+}
+
+// chatMark puts mark on the last part of m, whose string content becomes one
+// text part: cache_control goes only on a part.
+func chatMark(m *chatMsg, mark *anthCache) {
+	if text, ok := m.Content.(string); ok {
+		m.Content = []chatPart{{Type: "text", Text: text}}
+	}
+	parts := m.Content.([]chatPart)
+	parts[len(parts)-1].CacheControl = mark
 }
 
 // chatUser emits one tool message per result, then one user message holding
@@ -193,7 +251,8 @@ func (e openaiChat) assistant(recs []statefile.Record) (chatMsg, error) {
 }
 
 type chatChunk struct {
-	Choices []struct {
+	Provider string `json:"provider"` // OpenRouter: the upstream endpoint
+	Choices  []struct {
 		Delta struct {
 			Content   string                       `json:"content"`
 			Reasoning string                       `json:"reasoning_content"`
@@ -226,7 +285,7 @@ type chatCallDelta struct {
 // Stream accumulates reasoning, text and tool call deltas by index and emits
 // them when the stream ends, in that order: Chat Completions marks no block
 // boundaries.
-func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
+func (openaiChat) Stream(resp io.Reader, cache *Cache, emit func(statefile.Record)) (statefile.Header, error) {
 	var reasoning, text strings.Builder
 	var details []*detail
 	var calls []*chatToolCall
@@ -245,6 +304,7 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 		if c.Error != nil {
 			return fmt.Errorf("openai-chat: %s", c.Error.Message)
 		}
+		cache.Upstream = cmp.Or(c.Provider, cache.Upstream)
 		if c.Usage != nil {
 			u := c.Usage
 			read := max(u.PromptTokensDetails.CachedTokens, u.CacheHitTokens)
@@ -278,6 +338,9 @@ func (openaiChat) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 	}
 	if err != nil {
 		return statefile.Header{}, err
+	}
+	if cache.Marks != nil {
+		cache.settle(usage, stop)
 	}
 	if r, ok, err := chatThinking(details, reasoning.String()); err != nil {
 		return statefile.Header{}, err

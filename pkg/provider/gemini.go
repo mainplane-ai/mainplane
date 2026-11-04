@@ -37,8 +37,14 @@ var geminiMedia = slices.Concat(images, []string{"application/pdf", "audio/mpeg"
 func (gemini) Accepts(typ string) bool { return slices.Contains(geminiMedia, typ) }
 
 func (gemini) Owns(field string) bool {
-	return slices.Contains([]string{"systemInstruction", "contents", "tools"}, field)
+	return slices.Contains([]string{"systemInstruction", "contents", "tools", "cachedContent"}, field)
 }
+
+// gemCacheTTL: Gemini caches a prefix by itself and evicts it by load: a read
+// hits almost always in the first 150 s, 30-50% to about 10 minutes, and never
+// from 15 minutes on. A cachedContent object would cache only a fixed prefix
+// and bill its storage.
+const gemCacheTTL = 900
 
 type gemReq struct {
 	SystemInstruction *gemContent  `json:"systemInstruction,omitempty"`
@@ -95,7 +101,7 @@ type gemInline struct {
 	Data     string `json:"data"`
 }
 
-func (e gemini) Compile(req Request) ([]byte, json.RawMessage, error) {
+func (e gemini) Compile(req Request) ([]byte, Cache, error) {
 	system, rest := Split(req.Context)
 	rest = fit(e.Name(), rest, gemLimits)
 	body := gemReq{Contents: []gemContent{}}
@@ -107,7 +113,7 @@ func (e gemini) Compile(req Request) ([]byte, json.RawMessage, error) {
 		for i, t := range req.Tools {
 			schema, err := gemSchema(t.Schema)
 			if err != nil {
-				return nil, nil, fmt.Errorf("tool %s: %w", t.Name, err)
+				return nil, Cache{}, fmt.Errorf("tool %s: %w", t.Name, err)
 			}
 			decls[i] = gemDecl{Name: t.Name, Description: t.Description, Parameters: schema}
 		}
@@ -121,18 +127,14 @@ func (e gemini) Compile(req Request) ([]byte, json.RawMessage, error) {
 		}
 		parts, err := e.model(t.Records, names)
 		if err != nil {
-			return nil, nil, err
+			return nil, Cache{}, err
 		}
 		if len(parts) > 0 {
 			body.Contents = append(body.Contents, gemContent{Role: "model", Parts: parts})
 		}
 	}
-	cache, err := cacheHeader(0, req.Context[len(req.Context)-1].ID)
-	if err != nil {
-		return nil, nil, err
-	}
 	b, err := encode(body, req.Params)
-	return b, cache, err
+	return b, Cache{TTL: gemCacheTTL, Marks: []string{req.Context[len(req.Context)-1].ID}}, err
 }
 
 // gemSchema strips the JSON Schema keywords the parameters field rejects.
@@ -333,7 +335,7 @@ func gemCall(p gemPart, emit func(statefile.Record)) error {
 	return nil
 }
 
-func (gemini) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
+func (gemini) Stream(resp io.Reader, _ *Cache, emit func(statefile.Record)) (statefile.Header, error) {
 	var usage statefile.Usage
 	var block gemBlock
 	var stop string

@@ -107,33 +107,49 @@ type Request struct {
 }
 
 // Cache is the step record's cache header, facts only. Marks are the ids of
-// the records that end a cache breakpoint. Anthropic and bedrock put one after
-// the system prompt and one after the last user block; openai and gemini place
-// their own, so the mark is the last record sent. TTL is seconds from the
-// step's sent time, set only where the request the harness sends fixes it:
-// anthropic and bedrock. The step's usage says what was read and written.
+// the records that end a cache breakpoint: where the harness places them
+// (anthropic, bedrock, Claude and Qwen through openai-chat) the system prompt,
+// the previous step's last user block and the last user block; where the
+// vendor places its own, the last record sent. TTL is the seconds after which
+// nothing of the step's prefix is cached: a fixed timer on the vendors with
+// marks, OpenAI and Kimi, the measured upper edge on those that evict by load
+// (Meta, xAI, ChatGPT, Gemini). Anchor is where it counts from: start is the
+// step's sent time, end is the step record's time, empty is not measured. A
+// read refreshes it. Upstream is the endpoint a router sent the step to, whose
+// cache alone is warm. Miss is the vendor's reason for a read that fell short.
+// The step's usage says what was read and written.
 type Cache struct {
-	TTL   int      `json:"ttl,omitempty"`
-	Marks []string `json:"marks"`
+	TTL      int             `json:"ttl,omitempty"`
+	Anchor   string          `json:"anchor,omitempty"`
+	Marks    []string        `json:"marks,omitempty"`
+	Upstream string          `json:"upstream,omitempty"`
+	Miss     json.RawMessage `json:"miss,omitempty"`
 }
 
-func cacheHeader(ttl int, marks ...string) (json.RawMessage, error) {
-	return marshal(Cache{TTL: ttl, Marks: marks})
+// settle drops the marks of a step that cached nothing: a refusal writes no
+// cache and refreshes none, and a prompt under the model's minimum (4096
+// tokens on some Claude models) neither reads nor writes. For envelopes whose
+// vendor counts writes.
+func (c *Cache) settle(u statefile.Usage, stop string) {
+	if stop == "refusal" || u.CacheRead+u.CacheWrite == 0 {
+		*c = Cache{Upstream: c.Upstream}
+	}
 }
 
 // Envelope is one wire shape. Name tags the thinking and step records it
 // produces; only thinking with its own name is replayed. Compile is
-// deterministic and returns the cache markers it placed, which go on the step
-// record. Stream calls emit once per block as the stream completes it and
-// returns the step header with usage. Accepts is the media types the envelope
+// deterministic and returns the cache facts of the request, which go on the
+// step record. Stream calls emit once per block as the stream completes it,
+// adds what the response says to cache, and returns the step header with
+// usage. Accepts is the media types the envelope
 // encodes as media; a record of any other type goes as text. Owns is the body
 // fields Compile builds from the session, which params may not set.
 type Envelope interface {
 	Name() string
 	Accepts(typ string) bool
 	Owns(field string) bool
-	Compile(req Request) (body []byte, cache json.RawMessage, err error)
-	Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error)
+	Compile(req Request) (body []byte, cache Cache, err error)
+	Stream(resp io.Reader, cache *Cache, emit func(statefile.Record)) (statefile.Header, error)
 }
 
 // images are the types every envelope takes as an image block.
@@ -150,7 +166,7 @@ type Provider struct {
 	Socket   bool                                      // steps go over the session's WebSocket, see Conn: the openai envelope at OpenAI's own endpoint
 	// Run, if set, makes the step instead of an HTTP request: claude-code's
 	// process. It retries what it can itself.
-	Run func(ctx context.Context, body []byte, emit func(statefile.Record)) (statefile.Header, error)
+	Run func(ctx context.Context, body []byte, cache *Cache, emit func(statefile.Record)) (statefile.Header, error)
 }
 
 // Retry numbers are opencode's. A failure before the first block is out is
@@ -220,13 +236,11 @@ func (p Provider) Step(ctx context.Context, conn *Conn, req Request, emit func(s
 	}
 	if p.Run != nil {
 		sent := time.Now().UTC().Truncate(time.Millisecond)
-		h, err := p.Run(ctx, body, emit)
+		h, err := p.Run(ctx, body, &cache, emit)
 		if err != nil {
 			return statefile.Header{}, err
 		}
-		sum := sha256.Sum256(body)
-		h.Provider, h.Model, h.Request, h.Cache, h.Sent = p.Envelope.Name(), req.Model, "sha256:"+hex.EncodeToString(sum[:]), cache, sent
-		return h, nil
+		return p.done(h, req.Model, body, cache, sent)
 	}
 	url := p.URL
 	if p.Endpoint != nil {
@@ -237,11 +251,10 @@ func (p Provider) Step(ctx context.Context, conn *Conn, req Request, emit func(s
 	}
 	for attempt := 0; ; attempt++ {
 		sent := time.Now().UTC().Truncate(time.Millisecond)
-		h, emitted, err := p.once(ctx, conn, url, req.Key, body, emit)
+		c := cache
+		h, emitted, err := p.once(ctx, conn, url, req.Key, body, &c, emit)
 		if err == nil {
-			sum := sha256.Sum256(body)
-			h.Provider, h.Model, h.Request, h.Cache, h.Sent = p.Envelope.Name(), req.Model, "sha256:"+hex.EncodeToString(sum[:]), cache, sent
-			return h, nil
+			return p.done(h, req.Model, body, c, sent)
 		}
 		if emitted || attempt == retries || !transient(err) {
 			return statefile.Header{}, err
@@ -254,10 +267,22 @@ func (p Provider) Step(ctx context.Context, conn *Conn, req Request, emit func(s
 	}
 }
 
+// done completes the step header of a request that succeeded.
+func (p Provider) done(h statefile.Header, model string, body []byte, cache Cache, sent time.Time) (statefile.Header, error) {
+	sum := sha256.Sum256(body)
+	h.Provider, h.Model, h.Request, h.Sent = p.Envelope.Name(), model, "sha256:"+hex.EncodeToString(sum[:]), sent
+	if cache.TTL == 0 && cache.Marks == nil && cache.Upstream == "" {
+		return h, nil
+	}
+	var err error
+	h.Cache, err = marshal(cache)
+	return h, err
+}
+
 // once is one HTTP attempt, or a Socket provider's over conn. emitted reports
 // whether any block reached emit. An idle timeout cancels the request, and its
 // cause is the error.
-func (p Provider) once(ctx context.Context, conn *Conn, url, session string, body []byte, emit func(statefile.Record)) (h statefile.Header, emitted bool, err error) {
+func (p Provider) once(ctx context.Context, conn *Conn, url, session string, body []byte, cache *Cache, emit func(statefile.Record)) (h statefile.Header, emitted bool, err error) {
 	if p.Socket {
 		return p.socket(ctx, conn, url, session, body, emit)
 	}
@@ -297,7 +322,7 @@ func (p Provider) once(ctx context.Context, conn *Conn, url, session string, bod
 		}
 		emit(r)
 	}
-	h, err = p.Envelope.Stream(rb, tagged)
+	h, err = p.Envelope.Stream(rb, cache, tagged)
 	return h, emitted, err
 }
 

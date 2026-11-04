@@ -99,8 +99,8 @@ const stopHook = `{"continue":false,"stopReason":"mainplane runs tools","hookSpe
 func ClaudeCode(dir string) Provider {
 	return Provider{
 		Envelope: claudeCode{},
-		Run: func(ctx context.Context, body []byte, emit func(statefile.Record)) (statefile.Header, error) {
-			return runClaude(ctx, dir, body, emit)
+		Run: func(ctx context.Context, body []byte, cache *Cache, emit func(statefile.Record)) (statefile.Header, error) {
+			return runClaude(ctx, dir, body, cache, emit)
 		},
 	}
 }
@@ -137,13 +137,15 @@ type ccFrame struct {
 	ShouldQuery *bool   `json:"shouldQuery,omitempty"`
 }
 
-func (e claudeCode) Compile(req Request) ([]byte, json.RawMessage, error) {
+// Compile's cache is claude's own: it places the marks and, on a
+// subscription, writes for 1 hour from the request start.
+func (e claudeCode) Compile(req Request) ([]byte, Cache, error) {
 	system, rest := Split(req.Context)
 	rest = fit(e.Name(), rest, anthLimits)
 	body := ccReq{Model: req.Model, System: systemText(system), Tools: []mcpTool{}}
 	if v, ok := req.Params["effort"]; ok {
 		if err := json.Unmarshal(v, &body.Effort); err != nil {
-			return nil, nil, fmt.Errorf("claude-code: effort is a string: %s", v)
+			return nil, Cache{}, fmt.Errorf("claude-code: effort is a string: %s", v)
 		}
 	}
 	for _, t := range req.Tools {
@@ -155,7 +157,7 @@ func (e claudeCode) Compile(req Request) ([]byte, json.RawMessage, error) {
 		if t.Assistant {
 			f, err := ccAssistant(t.Records)
 			if err != nil {
-				return nil, nil, err
+				return nil, Cache{}, err
 			}
 			body.Frames = append(body.Frames, f)
 			continue
@@ -166,13 +168,9 @@ func (e claudeCode) Compile(req Request) ([]byte, json.RawMessage, error) {
 		}
 		body.Frames = append(body.Frames, f)
 	}
-	var marks []string
+	cache := Cache{TTL: 3600, Anchor: "start"}
 	if len(req.Context) > 0 {
-		marks = append(marks, req.Context[len(req.Context)-1].ID)
-	}
-	cache, err := cacheHeader(0, marks...)
-	if err != nil {
-		return nil, nil, err
+		cache.Marks = []string{req.Context[len(req.Context)-1].ID}
 	}
 	b, err := marshal(body)
 	return b, cache, err
@@ -311,7 +309,7 @@ func keepTurn(dir string, req ccReq, recs []statefile.Record, end ccTurn, resume
 
 // runClaude is one step: claude installed, the inert MCP server and the hook
 // on a loopback port, the frames replayed, the stream read to its result.
-func runClaude(ctx context.Context, dir string, body []byte, emit func(statefile.Record)) (_ statefile.Header, err error) {
+func runClaude(ctx context.Context, dir string, body []byte, cache *Cache, emit func(statefile.Record)) (_ statefile.Header, err error) {
 	var req ccReq
 	if err := json.Unmarshal(body, &req); err != nil {
 		return statefile.Header{}, err
@@ -390,7 +388,7 @@ func runClaude(ctx context.Context, dir string, body []byte, emit func(statefile
 	defer timer.Stop()
 	out := bufio.NewReader(idleReader{stdout, timer})
 	var recs []statefile.Record
-	h, end, err := replay(stdin, out, frames, func(r statefile.Record) { recs = append(recs, r); emit(r) })
+	h, end, err := replay(stdin, out, frames, cache, func(r statefile.Record) { recs = append(recs, r); emit(r) })
 	if err != nil {
 		cancel(err)
 	}
@@ -411,7 +409,7 @@ func runClaude(ctx context.Context, dir string, body []byte, emit func(statefile
 // replay sends the frames one by one, waiting for claude to take each
 // shouldQuery false frame before the next, or they merge into the query;
 // then it reads the step.
-func replay(stdin io.WriteCloser, out *bufio.Reader, frames []ccFrame, emit func(statefile.Record)) (statefile.Header, ccTurn, error) {
+func replay(stdin io.WriteCloser, out *bufio.Reader, frames []ccFrame, cache *Cache, emit func(statefile.Record)) (statefile.Header, ccTurn, error) {
 	for _, f := range frames {
 		b, err := marshal(f)
 		if err != nil {
@@ -440,7 +438,7 @@ func replay(stdin io.WriteCloser, out *bufio.Reader, frames []ccFrame, emit func
 	if err := stdin.Close(); err != nil {
 		return statefile.Header{}, ccTurn{}, err
 	}
-	return claudeStream(out, emit)
+	return claudeStream(out, cache, emit)
 }
 
 type ccEvent struct {
@@ -451,20 +449,20 @@ type ccEvent struct {
 	IsError bool            `json:"is_error"`
 	Result  string          `json:"result"`
 	Stop    string          `json:"stop_reason"`
-	Usage   anthUsage       `json:"usage"`
+	Usage   json.RawMessage `json:"usage"`
 	Message json.RawMessage `json:"message"`
 }
 
 // Stream reads claude's stream-json: an assistant event per finished block,
 // then the result with the request's usage. Blocks are kept as claude gave
 // them.
-func (claudeCode) Stream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, error) {
-	h, _, err := claudeStream(resp, emit)
+func (claudeCode) Stream(resp io.Reader, cache *Cache, emit func(statefile.Record)) (statefile.Header, error) {
+	h, _, err := claudeStream(resp, cache, emit)
 	return h, err
 }
 
 // claudeStream is Stream and where the turn ends in claude's transcript.
-func claudeStream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, ccTurn, error) {
+func claudeStream(resp io.Reader, cache *Cache, emit func(statefile.Record)) (statefile.Header, ccTurn, error) {
 	var end ccTurn
 	r := bufio.NewReader(resp)
 	for {
@@ -482,20 +480,8 @@ func claudeStream(resp io.Reader, emit func(statefile.Record)) (statefile.Header
 		switch e.Type {
 		case "assistant":
 			end.UUID = e.UUID
-			var m struct {
-				Content []json.RawMessage `json:"content"`
-			}
-			if err := json.Unmarshal(e.Message, &m); err != nil {
-				return statefile.Header{}, ccTurn{}, fmt.Errorf("claude-code: %w: %.200s", err, line)
-			}
-			for _, raw := range m.Content {
-				rec, ok, err := claudeBlock(raw)
-				if err != nil {
-					return statefile.Header{}, ccTurn{}, err
-				}
-				if ok {
-					emit(rec)
-				}
+			if err := claudeMessage(e.Message, cache, emit); err != nil {
+				return statefile.Header{}, ccTurn{}, err
 			}
 		case "result":
 			// A call without mcp__ ends at --max-turns, not at the hook,
@@ -505,11 +491,46 @@ func claudeStream(resp io.Reader, emit func(statefile.Record)) (statefile.Header
 				return statefile.Header{}, ccTurn{}, fmt.Errorf("claude-code: %s: %s", e.Subtype, e.Result)
 			}
 			var usage statefile.Usage
-			e.Usage.apply(&usage)
+			if err := anthApply(e.Usage, &usage); err != nil {
+				return statefile.Header{}, ccTurn{}, fmt.Errorf("claude-code: %w", err)
+			}
+			cache.settle(usage, e.Stop)
 			end.Session = e.Session
 			return statefile.Header{Usage: &usage, Stop: e.Stop}, end, nil
 		}
 	}
+}
+
+// claudeMessage emits the blocks of an assistant event's message and adds
+// what it says of the cache: the TTL of its writes and the server's reason
+// for a miss.
+func claudeMessage(msg json.RawMessage, cache *Cache, emit func(statefile.Record)) error {
+	var m struct {
+		Content     []json.RawMessage `json:"content"`
+		Usage       anthUsage         `json:"usage"`
+		Diagnostics *struct {
+			Miss json.RawMessage `json:"cache_miss_reason"`
+		} `json:"diagnostics"`
+	}
+	if err := json.Unmarshal(msg, &m); err != nil {
+		return fmt.Errorf("claude-code: %w: %.200s", err, msg)
+	}
+	if c := m.Usage.CacheCreation; c != nil && c.Ephemeral1h == 0 && c.Ephemeral5m > 0 {
+		cache.TTL = 300 // claude writes for 5 minutes on an account that spends usage credits
+	}
+	if d := m.Diagnostics; d != nil && string(d.Miss) != "null" {
+		cache.Miss = d.Miss
+	}
+	for _, raw := range m.Content {
+		rec, ok, err := claudeBlock(raw)
+		if err != nil {
+			return err
+		}
+		if ok {
+			emit(rec)
+		}
+	}
+	return nil
 }
 
 // claudeBlock is the record for one content block.
