@@ -55,11 +55,12 @@ func (openaiChat) Owns(field string) bool {
 //   - Claude (through OpenRouter) caches only what cache_control marks, as
 //     the anthropic envelope marks it, for anthCacheTTL from the request start.
 //   - Qwen caches what cache_control marks for 5 minutes, at 1.25x a write
-//     and 0.1x a read, against 0.2x for an implicit read that may miss. Clock
-//     not measured.
-//   - Kimi K3 on Moonshot's own API takes prompt_cache_options: 1 hour at 2x a write instead of 5
-//     minutes at 1x, which replayed over a month of real sessions cost 4%
-//     less. Clock not measured.
+//     and 0.1x a read, against 0.2x for an implicit read that may miss.
+//   - Kimi K3 on Moonshot's own API takes prompt_cache_options: 1 hour at 2x
+//     a write instead of 5 minutes at 1x, which replayed over a month of real
+//     sessions cost 4% less.
+//
+// Both clocks run from the response end, and a read restarts them.
 //
 // Gemini through OpenRouter is left implicit: with marks, a growing session
 // read nothing on most steps.
@@ -144,10 +145,10 @@ func (e openaiChat) Compile(req Request) ([]byte, Cache, error) {
 	case claude(req.Model):
 		mark, cache = ephemeral, Cache{TTL: anthCacheTTL, Anchor: "start"}
 	case strings.Contains(req.Model, "qwen"):
-		mark, cache = qwenMark, Cache{TTL: qwenCacheTTL}
+		mark, cache = qwenMark, Cache{TTL: qwenCacheTTL, Anchor: "end"}
 	case e.moonshot && strings.HasPrefix(req.Model, "kimi-k3"):
 		body.CacheOptions = kimiOptions
-		cache = Cache{TTL: kimiCacheTTL, Marks: []string{req.Context[len(req.Context)-1].ID}}
+		cache = Cache{TTL: kimiCacheTTL, Anchor: "end", Marks: []string{req.Context[len(req.Context)-1].ID}}
 	}
 	if len(system) > 0 {
 		m := chatMsg{Role: "system", Content: systemText(system)}
