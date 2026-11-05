@@ -134,7 +134,7 @@ func (e gemini) Compile(req Request) ([]byte, Cache, error) {
 		}
 	}
 	b, err := encode(body, req.Params)
-	return b, Cache{TTL: gemCacheTTL, Marks: []string{req.Context[len(req.Context)-1].ID}}, err
+	return b, Cache{TTL: gemCacheTTL, Likely: true, Marks: []string{req.Context[len(req.Context)-1].ID}}, err
 }
 
 // gemSchema strips the JSON Schema keywords the parameters field rejects.

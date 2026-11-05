@@ -23,6 +23,10 @@ const (
 	// stands out more than the one under the mouse.
 	openShade  = 0.07
 	hoverShade = 0.04
+	// The cache dot blinks in the cache's last minute, faster in its last
+	// 10 s: a message sent then still reads the prompt from the cache.
+	blinkFrom, blinkFastFrom   = time.Minute, 10 * time.Second
+	blinkEvery, blinkFastEvery = time.Second, 300 * time.Millisecond
 )
 
 // sessionList is the sessions, newest updated first, read every
@@ -98,11 +102,13 @@ func (l *sessionList) leave() {
 	}
 }
 
-// tick animates while any session steps.
+// tick animates while any session steps or its cache dot blinks.
 func (l *sessionList) tick(a *App) {
-	on := l.cur.stepping() || l.cur.blank && !a.Blurred
+	now := time.Now()
+	on := l.cur.stepping() || l.cur.blank && !a.Blurred || blinks(l.cur.info.Cache, now)
 	for i := range l.infos {
-		on = on || l.info(i).Status == statefile.StatusStepping
+		in := l.info(i)
+		on = on || in.Status == statefile.StatusStepping || blinks(in.Cache, now)
 	}
 	a.Ticking(on)
 }
@@ -223,8 +229,36 @@ func (l *sessionList) Draw(a *App, c *Canvas, r Rect) {
 			used += "/" + tokens(lim)
 		}
 		line(y, spread(run(title, term.Style{FG: a.Theme.Text, Attr: term.Bold}), state, w))
-		line(y+1, spread(run(meta, muted), run(used, muted), w))
+		right := run(used, muted)
+		if dot := cacheDot(a, in.Cache, time.Now()); dot != nil {
+			right = cat(dot, run(" "+used, muted))
+		}
+		line(y+1, spread(run(meta, muted), right, w))
 	}
+}
+
+// cacheDot is the dot before the context while the session's prompt is
+// cached, solid until its last minute and blinking then, or nil once it is
+// cold. In the off half of a blink a blank keeps its place.
+func cacheDot(a *App, c harness.Cache, now time.Time) []Glyph {
+	left := c.Until.Sub(now)
+	every := blinkEvery
+	if left <= blinkFastFrom {
+		every = blinkFastEvery
+	}
+	switch {
+	case left <= 0:
+		return nil
+	case left <= blinkFrom && left%every < every/2:
+		return run(" ", a.Theme.text())
+	}
+	return run("●", a.Theme.text())
+}
+
+// blinks is a cache in its last minute, whose dot needs the tick.
+func blinks(c harness.Cache, now time.Time) bool {
+	left := c.Until.Sub(now)
+	return left > 0 && left <= blinkFrom
 }
 
 // age is how long ago, in its largest unit: now, 15m, 3h, 2d.

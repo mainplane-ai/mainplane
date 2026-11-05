@@ -114,7 +114,7 @@ type Request struct {
 // prefix stays cached: a fixed timer on the vendors with marks, OpenAI and
 // Kimi; on those that evict by load (Meta, xAI, ChatGPT, Gemini), the
 // measured edge of the window in which a read is likely, past which reads
-// fall off. Anchor is where it counts from: start is the
+// fall off, and Likely is set. Anchor is where it counts from: start is the
 // step's sent time, end is the step record's time, empty is not measured. A
 // read refreshes it. Upstream is the endpoint a router sent the step to, whose
 // cache alone is warm. Miss is the vendor's reason for a read that fell short.
@@ -122,6 +122,7 @@ type Request struct {
 type Cache struct {
 	TTL      int             `json:"ttl,omitempty"`
 	Anchor   string          `json:"anchor,omitempty"`
+	Likely   bool            `json:"likely,omitempty"`
 	Marks    []string        `json:"marks,omitempty"`
 	Upstream string          `json:"upstream,omitempty"`
 	Miss     json.RawMessage `json:"miss,omitempty"`

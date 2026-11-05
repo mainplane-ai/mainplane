@@ -39,8 +39,8 @@ func OpenAI(url, key string) Provider {
 // grok47TTL); clock not measured. ChatGPT's is its own, below.
 var respCache = map[string]openai{
 	openaiURL:                {ttl: 1800, anchor: "start", options: true},
-	"https://api.meta.ai/v1": {ttl: 1800, anchor: "start"},
-	"https://api.x.ai/v1":    {ttl: 1200},
+	"https://api.meta.ai/v1": {ttl: 1800, anchor: "start", likely: true},
+	"https://api.x.ai/v1":    {ttl: 1200, likely: true},
 }
 
 const grok47TTL = 600
@@ -51,12 +51,13 @@ const openaiURL = "https://api.openai.com/v1"
 
 func bearer(r *http.Request, key string) { r.Header.Set("Authorization", "Bearer "+key) }
 
-// openai is the Responses envelope. ttl and anchor are its vendor's cache, as
-// Cache has them. options sends prompt_cache_options, which only OpenAI's own
-// API takes: ChatGPT answers 400, and Meta and xAI ignore it.
+// openai is the Responses envelope. ttl, anchor and likely are its vendor's
+// cache, as Cache has them. options sends prompt_cache_options, which only
+// OpenAI's own API takes: ChatGPT answers 400, and Meta and xAI ignore it.
 type openai struct {
 	ttl     int
 	anchor  string
+	likely  bool
 	options bool
 }
 
@@ -153,7 +154,7 @@ func (e openai) Compile(req Request) ([]byte, Cache, error) {
 	if strings.HasPrefix(req.Model, "grok-4.7") {
 		ttl = grok47TTL
 	}
-	return b, Cache{TTL: ttl, Anchor: e.anchor, Marks: []string{req.Context[len(req.Context)-1].ID}}, err
+	return b, Cache{TTL: ttl, Anchor: e.anchor, Likely: e.likely, Marks: []string{req.Context[len(req.Context)-1].ID}}, err
 }
 
 func imageURL(r statefile.Record) string {
