@@ -23,7 +23,7 @@ const (
 	// stands out more than the one under the mouse.
 	openShade  = 0.07
 	hoverShade = 0.04
-	// The cache dot blinks in the cache's last minute, faster in its last
+	// The cache mark blinks in the cache's last minute, faster in its last
 	// 10 s: a message sent then still reads the prompt from the cache.
 	blinkFrom, blinkFastFrom   = time.Minute, 10 * time.Second
 	blinkEvery, blinkFastEvery = time.Second, 300 * time.Millisecond
@@ -102,7 +102,7 @@ func (l *sessionList) leave() {
 	}
 }
 
-// tick animates while any session steps or its cache dot blinks.
+// tick animates while any session steps or its cache mark blinks.
 func (l *sessionList) tick(a *App) {
 	now := time.Now()
 	on := l.cur.stepping() || l.cur.blank && !a.Blurred || blinks(l.cur.info.Cache, now)
@@ -230,17 +230,19 @@ func (l *sessionList) Draw(a *App, c *Canvas, r Rect) {
 		}
 		line(y, spread(run(title, term.Style{FG: a.Theme.Text, Attr: term.Bold}), state, w))
 		right := run(used, muted)
-		if dot := cacheDot(a, in.Cache, time.Now()); dot != nil {
-			right = cat(dot, run(" "+used, muted))
+		if mark := cacheMark(a, in.Cache, time.Now()); mark != nil {
+			right = cat(right, run(" ", muted), mark)
 		}
 		line(y+1, spread(run(meta, muted), right, w))
 	}
 }
 
-// cacheDot is the dot before the context while the session's prompt is
-// cached, solid until its last minute and blinking then, or nil once it is
-// cold. In the off half of a blink a blank keeps its place.
-func cacheDot(a *App, c harness.Cache, now time.Time) []Glyph {
+// cacheMark is the mark beside the context while the session's prompt is
+// cached: filled where the vendor keeps it for certain, hollow where only
+// likely. Muted like the row it sits in, steady until the cache's last
+// minute and blinking then, nil once it is cold. In the off half of a blink
+// a blank keeps its place.
+func cacheMark(a *App, c harness.Cache, now time.Time) []Glyph {
 	left := c.Until.Sub(now)
 	every := blinkEvery
 	if left <= blinkFastFrom {
@@ -250,12 +252,14 @@ func cacheDot(a *App, c harness.Cache, now time.Time) []Glyph {
 	case left <= 0:
 		return nil
 	case left <= blinkFrom && left%every < every/2:
-		return run(" ", a.Theme.text())
+		return run(" ", a.Theme.muted())
+	case c.Likely:
+		return run("◇", a.Theme.muted())
 	}
-	return run("●", a.Theme.text())
+	return run("◆", a.Theme.muted())
 }
 
-// blinks is a cache in its last minute, whose dot needs the tick.
+// blinks is a cache in its last minute, whose mark needs the tick.
 func blinks(c harness.Cache, now time.Time) bool {
 	left := c.Until.Sub(now)
 	return left > 0 && left <= blinkFrom
