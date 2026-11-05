@@ -336,6 +336,9 @@ func (c *chatContent) UnmarshalJSON(b []byte) error {
 			c.text += p.Text
 		case "thinking":
 			for _, t := range p.Thinking {
+				if t.Type != "text" {
+					return fmt.Errorf("openai-chat: thinking chunk part type %q", t.Type)
+				}
 				c.thinking += t.Text
 			}
 		default:
