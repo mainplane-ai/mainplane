@@ -2,6 +2,15 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.5.12
+
+- Prompt caching is owned by the harness, set per vendor from measurements: cache fields in session params are refused. Claude (anthropic, bedrock, OpenRouter) caches for 1 hour, which replayed over a month of real sessions cost less than 5 minutes. A third cache mark keeps the conversation cached after a step with many parallel tool calls. OpenRouter Claude, Qwen and Kimi K3 on Moonshot now cache. Meta steps no longer fail with "invalid character 'D'"
+- Step records: the cache header has `ttl`, `anchor` (start or end), `likely` (vendors that evict by load), `upstream` (OpenRouter) and `miss` (Claude's miss reason). `usage.vendor` keeps the vendor's cache-write split. Session info has `cache: {until, likely}`
+- Terminal app: a white dot before the context count, in the sidebar and the status line, while the session's prompt cache is warm. It blinks in the last minute, faster in the last 10 s. With room the status line says `cache active`, or `cache likely` on ChatGPT, xAI, Meta and Gemini
+- Terminal app: `/fork` works while the session steps, and `/btw <question>` opens a fork with the question in its input while the original keeps working
+- `prompt` in config.json: the policy lines of the system prompt (AGENTS.md conventions, bug reports, writing and coding guidelines), editable in /settings. No field gives each release's default; `[]` gives the mechanics only
+- openai and chatgpt on OpenAI's own endpoint step over the Responses WebSocket, sending only the new input after the first step: 10-24% faster per step
+
 ## v0.5.11
 
 - Install options for a more private harness, documented in the new `docs/privacy-and-security.md`. `--no-admin` (Windows: `-NoAdmin`) does not make the harness machine the worker `admin`, so no agent can read the config and the provider keys; on an existing install it also removes the `admin` worker. Update from /settings then says to run `mainplane-server update` on the harness's machine. `--no-pointer` (`-NoPointer`) never contacts pointer.mainplane.ai: join lines and api keys carry the harness URL (`mp_join_<key>.<secret>@https://<host>`), and devices with them must join again when the URL changes. Flags given to a later install are added to the kept config, never taken away
