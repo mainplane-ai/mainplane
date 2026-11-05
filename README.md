@@ -49,9 +49,9 @@ Read more in [docs/self-hosting.md](docs/self-hosting.md), and [docs/privacy-and
 
 # FAQ
 <details>
-<summary>Can I bring my Claude Code or ChatGPT subscription?</summary>
+<summary>Can I bring my Claude Code, ChatGPT, or OpenCode Go subscription?</summary>
 
-Yes, Mainplane can use the regular limits of a Claude Code or ChatGPT Codex subscription, or an API key with any model.
+Yes, Mainplane can use the regular limits of a Claude Code, ChatGPT, or OpenCode Go subscription.
 </details>
 
 <details>
