@@ -2,10 +2,12 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"slices"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
@@ -13,6 +15,7 @@ import (
 // session: everything the tip states and its name, no cost. ContextUsed is
 // the last step's prompt in tokens, against Config.ContextLimit. Updated is
 // the newest record that is not a name, so a rename does not reorder a list.
+// Cache is the prompt cache of the newest step that kept one.
 type Info struct {
 	ID          string           `json:"id"`
 	Name        string           `json:"name,omitempty"`
@@ -23,6 +26,29 @@ type Info struct {
 	N           int              `json:"n"`
 	ContextUsed int              `json:"context_used"`
 	Usage       statefile.Usage  `json:"usage"`
+	Cache       Cache            `json:"cache,omitzero"`
+}
+
+// Cache is how long the vendor keeps a session's prompt: warm until Until,
+// or with Likely, probably warm until then, on a vendor that evicts by load.
+// Zero when no step kept one or the vendor states no window.
+type Cache struct {
+	Until  time.Time `json:"until"`
+	Likely bool      `json:"likely,omitempty"`
+}
+
+// cacheOf is the cache a step kept, from its header: its TTL counted from
+// the anchor, the request's start where the anchor is not measured.
+func cacheOf(r statefile.Record) (Cache, bool) {
+	var c provider.Cache
+	if r.Kind != statefile.Step || len(r.Cache) == 0 || json.Unmarshal(r.Cache, &c) != nil || c.TTL == 0 {
+		return Cache{}, false
+	}
+	at := r.Sent
+	if c.Anchor == "end" || at.IsZero() {
+		at = r.Time
+	}
+	return Cache{Until: at.Add(time.Duration(c.TTL) * time.Second), Likely: c.Likely}, true
 }
 
 // Info reads one session's file.
@@ -48,6 +74,9 @@ func (h *Harness) Info(id string) (Info, error) {
 			info.Usage.Output += r.Usage.Output
 			info.Usage.CacheRead += r.Usage.CacheRead
 			info.Usage.CacheWrite += r.Usage.CacheWrite
+		}
+		if c, ok := cacheOf(r); ok {
+			info.Cache = c
 		}
 	}
 	h.lockIndex()
