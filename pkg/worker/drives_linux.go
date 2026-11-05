@@ -77,9 +77,12 @@ IPAddressAllow=%s
 
 // SMB3 only, with no NetBIOS, printers or guests. posix locking makes a
 // Windows byte-range lock an fcntl lock, which NFS clients and local
-// programs meet; kernel oplocks makes an oplock a kernel lease, which an NFS
-// or local open breaks. Every file is the operator's, whoever wrote it, as
-// over NFS.
+// programs meet. No oplocks or leases: Windows serves later opens from a
+// cached handle, which no NFS rename breaks and, with Samba's own leases, no
+// NFS write either, so it reads old content for as long as it polls; and a
+// kernel lease answers each NFS open NFS4ERR_DELAY, which the macOS client
+// retries after 4, 8, 16, 30s. Every file is the operator's, whoever wrote
+// it, as over NFS.
 const smbConfText = `# mainplane drives, written by mainplaned
 [global]
 	server role = standalone server
@@ -101,7 +104,7 @@ const smbConfText = `# mainplane drives, written by mainplaned
 	log file = %[1]s/log
 	max log size = 1000
 	posix locking = yes
-	kernel oplocks = yes
+	oplocks = no
 	force user = %[2]s
 `
 

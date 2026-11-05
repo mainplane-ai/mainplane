@@ -410,6 +410,14 @@ server. Nothing is shared until the harness config names a drive:
   removes its exports and smbd; the packages and `/srv/mainplane` stay.
 - Lock files on a drive with fcntl locks (`lockf(3)`, Python's `fcntl.lockf`),
   not `flock`: on a drive's server, `flock` does not see other workers' locks.
+- Windows gets no oplocks on a drive, so it sees a change from another worker
+  at its next read, and each open of a file is a round trip to the server.
+- A Windows deny-write open stops only other Windows workers. Office's `~$`
+  owner files are a convention: a macOS or Linux worker can still write the
+  file. Byte-range locks do reach every worker.
+- On macOS, FSEvents watchers (`fs.watch`, editors, dev servers) get no events
+  for changes made on other workers; kqueue gets them after a few seconds. Poll,
+  or run the watcher on the drive's server, where inotify sees every change.
 
 ## What Cloudflare can read
 
