@@ -9,7 +9,7 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 - Terminal app: a white dot before the context count, in the sidebar and the status line, while the session's prompt cache is warm. It blinks in the last minute, faster in the last 10 s. With room the status line says `cache active`, or `cache likely` on ChatGPT, xAI, Meta and Gemini
 - Terminal app: `/fork` works while the session steps, and `/btw <question>` opens a fork with the question in its input while the original keeps working
 - `prompt` in config.json: the policy lines of the system prompt (AGENTS.md conventions, bug reports, writing and coding guidelines), editable in /settings. No field gives each release's default; `[]` gives the mechanics only
-- openai and chatgpt on OpenAI's own endpoint step over the Responses WebSocket, 10-24% faster per step. A step that continues the previous one on the same socket sends only the new input; after a failure or on a new socket the full input is sent
+- openai and chatgpt on OpenAI's own endpoint step over the Responses WebSocket, 10-24% faster per step. Only a step that continues the previous one on the same socket, with the same request fields, sends just the new input. Any other step sends the full input: the first on a socket, one after a failure, and one on a replaced socket
 
 ## v0.5.11
 
