@@ -181,7 +181,7 @@ func (e openaiChat) Compile(req Request) ([]byte, Cache, error) {
 		body.CacheOptions = kimiOptions
 		cache = Cache{TTL: kimiCacheTTL, Anchor: "end", Marks: []string{req.Context[len(req.Context)-1].ID}}
 	case e.mistral:
-		cache = Cache{TTL: mistralTTL(req.Model), Anchor: "end", Marks: []string{req.Context[len(req.Context)-1].ID}}
+		cache = Cache{TTL: mistralTTL(req.Model), Anchor: "end", Likely: true, Marks: []string{req.Context[len(req.Context)-1].ID}}
 	}
 	if len(system) > 0 {
 		m := chatMsg{Role: "system", Content: systemText(system)}
