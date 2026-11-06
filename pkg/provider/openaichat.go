@@ -22,7 +22,10 @@ var chatLimits = Limits{Side: 2576, Pixels: 3_700_000, Bytes: 3_750_000, Count: 
 // Thinking is reasoning_content, the field DeepSeek, Kimi, GLM and MiMo stream
 // and want back in a tool loop. OpenRouter and OpenCode Go stream it as
 // reasoning instead and read either field back, so it replays as
-// reasoning_content everywhere; a server without it sends none. OpenRouter
+// reasoning_content everywhere; a server without it sends none. Mistral's own
+// API streams thinking as a thinking chunk in content, refuses
+// reasoning_content (422), and asks for the chunk back, so there it replays as
+// one. OpenRouter
 // also streams reasoning_details, which hold the upstream's signed or
 // encrypted reasoning (Claude, GPT, Gemini). Where a step has them they are
 // its thinking record, a JSON array, replayed as reasoning_details.
@@ -30,17 +33,21 @@ func OpenAIChat(url, key string) Provider {
 	return Provider{
 		URL:      base(url, "https://api.openai.com/v1") + "/chat/completions",
 		Key:      key,
-		Envelope: openaiChat{moonshot: base(url, "") == moonshotURL},
+		Envelope: openaiChat{moonshot: base(url, "") == moonshotURL, mistral: base(url, "") == mistralURL},
 		Headers:  bearer,
 	}
 }
 
 // openaiChat is the Chat Completions envelope. moonshot is Moonshot's own
 // API, the one endpoint known to take Kimi K3's prompt_cache_options: other
-// vendors that serve kimi-k3 are untested with it.
-type openaiChat struct{ moonshot bool }
+// vendors that serve kimi-k3 are untested with it. mistral is Mistral's own
+// API, whose messages hold thinking as a chunk of content.
+type openaiChat struct{ moonshot, mistral bool }
 
-const moonshotURL = "https://api.moonshot.ai/v1"
+const (
+	moonshotURL = "https://api.moonshot.ai/v1"
+	mistralURL  = "https://api.mistral.ai/v1"
+)
 
 func (openaiChat) Name() string { return "openai-chat" }
 
@@ -64,10 +71,32 @@ func (openaiChat) Owns(field string) bool {
 //
 // Gemini through OpenRouter is left implicit: with marks, a growing session
 // read nothing on most steps.
+//
+// Mistral caches by itself and evicts by load, so its TTL is the measured
+// edge of likely reads, from the response end, per model. 16 rounds over
+// 2026-11-05/06, one fresh 7-10k prefix per wait, prompt_cache_key set:
+//   - mistral-small-2603: 14/16 read at 60 s, 3/16 at 180 s, none past 300 s.
+//   - mistral-medium-2604: 15-16/16 to 300 s, 14/16 at 600 s, 12/16 at
+//     1200 s; in US daytime reads stopped at 300-600 s, at night they lasted
+//     past 1 h.
+//   - mistral-large-4: 15/16 at 300 s, 5/16 at 600 s (night only), none
+//     past 900 s.
+//
+// Without prompt_cache_key a medium prefix read nothing in daytime.
 const (
 	qwenCacheTTL = 300
 	kimiCacheTTL = 3600 // kimiOptions' 1h
 )
+
+func mistralTTL(model string) int {
+	switch {
+	case strings.HasPrefix(model, "mistral-small"):
+		return 60
+	case strings.HasPrefix(model, "mistral-medium"):
+		return 600
+	}
+	return 300
+}
 
 var (
 	qwenMark    = &anthCache{Type: "ephemeral"}
@@ -103,7 +132,8 @@ type chatFunction struct {
 }
 
 // chatMsg content is a string for system, assistant, and tool messages and
-// []chatPart for user messages.
+// []chatPart for user messages and for Mistral's assistant messages with
+// thinking.
 type chatMsg struct {
 	Role       string            `json:"role"`
 	Content    any               `json:"content,omitempty"`
@@ -116,6 +146,7 @@ type chatMsg struct {
 type chatPart struct {
 	Type         string        `json:"type"`
 	Text         string        `json:"text,omitempty"`
+	Thinking     []chatPart    `json:"thinking,omitempty"` // Mistral: the text parts of a thinking chunk
 	ImageURL     *chatImageURL `json:"image_url,omitempty"`
 	CacheControl *anthCache    `json:"cache_control,omitempty"`
 }
@@ -149,6 +180,8 @@ func (e openaiChat) Compile(req Request) ([]byte, Cache, error) {
 	case e.moonshot && strings.HasPrefix(req.Model, "kimi-k3"):
 		body.CacheOptions = kimiOptions
 		cache = Cache{TTL: kimiCacheTTL, Anchor: "end", Marks: []string{req.Context[len(req.Context)-1].ID}}
+	case e.mistral:
+		cache = Cache{TTL: mistralTTL(req.Model), Anchor: "end", Likely: true, Marks: []string{req.Context[len(req.Context)-1].ID}}
 	}
 	if len(system) > 0 {
 		m := chatMsg{Role: "system", Content: systemText(system)}
@@ -272,6 +305,13 @@ func (e openaiChat) assistant(recs []statefile.Record) (chatMsg, error) {
 		m.Content = strings.Join(text, "")
 	}
 	m.Reasoning = strings.Join(reasoning, "")
+	if e.mistral && m.Reasoning != "" {
+		parts := []chatPart{{Type: "thinking", Thinking: []chatPart{{Type: "text", Text: m.Reasoning}}}}
+		if len(text) > 0 {
+			parts = append(parts, chatPart{Type: "text", Text: strings.Join(text, "")})
+		}
+		m.Content, m.Reasoning = parts, ""
+	}
 	return m, nil
 }
 
@@ -279,7 +319,7 @@ type chatChunk struct {
 	Provider string `json:"provider"` // OpenRouter: the upstream endpoint
 	Choices  []struct {
 		Delta struct {
-			Content   string                       `json:"content"`
+			Content   chatContent                  `json:"content"`
 			Reasoning string                       `json:"reasoning_content"`
 			Alias     string                       `json:"reasoning"`         // OpenRouter, OpenCode Go
 			Details   []map[string]json.RawMessage `json:"reasoning_details"` // OpenRouter
@@ -302,6 +342,36 @@ type chatChunk struct {
 	} `json:"error"`
 }
 
+// chatContent is a delta's content: a string, or Mistral's list of chunks,
+// text and thinking, a thinking chunk a list of text parts.
+type chatContent struct{ text, thinking string }
+
+func (c *chatContent) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || b[0] != '[' {
+		return json.Unmarshal(b, &c.text)
+	}
+	var parts []chatPart
+	if err := json.Unmarshal(b, &parts); err != nil {
+		return err
+	}
+	for _, p := range parts {
+		switch p.Type {
+		case "text":
+			c.text += p.Text
+		case "thinking":
+			for _, t := range p.Thinking {
+				if t.Type != "text" {
+					return fmt.Errorf("openai-chat: thinking chunk part type %q", t.Type)
+				}
+				c.thinking += t.Text
+			}
+		default:
+			return fmt.Errorf("openai-chat: content chunk type %q", p.Type)
+		}
+	}
+	return nil
+}
+
 type chatCallDelta struct {
 	Index    int          `json:"index"`
 	ID       string       `json:"id"`
@@ -311,7 +381,7 @@ type chatCallDelta struct {
 // Stream accumulates reasoning, text and tool call deltas by index and emits
 // them when the stream ends, in that order: Chat Completions marks no block
 // boundaries.
-func (openaiChat) Stream(resp io.Reader, cache *Cache, emit func(statefile.Record)) (statefile.Header, error) {
+func (e openaiChat) Stream(resp io.Reader, cache *Cache, emit func(statefile.Record)) (statefile.Header, error) {
 	var reasoning, text strings.Builder
 	var details []*detail
 	var calls []*chatToolCall
@@ -354,7 +424,8 @@ func (openaiChat) Stream(resp io.Reader, cache *Cache, emit func(statefile.Recor
 		if details, err = addDetails(details, d.Details); err != nil {
 			return err
 		}
-		text.WriteString(d.Content)
+		reasoning.WriteString(d.Content.thinking)
+		text.WriteString(d.Content.text)
 		if calls, err = addCalls(calls, d.ToolCalls); err != nil {
 			return fmt.Errorf("%w: %.200s", err, data)
 		}
@@ -366,7 +437,7 @@ func (openaiChat) Stream(resp io.Reader, cache *Cache, emit func(statefile.Recor
 	if err != nil {
 		return statefile.Header{}, err
 	}
-	if cache.Marks != nil {
+	if cache.Marks != nil && !e.mistral { // Mistral counts no writes
 		cache.settle(usage, stop)
 	}
 	if r, ok, err := chatThinking(details, reasoning.String()); err != nil {

@@ -786,7 +786,7 @@ var providerSections = []struct {
 	ids  []string
 }{
 	{"Subscriptions", []string{"claude-code", "chatgpt", "opencode-go"}},
-	{"Frontier labs", []string{"anthropic", "openai", "google", "meta", "xai", "deepseek", "moonshot", "zai", "minimax", "xiaomi"}},
+	{"Frontier labs", []string{"anthropic", "openai", "google", "meta", "xai", "deepseek", "moonshot", "zai", "minimax", "xiaomi", "mistral"}},
 	{"Clouds", []string{"bedrock"}},
 	{"Gateways", []string{"openrouter"}},
 }
