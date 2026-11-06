@@ -71,10 +71,32 @@ func (openaiChat) Owns(field string) bool {
 //
 // Gemini through OpenRouter is left implicit: with marks, a growing session
 // read nothing on most steps.
+//
+// Mistral caches by itself and evicts by load, so its TTL is the measured
+// edge of likely reads, from the response end, per model. 16 rounds over
+// 2026-11-05/06, one fresh 7-10k prefix per wait, prompt_cache_key set:
+//   - mistral-small-2603: 14/16 read at 60 s, 3/16 at 180 s, none past 300 s.
+//   - mistral-medium-2604: 15-16/16 to 300 s, 14/16 at 600 s, 12/16 at
+//     1200 s; in US daytime reads stopped at 300-600 s, at night they lasted
+//     past 1 h.
+//   - mistral-large-4: 15/16 at 300 s, 5/16 at 600 s (night only), none
+//     past 900 s.
+//
+// Without prompt_cache_key a medium prefix read nothing in daytime.
 const (
 	qwenCacheTTL = 300
 	kimiCacheTTL = 3600 // kimiOptions' 1h
 )
+
+func mistralTTL(model string) int {
+	switch {
+	case strings.HasPrefix(model, "mistral-small"):
+		return 60
+	case strings.HasPrefix(model, "mistral-medium"):
+		return 600
+	}
+	return 300
+}
 
 var (
 	qwenMark    = &anthCache{Type: "ephemeral"}
@@ -158,6 +180,8 @@ func (e openaiChat) Compile(req Request) ([]byte, Cache, error) {
 	case e.moonshot && strings.HasPrefix(req.Model, "kimi-k3"):
 		body.CacheOptions = kimiOptions
 		cache = Cache{TTL: kimiCacheTTL, Anchor: "end", Marks: []string{req.Context[len(req.Context)-1].ID}}
+	case e.mistral:
+		cache = Cache{TTL: mistralTTL(req.Model), Anchor: "end", Marks: []string{req.Context[len(req.Context)-1].ID}}
 	}
 	if len(system) > 0 {
 		m := chatMsg{Role: "system", Content: systemText(system)}
@@ -357,7 +381,7 @@ type chatCallDelta struct {
 // Stream accumulates reasoning, text and tool call deltas by index and emits
 // them when the stream ends, in that order: Chat Completions marks no block
 // boundaries.
-func (openaiChat) Stream(resp io.Reader, cache *Cache, emit func(statefile.Record)) (statefile.Header, error) {
+func (e openaiChat) Stream(resp io.Reader, cache *Cache, emit func(statefile.Record)) (statefile.Header, error) {
 	var reasoning, text strings.Builder
 	var details []*detail
 	var calls []*chatToolCall
@@ -413,7 +437,7 @@ func (openaiChat) Stream(resp io.Reader, cache *Cache, emit func(statefile.Recor
 	if err != nil {
 		return statefile.Header{}, err
 	}
-	if cache.Marks != nil {
+	if cache.Marks != nil && !e.mistral { // Mistral counts no writes
 		cache.settle(usage, stop)
 	}
 	if r, ok, err := chatThinking(details, reasoning.String()); err != nil {
