@@ -217,13 +217,13 @@ func (s *session) askHome(a *App) {
 }
 
 // The widths of the status line from which it shows the commands key, and
-// the words after the cache dot.
+// the words after the cache mark.
 const (
 	hintFrom  = 60
 	cacheFrom = 90
 )
 
-// metaLine is the right of the status line, w wide: the cache dot, the
+// metaLine is the right of the status line, w wide: the cache mark, the
 // context used of its limit, the cost once the catalog is loaded, and the
 // commands key.
 func (s *session) metaLine(a *App, w int) []Glyph {
@@ -235,16 +235,16 @@ func (s *session) metaLine(a *App, w int) []Glyph {
 		if l := s.info.Config.ContextLimit; l > 0 {
 			c += "/" + tokens(l)
 		}
-		dot := cacheDot(a, s.info.Cache, time.Now())
+		mark := cacheMark(a, s.info.Cache, time.Now())
 		switch {
-		case dot == nil:
+		case mark == nil:
 			parts = append(parts, run(c, muted))
 		case w > cacheFrom && s.info.Cache.Likely:
-			parts = append(parts, cat(dot, run(" cache likely", muted)), run(c, muted))
+			parts = append(parts, cat(mark, run(" cache likely", muted)), run(c, muted))
 		case w > cacheFrom:
-			parts = append(parts, cat(dot, run(" cache active", muted)), run(c, muted))
+			parts = append(parts, cat(mark, run(" cache active", muted)), run(c, muted))
 		default:
-			parts = append(parts, cat(dot, run(" "+c, muted)))
+			parts = append(parts, cat(mark, run(" "+c, muted)))
 		}
 		if c, ok := s.cost(); ok {
 			parts = append(parts, run(fmt.Sprintf("$%.2f", c), muted))
