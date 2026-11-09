@@ -55,7 +55,8 @@ type source struct {
 type sourcePreset struct {
 	Provider string         `json:"provider"`
 	Model    string         `json:"model"`
-	Effort   string         `json:"effort"` // the one the provider uses when none is sent
+	Effort   string         `json:"effort"`    // the one the provider uses when none is sent
+	EffortAs map[string]any `json:"effort_as"` // the params an effort is for this preset, where not its provider's: a provider that serves several labs' models
 	Tools    string         `json:"tools"`
 	Variant  string         `json:"variant"`      // the id suffix and name suffix: provider/model:variant, "<name> <Variant>"
 	Params   map[string]any `json:"params"`       // this preset's own, merged over the provider's and the effort's
@@ -182,8 +183,12 @@ func preset(src source, dev map[string]devProvider, s sourcePreset) (catalog.Pre
 			return catalog.Preset{}, fmt.Errorf("%s/%s: effort %q is not one of %v", s.Provider, s.Model, s.Effort, levels)
 		}
 		set := catalog.Setting{Name: "effort"}
+		as := src.Effort[s.Provider]
+		if s.EffortAs != nil {
+			as = s.EffortAs
+		}
 		for _, l := range levels {
-			v, err := effort(src.Effort[s.Provider], l)
+			v, err := effort(as, l)
 			if err != nil {
 				return catalog.Preset{}, err
 			}

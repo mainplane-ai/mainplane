@@ -91,6 +91,7 @@
     {"provider": "bedrock", "model": "global.anthropic.claude-opus-5-5", "effort": "medium"},
     {"provider": "bedrock", "model": "global.anthropic.claude-sonnet-5-5", "effort": "high", "default": true},
     {"provider": "bedrock", "model": "global.anthropic.claude-haiku-5-5", "effort": "medium"},
+    {"provider": "bedrock", "model": "global.moonshotai.kimi-k3.1", "effort": "max", "effort_as": {"additionalModelRequestFields": {"reasoning_effort": "$"}}},
     {"provider": "openrouter", "model": "anthropic/claude-fable-5.2", "effort": "high"},
     {"provider": "openrouter", "model": "anthropic/claude-opus-5.5", "effort": "high"},
     {"provider": "openrouter", "model": "anthropic/claude-sonnet-5.5", "effort": "high", "default": true},
