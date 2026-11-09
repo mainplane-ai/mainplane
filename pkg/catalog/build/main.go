@@ -183,10 +183,7 @@ func preset(src source, dev map[string]devProvider, s sourcePreset) (catalog.Pre
 			return catalog.Preset{}, fmt.Errorf("%s/%s: effort %q is not one of %v", s.Provider, s.Model, s.Effort, levels)
 		}
 		set := catalog.Setting{Name: "effort"}
-		as := src.Effort[s.Provider]
-		if s.EffortAs != nil {
-			as = s.EffortAs
-		}
+		as := effortAs(src, s)
 		for _, l := range levels {
 			v, err := effort(as, l)
 			if err != nil {
@@ -201,6 +198,15 @@ func preset(src source, dev map[string]devProvider, s sourcePreset) (catalog.Pre
 	}
 	pr.Params = raw(merge(params, s.Params))
 	return pr, nil
+}
+
+// effortAs is the params an effort is for preset s: its own, else its
+// provider's.
+func effortAs(src source, s sourcePreset) map[string]any {
+	if s.EffortAs != nil {
+		return s.EffortAs
+	}
+	return src.Effort[s.Provider]
 }
 
 // effort is the shape's effort params with "$" made the level.
