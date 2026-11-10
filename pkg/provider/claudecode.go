@@ -81,6 +81,13 @@ const (
 // it: no update, telemetry or memory, no CLAUDE.md, no compaction (an extra
 // request; the harness owns the context limit), no token budget reminder. A
 // description past claude's default cut would change our tools.
+//
+// Without compaction claude refuses, with no request, a prompt within 23k
+// tokens of the window it believes the model has, and for a model newer than
+// itself it believes in 200k. So it is told 1M, the largest window of any
+// Claude model, which it takes for every model when compaction is off: the
+// session's context limit ends a session first, and the API refuses what a
+// model cannot take.
 var claudeEnv = []string{
 	"DISABLE_AUTOUPDATER=1",
 	"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
@@ -88,6 +95,7 @@ var claudeEnv = []string{
 	"CLAUDE_CODE_DISABLE_AUTO_MEMORY=1",
 	"DISABLE_AUTO_COMPACT=1",
 	"DISABLE_COMPACT=1",
+	"CLAUDE_CODE_MAX_CONTEXT_TOKENS=1000000",
 	"CLAUDE_CODE_TOTAL_TOKENS_REMINDER=off",
 	"CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH=100000",
 }
@@ -400,8 +408,11 @@ func runClaude(ctx context.Context, dir string, body []byte, cache *Cache, emit 
 	if err == nil && werr != nil && (!end.maxTurns || !errors.As(werr, &exit) || exit.ExitCode() != 1) {
 		err = werr
 	}
+	if err != nil && stderr.b.Len() > 0 {
+		err = fmt.Errorf("%w\nclaude stderr: %s", err, stderr.b.Bytes())
+	}
 	if err != nil {
-		return statefile.Header{}, fmt.Errorf("%w; claude stderr: %s", err, stderr.b.Bytes())
+		return statefile.Header{}, err
 	}
 	return h, keepTurn(dir, req, recs, end, resumed)
 }
@@ -488,7 +499,7 @@ func claudeStream(resp io.Reader, cache *Cache, emit func(statefile.Record)) (st
 			// and claude exits 1.
 			end.maxTurns = e.Subtype == "error_max_turns" && e.Stop == "tool_use"
 			if e.IsError && !end.maxTurns {
-				return statefile.Header{}, ccTurn{}, fmt.Errorf("claude-code: %s: %s", e.Subtype, e.Result)
+				return statefile.Header{}, ccTurn{}, claudeError(e)
 			}
 			var usage statefile.Usage
 			if err := anthApply(e.Usage, &usage); err != nil {
@@ -499,6 +510,21 @@ func claudeStream(resp io.Reader, cache *Cache, emit func(statefile.Record)) (st
 			return statefile.Header{Usage: &usage, Stop: e.Stop}, end, nil
 		}
 	}
+}
+
+// claudeError is the error of a result that is one. An error claude words as
+// the API's has the subtype success and the error as the result's text. Its
+// refusal of a prompt past the window is one, and no retry mends it: the
+// context only grows.
+func claudeError(e ccEvent) error {
+	s := "claude-code: " + e.Result
+	if e.Subtype != "success" {
+		s = fmt.Sprintf("claude-code: %s: %s", e.Subtype, e.Result)
+	}
+	if e.Result == "Prompt is too long" {
+		s += "\nThe context is past what Claude takes for this model, so this session cannot go on. Use /continue to carry it into a new one."
+	}
+	return errors.New(s)
 }
 
 // claudeMessage emits the blocks of an assistant event's message and adds
