@@ -142,6 +142,9 @@ func cli(verb string, args []string) {
 // the same key. A provider the harness has keeps its shape, url and session;
 // a new one gets the catalog's.
 func (c client) key(name, key string) {
+	if strings.TrimSpace(key) == "" { // sent with the catalog's url, it would make a provider with no key
+		die(errors.New("a key is one line"))
+	}
 	var have []harness.ProviderInfo
 	c.call("GET", "/providers", "", nil, &have)
 	cat, err := catalog.Fetch(context.Background())
