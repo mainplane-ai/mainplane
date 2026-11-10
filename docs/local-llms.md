@@ -6,19 +6,28 @@
 
 A model you run yourself is a provider like any other. Any server that speaks
 OpenAI Chat Completions works: Ollama, LM Studio, the llama.cpp server, vLLM.
-The harness needs its base url and nothing else. The steps below use Ollama;
-only step 1 differs for another server.
+The harness needs its base url and nothing else. The steps below use Ollama.
+Another server needs the same two things in step 1: an address the harness
+machine reaches, and a context window.
 
 ## Setup
 
-1. Serve the model where the harness can reach it. On the harness's own
-   machine, the default `http://localhost:11434/v1` is enough. On another
-   machine, make that machine a worker: the harness then reaches it by its
-   worker name over the mesh, and no port opens to the internet. The mesh is
-   IPv6, so the server must listen on every address, not on loopback alone:
+1. Serve the model where the harness machine can reach it. On the harness's
+   own machine, the default `http://localhost:11434/v1` is enough. On another
+   machine, make that machine a worker and link it to the harness machine's
+   worker in the config ([the mesh](self-hosting.md#the-mesh)):
+   `"links": [["admin", "gpu-box"]]`. The harness machine then reaches it by
+   its worker name over the mesh, and no port opens to the internet. The mesh
+   is IPv6, so the server must listen on every address, not on loopback alone.
+   Set both in the environment of the Ollama server (its FAQ says how for the
+   app and for the service), restart it, and pull a model:
 
    ```
-   OLLAMA_HOST=0.0.0.0 OLLAMA_CONTEXT_LENGTH=32768 ollama serve
+   OLLAMA_HOST=0.0.0.0
+   OLLAMA_CONTEXT_LENGTH=32768
+   ```
+
+   ```
    ollama pull <model>
    ```
 
@@ -56,13 +65,16 @@ before the first message, and each root AGENTS.md adds to that.
   workable floor.
 - Set the session's `context_limit` under the server's window. The harness
   then ends the session in order before the server's window is full.
-- Past its window, Ollama's Chat Completions endpoint drops the start of the
-  prompt and answers as if nothing happened. The model loses the system prompt
-  and the tools, and calls tools that do not exist. The harness fails the step
-  when it sees a prompt shrink between two steps of one turn. It cannot see a
-  first prompt that is already too large.
-- A stop of `length` after a few output tokens means the window is full, not
-  the output limit.
+- Past its window, Ollama's Chat Completions endpoint cuts the prompt and
+  answers as if nothing happened. A first prompt that is too large loses its
+  start, the system prompt and the tools with it, and the model calls tools
+  that do not exist. Later, the oldest messages go, the task first.
+- The harness fails a step whose prompt is smaller than the prompt of the step
+  before it in the same turn, and does not run that step's calls. It cannot
+  see a first prompt that is already too large, nor a cut that leaves the
+  prompt larger than the one before.
+- A stop of `length` after a few output tokens can also mean the window is
+  full, not the output limit.
 
 ## The model
 
