@@ -408,6 +408,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 			last, floor = r.Header, statefile.Header{}
 		case statefile.Result:
 			floor = last
+		case statefile.Start, statefile.Config, statefile.System, statefile.Message, statefile.Text, statefile.Thinking, statefile.Call, statefile.Error, statefile.Name:
 		}
 	}
 	stepID := statefile.NewID()

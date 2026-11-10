@@ -19,8 +19,9 @@ machine reaches, and a context window.
    `"links": [["admin", "gpu-box"]]`. The harness machine then reaches it by
    its worker name over the mesh, and no port opens to the internet. The mesh
    is IPv6, so the server must listen on every address, not on loopback alone.
-   Set both in the environment of the Ollama server (its FAQ says how for the
-   app and for the service), restart it, and pull a model:
+   With `0.0.0.0`, Ollama listens on IPv4 and IPv6. Set both in the
+   environment of the Ollama server (its FAQ says how for the app and for the
+   service), restart it, and pull a model:
 
    ```
    OLLAMA_HOST=0.0.0.0
@@ -70,9 +71,10 @@ before the first message, and each root AGENTS.md adds to that.
   start, the system prompt and the tools with it, and the model calls tools
   that do not exist. Later, the oldest messages go, the task first.
 - The harness fails a step whose prompt is smaller than the prompt of the step
-  before it in the same turn, and does not run that step's calls. It cannot
-  see a first prompt that is already too large, nor a cut that leaves the
-  prompt larger than the one before.
+  before it in the same turn, and does not run that step's calls. It compares
+  the token counts the server reports for one model, so a server that reports
+  no usage is not checked. It cannot see a first prompt that is already too
+  large, nor a cut that leaves the prompt larger than the one before.
 - A stop of `length` after a few output tokens can also mean the window is
   full, not the output limit.
 

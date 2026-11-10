@@ -401,9 +401,10 @@ func loadConfig(path string) (Config, error) {
 // setProvider makes the body, a Provider, the provider name in the config at
 // path: the fields it sets replace the ones there, so a key alone renews the
 // key of a provider the config has. A provider with a url of its own, such as
-// a local server, may have no key. It serves the providers it makes at
-// once: the README runs mainplane new right after mainplane key, sooner than
-// the watch rereads.
+// a local server, may have no key, and a key goes only to the url it came
+// with: a body with a url and no key leaves the provider none. It serves the
+// providers it makes at once: the README runs mainplane new right after
+// mainplane key, sooner than the watch rereads.
 func setProvider(path, name string, body io.Reader, serve func(map[string]provider.Provider)) error {
 	b, err := io.ReadAll(io.LimitReader(body, maxKey+1))
 	if err != nil {
@@ -414,14 +415,14 @@ func setProvider(path, name string, body io.Reader, serve func(map[string]provid
 		return fmt.Errorf("the body is a provider of at most %d bytes: {\"shape\",\"key\",\"url\",\"region\",\"session\"}", maxKey)
 	}
 	in.Key = strings.TrimSpace(in.Key)
-	if in.Key == "" && in.URL == "" || strings.ContainsAny(in.Key, "\r\n") {
+	if in.Key == "" && os.ExpandEnv(in.URL) == "" || strings.ContainsAny(in.Key, "\r\n") {
 		return errors.New("a key is one line; only a provider with a url takes none")
 	}
 	return saveProvider(path, name, in, serve)
 }
 
 // saveProvider writes in over the provider name in the config at path, each
-// field in sets, and serves the providers. The lock holds the write and serve
+// field in sets, and the key with a url, and serves the providers. The lock holds the write and serve
 // in one order.
 func saveProvider(path, name string, in Provider, serve func(map[string]provider.Provider)) error {
 	keyMu.Lock()
@@ -434,6 +435,9 @@ func saveProvider(path, name string, in Provider, serve func(map[string]provider
 		c.Providers = map[string]Provider{}
 	}
 	p := c.Providers[name]
+	if in.URL != "" {
+		p.Key = "" // the key there was for the url there
+	}
 	for _, f := range [][2]*string{{&p.Shape, &in.Shape}, {&p.Key, &in.Key}, {&p.URL, &in.URL}, {&p.Region, &in.Region}, {&p.Session, &in.Session}} {
 		if *f[1] != "" {
 			*f[0] = *f[1]

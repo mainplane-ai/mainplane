@@ -42,7 +42,9 @@ func Anthropic(url, key string) Provider {
 		Key:      key,
 		Envelope: anthropic{},
 		Headers: func(r *http.Request, key string) {
-			r.Header.Set("x-api-key", key)
+			if key != "" {
+				r.Header.Set("x-api-key", key)
+			}
 			r.Header.Set("anthropic-version", "2023-06-01")
 		},
 	}
