@@ -2,6 +2,14 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.5.13
+
+- Claude subscription (`claude-code`): a Claude Fable 5.2 session no longer fails for good at about 177k tokens with "Prompt is too long". Claude Code took 200k as the window of a model newer than itself and refused the prompt with no request. It is now told 1M, so the session's context limit ends a session first. The error now says that the context is past the model's window and to use /continue, without the result subtype `success`
+- Providers: Mistral AI on its own API (`mistral`), with Mistral Large 4, Medium 3.5 and Small 4. A ChatGPT plan that does not include a model now says to try another one with /model
+- Catalog: Claude Fable 5.2 replaces Fable 5.1 on the Claude API, the Claude subscription, Bedrock and OpenRouter. Adds Muse Ember on OpenRouter, MiniMax M3.1 Flash on OpenRouter and OpenCode Go, and Kimi K3.1 on Bedrock
+- Drives: the drive server gives Windows no SMB oplocks. Windows now sees changes made from other workers, and macOS writes no longer stall 28-68 s while Windows polls a file. Windows no longer caches drive files, so small reads are slower
+- Terminal app: the cache mark is a diamond in the muted color, filled where the cache is certain and hollow where it is only likely. In the sidebar it sits after the context, at the row's right edge
+
 ## v0.5.12
 
 - Prompt caching is owned by the harness, set per vendor from measurements: cache fields in session params are refused. Claude (anthropic, bedrock, OpenRouter) caches for 1 hour: replayed over a month of real sessions, it cost less than the 5-minute TTL. A third cache mark keeps the conversation cached after a step with many parallel tool calls. OpenRouter Claude, Qwen and Kimi K3 on Moonshot now cache. Meta steps no longer fail with "invalid character 'D'"
