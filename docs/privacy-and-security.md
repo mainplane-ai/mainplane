@@ -93,9 +93,8 @@ it sees, and how to keep it local.
 - **Why it exists:** the model is the agent.
 - **What it sees:** the whole context of each session: messages, tool calls,
   command output, and the files and images the agent reads.
-- **How to keep it local:** run a local model behind an OpenAI-compatible URL,
-  as a provider with shape `openai-chat` and its `url`
-  ([the config](self-hosting.md#the-config)).
+- **How to keep it local:** run the model yourself
+  ([Local LLMs](local-llms.md)).
 
 ### Cloudflare quick tunnel
 

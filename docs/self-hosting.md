@@ -109,6 +109,9 @@ and `opencode-go-google`; `mainplane key opencode-go <key>` sets all four. Insta
 takes keys from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`,
 `AWS_BEARER_TOKEN_BEDROCK` with `AWS_REGION`, and `OPENROUTER_API_KEY`.
 
+A model server of your own, such as Ollama or vLLM, is a provider too, and
+takes no key: see [Local LLMs](local-llms.md).
+
 The `chatgpt` shape takes no key: it uses the plan of a ChatGPT account, through
 OpenAI's [Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source)
 for open-source apps. OpenAI allows this for a harness you host for yourself.
@@ -284,8 +287,7 @@ these, which you would set up yourself:
 - Releases: install, update and the model list come from `dl.mainplane.ai`,
   and Bun (the js interpreter) from GitHub. Mirror them and
   install by hand.
-- Models: a local model behind an OpenAI-compatible URL, as a provider with
-  shape `openai-chat` and its `url`.
+- Models: a model you run yourself, see [Local LLMs](local-llms.md).
 - Direct paths: STUN uses Cloudflare's and Google's servers. Devices on one
   LAN still find each other, and the relay in the harness carries the rest.
 

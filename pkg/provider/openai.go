@@ -49,7 +49,12 @@ const grok47TTL = 600
 // over a WebSocket. Other vendors take the openai shape with their own url.
 const openaiURL = "https://api.openai.com/v1"
 
-func bearer(r *http.Request, key string) { r.Header.Set("Authorization", "Bearer "+key) }
+// bearer sends no header for no key: a local server takes none.
+func bearer(r *http.Request, key string) {
+	if key != "" {
+		r.Header.Set("Authorization", "Bearer "+key)
+	}
+}
 
 // openai is the Responses envelope. ttl, anchor and likely are its vendor's
 // cache, as Cache has them. options sends prompt_cache_options, which only
