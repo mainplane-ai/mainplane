@@ -195,7 +195,14 @@ type httpError struct {
 	after        time.Duration
 }
 
-func (e *httpError) Error() string { return fmt.Sprintf("%s: %s: %s", e.name, e.status, e.body) }
+func (e *httpError) Error() string {
+	s := fmt.Sprintf("%s: %s: %s", e.name, e.status, e.body)
+	// ChatGPT plans differ in their models, and nothing says which a plan has.
+	if bytes.Contains(e.body, []byte("not supported when using Codex with a ChatGPT account")) {
+		s += "\nThis ChatGPT plan may not include this model. Try another one with /model."
+	}
+	return s
+}
 
 // configError is a failure no retry mends, such as a provider not signed in.
 type configError struct{ error }
