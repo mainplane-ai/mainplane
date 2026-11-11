@@ -31,6 +31,7 @@ type session struct {
 	retry   bool            // a run asked to step past a failed tip
 	stopped string          // who asked for the stop, while one is in flight
 	logs    sync.Mutex      // held by copyLogs from Load to the last Write, so an older copy never lands last
+	copied  int             // under logs: the n of the tip every worker's copy ends at
 	exports atomic.Int64    // copyLogs calls asked for; a waiting one leaves to a newer one
 	conn    provider.Conn   // the provider's socket, kept from step to step within a run
 

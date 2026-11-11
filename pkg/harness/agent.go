@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -313,7 +314,8 @@ func (h *Harness) ListAgents(keep func(Agent) bool) []AgentInfo {
 		}
 		infos = append(infos, i)
 	}
-	slices.SortFunc(infos, func(a, b AgentInfo) int { return b.Updated.Compare(a.Updated) })
+	// Two updated in one millisecond keep one order, so a page after an id is the same page each time.
+	slices.SortFunc(infos, func(a, b AgentInfo) int { return cmp.Or(b.Updated.Compare(a.Updated), cmp.Compare(a.ID, b.ID)) })
 	return infos
 }
 

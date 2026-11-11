@@ -546,6 +546,7 @@ func TestAgentRoutes(t *testing.T) {
 		t.Fatalf("create: %+v %v", made, err)
 	}
 	do(400, "POST", "/agents?via=web", `{"name":"no config"}`)
+	time.Sleep(2 * time.Millisecond) // a record's time is to the millisecond, and the list is newest first
 	sub := r.create(AgentCreate{Config: r.conf(1000, 0)}, "agent:"+made.ID)
 
 	var info AgentInfo

@@ -149,6 +149,9 @@ func (h *Harness) List() ([]Info, error) {
 // <scratch>/logs/<id>.log, the bodies the envelope takes as media dropped so
 // rg works on it. A
 // worker not connected is skipped; the session's next stop writes again.
+// A copy the workers already have whole is not written again: a write
+// empties the file first, under whoever reads it, and after a handoff that
+// is the next session's first run.
 func (h *Harness) copyLogs(ctx context.Context, s *session) {
 	id, n := s.id, s.exports.Add(1)
 	s.logs.Lock()
@@ -159,6 +162,10 @@ func (h *Harness) copyLogs(ctx context.Context, s *session) {
 	chain, err := h.Sessions.Load(id)
 	if err != nil {
 		log.Printf("session %s: log copy: %v", id, err)
+		return
+	}
+	tip := chain[len(chain)-1].N
+	if tip == s.copied {
 		return
 	}
 	conf, err := config(chain)
@@ -183,13 +190,19 @@ func (h *Harness) copyLogs(ctx context.Context, s *session) {
 		}
 		b = append(b, enc...)
 	}
+	whole := true
 	for _, w := range conf.Workers {
 		r, ok := h.Workers.Get(w.Name)
 		if !ok {
+			whole = false
 			continue
 		}
 		if err := r.Write(ctx, r.Scratch+"/logs/"+id+".log", b); err != nil {
+			whole = false
 			log.Printf("session %s: log copy to %s: %v", id, w.Name, err)
 		}
+	}
+	if whole {
+		s.copied = tip
 	}
 }
