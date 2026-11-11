@@ -873,13 +873,13 @@ func TestConcurrentPostDuringMidRunRollover(t *testing.T) {
 	// Fire 4 concurrent PostAgent calls right in the window after S1 is retired
 	// and while copyLogsForce writes <S1>.log before finishMidRunRollover runs.
 	var burstWG sync.WaitGroup
+	burstWG.Add(4)
 	var postSessions [4]string
 	var postErrs [4]error
 	var triggered atomic.Bool
 	fw.onWrite = func(path string) {
 		if strings.HasSuffix(path, s1+".log") && triggered.CompareAndSwap(false, true) {
 			for i := range 4 {
-				burstWG.Add(1)
 				go func(idx int) {
 					defer burstWG.Done()
 					postSessions[idx], _, postErrs[idx] = rig.cli.PostAgent(ctx, aid, "web", fmt.Sprintf("burst-%d", idx), nil)

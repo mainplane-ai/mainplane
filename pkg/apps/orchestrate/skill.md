@@ -1,5 +1,5 @@
 Spawn, inspect, update, watch, stop, and delete subagents within your worker and app permissions.
-All routes (`list`, `get`, `records`, `spawn`, `update`, `watch`, `stop`, `delete`) are scoped to agents and agent sessions whose `workers` and `apps` are subsets of yours (`403` otherwise).
+All routes are scoped to agents and agent sessions whose `workers` and `apps` are subsets of yours; targeted routes return `403` otherwise, while `list` omits agents outside your permissions.
 
 Routes (via `mainplane app orchestrate <METHOD> <path> [body]` or `$MAINPLANE_URL/apps/orchestrate`):
 

@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -551,8 +552,12 @@ func verifyForeignPortRejected(t *testing.T, exe string) {
 	defer func() { _ = ln.Close() }()
 	foreignPort := ln.Addr().(*net.TCPAddr).Port
 
-	// Spawn an idle helper subprocess in its own procGroup that does NOT own foreignPort.
-	cmd := exec.Command(exe, "-test.run=^TestNonExistentHelper$")
+	otherPort, err := freePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "-test.run=^TestHelperDaemonProcess$", "--", "daemon-mode")
+	cmd.Env = append(os.Environ(), "PORT="+strconv.Itoa(otherPort), "MAINPLANE_PROXY_SECRET=probe")
 	pg, err := startProcGroup(cmd)
 	if err != nil {
 		t.Fatal(err)
@@ -568,6 +573,11 @@ func verifyForeignPortRejected(t *testing.T, exe string) {
 		<-waitDone
 	}()
 
+	ownCtx, ownCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer ownCancel()
+	if err := waitOwnedPort(ownCtx, otherPort, pg, waitDone, &waitErr); err != nil {
+		t.Fatalf("waitOwnedPort failed on daemon's own port %d: %v", otherPort, err)
+	}
 	if pg.ownsTCPPort(foreignPort) {
 		t.Fatalf("procGroup claimed ownership of foreign port %d held by test runner", foreignPort)
 	}

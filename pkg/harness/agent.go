@@ -318,6 +318,7 @@ func (h *Harness) CreateAgent(ctx context.Context, c AgentCreate, via string) (s
 	}
 	sid := statefile.NewID()
 	if err := h.createAgentSession(ctx, sid, aid, c.Name, cfg, appList, "", nil); err != nil {
+		h.cleanupFailedNextSession(sid)
 		return "", "", err
 	}
 	af := agentFile{
@@ -330,6 +331,7 @@ func (h *Harness) CreateAgent(ctx context.Context, c AgentCreate, via string) (s
 		Sessions: []string{sid},
 	}
 	if err := h.saveAgentFile(af); err != nil {
+		h.cleanupFailedNextSession(sid)
 		return "", "", err
 	}
 	h.amu.Lock()
@@ -781,6 +783,7 @@ func (h *Harness) maybeIdleRolloverLocked(ctx context.Context, e *agentEntry, cu
 	h.copyLogsForce(ctx, s)
 	nextID := statefile.NewID()
 	if err := h.createAgentSession(ctx, nextID, e.a.ID, e.a.Name, e.a.Config, e.a.Apps, cur, e.a.Sessions); err != nil {
+		h.cleanupFailedNextSession(nextID)
 		return "", err
 	}
 	if err := h.note(s, cur, system("continue", nextID)); err != nil {
@@ -917,6 +920,7 @@ func (h *Harness) finishMidRunRollover(ctx context.Context, cur, nextID string, 
 	}
 	if err := h.createAgentSession(ctx, nextID, e.a.ID, e.a.Name, e.a.Config, e.a.Apps, cur, e.a.Sessions); err != nil {
 		log.Printf("agent %s: rollover create session: %v", e.a.ID, err)
+		h.cleanupFailedNextSession(nextID)
 		e.mu.Unlock()
 		h.abortMidRunRollover(ctx, cur, s)
 		return

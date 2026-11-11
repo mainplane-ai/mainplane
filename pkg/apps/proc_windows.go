@@ -58,6 +58,7 @@ func startProcGroup(cmd *exec.Cmd) (*procGroup, error) {
 	hProc, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, pid)
 	if err != nil {
 		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 		_ = windows.CloseHandle(job)
 		return nil, err
 	}
@@ -65,6 +66,7 @@ func startProcGroup(cmd *exec.Cmd) (*procGroup, error) {
 	_ = windows.CloseHandle(hProc)
 	if assignErr != nil {
 		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 		_ = windows.CloseHandle(job)
 		return nil, assignErr
 	}

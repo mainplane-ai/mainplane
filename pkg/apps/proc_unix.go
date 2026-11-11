@@ -15,7 +15,8 @@ import (
 )
 
 type procGroup struct {
-	pgid int
+	pgid    int
+	process *os.Process
 }
 
 func startProcGroup(cmd *exec.Cmd) (*procGroup, error) {
@@ -23,12 +24,15 @@ func startProcGroup(cmd *exec.Cmd) (*procGroup, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return &procGroup{pgid: cmd.Process.Pid}, nil
+	return &procGroup{pgid: cmd.Process.Pid, process: cmd.Process}, nil
 }
 
 func (pg *procGroup) kill() {
 	if pg != nil && pg.pgid > 0 {
 		_ = syscall.Kill(-pg.pgid, syscall.SIGKILL)
+		if pg.process != nil {
+			_ = pg.process.Kill()
+		}
 	}
 }
 
@@ -97,6 +101,7 @@ func linuxListenInodes(port int) (allInodes, loopInodes map[string]bool) {
 			if i == 0 {
 				continue
 			}
+			// /proc/net/tcp fields: 0:sl 1:local 2:rem 3:st 4:tx:rx 5:tr:tm 6:retrnsmt 7:uid 8:timeout 9:inode
 			f := strings.Fields(line)
 			if len(f) < 10 || f[3] != "0A" || f[9] == "0" {
 				continue

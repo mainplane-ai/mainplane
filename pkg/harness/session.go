@@ -384,12 +384,10 @@ func (h *Harness) retireForRollover(s *session, nextID, reason string) error {
 	if _, err := h.write(s, s.f, system("continue", nextID)); err != nil {
 		return err
 	}
-	if _, err := h.write(s, s.f, errorRecord("", reason)); err != nil {
-		return err
-	}
 	s.rollover = nextID
 	s.retired = true
-	return nil
+	_, err := h.write(s, s.f, errorRecord("", reason))
+	return err
 }
 
 // Stop ends everything the session is doing. A running step is cut now: the

@@ -133,9 +133,18 @@ func (a *App) saveLocked() error {
 func (a *App) addWatch(target, watcher string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if !slices.Contains(a.watches[target], watcher) {
-		a.watches[target] = append(a.watches[target], watcher)
-		return a.saveLocked()
+	if slices.Contains(a.watches[target], watcher) {
+		return nil
+	}
+	prev := slices.Clone(a.watches[target])
+	a.watches[target] = append(slices.Clone(prev), watcher)
+	if err := a.saveLocked(); err != nil {
+		if len(prev) == 0 {
+			delete(a.watches, target)
+		} else {
+			a.watches[target] = prev
+		}
+		return err
 	}
 	return nil
 }
@@ -143,9 +152,9 @@ func (a *App) addWatch(target, watcher string) error {
 func (a *App) removeWatch(target, watcher string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	before := len(a.watches[target])
-	list := slices.DeleteFunc(a.watches[target], func(w string) bool { return w == watcher })
-	if len(list) == before {
+	prev := slices.Clone(a.watches[target])
+	list := slices.DeleteFunc(slices.Clone(prev), func(w string) bool { return w == watcher })
+	if len(list) == len(prev) {
 		return nil
 	}
 	if len(list) == 0 {
@@ -153,7 +162,11 @@ func (a *App) removeWatch(target, watcher string) error {
 	} else {
 		a.watches[target] = list
 	}
-	return a.saveLocked()
+	if err := a.saveLocked(); err != nil {
+		a.watches[target] = prev
+		return err
+	}
+	return nil
 }
 
 func (a *App) clearWatch(target string) {
