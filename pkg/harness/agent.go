@@ -292,13 +292,16 @@ func (h *Harness) agentInfo(a Agent) (AgentInfo, error) {
 	return AgentInfo{Agent: a, Updated: i.Updated, Status: i.Status, CurrentSession: a.live(), ContextUsed: i.ContextUsed, Usage: i.Usage}, err
 }
 
-// ListAgents is every agent, newest updated first. One whose live session
-// does not read is logged and left out.
-func (h *Harness) ListAgents() []AgentInfo {
+// ListAgents is every agent keep says yes to, newest updated first. Only
+// their live sessions are read. One whose live session does not read is
+// logged and left out.
+func (h *Harness) ListAgents(keep func(Agent) bool) []AgentInfo {
 	h.lockAgents()
 	agents := make([]Agent, 0, len(h.agents))
 	for _, a := range h.agents {
-		agents = append(agents, a)
+		if keep(a) {
+			agents = append(agents, a)
+		}
 	}
 	h.amu.Unlock()
 	infos := make([]AgentInfo, 0, len(agents))
@@ -363,26 +366,32 @@ func (h *Harness) SetAgentConfig(id, via string, c AgentConfig) error {
 
 // SetAgentApps is PUT /agents/{id}/apps. The live session reads the new list
 // as a system record at its next step, and its key reaches the new apps and
-// no longer the ones taken away.
-func (h *Harness) SetAgentApps(id string, apps []string) error {
+// no longer the ones taken away. That record says who changed them.
+func (h *Harness) SetAgentApps(id, via string, apps []string) error {
 	a, unlock, err := h.holdAgent(id)
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	a.Apps = slices.Compact(slices.Sorted(slices.Values(apps)))
-	note, err := h.apps(a)
+	if a.Apps = slices.Compact(slices.Sorted(slices.Values(apps))); a.Apps == nil {
+		a.Apps = []string{} // a list in the file and every reply, as a new agent's is
+	}
+	text, err := h.apps(a)
 	if err != nil {
 		return err
 	}
 	if err := h.save(a); err != nil {
 		return err
 	}
-	return h.note(h.session(a.live()), a.live(), system("apps", note))
+	note := system("apps", text)
+	note.Via = via
+	return h.note(h.session(a.live()), a.live(), note)
 }
 
-// SetAgentName is PUT /agents/{id}/name. Empty removes the name.
-func (h *Harness) SetAgentName(id, name string) error {
+// SetAgentName is PUT /agents/{id}/name. Empty removes the name. The
+// agent's file holds what the agent is now and no history, so who named it
+// goes to the log, as who deleted a session does.
+func (h *Harness) SetAgentName(id, via, name string) error {
 	if err := checkName(name); err != nil {
 		return err
 	}
@@ -392,28 +401,42 @@ func (h *Harness) SetAgentName(id, name string) error {
 	}
 	defer unlock()
 	a.Name = name
-	return h.save(a)
+	if err := h.save(a); err != nil {
+		return err
+	}
+	log.Printf("agent %s: named %q by %s", id, name, via)
+	return nil
 }
 
-// DeleteAgent stops the live session and removes the agent's file. Its
-// sessions' files stay: they go through /sessions.
+// DeleteAgent removes the agent's file, then stops its live session and
+// waits for the run to end, so nothing of the agent steps once this
+// returns. The agent goes first: from then its key is refused, no post
+// finds it, and a step that is handing the session over does not wait on
+// an agent that waits on the step. Its sessions' files stay: they go
+// through /sessions.
 func (h *Harness) DeleteAgent(ctx context.Context, id, via string) error {
 	a, unlock, err := h.holdAgent(id)
 	if err != nil {
 		return err
 	}
-	defer unlock()
-	if err := h.Stop(ctx, a.live(), via); err != nil {
-		log.Printf("agent %s: stop before delete: %v", id, err)
+	if err = os.Remove(filepath.Join(h.Agents, id+".json")); err == nil || errors.Is(err, fs.ErrNotExist) {
+		err = nil
+		h.lockAgents()
+		delete(h.agents, id)
+		delete(h.live, a.live())
+		delete(h.alocks, id)
+		h.amu.Unlock()
 	}
-	if err := os.Remove(filepath.Join(h.Agents, id+".json")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	unlock()
+	if err != nil {
 		return err
 	}
-	h.lockAgents()
-	defer h.amu.Unlock()
-	delete(h.agents, id)
-	delete(h.live, a.live())
-	delete(h.alocks, id)
+	release, err := h.halt(ctx, h.session(a.live()), via)
+	if err != nil {
+		return err
+	}
+	release()
+	log.Printf("agent %s: deleted by %s", id, via)
 	return nil
 }
 

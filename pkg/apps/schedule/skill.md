@@ -1,6 +1,6 @@
 # schedule: timers that message this agent later, once or on a cron.
 
-A timer posts its text to you as a user message `via app:schedule` when it is due. It is addressed to the agent, not the session: it survives harness restarts and reaches whichever session is live then. Write the text for a reader who has lost this session's context.
+A timer posts `[timer <id>] <text>` to you as a user message `via app:schedule` when it is due. It is addressed to the agent, not the session: it survives harness restarts and reaches whichever session is live then. Write the text for a reader who has lost this session's context.
 
 ```
 A="Authorization: Bearer $MAINPLANE_KEY"

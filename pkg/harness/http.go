@@ -233,7 +233,7 @@ func (h *Harness) agentRoutes(ctx context.Context, mux *http.ServeMux, handle fu
 		if err != nil {
 			return err
 		}
-		return h.SetAgentName(id, string(b))
+		return h.SetAgentName(id, via, string(b))
 	})
 	act("PUT /agents/{id}/config", func(r *http.Request, id, via string) error {
 		var c AgentConfig
@@ -247,15 +247,14 @@ func (h *Harness) agentRoutes(ctx context.Context, mux *http.ServeMux, handle fu
 		if err := json.NewDecoder(r.Body).Decode(&apps); err != nil {
 			return err
 		}
-		return h.SetAgentApps(id, apps)
+		return h.SetAgentApps(id, via, apps)
 	})
 }
 
 func (h *Harness) serveAgents(w http.ResponseWriter, r *http.Request) {
-	q, infos := r.URL.Query(), h.ListAgents()
-	infos = slices.DeleteFunc(infos, func(i AgentInfo) bool {
-		return q.Get("via") != "" && i.Via != q.Get("via") || q.Get("status") != "" && string(i.Status) != q.Get("status")
-	})
+	q := r.URL.Query()
+	infos := h.ListAgents(func(a Agent) bool { return q.Get("via") == "" || a.Via == q.Get("via") })
+	infos = slices.DeleteFunc(infos, func(i AgentInfo) bool { return q.Get("status") != "" && string(i.Status) != q.Get("status") })
 	if i := slices.IndexFunc(infos, func(i AgentInfo) bool { return i.ID == q.Get("after") }); i >= 0 {
 		infos = infos[i+1:]
 	}

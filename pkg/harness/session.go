@@ -228,36 +228,15 @@ func (h *Harness) SetName(id, via, n string) (int, error) {
 // workers their logs.
 func (h *Harness) Delete(ctx context.Context, id, via string) error {
 	s := h.session(id)
+	release, err := h.halt(ctx, s, via)
+	if err != nil {
+		return err
+	}
+	defer release()
 	h.mu.Lock()
-	if s.deleting {
-		h.mu.Unlock()
-		return fmt.Errorf("session %s is already being deleted", id)
-	}
-	s.deleting = true
-	h.mu.Unlock()
-	defer func() {
-		h.mu.Lock()
-		s.deleting = false
-		h.mu.Unlock()
-	}()
-	if err := h.Stop(ctx, id, via); err != nil {
-		log.Printf("session %s: stop before delete: %v", id, err) // a broken file still goes
-	}
-	h.mu.Lock()
-	if s.running {
-		done := s.done
-		h.mu.Unlock()
-		select {
-		case <-done:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-		h.mu.Lock()
-	}
-
 	s.mu.Lock()
 	h.mu.Unlock()
-	err := os.Remove(h.Sessions.Path(id))
+	err = os.Remove(h.Sessions.Path(id))
 	if err == nil {
 		h.lockIndex()
 		delete(h.index, id)
@@ -278,6 +257,39 @@ func (h *Harness) Delete(ctx context.Context, id, via string) error {
 	h.mu.Unlock()
 	log.Printf("session %s: deleted by %s", id, via)
 	return nil
+}
+
+// halt stops the session and waits for its runner to end. Until the func it
+// returns is called no kick starts another, so the caller finds the session
+// still.
+func (h *Harness) halt(ctx context.Context, s *session, via string) (func(), error) {
+	h.mu.Lock()
+	if s.deleting {
+		h.mu.Unlock()
+		return nil, fmt.Errorf("session %s is already being deleted", s.id)
+	}
+	s.deleting = true
+	h.mu.Unlock()
+	release := func() {
+		h.mu.Lock()
+		s.deleting = false
+		h.mu.Unlock()
+	}
+	if err := h.Stop(ctx, s.id, via); err != nil {
+		log.Printf("session %s: stop before delete: %v", s.id, err) // a broken file still goes
+	}
+	h.mu.Lock()
+	running, done := s.running, s.done
+	h.mu.Unlock()
+	if running {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			release()
+			return nil, ctx.Err()
+		}
+	}
+	return release, nil
 }
 
 // Kick steps a session in the background until it is not open. A kick during

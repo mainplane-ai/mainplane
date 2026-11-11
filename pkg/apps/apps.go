@@ -314,12 +314,15 @@ func (m *Manager) Routes(mux *http.ServeMux) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		reply(w, slices.Sorted(maps.Keys(s)))
+		reply(w, append([]string{}, slices.Sorted(maps.Keys(s))...)) // a list, with no secrets too
 	})
 	mux.HandleFunc("PUT /secrets/{name}", func(w http.ResponseWriter, r *http.Request) {
 		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSecret))
+		v := string(b)
+		if err == nil && strings.TrimSpace(v) == "" { // an empty one would count as there, and start its apps with nothing
+			err = errors.New("a secret has a value: DELETE /secrets/<name> removes one")
+		}
 		if err == nil {
-			v := string(b)
 			err = m.setSecret(r.PathValue("name"), &v)
 		}
 		done(w, err)
@@ -396,10 +399,8 @@ func (m *Manager) app(w http.ResponseWriter, r *http.Request, token string, rout
 			Name string `json:"name"`
 		}
 		out := []agent{}
-		for _, i := range m.h.ListAgents() {
-			if slices.Contains(i.Apps, name) {
-				out = append(out, agent{i.ID, i.Name})
-			}
+		for _, i := range m.h.ListAgents(func(a harness.Agent) bool { return slices.Contains(a.Apps, name) }) {
+			out = append(out, agent{i.ID, i.Name})
 		}
 		reply(w, out)
 	case r.Method == http.MethodPost && len(parts) == 3 && parts[0] == "agents" && parts[2] == "records" && slices.Contains(a.spec.Entitlements, "post"):
@@ -453,6 +454,9 @@ func (m *Manager) dispatch(w http.ResponseWriter, r *http.Request, name, path, a
 			r.Header.Del(k)
 		}
 	}
+	// A webhook keeps its Authorization: it is the sender's word to the app,
+	// and where some senders put the signature the app checks. An agent's
+	// is the session's key, which no app sees.
 	if agent != "" {
 		r.Header.Del("Authorization")
 		r.Header.Set(agentHeader, agent)

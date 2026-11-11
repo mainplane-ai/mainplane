@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -95,7 +96,7 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 	}
 	handle("POST /spawn", o.spawn)
 	handle("GET /{$}", func(w http.ResponseWriter, r *http.Request, caller harness.Agent) error {
-		reply(w, slices.DeleteFunc(h.ListAgents(), func(i harness.AgentInfo) bool { return i.Via != "agent:"+caller.ID }))
+		reply(w, h.ListAgents(func(a harness.Agent) bool { return a.Via == "agent:"+caller.ID }))
 		return nil
 	})
 	handle("GET /{id}", func(w http.ResponseWriter, r *http.Request, caller harness.Agent) error {
@@ -166,19 +167,31 @@ func (o *App) spawn(w http.ResponseWriter, r *http.Request, caller harness.Agent
 	if !within(caller, create.Config, create.Apps) {
 		return errEscalate
 	}
-	a, err := o.h.CreateAgent(o.ctx, create, "agent:"+caller.ID)
+	via := "agent:" + caller.ID
+	a, err := o.h.CreateAgent(o.ctx, create, via)
 	if err != nil {
 		return err
 	}
 	if c.NotifyOnStop != nil && *c.NotifyOnStop {
-		if err := o.watch(a.ID, caller.ID); err != nil {
-			return err
-		}
+		err = o.watch(a.ID, caller.ID)
 	}
-	if c.Message != "" {
-		if _, _, err := o.h.PostAgent(o.ctx, a.ID, "agent:"+caller.ID, "", []harness.Part{{Type: "text/plain", Body: []byte(c.Message)}}); err != nil {
-			return err
+	if err == nil && c.Message != "" {
+		_, _, err = o.h.PostAgent(o.ctx, a.ID, via, "", []harness.Part{{Type: "text/plain", Body: []byte(c.Message)}})
+	}
+	if err != nil {
+		// The caller is told the spawn failed and may try again: nothing of
+		// this try stays, or each try would leave an agent nobody knows of.
+		undo := o.h.DeleteAgent(o.ctx, a.ID, via)
+		if undo == nil {
+			undo = o.h.Delete(o.ctx, a.Sessions[0], via)
 		}
+		if undo == nil {
+			undo = o.watch(a.ID, "")
+		}
+		if undo != nil {
+			log.Printf("orchestrate: undoing the spawn of agent %s: %v", a.ID, undo)
+		}
+		return err
 	}
 	reply(w, map[string]string{"id": a.ID, "session": a.Sessions[0]})
 	return nil
@@ -231,13 +244,13 @@ func (o *App) update(w http.ResponseWriter, r *http.Request, caller harness.Agen
 		return errEscalate
 	}
 	if c.Name != nil {
-		err = o.h.SetAgentName(a.ID, *c.Name)
+		err = o.h.SetAgentName(a.ID, "agent:"+caller.ID, *c.Name)
 	}
 	if err == nil && c.Config != nil {
 		err = o.h.SetAgentConfig(a.ID, "agent:"+caller.ID, *c.Config)
 	}
 	if err == nil && c.Apps != nil {
-		err = o.h.SetAgentApps(a.ID, apps)
+		err = o.h.SetAgentApps(a.ID, "agent:"+caller.ID, apps)
 	}
 	if err == nil && c.NotifyOnStop != nil {
 		parent := ""
@@ -270,17 +283,25 @@ func within(caller harness.Agent, c *harness.AgentConfig, apps []string) bool {
 func (o *App) watch(agent, parent string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if delete(o.watches, agent); parent != "" {
-		o.watches[agent] = parent
+	if _, ok := o.watches[agent]; !ok && parent == "" {
+		return nil // nobody was to be told
 	}
-	b, err := json.MarshalIndent(o.watches, "", "  ")
+	next := maps.Clone(o.watches) // memory takes the change once the file has it
+	if delete(next, agent); parent != "" {
+		next[agent] = parent
+	}
+	b, err := json.MarshalIndent(next, "", "  ")
 	if err != nil {
 		return err
 	}
 	if err := os.WriteFile(o.path+".tmp", b, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(o.path+".tmp", o.path)
+	if err := os.Rename(o.path+".tmp", o.path); err != nil {
+		return err
+	}
+	o.watches = next
+	return nil
 }
 
 // Stopped is the harness's word that an agent's live session ended a run

@@ -12,6 +12,7 @@ import (
 
 	"github.com/mainplane-ai/mainplane/pkg/apps"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
+	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
 // Session is the client a worker's environment gives: the harness at
@@ -62,9 +63,12 @@ func (c *Client) StopAgent(ctx context.Context, id, via string) error {
 	return c.Call(ctx, "POST", "/agents/"+id+"/stop?via="+url.QueryEscape(via), "", nil, nil)
 }
 
-// RetryAgent steps the agent's live session from its tip.
-func (c *Client) RetryAgent(ctx context.Context, id string) error {
-	return c.Call(ctx, "POST", "/agents/"+id+"/retry", "", nil, nil)
+// RetryAgent steps the agent's live session from its tip, and returns the
+// status the harness answers.
+func (c *Client) RetryAgent(ctx context.Context, id string) (statefile.Status, error) {
+	var out struct{ Status statefile.Status }
+	err := c.Call(ctx, "POST", "/agents/"+id+"/retry", "", nil, &out)
+	return out.Status, err
 }
 
 // DeleteAgent removes the agent. Its sessions stay.

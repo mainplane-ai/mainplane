@@ -52,7 +52,7 @@ func main() {
 		cli("worker "+os.Args[2], os.Args[3:])
 		return
 	}
-	if len(os.Args) > 2 && (os.Args[1] == "agent" || os.Args[1] == "secret" || os.Args[1] == "app" && len(os.Args) == 4 && (os.Args[2] == "start" || os.Args[2] == "stop")) {
+	if len(os.Args) > 2 && (os.Args[1] == "agent" || os.Args[1] == "secret" || (os.Args[1] == "app" && len(os.Args) == 4 && (os.Args[2] == "start" || os.Args[2] == "stop"))) {
 		cli(os.Args[1]+" "+os.Args[2], os.Args[3:])
 		return
 	}

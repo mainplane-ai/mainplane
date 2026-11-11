@@ -96,8 +96,10 @@ func New(ctx context.Context, h *harness.Harness, dir string) (http.Handler, err
 			http.Error(w, "no such timer", http.StatusNotFound)
 			return
 		}
-		a.timers = slices.Delete(a.timers, i, i+1)
+		old := a.timers
+		a.timers = slices.Delete(slices.Clone(old), i, i+1)
 		if err := a.save(); err != nil {
+			a.timers = old // the file still has it: so does memory, and the next try finds it
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -140,7 +142,9 @@ func (a *app) add(w http.ResponseWriter, r *http.Request) {
 	t.Next = t.Next.UTC()
 	a.mu.Lock()
 	a.timers = append(a.timers, t)
-	err = a.save()
+	if err = a.save(); err != nil {
+		a.timers = a.timers[:len(a.timers)-1] // a timer the caller was refused must not fire
+	}
 	a.mu.Unlock()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

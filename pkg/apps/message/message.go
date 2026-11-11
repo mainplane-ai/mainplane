@@ -26,7 +26,11 @@ func New(ctx context.Context, h *harness.Harness) http.Handler {
 			http.Error(w, `the body is {"to":"<agent id>","text":"..."}`, http.StatusBadRequest)
 			return
 		}
-		_, _, err := h.PostAgent(ctx, m.To, "agent:"+r.Header.Get("X-Mainplane-Agent"), r.Header.Get("Idempotency-Key"), []harness.Part{{Type: "text/plain", Body: []byte(m.Text)}})
+		from, key := "agent:"+r.Header.Get("X-Mainplane-Agent"), r.Header.Get("Idempotency-Key")
+		if key != "" {
+			key = from + ":" + key // a key is its sender's: two agents that pick the same one do not collide
+		}
+		_, _, err := h.PostAgent(ctx, m.To, from, key, []harness.Part{{Type: "text/plain", Body: []byte(m.Text)}})
 		switch {
 		case errors.Is(err, harness.ErrNoAgent):
 			http.Error(w, err.Error(), http.StatusNotFound)

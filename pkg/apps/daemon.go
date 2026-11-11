@@ -121,9 +121,11 @@ func (m *Manager) supervise(ctx context.Context, a app, d *daemon, secrets map[s
 		}
 		cmd := exec.CommandContext(ctx, a.spec.Run[0], a.spec.Run[1:]...)
 		cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr, cmd.WaitDelay = a.dir, env, os.Stderr, os.Stderr, relaunch
-		go listening(ctx, port, ready)
+		lctx, launched := context.WithCancel(ctx) // a process that dies before it listens ends its poll
+		go listening(lctx, port, ready)
 		log.Printf("app %s: %v on port %d", a.name, a.spec.Run, port)
 		err = cmd.Run()
+		launched()
 		if ctx.Err() != nil {
 			return
 		}

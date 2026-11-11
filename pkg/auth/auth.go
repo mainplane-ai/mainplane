@@ -1,10 +1,14 @@
-// Package auth is the two credentials a harness checks. An api key lets a
+// Package auth is the four credentials a harness checks. An api key lets a
 // connector call every HTTP route; api keys live hashed in a table in the
 // harness's directory. A join secret lets a machine join the mesh as a
 // worker; it can add a worker and nothing else. It derives from the device
-// code, which is what a person types (code.go). Both are held as a token: the
-// kind, the key of the harness its holder finds through the pointer, and the
-// secret itself.
+// code, which is what a person types (code.go). A session key lets a
+// session's workers reach the apps of the agent whose live session it is,
+// and an app key lets a daemon app call the routes its entitlements name.
+// No table holds these two: each is its subject and a MAC of it under the
+// harness's key (Sign in code.go), so what the subject may do now is the
+// whole check. Each is held as a token: the kind, the key of the harness
+// its holder finds through the pointer, and the secret itself.
 //
 //	mp_<kind>_<harness key>.<secret>
 package auth

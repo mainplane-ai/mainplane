@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -287,7 +288,7 @@ func TestCreateAgent(t *testing.T) {
 	if err := r.h.LoadAgents(); err != nil {
 		t.Fatal(err)
 	}
-	if h, ok := r.h.Holder(s1); !ok || h.ID != two.ID || len(r.h.ListAgents()) != 2 {
+	if h, ok := r.h.Holder(s1); !ok || h.ID != two.ID || len(r.h.ListAgents(func(Agent) bool { return true })) != 2 {
 		t.Fatalf("after a reload: %+v", h)
 	}
 }
@@ -308,7 +309,7 @@ func TestWarmFastPath(t *testing.T) {
 	if err := r.h.SetAgentConfig(a.ID, "web", *c); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.h.SetAgentApps(a.ID, []string{"message", "schedule"}); err != nil {
+	if err := r.h.SetAgentApps(a.ID, "web", []string{"message", "schedule"}); err != nil {
 		t.Fatal(err)
 	}
 	conf, _ := config(r.chain(s1))
@@ -318,7 +319,7 @@ func TestWarmFastPath(t *testing.T) {
 	if notes := r.bodies(s1, statefile.System, "apps"); len(notes) != 2 || !strings.Contains(notes[1], "schedule: ") {
 		t.Fatalf("apps notes: %q", notes)
 	}
-	if err := r.h.SetAgentApps(a.ID, []string{"nope"}); err == nil {
+	if err := r.h.SetAgentApps(a.ID, "web", []string{"nope"}); err == nil {
 		t.Fatal("an agent took an app the harness does not have")
 	}
 }
@@ -478,6 +479,47 @@ func TestMidRunRollover(t *testing.T) {
 	}
 }
 
+// A delete of an agent mid-step returns with its run over: no later step,
+// queued kick or not, and no stop told of an agent that is gone.
+func TestDeleteAgent(t *testing.T) {
+	r := newRig(t)
+	t.Cleanup(func() { close(r.release) })
+	r.step = func(string) turn { return turn{code: "wait", input: 10} }
+	a := r.create(AgentCreate{Config: r.conf(1000, 0, "w1")}, "web")
+	s1 := a.Sessions[0]
+	if _, _, err := r.h.PostAgent(context.Background(), a.ID, "web", "", []Part{{Type: "text/plain", Body: []byte("start")}}); err != nil {
+		t.Fatal(err)
+	}
+	<-r.started
+	r.h.Kick(context.Background(), s1) // one more pass is owed when this run ends
+	if err := r.h.DeleteAgent(context.Background(), a.ID, "web"); err != nil {
+		t.Fatal(err)
+	}
+	s := r.h.session(s1)
+	r.h.mu.Lock()
+	running := s.running
+	r.h.mu.Unlock()
+	if running {
+		t.Fatal("the delete returned while the agent's session was still running")
+	}
+	time.Sleep(50 * time.Millisecond)
+	r.mu.Lock()
+	steps, stopped := r.steps, slices.Clone(r.stopped)
+	r.mu.Unlock()
+	if steps != 1 || len(stopped) != 0 {
+		t.Fatalf("after the delete: %d model calls, stops told %v", steps, stopped)
+	}
+	if _, ok := r.h.Holder(s1); ok {
+		t.Fatal("a deleted agent's session still holds its key")
+	}
+	if _, err := r.h.Agent(a.ID); !errors.Is(err, ErrNoAgent) {
+		t.Fatalf("the agent after its delete: %v", err)
+	}
+	if st := statefile.Derive(r.chain(s1)); st == statefile.StatusOpen {
+		t.Fatalf("the session of a deleted agent is %s: a restart would step it", st)
+	}
+}
+
 // The /agents routes.
 func TestAgentRoutes(t *testing.T) {
 	r := newRig(t)
@@ -548,6 +590,14 @@ func TestAgentRoutes(t *testing.T) {
 	r.settled(made.ID)
 	do(400, "POST", "/agents/"+made.ID+"/records", "no via")
 	do(204, "PUT", "/agents/"+made.ID+"/name?via=web", "chief")
+	do(204, "PUT", "/agents/"+made.ID+"/apps?via=phone", `[]`)
+	if got := do(200, "GET", "/agents/"+made.ID, ""); !strings.Contains(got, `"apps":[]`) {
+		t.Fatalf("an agent with no apps: %s", got)
+	}
+	chain := r.chain(made.Session)
+	if i := slices.IndexFunc(chain, func(rec statefile.Record) bool { return rec.Source == "apps" && rec.Via == "phone" }); i < 0 || !strings.HasSuffix(string(chain[i].Body), "none\n") {
+		t.Fatalf("no apps record says who took the apps away: %v", r.bodies(made.Session, statefile.System, "apps"))
+	}
 	do(204, "PUT", "/agents/"+made.ID+"/apps?via=web", `["schedule"]`)
 	do(400, "PUT", "/agents/"+made.ID+"/apps?via=web", `["nope"]`)
 	do(204, "PUT", "/agents/"+made.ID+"/config?via=web", string(conf))

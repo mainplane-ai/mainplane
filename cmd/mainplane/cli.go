@@ -40,6 +40,9 @@ var arity = map[string][2]int{
 	"apps": {0, 0}, "app start": {1, 1}, "app stop": {1, 1}, "secrets": {0, 0}, "secret set": {1, 2}, "secret delete": {1, 1}, "skill": {0, 1}, "app": {3, 4},
 }
 
+// methods are what the app verb calls an app with.
+var methods = []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}
+
 // cli is the harness API as verbs: one verb, one route, its reply printed.
 // The harness and the key come from login; nothing else is remembered or
 // defaulted, and a reply the harness refuses is printed as it came and exits
@@ -142,11 +145,15 @@ func cli(verb string, args []string) {
 	}
 }
 
-// agent is the verbs on agents, apps and secrets.
+// agent is the verbs on agents, apps and secrets. Each route is the
+// connector's to name; a body from stdin is read here, so one that is not
+// the JSON the route takes ends the verb before the harness is asked.
 func (c client) agent(verb string, args []string) {
+	ctx := context.Background()
+	var err error
 	switch verb {
 	case "agents":
-		infos, err := c.Agents(context.Background(), "", strings.Join(args, ""))
+		infos, err := c.Agents(ctx, "", strings.Join(args, ""))
 		if err != nil {
 			die(err)
 		}
@@ -154,34 +161,44 @@ func (c client) agent(verb string, args []string) {
 			fmt.Printf("%s  %-11s  %-40s  session=%s  context=%d/%d  %s  %-14s  %s\n", i.ID, i.Status, i.Config.Model, i.CurrentSession, i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime), i.Via, i.Name)
 		}
 	case "agent new":
-		var out struct{ ID, Session string }
-		c.call("POST", "/agents?via="+via, "application/json", os.Stdin, &out)
-		fmt.Println(out.ID, out.Session)
+		var cr harness.AgentCreate
+		if err := json.NewDecoder(os.Stdin).Decode(&cr); err != nil {
+			die(err)
+		}
+		id, session, err := c.CreateAgent(ctx, cr, via)
+		if err != nil {
+			die(err)
+		}
+		fmt.Println(id, session)
 	case "agent info":
-		c.raw("/agents/" + args[0])
+		c.raw("/agents/" + args[0]) // printed as it came, as info prints a session
 	case "agent message":
-		s, n, err := c.PostAgent(context.Background(), args[0], via, args[1], args[2:])
+		s, n, err := c.PostAgent(ctx, args[0], via, args[1], args[2:])
 		if err != nil {
 			die(err)
 		}
 		fmt.Println(s, n)
 	case "agent retry":
-		var out struct{ Status string }
-		c.call("POST", "/agents/"+args[0]+"/retry", "", nil, &out)
-		fmt.Println(out.Status)
+		st, err := c.RetryAgent(ctx, args[0])
+		if err != nil {
+			die(err)
+		}
+		fmt.Println(st)
 	case "agent stop":
-		c.call("POST", "/agents/"+args[0]+"/stop?via="+via, "", nil, nil)
+		err = c.StopAgent(ctx, args[0], via)
 	case "agent delete":
-		c.call("DELETE", "/agents/"+args[0]+"?via="+via, "", nil, nil)
+		err = c.DeleteAgent(ctx, args[0], via)
 	case "agent name":
-		c.call("PUT", "/agents/"+args[0]+"/name?via="+via, "text/plain", strings.NewReader(strings.Join(args[1:], " ")), nil)
+		err = c.SetAgentName(ctx, args[0], via, strings.Join(args[1:], " "))
 	case "agent config":
-		c.call("PUT", "/agents/"+args[0]+"/config?via="+via, "application/json", os.Stdin, nil)
+		var conf harness.AgentConfig
+		if err = json.NewDecoder(os.Stdin).Decode(&conf); err == nil {
+			err = c.SetAgentConfig(ctx, args[0], via, conf)
+		}
 	case "agent apps":
-		b, _ := json.Marshal(args[1:]) // names are strings: it cannot fail
-		c.call("PUT", "/agents/"+args[0]+"/apps?via="+via, "application/json", bytes.NewReader(b), nil)
+		err = c.SetAgentApps(ctx, args[0], via, args[1:])
 	case "apps":
-		infos, err := c.Apps(context.Background())
+		infos, err := c.Apps(ctx)
 		if err != nil {
 			die(err)
 		}
@@ -189,9 +206,9 @@ func (c client) agent(verb string, args []string) {
 			fmt.Printf("%-20s  %-8s  %-15s  %s\n", i.Name, i.Kind, strings.TrimSpace(i.Status+" "+strings.Join(i.MissingSecrets, ",")), i.Description)
 		}
 	case "app start", "app stop":
-		c.call("POST", "/apps/"+url.PathEscape(args[0])+"/"+strings.TrimPrefix(verb, "app "), "", nil, nil)
+		err = c.RunApp(ctx, args[0], verb == "app start")
 	case "secrets":
-		names, err := c.Secrets(context.Background())
+		names, err := c.Secrets(ctx)
 		if err != nil {
 			die(err)
 		}
@@ -199,22 +216,31 @@ func (c client) agent(verb string, args []string) {
 			fmt.Println(n)
 		}
 	case "secret set":
-		value := strings.Join(args[1:], "")
-		if len(args) == 1 { // from stdin a value stays out of the shell's history, and may be many lines
-			b, err := io.ReadAll(os.Stdin)
-			if err != nil {
-				die(err)
-			}
-			value = strings.TrimRight(string(b), "\r\n")
-		}
-		if err := c.SetSecret(context.Background(), args[0], value); err != nil {
-			die(err)
-		}
+		err = c.SetSecret(ctx, args[0], secretValue(args[1:]))
 	case "secret delete":
-		if err := c.DeleteSecret(context.Background(), args[0]); err != nil {
+		err = c.DeleteSecret(ctx, args[0])
+	}
+	if err != nil {
+		die(err)
+	}
+}
+
+// secretValue is the value secret set was given: its arguments, or with none
+// stdin, where a value stays out of the shell's history and may be many
+// lines. An empty one would count as there, and start its apps with nothing.
+func secretValue(args []string) string {
+	value := strings.Join(args, "")
+	if len(args) == 0 {
+		b, err := io.ReadAll(os.Stdin)
+		if err != nil {
 			die(err)
 		}
+		value = strings.TrimRight(string(b), "\r\n")
 	}
+	if strings.TrimSpace(value) == "" {
+		die(errors.New("a secret has a value: mainplane secret delete <name> removes one"))
+	}
+	return value
 }
 
 // skill is the two verbs an agent uses: with one argument or none, read a
@@ -251,6 +277,11 @@ func skill(verb string, args []string) {
 		}
 		fmt.Print(text)
 	default:
+		// The method is checked before the harness is asked: "app stop x y" is
+		// a slip for the stop verb, not a call of an app named stop.
+		if !slices.Contains(methods, strings.ToUpper(args[1])) {
+			usage()
+		}
 		var body io.Reader
 		ctype := ""
 		if len(args) == 4 {

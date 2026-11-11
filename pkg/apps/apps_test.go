@@ -301,6 +301,12 @@ func TestProxySecretsWebhooks(t *testing.T) {
 		t.Fatalf("apps: %s", got)
 	}
 	const value = `s3cret=with "quotes"`
+	for _, blank := range []string{"", " \n"} {
+		r.want(400, "full", "PUT", "/secrets/K", blank)
+	}
+	if got := r.want(200, "full", "GET", "/secrets", ""); strings.TrimSpace(got) != `[]` {
+		t.Fatalf("a secret with no value was kept: %s", got)
+	}
 	r.want(204, "full", "PUT", "/secrets/K", value)
 	if got := r.want(200, "full", "GET", "/secrets", ""); strings.TrimSpace(got) != `["K"]` {
 		t.Fatalf("secrets: %s", got)
@@ -320,8 +326,8 @@ func TestProxySecretsWebhooks(t *testing.T) {
 		t.Fatalf("skills: %s", got)
 	}
 
-	path, h = seen(r.want(200, "", "POST", "/webhooks/bare/events", "{}", "X-Mainplane-Agent", "forged"))
-	if path != "/webhooks/events" || h.Get(agentHeader) != "" {
+	path, h = seen(r.want(200, "", "POST", "/webhooks/bare/events", "{}", "X-Mainplane-Agent", "forged", "Authorization", "Basic sender"))
+	if path != "/webhooks/events" || h.Get(agentHeader) != "" || h.Get("Authorization") != "Basic sender" { // the sender's word to the app goes through
 		t.Fatalf("webhook: %s %v", path, h)
 	}
 	r.want(404, "", "POST", "/webhooks/prox/events", "{}")
@@ -427,6 +433,15 @@ func TestOrchestrateAndMessage(t *testing.T) {
 		t.Fatalf("other vias: %v", got)
 	}
 
+	// a key is its sender's: the same one from two agents is two messages, and a repeat of one is none
+	for _, k := range []string{key, r.key(child), r.key(child)} {
+		r.want(204, k, "POST", "/apps/message", `{"to":"`+other.ID+`","text":"keyed"}`, "Idempotency-Key", "k1")
+		r.settled(other.ID)
+	}
+	if got := r.vias(other.ID); !slices.Equal(got, []string{"agent:" + c, "agent:" + a.ID, "agent:" + c}) {
+		t.Fatalf("other vias after keyed posts: %v", got)
+	}
+
 	n := spawn(`{"notify_on_stop":true,"message":"task two"}`)
 	r.until(func() bool { return slices.Contains(r.vias(a.ID), "app:orchestrate") })
 	r.settled(a.ID)
@@ -455,6 +470,45 @@ func TestOrchestrateAndMessage(t *testing.T) {
 	r.want(204, key, "POST", "/apps/orchestrate/"+c+"/stop", "")
 	r.want(204, key, "DELETE", "/apps/orchestrate/"+c, "")
 	r.want(404, key, "GET", "/apps/orchestrate/"+c, "")
+}
+
+// A spawn that fails after its agent was made leaves no agent, no session
+// and no watch: the caller was told no, and may try again.
+func TestSpawnUndone(t *testing.T) {
+	r := newRig(t)
+	a := r.agent(conf("w1"), "orchestrate")
+	key := r.key(a)
+	all := func(harness.Agent) bool { return true }
+	block := filepath.Join(r.dir, "app-data", "orchestrate", "watches.json.tmp") // the watch cannot be written
+	if err := os.Mkdir(block, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessions := func() int {
+		names, err := os.ReadDir(r.h.Sessions.Dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(names)
+	}
+	before := sessions()
+	if code, got := r.do(key, "POST", "/apps/orchestrate/spawn", `{"notify_on_stop":true,"message":"the task"}`); code == 200 {
+		t.Fatalf("a spawn whose watch was not kept: %s", got)
+	}
+	if got := r.want(200, key, "GET", "/apps/orchestrate", ""); strings.TrimSpace(got) != `[]` {
+		t.Fatalf("children after a failed spawn: %s", got)
+	}
+	if n := len(r.h.ListAgents(all)); n != 1 || sessions() != before {
+		t.Fatalf("after a failed spawn: %d agents, %d sessions, want 1 and %d", n, sessions(), before)
+	}
+	if err := os.Remove(block); err != nil {
+		t.Fatal(err)
+	}
+	r.want(200, key, "POST", "/apps/orchestrate/spawn", `{"notify_on_stop":true,"message":"the task"}`)
+	if n := len(r.h.ListAgents(all)); n != 2 {
+		t.Fatalf("after the next try: %d agents", n)
+	}
+	r.until(func() bool { return slices.Contains(r.vias(a.ID), "app:orchestrate") })
+	r.settled(a.ID)
 }
 
 // schedule: a timer fires as a message from the app, and the timers are
@@ -500,6 +554,19 @@ func TestSchedule(t *testing.T) {
 	again.ServeHTTP(w, req)
 	if got := w.Body.String(); !strings.Contains(got, "later") || !strings.Contains(got, "often") || strings.Contains(got, "b's") || strings.Contains(got, "wake") {
 		t.Fatalf("timers after restart: %s", got)
+	}
+	// a change the file did not take is not in memory either
+	block := filepath.Join(r.dir, "app-data", "schedule", "timers.json.tmp")
+	if err := os.Mkdir(block, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r.want(500, key, "POST", "/apps/schedule", `{"in":"1h","text":"refused"}`)
+	r.want(500, key, "DELETE", "/apps/schedule/"+cron.ID, "")
+	if got := r.want(200, key, "GET", "/apps/schedule", ""); strings.Contains(got, "refused") || !strings.Contains(got, "often") {
+		t.Fatalf("timers after two failed saves: %s", got)
+	}
+	if err := os.Remove(block); err != nil {
+		t.Fatal(err)
 	}
 	r.want(204, key, "DELETE", "/apps/schedule/"+cron.ID, "")
 	if got := r.want(200, key, "GET", "/apps/schedule", ""); strings.Contains(got, "often") {

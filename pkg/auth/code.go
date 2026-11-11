@@ -67,7 +67,9 @@ func Secret(k ed25519.PrivateKey, code string) string {
 
 // Sign is the token of kind for subject, a session's id or an app's name. No
 // table holds it: the harness key makes it and checks it, so it is revoked
-// by what the subject may do, not by a write.
+// by what the subject may do, not by a write. The MAC is under k, which only
+// this harness has, so no other harness's token passes. harness is where the
+// holder finds the harness, as in every token, and is not part of the check.
 func Sign(k ed25519.PrivateKey, kind, harness, subject string) string {
 	return Token(kind, harness, subject+":"+Secret(k, kind+" "+subject))
 }
