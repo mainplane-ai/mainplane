@@ -14,8 +14,11 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/apps"
+	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/version"
@@ -46,6 +49,16 @@ type Harness struct {
 	Remove    func(name string) error      // the coordinator's: the worker leaves the mesh for good
 	Rename    func(old, name string) error // the coordinator's: the worker takes another name
 	Prompt    func() ([]string, error)     // the config's prompt lines, read once per new session
+
+	AgentDir string         // agents/<id>.json
+	Apps     *apps.Registry // what agents may use
+	Signer   auth.Signer    // signs each session's key
+	url      atomic.Value   // the API on the mesh, for MAINPLANE_URL
+
+	amu   sync.Mutex
+	byID  map[string]*agent
+	live  map[string]string // live session -> agent
+	stops []func(agent string, st statefile.Status)
 
 	pmu sync.RWMutex
 	mu  sync.Mutex
@@ -115,46 +128,52 @@ func system(source, body string) statefile.Record {
 // AGENTS.md scan, and the worker list, so all three reach the provider as
 // system text ahead of the first message. A copy is byte for byte and gets
 // nothing appended but a result for each call still open at its cut. It
-// does not step until a message or retry comes.
+// does not step until a message or retry comes. Record 1 names via, who
+// created it.
 func (h *Harness) Create(ctx context.Context, c Create, via string) (string, error) {
 	id := statefile.NewID()
+	if err := h.create(ctx, id, c, via, nil); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// create makes session id, with extra system records after the worker list.
+func (h *Harness) create(ctx context.Context, id string, c Create, via string, extra []statefile.Record) error {
 	if c.From != "" {
 		if c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Tools != "" || c.Input != nil || c.Params != nil || c.Preset != "" || c.Name != "" {
-			return "", fmt.Errorf("a copy takes no config and no name")
+			return fmt.Errorf("a copy takes no config and no name")
 		}
-		if err := h.copy(c.From, id, c.N); err != nil {
-			return "", err
-		}
-		return id, nil
+		return h.copy(c.From, id, c.N)
 	}
 	p, model, err := h.provider(c.Model)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if c.ContextLimit <= 0 {
-		return "", fmt.Errorf("context_limit must be set")
+		return fmt.Errorf("context_limit must be set")
 	}
 	if err := checkName(c.Name); err != nil {
-		return "", err
+		return err
 	}
 	if c.Name != "" && via == "" {
-		return "", errors.New("a name needs ?via= naming who is acting")
+		return errors.New("a name needs ?via= naming who is acting")
 	}
 	for _, t := range c.Input {
 		if !p.Envelope.Accepts(t) {
-			return "", fmt.Errorf("%s does not take %s as input", p.Envelope.Name(), t)
+			return fmt.Errorf("%s does not take %s as input", p.Envelope.Name(), t)
 		}
 	}
 	for k := range c.Params {
 		if p.Envelope.Owns(k) {
-			return "", fmt.Errorf("%s builds %s from the session, a param cannot set it", p.Envelope.Name(), k)
+			return fmt.Errorf("%s builds %s from the session, a param cannot set it", p.Envelope.Name(), k)
 		}
 	}
 	if c.Tools == "" {
 		c.Tools = "default"
 	}
 	if Tools(c.Tools, nil) == nil {
-		return "", fmt.Errorf("unknown tools %q; sets: default, patch", c.Tools)
+		return fmt.Errorf("unknown tools %q; sets: default, patch", c.Tools)
 	}
 	conf := statefile.Conf{Model: c.Model, Tools: c.Tools, Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params, Preset: c.Preset}
 	if conf.Workers == nil {
@@ -162,32 +181,37 @@ func (h *Harness) Create(ctx context.Context, c Create, via string) (string, err
 	}
 	body, err := json.Marshal(conf)
 	if err != nil {
-		return "", err
+		return err
 	}
 	prompt, err := h.Prompt()
 	if err != nil {
-		return "", err
+		return err
 	}
-	f, err := h.Sessions.Start(id, body)
+	f, err := h.Sessions.Start(id, via, body)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if err := f.Append(system("harness", System(model, prompt))); err != nil {
-		return "", err
+		return err
 	}
 	if err := f.Append(system("agents", h.agents(ctx, id, conf))); err != nil {
-		return "", err
+		return err
 	}
 	if err := f.Append(system("workers", workersFirst+h.workers(conf.Workers))); err != nil {
-		return "", err
+		return err
+	}
+	for _, r := range extra {
+		if err := f.Append(r); err != nil {
+			return err
+		}
 	}
 	if c.Name != "" {
 		if err := f.Append(name(via, c.Name)); err != nil {
-			return "", err
+			return err
 		}
 	}
 	h.touch(id)
-	return id, f.Close()
+	return f.Close()
 }
 
 // copy copies session from up to record n as id, and answers each call the
@@ -333,8 +357,19 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	if err != nil {
 		return "", err
 	}
+	why := ""
 	if p := statefile.ContextUsed(chain); p > conf.ContextLimit {
+		why = fmt.Sprintf("context %d exceeds limit %d", p, conf.ContextLimit)
+	} else if a, ok := h.LiveAgent(id); ok && status == statefile.StatusOpen && !sameConf(conf, a.Config.Conf) {
+		why = "the agent's config changed mid-task"
+	}
+	if why != "" {
 		h.killAll(ctx, id, chain)
+		if moved, err := h.handoff(ctx, s, id, why); moved || err != nil {
+			return statefile.StatusFailed, err
+		}
+	}
+	if p := statefile.ContextUsed(chain); p > conf.ContextLimit {
 		_, err := h.append(s, errorRecord("", fmt.Sprintf("context %d exceeds limit %d", p, conf.ContextLimit)))
 		return statefile.StatusFailed, err
 	}
@@ -380,6 +415,16 @@ func rebuilt(p provider.Provider, model string, conf statefile.Conf, chain []sta
 		return ""
 	}
 	return fmt.Sprintf("\n\nThis session was built by harness %s. This harness (%s) builds the same records into a different request, so the provider sees a different conversation. A session from an incompatible harness version cannot go on. Use /continue to carry it into a new session.", last.Harness, version.V)
+}
+
+// SetURL is where workers reach the API on the mesh, once the mesh is up.
+func (h *Harness) SetURL(u string) { h.url.Store(u) }
+
+// Env is what each environment of session id starts with: its key, which
+// reaches its agent's apps while it is the live session, and the API's URL.
+func (h *Harness) Env(id string) []string {
+	u, _ := h.url.Load().(string)
+	return []string{"MAINPLANE_KEY=" + h.Signer.Sign(auth.SessionKey, id), "MAINPLANE_URL=" + u}
 }
 
 func errorRecord(via, text string) statefile.Record {

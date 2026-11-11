@@ -57,6 +57,8 @@ type Remote struct {
 	left  map[string]chan struct{} // closed by a call that stopped listening
 	done  chan struct{}            // closed when the connection ends
 
+	env func(session string) []string // the variables a session's environments start with; nil is none
+
 	sent   []byte // the last drives frame, under wmu
 	dmu    sync.Mutex
 	drives []worker.Drive // from the hello, then each status
@@ -264,7 +266,7 @@ func (r *Remote) Job(ctx context.Context, session, interpreter, code, job string
 	var o Output
 	stopped := false
 	go func() {
-		ended <- r.call(ctx, worker.Header{Kind: worker.Run, Session: session, Interp: interpreter, Job: job}, []byte(code), func(f worker.Frame) {
+		ended <- r.call(ctx, worker.Header{Kind: worker.Run, Session: session, Interp: interpreter, Job: job, Env: r.vars(session)}, []byte(code), func(f worker.Frame) {
 			switch f.Kind {
 			case worker.Started:
 				started <- f
@@ -309,7 +311,7 @@ func (r *Remote) Run(ctx context.Context, session, interpreter, code string, tim
 	}
 	var o Output
 	mid := false // the tail starts inside a line already counted
-	err := r.call(ctx, worker.Header{Kind: worker.Run, Session: session, Interp: interpreter, Timeout: timeout}, []byte(code), func(f worker.Frame) {
+	err := r.call(ctx, worker.Header{Kind: worker.Run, Session: session, Interp: interpreter, Timeout: timeout, Env: r.vars(session)}, []byte(code), func(f worker.Frame) {
 		if f.Kind == worker.Result {
 			o.Exit, o.Full = f.Exit, f.Full
 			return
@@ -331,6 +333,14 @@ func (r *Remote) Run(ctx context.Context, session, interpreter, code string, tim
 		}
 	})
 	return o, err
+}
+
+// vars is what env gives a session, none when the pool set no env.
+func (r *Remote) vars(session string) []string {
+	if r.env == nil {
+		return nil
+	}
+	return r.env(session)
 }
 
 func (r *Remote) Read(ctx context.Context, path string) ([]byte, error) {

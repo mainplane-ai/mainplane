@@ -141,7 +141,7 @@ func (s *server) run(f Frame) (Frame, error) {
 		return s.job(f, it)
 	}
 	key := f.Session + "/" + name
-	e, reset, err := s.acquire(key, f.Session, name)
+	e, reset, err := s.acquire(key, f.Session, name, f.Env)
 	if err != nil {
 		return Frame{}, err
 	}
@@ -182,7 +182,7 @@ func (s *server) run(f Frame) (Frame, error) {
 // acquire finds or starts the environment for key and holds it for one run.
 // An environment that ended while this run waited for it is not used: the
 // loop finds its replacement and the reset flag its end left.
-func (s *server) acquire(key, session, name string) (*env, bool, error) {
+func (s *server) acquire(key, session, name string, vars []string) (*env, bool, error) {
 	it, err := s.interp(name)
 	if err != nil {
 		return nil, false, err
@@ -191,7 +191,7 @@ func (s *server) acquire(key, session, name string) (*env, bool, error) {
 		s.emu.Lock()
 		e, ok := s.envs[key]
 		if !ok {
-			if e, err = start(it, s.Operator, session); err != nil {
+			if e, err = start(it, s.Operator, session, vars); err != nil {
 				s.emu.Unlock()
 				return nil, false, err
 			}

@@ -26,6 +26,10 @@ import (
 
 	"golang.org/x/net/http/httpguts"
 
+	"github.com/mainplane-ai/mainplane/pkg/apps"
+	"github.com/mainplane-ai/mainplane/pkg/apps/message"
+	"github.com/mainplane-ai/mainplane/pkg/apps/orchestrate"
+	"github.com/mainplane-ai/mainplane/pkg/apps/schedule"
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/coordinator"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
@@ -244,7 +248,14 @@ func Harness(ctx context.Context, path string) error {
 		c, err := loadConfig(path)
 		return c.prompt(), err
 	}
-	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove, Rename: coord.Rename, Prompt: prompt}
+	signer := auth.Signer{Seed: k.Seed(), Harness: pointer.Encode(k)}
+	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove, Rename: coord.Rename, Prompt: prompt, AgentDir: filepath.Join(dir, "agents"), Signer: signer}
+	h.Apps = apps.New(ctx, dir, "http://"+c.HTTP, func(app string) string { return signer.Sign(auth.AppKey, app) })
+	defer h.Apps.Close() // a run app ends with the harness, not after it
+	if err := loadAgents(h); err != nil {
+		return err
+	}
+	pool.Env = h.Env
 	go watch(ctx, path, func(c Config) error {
 		ps, err := providers(dir, c.Providers)
 		if err == nil {
@@ -283,8 +294,11 @@ func Harness(ctx context.Context, path string) error {
 	a := &api{dir: dir, path: path, k: k, noPointer: c.NoPointer, at: func() string { return at.Load().(string) }, coord: coord, pool: pool}
 	a.handle(routes)
 	go ship(ctx, dir, path)
-	api := store.Bearer(limit, routes)
+	api := store.Bearer(limit, signer, h.Gate(ctx, routes))
 	mux.Handle("/", api)
+	mux.HandleFunc("POST /webhooks/{app}/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		h.Apps.Webhook(w, r, r.PathValue("app"), r.PathValue("path"))
+	})
 	srv := &http.Server{Addr: c.HTTP, Handler: mux}
 	if c.URL != "" {
 		srv.Handler = proxied(mux)
@@ -310,6 +324,7 @@ func Harness(ctx context.Context, path string) error {
 			errs <- err
 			return
 		}
+		h.SetURL("http://" + ls[1].Addr().String())
 		// The CLI on a worker, over the mesh: no tunnel, so no CF-Connecting-IP
 		// to trust; the limit counts the node's address.
 		go func() {
@@ -344,6 +359,28 @@ func Harness(ctx context.Context, path string) error {
 		return err
 	}
 	return nil
+}
+
+// loadAgents loads the agents, then the apps compiled in and those on disk: the
+// apps' timers and hooks name agents. No app is on for an agent unless its
+// connector lists it.
+func loadAgents(h *harness.Harness) error {
+	if err := h.LoadAgents(); err != nil {
+		return err
+	}
+	for name, b := range map[string]struct {
+		skill []byte
+		serve func(context.Context, *harness.Harness, string) (http.Handler, error)
+	}{
+		"schedule":    {schedule.Skill, schedule.New},
+		"message":     {message.Skill, message.New},
+		"orchestrate": {orchestrate.Skill, orchestrate.New},
+	} {
+		if err := h.Apps.Builtin(name, b.skill, func(ctx context.Context, dir string) (http.Handler, error) { return b.serve(ctx, h, dir) }); err != nil {
+			return err
+		}
+	}
+	return h.Apps.Load()
 }
 
 // way is why c gives the harness no one way in, if it does not.

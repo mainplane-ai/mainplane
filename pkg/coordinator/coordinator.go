@@ -217,9 +217,15 @@ func (c *Coordinator) Listen(ctx context.Context, dir, control string, ports ...
 	if err != nil {
 		return nil, err
 	}
+	// On the node's address, not on all of them: each listener's Addr is then
+	// where a worker reaches it, which the harness tells its agents' workers.
+	i := slices.IndexFunc(st.TailscaleIPs, netip.Addr.Is6)
+	if i < 0 {
+		return nil, fmt.Errorf("the harness has no IPv6 address on the mesh: %v", st.TailscaleIPs)
+	}
 	var ls []net.Listener
 	for _, p := range ports {
-		l, err := s.Listen("tcp", fmt.Sprintf(":%d", p))
+		l, err := s.Listen("tcp", netip.AddrPortFrom(st.TailscaleIPs[i], uint16(p)).String())
 		if err != nil {
 			return nil, err
 		}

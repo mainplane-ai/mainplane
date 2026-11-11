@@ -65,12 +65,13 @@ type Header struct {
 	Kind string `json:"kind"`
 	Len  int    `json:"len"`
 
-	Session string `json:"session,omitempty"` // run, kill: environments live per session
-	Interp  string `json:"interp,omitempty"`  // run: empty means the worker's first
-	Timeout int    `json:"timeout,omitempty"` // run: seconds before the environment is killed
-	Job     string `json:"job,omitempty"`     // run: a background job of this id, in an interpreter of its own
-	Path    string `json:"path,omitempty"`    // read, write; started, result: a job's log; update: mainplane-server, to update the harness beside the worker
-	Pid     int    `json:"pid,omitempty"`     // started
+	Session string   `json:"session,omitempty"` // run, kill: environments live per session
+	Interp  string   `json:"interp,omitempty"`  // run: empty means the worker's first
+	Timeout int      `json:"timeout,omitempty"` // run: seconds before the environment is killed
+	Job     string   `json:"job,omitempty"`     // run: a background job of this id, in an interpreter of its own
+	Env     []string `json:"env,omitempty"`     // run: KEY=value pairs a new environment of the session starts with
+	Path    string   `json:"path,omitempty"`    // read, write; started, result: a job's log; update: mainplane-server, to update the harness beside the worker
+	Pid     int      `json:"pid,omitempty"`     // started
 
 	Exit int    `json:"exit,omitempty"` // result
 	Full string `json:"full,omitempty"` // result: file holding all the output, when over the limits

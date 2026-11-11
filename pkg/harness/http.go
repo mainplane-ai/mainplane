@@ -100,7 +100,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 			fail(w, err)
 			return
 		}
-		reply(w, page(infos, r.URL.Query().Get("status"), r.URL.Query().Get("after"), r.URL.Query().Get("limit")))
+		reply(w, page(infos, r.URL.Query().Get("status"), r.URL.Query().Get("after"), r.URL.Query().Get("limit"), func(i Info) (string, statefile.Status) { return i.ID, i.Status }))
 	})
 	mux.HandleFunc("POST /sessions", func(w http.ResponseWriter, r *http.Request) {
 		var c Create
@@ -123,7 +123,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		}
 		reply(w, info)
 	})
-	handle("GET /sessions/{id}/records", h.serveRecords)
+	handle("GET /sessions/{id}/records", func(w http.ResponseWriter, r *http.Request) { h.ServeRecords(w, r, r.PathValue("id")) })
 	handle("POST /sessions/{id}/records", func(w http.ResponseWriter, r *http.Request) {
 		via, err := via(r)
 		if err != nil {
@@ -166,6 +166,8 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 	handle("DELETE /sessions/{id}", h.serveDelete)
 	handle("PUT /sessions/{id}/workers", h.serveWorkers)
 	handle("PUT /sessions/{id}/name", h.serveName)
+	h.agentRoutes(ctx, mux)
+	h.appRoutes(mux)
 	return mux
 }
 
@@ -261,13 +263,14 @@ func (h *Harness) serveName(w http.ResponseWriter, r *http.Request) {
 }
 
 // page filters a list by status, skips through the entry named by after, and
-// cuts it to limit. Empty means no filter, no skip, no cut.
-func page(infos []Info, status, after, limit string) []Info {
+// cuts it to limit; of is an entry's id and status. Empty means no filter, no
+// skip, no cut.
+func page[T any](infos []T, status, after, limit string, of func(T) (string, statefile.Status)) []T {
 	if status != "" {
-		infos = slices.DeleteFunc(infos, func(i Info) bool { return string(i.Status) != status })
+		infos = slices.DeleteFunc(infos, func(i T) bool { _, st := of(i); return string(st) != status })
 	}
 	if after != "" {
-		if i := slices.IndexFunc(infos, func(i Info) bool { return i.ID == after }); i >= 0 {
+		if i := slices.IndexFunc(infos, func(i T) bool { id, _ := of(i); return id == after }); i >= 0 {
 			infos = infos[i+1:]
 		}
 	}
@@ -313,11 +316,10 @@ func parts(ctype string, body io.Reader) ([]Part, error) {
 	}
 }
 
-// serveRecords writes the records after ?after, long polling for ?wait when
-// there are none. The change channel is taken before the read, so an append
-// between read and wait is not missed.
-func (h *Harness) serveRecords(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+// ServeRecords writes session id's records after ?after, long polling for
+// ?wait when there are none. The change channel is taken before the read, so
+// an append between read and wait is not missed.
+func (h *Harness) ServeRecords(w http.ResponseWriter, r *http.Request, id string) {
 	after, _ := strconv.Atoi(r.URL.Query().Get("after"))
 	changed := h.Changed(id)
 	recs, err := h.records(id, after)

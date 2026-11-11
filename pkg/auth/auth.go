@@ -149,10 +149,11 @@ func (s Store) Check(kind, secret string) bool {
 	return ok
 }
 
-// Bearer refuses a request whose Authorization: Bearer is not a live api key,
-// and one from an address l turns away. A request with no key is refused but
-// not counted: it guesses nothing.
-func (s Store) Bearer(l *Limit, next http.Handler) http.Handler {
+// Bearer refuses a request whose Authorization: Bearer is not a live api key
+// or a token sg signed, and one from an address l turns away. A request with
+// no key is refused but not counted: it guesses nothing. The request carries
+// its caller on, for the routes to scope a signed token.
+func (s Store) Bearer(l *Limit, sg Signer, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a := Addr(r)
 		if err := l.Wait(a); err != nil {
@@ -160,14 +161,20 @@ func (s Store) Bearer(l *Limit, next http.Handler) http.Handler {
 			return
 		}
 		secret, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if !ok || !s.Check(Key, secret) {
+		c, good := Caller{Kind: Key}, ok && s.Check(Key, secret)
+		for _, kind := range []string{SessionKey, AppKey} {
+			if sub, signed := sg.Verify(kind, secret); ok && signed {
+				c, good = Caller{Kind: kind, Subject: sub}, true
+			}
+		}
+		if !good {
 			if ok {
 				l.Refused(a)
 			}
 			http.Error(w, "api key refused", http.StatusUnauthorized)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(WithCaller(r.Context(), c)))
 	})
 }
 

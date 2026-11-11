@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/mainplane-ai/mainplane/pkg/apps"
 	"github.com/mainplane-ai/mainplane/pkg/catalog"
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
@@ -36,7 +37,13 @@ const resultLines = 20
 var arity = map[string][2]int{
 	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {0, 1}, "retry": {1, 1}, "stop": {1, 1}, "delete": {1, 1},
 	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "worker remove": {1, 1}, "worker rename": {2, 2}, "providers": {0, 0}, "provider": {3, 4}, "key": {2, 2}, "signin": {1, 1},
+	"agents": {0, 1}, "agent new": {0, 0}, "agent info": {1, 1}, "agent message": {2, -1}, "agent stop": {1, 1}, "agent retry": {1, 1}, "agent delete": {1, 1}, "agent name": {1, -1}, "agent config": {1, 1}, "agent apps": {1, -1},
+	"apps": {0, 0}, "apps start": {1, 1}, "apps stop": {1, 1}, "app": {2, 4}, "skills": {0, 0}, "skill": {1, 1}, "secrets": {0, 0}, "secret set": {1, 1}, "secret delete": {1, 1},
 }
+
+// keyed are the verbs a session's own key serves, in an agent's
+// environments: there they go to the agent's apps, with no login.
+var keyed = []string{"app", "skill", "skills"}
 
 // cli is the harness API as verbs: one verb, one route, its reply printed.
 // The harness and the key come from login; nothing else is remembered or
@@ -47,14 +54,7 @@ func cli(verb string, args []string) {
 	if !ok || len(args) < a[0] || a[1] >= 0 && len(args) > a[1] {
 		usage()
 	}
-	c, err := login()
-	if errors.Is(err, fs.ErrNotExist) {
-		die(fmt.Errorf("not logged in: mainplane login <api key>"))
-	}
-	if err != nil {
-		die(err)
-	}
-	hv := c.version()
+	c, hv := connect(verb)
 	switch verb {
 	case "new":
 		var out struct{ ID string }
@@ -135,7 +135,123 @@ func cli(verb string, args []string) {
 		c.key(args[0], args[1])
 	case "signin":
 		c.signin(args[0])
+	default:
+		c.agentVerb(verb, args)
 	}
+}
+
+// connect is the client for verb and the harness's version. In an agent's
+// environments a keyed verb goes with the session's own key: no login, and
+// no version check, which that key may not ask for.
+func connect(verb string) (client, string) {
+	if sc, ok := connector.Session(); ok && slices.Contains(keyed, verb) {
+		return client{sc}, ""
+	}
+	c, err := login()
+	if errors.Is(err, fs.ErrNotExist) {
+		die(fmt.Errorf("not logged in: mainplane login <api key>"))
+	}
+	if err != nil {
+		die(err)
+	}
+	return c, c.version()
+}
+
+// agentVerb is a verb of agents, apps, skills or secrets.
+func (c client) agentVerb(verb string, args []string) {
+	switch verb {
+	case "agents":
+		infos, err := c.Agents(context.Background(), strings.Join(args, ""))
+		if err != nil {
+			die(err)
+		}
+		for _, i := range infos {
+			fmt.Printf("%s  %-11s  %-40s  session=%s  context=%d/%d  %s  %-16s  %s\n", i.ID, i.Status, i.Config.Model, i.CurrentSession, i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime), i.Via, i.Name)
+		}
+	case "agent new":
+		var out struct{ ID, Session string }
+		c.call("POST", "/agents?via="+via, "application/json", os.Stdin, &out)
+		fmt.Println(out.ID, out.Session)
+	case "agent info":
+		c.raw("/agents/" + args[0])
+	case "agent message":
+		sid, n, err := c.PostAgent(context.Background(), args[0], via, args[1], args[2:])
+		if err != nil {
+			die(err)
+		}
+		fmt.Println(sid, n)
+	case "agent stop":
+		c.call("POST", "/agents/"+args[0]+"/stop?via="+via, "", nil, nil)
+	case "agent retry":
+		var out struct{ Status string }
+		c.call("POST", "/agents/"+args[0]+"/retry", "", nil, &out)
+		fmt.Println(out.Status)
+	case "agent delete":
+		c.call("DELETE", "/agents/"+args[0]+"?via="+via, "", nil, nil)
+	case "agent name":
+		c.call("PUT", "/agents/"+args[0]+"/name?via="+via, "text/plain", strings.NewReader(strings.Join(args[1:], " ")), nil)
+	case "agent config":
+		c.call("PUT", "/agents/"+args[0]+"/config?via="+via, "application/json", os.Stdin, nil)
+	case "agent apps":
+		b, _ := json.Marshal(append([]string{}, args[1:]...)) // names are strings: it cannot fail
+		c.call("PUT", "/agents/"+args[0]+"/apps?via="+via, "application/json", bytes.NewReader(b), nil)
+	case "apps":
+		var infos []apps.Info
+		c.call("GET", "/apps", "", nil, &infos)
+		for _, i := range infos {
+			fmt.Printf("%-16s  %-8s  %-15s  %s\n", i.Name, i.Kind, i.Status, i.Description)
+		}
+	case "apps start", "apps stop":
+		c.call("POST", "/apps/"+url.PathEscape(args[0])+"/"+strings.TrimPrefix(verb, "apps "), "", nil, nil)
+	case "app":
+		c.app(args[0], args[1], args[2:])
+	case "skills":
+		var skills []harness.SkillInfo
+		c.call("GET", "/skills", "", nil, &skills)
+		for _, k := range skills {
+			fmt.Printf("%-16s  %s\n", k.Name, k.Description)
+		}
+	case "skill":
+		resp, err := c.Do(context.Background(), "GET", "/skills/"+url.PathEscape(args[0]), "", nil)
+		if err != nil {
+			die(err)
+		}
+		_, _ = io.Copy(os.Stdout, resp.Body)
+		_ = resp.Body.Close()
+	case "secrets":
+		var names []string
+		c.call("GET", "/secrets", "", nil, &names)
+		for _, n := range names {
+			fmt.Println(n)
+		}
+	case "secret set":
+		c.call("PUT", "/secrets/"+url.PathEscape(args[0]), "application/octet-stream", os.Stdin, nil)
+	case "secret delete":
+		c.call("DELETE", "/secrets/"+url.PathEscape(args[0]), "", nil, nil)
+	}
+}
+
+// app calls an app: method, then its own path and a JSON body, either one
+// optional; the reply is printed as it came.
+func (c client) app(name, method string, rest []string) {
+	path, body := "", ""
+	if len(rest) > 0 && strings.HasPrefix(rest[0], "/") {
+		path, rest = rest[0], rest[1:]
+	}
+	if len(rest) > 0 {
+		body = rest[0]
+	}
+	var r io.Reader
+	ctype := ""
+	if body != "" {
+		r, ctype = strings.NewReader(body), "application/json"
+	}
+	resp, err := c.Do(context.Background(), strings.ToUpper(method), "/apps/"+url.PathEscape(name)+path, ctype, r)
+	if err != nil {
+		die(err)
+	}
+	_, _ = io.Copy(os.Stdout, resp.Body)
+	_ = resp.Body.Close()
 }
 
 // key sets a provider's key, and that of each catalog provider that takes

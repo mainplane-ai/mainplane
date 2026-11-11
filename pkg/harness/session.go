@@ -320,6 +320,7 @@ func (h *Harness) Kick(ctx context.Context, id string) {
 				h.touch(id)
 				if st == statefile.StatusClosed || st == statefile.StatusFailed {
 					h.copyLogs(ctx, s)
+					h.stopped(id, st)
 				}
 				close(done)
 				return
@@ -489,14 +490,17 @@ func (h *Harness) lostJobs(ids []string) {
 
 // status is the file's word, or stepping while a runner holds the session.
 func (h *Harness) status(id string, chain []statefile.Record) statefile.Status {
-	s := h.session(id)
-	h.mu.Lock()
-	running := s.running
-	h.mu.Unlock()
-	if running {
+	if h.running(id) {
 		return statefile.StatusStepping
 	}
 	return statefile.Derive(chain)
+}
+
+func (h *Harness) running(id string) bool {
+	s := h.session(id)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return s.running
 }
 
 // Changed is a channel closed at the session's next append.

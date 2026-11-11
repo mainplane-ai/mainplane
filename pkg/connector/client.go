@@ -300,36 +300,85 @@ func (c *Client) Stop(ctx context.Context, id, via string) error {
 // is refused, not guessed. Returns the last record's n.
 func (c *Client) Post(ctx context.Context, id, via, text string, files []string) (int, error) {
 	var out struct{ N int }
-	path := "/sessions/" + id + "/records?via=" + url.QueryEscape(via)
+	err := c.post(ctx, "/sessions/"+id+"/records?via="+url.QueryEscape(via), text, files, &out)
+	return out.N, err
+}
+
+// PostAgent posts to an agent as Post does to a session, and returns the
+// session the post landed on and its n.
+func (c *Client) PostAgent(ctx context.Context, id, via, text string, files []string) (string, int, error) {
+	var out struct {
+		Session string
+		N       int
+	}
+	err := c.post(ctx, "/agents/"+id+"/records?via="+url.QueryEscape(via), text, files, &out)
+	return out.Session, out.N, err
+}
+
+func (c *Client) post(ctx context.Context, path, text string, files []string, out any) error {
 	if len(files) == 0 {
-		err := c.Call(ctx, "POST", path, "text/plain", strings.NewReader(text), &out)
-		return out.N, err
+		return c.Call(ctx, "POST", path, "text/plain", strings.NewReader(text), out)
 	}
 	var b bytes.Buffer
 	mw := multipart.NewWriter(&b)
 	w, err := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"text/plain"}})
 	if err != nil {
-		return 0, err
+		return err
 	}
 	_, _ = w.Write([]byte(text))
 	for _, f := range files {
 		t := mime.TypeByExtension(filepath.Ext(f))
 		if t == "" {
-			return 0, fmt.Errorf("%s: no content type for %q", f, filepath.Ext(f))
+			return fmt.Errorf("%s: no content type for %q", f, filepath.Ext(f))
 		}
 		data, err := os.ReadFile(f)
 		if err != nil {
-			return 0, err
+			return err
 		}
 		w, err := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {t}})
 		if err != nil {
-			return 0, err
+			return err
 		}
 		_, _ = w.Write(data)
 	}
 	_ = mw.Close()
-	err = c.Call(ctx, "POST", path, mw.FormDataContentType(), &b, &out)
-	return out.N, err
+	return c.Call(ctx, "POST", path, mw.FormDataContentType(), &b, out)
+}
+
+// CreateAgent makes an agent and its first session, or adopts n.Session.
+func (c *Client) CreateAgent(ctx context.Context, n harness.NewAgent, via string) (id, session string, err error) {
+	b, err := json.Marshal(n)
+	if err != nil {
+		return "", "", err
+	}
+	var out struct{ ID, Session string }
+	err = c.Call(ctx, "POST", "/agents?via="+url.QueryEscape(via), "application/json", bytes.NewReader(b), &out)
+	return out.ID, out.Session, err
+}
+
+// Agents lists agents, newest updated first.
+func (c *Client) Agents(ctx context.Context, status string) ([]harness.AgentInfo, error) {
+	var infos []harness.AgentInfo
+	err := c.Call(ctx, "GET", "/agents?status="+url.QueryEscape(status), "", nil, &infos)
+	return infos, err
+}
+
+// Agent is one agent with its live session's state.
+func (c *Client) Agent(ctx context.Context, id string) (harness.AgentInfo, error) {
+	var info harness.AgentInfo
+	err := c.Call(ctx, "GET", "/agents/"+id, "", nil, &info)
+	return info, err
+}
+
+// Session is the client a session's environment names: its session key and
+// MAINPLANE_URL, which reach the agent's apps and skills and nothing else.
+// False outside one.
+func Session() (*Client, bool) {
+	k, u := os.Getenv("MAINPLANE_KEY"), os.Getenv("MAINPLANE_URL")
+	if !strings.HasPrefix(k, "mp_"+auth.SessionKey+"_") || u == "" {
+		return nil, false
+	}
+	return &Client{URL: u, Mesh: u, Key: k}, true
 }
 
 // Records is the file after record n; with wait, a long poll.

@@ -48,8 +48,8 @@ func main() {
 		app(strings.Join(os.Args[1:], ""), false)
 		return
 	}
-	if len(os.Args) > 2 && os.Args[1] == "worker" && (os.Args[2] == "remove" || os.Args[2] == "rename") {
-		cli("worker "+os.Args[2], os.Args[3:])
+	if _, ok := arity[strings.Join(os.Args[1:min(3, len(os.Args))], " ")]; ok && len(os.Args) > 2 {
+		cli(os.Args[1]+" "+os.Args[2], os.Args[3:])
 		return
 	}
 	if len(os.Args) > 2 && os.Args[1] == "workers" {
@@ -413,6 +413,27 @@ func usage() {
                                      the catalog gives the provider, in its config, and serves it at once
   signin     <provider>              POST /providers/{provider}/login: sign in where a provider takes no key, such as
                                      chatgpt; prints the URL to open, reads what to paste back, waits for the end
+
+  agents     [status]                GET  /agents: id, status, model, live session, context, updated, via, name
+  agent      new                     POST /agents, body from stdin: {"name","config","apps"} or {"session","apps"}
+  agent      info <id>               GET  /agents/{id}
+  agent      message <id> <text> [file...]
+                                     POST /agents/{id}/records: onto its live session, or a new one when that is
+                                     stale; prints the session and n
+  agent      stop|retry|delete <id>  POST /agents/{id}/stop, POST /agents/{id}/retry, DELETE /agents/{id}
+  agent      name <id> [text]        PUT  /agents/{id}/name
+  agent      config <id>             PUT  /agents/{id}/config, body from stdin: its next sessions' config
+  agent      apps <id> [app...]      PUT  /agents/{id}/apps
+  apps                               GET  /apps: each app's kind, status and summary
+  apps       start|stop <name>       POST /apps/{name}/start or stop: a run app
+  app        <name> <method> [path] [json]
+                                     an app call. In an agent's environments it goes with $MAINPLANE_KEY to
+                                     $MAINPLANE_URL, as do skill and skills: no login there
+  skills                             GET  /skills: every app, or in an agent's environments its apps
+  skill      <name>                  GET  /skills/{name}: the app's whole skill
+  secrets                            GET  /secrets: names only; no route reads a value
+  secret     set <name>              PUT  /secrets/{name}, the value from stdin. Apps get only the secrets they name
+  secret     delete <name>           DELETE /secrets/{name}
 `)
 	os.Exit(2)
 }

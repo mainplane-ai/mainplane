@@ -32,9 +32,9 @@ func (s Sessions) List() ([]string, error) {
 	return ids, nil
 }
 
-// Start creates a session: start, then config.
-func (s Sessions) Start(id string, config []byte) (*File, error) {
-	return Create(s.Path(id), config)
+// Start creates a session: start, naming who created it, then config.
+func (s Sessions) Start(id, via string, config []byte) (*File, error) {
+	return Create(s.Path(id), via, config)
 }
 
 // Copy creates session id from records 1 through n-1 of session from. Fork

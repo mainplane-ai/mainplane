@@ -24,6 +24,8 @@ type Pool struct {
 
 	smu     sync.Mutex                  // one Resend at a time, so an older one never lands last
 	desired func(string) worker.Desired // the drives of the worker by name
+
+	Env func(session string) []string // the variables each session's environments start with, set before Serve
 }
 
 // Listed is a worker as GET /workers shows it: its hello, and why its last
@@ -141,6 +143,7 @@ func (p *Pool) serve(conn net.Conn, node func(netip.Addr) (string, bool)) {
 		return
 	}
 	log.Printf("worker %s connected from %s: %s %s %s", r.Name, who, r.OS, r.Arch, r.Version)
+	r.env = p.Env
 	p.Add(r)
 	p.Resend()
 	<-r.done
