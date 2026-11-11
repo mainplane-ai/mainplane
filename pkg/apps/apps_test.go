@@ -573,3 +573,45 @@ func TestSchedule(t *testing.T) {
 		t.Fatalf("deleted timer listed: %s", got)
 	}
 }
+
+// A secret cannot take the name of a variable the harness sets for a daemon,
+// and an app.json cannot name one or set a header the harness speaks in.
+func TestReservedNames(t *testing.T) {
+	r := newRig(t)
+	for _, n := range []string{"PORT", "DATA_DIR", "PATH", "HOME", "Path", "MAINPLANE_URL", "MAINPLANE_PROXY_SECRET", "mainplane_app_key"} {
+		if got := r.want(400, "full", "PUT", "/secrets/"+n, "v"); !strings.Contains(got, n) {
+			t.Fatalf("%s: %s", n, got)
+		}
+		r.install("d", Spec{Run: []string{os.Args[0]}, Secrets: []string{"K", n}})
+		if got := r.want(404, "full", "GET", "/skills/d", ""); !strings.Contains(got, "secret "+n) {
+			t.Fatalf("app.json with secret %s: %s", n, got)
+		}
+		r.want(400, "full", "POST", "/apps/d/start", "")
+	}
+	if got := r.want(200, "full", "GET", "/secrets", ""); strings.TrimSpace(got) != "[]" {
+		t.Fatalf("secrets: %s", got)
+	}
+	r.want(204, "full", "PUT", "/secrets/PORTS", "v") // only the names themselves
+	// one written before the rule can still be removed
+	if err := os.WriteFile(filepath.Join(r.dir, ".secrets"), []byte(`{"PORT":"1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.want(204, "full", "DELETE", "/secrets/PORT", "")
+
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = io.WriteString(w, req.Header.Get(agentHeader)+" "+req.URL.RawQuery)
+	}))
+	defer up.Close()
+	for _, k := range []string{"X-Mainplane-Agent", "x-mainplane-session", "X-MAINPLANE-ANYTHING"} {
+		r.install("forge", Spec{URL: up.URL, Headers: map[string]string{k: "another"}})
+		if got := r.want(404, "full", "GET", "/skills/forge", ""); !strings.Contains(got, "header "+k) {
+			t.Fatalf("app.json with header %s: %s", k, got)
+		}
+	}
+	// a base URL's query stays when the call has one of its own
+	r.install("forge", Spec{URL: up.URL + "?base=1", Headers: map[string]string{"X-Other": "fine"}})
+	a := r.agent(conf(), "forge")
+	if got := r.want(200, r.key(a), "GET", "/apps/forge/x?own=2", ""); got != a.ID+" base=1&own=2" {
+		t.Fatalf("forwarded: %s", got)
+	}
+}

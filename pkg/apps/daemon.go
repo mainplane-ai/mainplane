@@ -92,11 +92,19 @@ func (m *Manager) stop(name string) {
 	}
 }
 
+// reserved is whether name is a variable supervise sets for a daemon, which
+// a secret of that name would replace. Windows reads names without case.
+func reserved(name string) bool {
+	n := strings.ToUpper(name)
+	return n == "PATH" || n == "HOME" || n == "PORT" || n == "DATA_DIR" || strings.HasPrefix(n, "MAINPLANE_")
+}
+
 // supervise runs the app's command until ctx ends, again each time it exits.
 // The process gets its port, the secret the harness proves itself with, its
 // data folder, the secrets it names, and a key of its own only when it has
 // entitlements. It does not get the harness's environment, where provider
-// keys may be.
+// keys may be. It leads a process tree of its own, which ends whole when the
+// daemon is stopped or its first process exits.
 func (m *Manager) supervise(ctx context.Context, a app, d *daemon, secrets map[string]string) {
 	data := m.data(a.name)
 	if err := os.MkdirAll(data, 0o755); err != nil {
@@ -121,11 +129,16 @@ func (m *Manager) supervise(ctx context.Context, a app, d *daemon, secrets map[s
 		}
 		cmd := exec.CommandContext(ctx, a.spec.Run[0], a.spec.Run[1:]...)
 		cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr, cmd.WaitDelay = a.dir, env, os.Stderr, os.Stderr, relaunch
+		cmd.Cancel = func() error { return killTree(cmd.Process) }
+		own(cmd)
 		lctx, launched := context.WithCancel(ctx) // a process that dies before it listens ends its poll
 		go listening(lctx, port, ready)
 		log.Printf("app %s: %v on port %d", a.name, a.spec.Run, port)
 		err = cmd.Run()
 		launched()
+		if cmd.Process != nil && ctx.Err() == nil {
+			_ = killTree(cmd.Process) // what it started and left behind would pile up, one per launch
+		}
 		if ctx.Err() != nil {
 			return
 		}

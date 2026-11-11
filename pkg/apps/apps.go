@@ -157,13 +157,33 @@ func (m *Manager) load(name string) (app, error) {
 	if err == nil {
 		err = json.Unmarshal(b, &a.spec)
 	}
-	if err == nil && a.spec.URL != "" && len(a.spec.Run) > 0 {
-		err = errors.New("url and run are both set")
+	if err == nil {
+		err = a.spec.check()
 	}
 	if err != nil {
 		return a, fmt.Errorf("app %s: app.json: %w", name, err)
 	}
 	return a, nil
+}
+
+// check refuses a spec that would speak for the harness: a secret named as a
+// variable the harness sets for a daemon, or a header under the prefix the
+// harness names the caller with.
+func (s Spec) check() error {
+	if s.URL != "" && len(s.Run) > 0 {
+		return errors.New("url and run are both set")
+	}
+	for _, n := range s.Secrets {
+		if reserved(n) {
+			return fmt.Errorf("secret %s: the harness sets that variable for a daemon", n)
+		}
+	}
+	for k := range s.Headers {
+		if strings.HasPrefix(http.CanonicalHeaderKey(k), prefix) {
+			return fmt.Errorf("header %s: the harness sets the %s headers", k, prefix)
+		}
+	}
+	return nil
 }
 
 // names is every app the harness has, sorted.
@@ -235,6 +255,9 @@ func (m *Manager) readSecrets() (map[string]string, error) {
 func (m *Manager) setSecret(name string, value *string) error {
 	if !secretName.MatchString(name) {
 		return fmt.Errorf("bad secret name %q: letters, digits and _", name)
+	}
+	if value != nil && reserved(name) { // one that is there from before can still be removed
+		return fmt.Errorf("secret %s: the harness sets that variable for a daemon", name)
 	}
 	m.mu.Lock()
 	s, err := m.readSecrets()
