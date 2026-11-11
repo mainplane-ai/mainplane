@@ -228,6 +228,18 @@ func (h *Harness) SetName(id, via, n string) (int, error) {
 // the lock a post takes, so no post does. Copies keep their own files,
 // workers their logs.
 func (h *Harness) Delete(ctx context.Context, id, via string) error {
+	// An agent always has its live session: asked before the stop, so a
+	// refusal leaves the session as it was, and again under the lock an
+	// adoption writes under, so one that came since is seen.
+	live := func() error {
+		if a, ok := h.Holder(id); ok {
+			return fmt.Errorf("%w: session %s is the live session of agent %s: delete the agent, or let it roll over to a new session", ErrLive, id, a.ID)
+		}
+		return nil
+	}
+	if err := live(); err != nil {
+		return err
+	}
 	s := h.session(id)
 	release, err := h.halt(ctx, s, via)
 	if err != nil {
@@ -237,7 +249,9 @@ func (h *Harness) Delete(ctx context.Context, id, via string) error {
 	h.mu.Lock()
 	s.mu.Lock()
 	h.mu.Unlock()
-	err = os.Remove(h.Sessions.Path(id))
+	if err = live(); err == nil {
+		err = os.Remove(h.Sessions.Path(id))
+	}
 	if err == nil {
 		h.lockIndex()
 		delete(h.index, id)

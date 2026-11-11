@@ -630,3 +630,81 @@ func TestAgentRoutes(t *testing.T) {
 	}
 	do(200, "GET", "/sessions/"+made.Session, "") // the session's file stays
 }
+
+// An agent's live session is not deleted from under it; the sessions it has
+// left are, and so is the live one once the agent is gone.
+func TestDeleteLiveSession(t *testing.T) {
+	r := newRig(t)
+	t.Cleanup(func() { close(r.release) })
+	ctx := context.Background()
+	del := func(id string) (int, string) {
+		w := httptest.NewRecorder()
+		Handler(ctx, r.h).ServeHTTP(w, httptest.NewRequest("DELETE", "/sessions/"+id+"?via=test", nil))
+		return w.Code, w.Body.String()
+	}
+	a := r.create(AgentCreate{Config: r.conf(1000, 0, "w1")}, "web")
+	s1 := a.Sessions[0]
+	before := len(r.chain(s1))
+	if code, body := del(s1); code != http.StatusConflict || !strings.Contains(body, "agent "+a.ID) {
+		t.Fatalf("delete of the live session: %d %s", code, body)
+	}
+	if after := len(r.chain(s1)); after != before {
+		t.Fatalf("the refused delete wrote %d records to the session", after-before)
+	}
+	c := r.conf(1000, 0, "w1")
+	c.Params = map[string]json.RawMessage{"temperature": json.RawMessage("0.5")}
+	if err := r.h.SetAgentConfig(a.ID, "web", *c); err != nil {
+		t.Fatal(err)
+	}
+	s2 := r.post(a.ID, "go on")
+	if s2 == s1 {
+		t.Fatal("no rollover")
+	}
+	if code, body := del(s1); code != http.StatusNoContent {
+		t.Fatalf("delete of a session the agent left: %d %s", code, body)
+	}
+	if code, _ := del(s2); code != http.StatusConflict {
+		t.Fatalf("delete of the new live session: %d", code)
+	}
+	// an adopted session is its agent's live one too, until the agent goes
+	plain, err := r.h.Create(ctx, Create{Model: "fake/m1", ContextLimit: 1000}, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := r.create(AgentCreate{Session: plain}, "web")
+	if code, _ := del(plain); code != http.StatusConflict {
+		t.Fatalf("delete of an adopted session: %d", code)
+	}
+	if err := r.h.DeleteAgent(ctx, b.ID, "web"); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := del(plain); code != http.StatusNoContent {
+		t.Fatalf("delete after the agent's: %d %s", code, body)
+	}
+}
+
+// An id a caller made up reaches no file and keeps no lock.
+func TestMadeUpIDs(t *testing.T) {
+	r := newRig(t)
+	t.Cleanup(func() { close(r.release) })
+	ctx := context.Background()
+	for _, s := range []string{"../agents/x", "..", "a/b", "ABCDEFGH", strings.Repeat("a", 300)} {
+		if _, err := r.h.CreateAgent(ctx, AgentCreate{Session: s}, "web"); err == nil || !strings.Contains(err.Error(), "bad session id") {
+			t.Fatalf("adopting %q: %v", s, err)
+		}
+	}
+	for _, id := range []string{"00000000", "../x", ""} {
+		if _, _, err := r.h.PostAgent(ctx, id, "agent:x", "", []Part{{Type: "text/plain", Body: []byte("hi")}}); !errors.Is(err, ErrNoAgent) {
+			t.Fatalf("post to %q: %v", id, err)
+		}
+		if err := r.h.DeleteAgent(ctx, id, "web"); !errors.Is(err, ErrNoAgent) {
+			t.Fatalf("delete of %q: %v", id, err)
+		}
+	}
+	r.h.amu.Lock()
+	n := len(r.h.alocks)
+	r.h.amu.Unlock()
+	if entries, _ := os.ReadDir(r.h.Agents); n != 0 || len(entries) != 0 {
+		t.Fatalf("%d locks and %d files for agents that are not", n, len(entries))
+	}
+}

@@ -45,7 +45,8 @@ const MaxPost = 8 << 20
 //	PUT  /sessions/{id}/name          the name as text; ?via= required. a name     -> {"n"}
 //	                                  record; empty removes the name
 //	DELETE /sessions/{id}             ?via= required. the file is gone for good;   -> 204
-//	                                  a running step is stopped first
+//	                                  a running step is stopped first.
+//	                                  409 for an agent's live session
 //	GET  /agents                      ?via= ?status= ?limit= ?after=<id>           -> [AgentInfo], newest updated first
 //	POST /agents                      AgentCreate body; ?via= who makes it         -> {"id","session"}
 //	GET  /agents/{id}                 -> AgentInfo
@@ -298,11 +299,15 @@ func (h *Harness) serveAgentPost(ctx context.Context, w http.ResponseWriter, r *
 }
 
 // fail answers a request the harness refuses: an agent no file has is not
-// found, the rest is the caller's to fix.
+// found, an agent's live session is not deleted, the rest is the caller's
+// to fix.
 func fail(w http.ResponseWriter, err error) {
 	code := http.StatusBadRequest
-	if errors.Is(err, ErrNoAgent) {
+	switch {
+	case errors.Is(err, ErrNoAgent):
 		code = http.StatusNotFound
+	case errors.Is(err, ErrLive):
+		code = http.StatusConflict
 	}
 	http.Error(w, err.Error(), code)
 }

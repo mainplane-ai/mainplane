@@ -61,8 +61,12 @@ type AgentCreate struct {
 	Session string       `json:"session,omitempty"`
 }
 
-// ErrNoAgent is an agent id no file has.
-var ErrNoAgent = errors.New("no such agent")
+// ErrNoAgent is an agent id no file has. ErrLive is a delete of the session
+// an agent lives in.
+var (
+	ErrNoAgent = errors.New("no such agent")
+	ErrLive    = errors.New("in use")
+)
 
 // What a rollover writes. continued is the system record a new session
 // starts with; carry is the message that steps one made mid-task, when the
@@ -140,6 +144,10 @@ func (h *Harness) Holder(session string) (Agent, bool) {
 func (h *Harness) holdAgent(id string) (Agent, func(), error) {
 	h.lockAgents()
 	mu, ok := h.alocks[id]
+	if _, is := h.agents[id]; !ok && !is { // no lock is kept for an id a caller made up
+		h.amu.Unlock()
+		return Agent{}, nil, fmt.Errorf("%w: %s", ErrNoAgent, id)
+	}
 	if !ok {
 		mu = &sync.Mutex{}
 		h.alocks[id] = mu
