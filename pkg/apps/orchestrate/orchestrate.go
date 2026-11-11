@@ -71,6 +71,7 @@ type AgentCreate struct {
 // Host is the harness surface orchestrate calls.
 type Host interface {
 	GetAgent(id string) (AgentInfo, error)
+	SessionAgent(sessionID string) (AgentInfo, bool)
 	ListAgents() ([]AgentInfo, error)
 	CreateAgent(ctx context.Context, c AgentCreate, via string) (id, session string, err error)
 	PostText(ctx context.Context, id, via, text string) (session string, n int, err error)
@@ -137,6 +138,22 @@ func (a *App) addWatch(target, watcher string) error {
 		return a.saveLocked()
 	}
 	return nil
+}
+
+func (a *App) removeWatch(target, watcher string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	before := len(a.watches[target])
+	list := slices.DeleteFunc(a.watches[target], func(w string) bool { return w == watcher })
+	if len(list) == before {
+		return nil
+	}
+	if len(list) == 0 {
+		delete(a.watches, target)
+	} else {
+		a.watches[target] = list
+	}
+	return a.saveLocked()
 }
 
 func (a *App) clearWatch(target string) {
@@ -211,9 +228,9 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && verb == "spawn" && rest == "":
 		a.handleSpawn(w, r, caller)
 	case r.Method == http.MethodGet && (p == "" || p == "list" || p == "agents"):
-		a.handleList(w, r)
+		a.handleList(w, r, caller)
 	case r.Method == http.MethodGet && (verb == "get" || verb == "agents") && rest != "" && !strings.Contains(rest, "/"):
-		a.handleGet(w, rest)
+		a.handleGet(w, caller, rest)
 	case r.Method == http.MethodGet && verb == "records" && rest != "":
 		a.handleRecords(w, r, caller, rest)
 	case (r.Method == http.MethodPost || r.Method == http.MethodPut) && verb == "update" && rest != "":
@@ -297,12 +314,13 @@ func mergeConfig(base, over AgentConfig) AgentConfig {
 	return out
 }
 
-func (a *App) handleList(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleList(w http.ResponseWriter, r *http.Request, caller AgentInfo) {
 	infos, err := a.host.ListAgents()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	infos = slices.DeleteFunc(infos, func(i AgentInfo) bool { return !allowedTarget(i, caller) })
 	q := r.URL.Query()
 	if v := q.Get("via"); v != "" {
 		infos = slices.DeleteFunc(infos, func(i AgentInfo) bool { return i.Via != v })
@@ -316,9 +334,13 @@ func (a *App) handleList(w http.ResponseWriter, r *http.Request) {
 	replyJSON(w, infos)
 }
 
-func (a *App) handleGet(w http.ResponseWriter, id string) {
+func (a *App) handleGet(w http.ResponseWriter, caller AgentInfo, id string) {
 	info, err := a.host.GetAgent(id)
 	if writeAgentErr(w, err) {
+		return
+	}
+	if !allowedTarget(info, caller) {
+		http.Error(w, "target permissions exceed caller", http.StatusForbidden)
 		return
 	}
 	replyJSON(w, info)
@@ -332,9 +354,13 @@ func (a *App) handleRecords(w http.ResponseWriter, r *http.Request, caller Agent
 	q := r.URL.Query()
 	after, _ := strconv.Atoi(q.Get("after"))
 	wait, _ := time.ParseDuration(q.Get("wait"))
-	// Check worker subset against the session's config records first.
 	head, err := a.host.SessionRecords(r.Context(), sid, 0, 0)
 	if writeAgentErr(w, err) {
+		return
+	}
+	owner, ok := a.host.SessionAgent(sid)
+	if !ok || !allowedTarget(owner, caller) {
+		http.Error(w, "session permissions exceed caller", http.StatusForbidden)
 		return
 	}
 	for _, rec := range head {
@@ -416,8 +442,14 @@ func (a *App) handleUpdate(w http.ResponseWriter, r *http.Request, caller AgentI
 			return
 		}
 	}
-	if in.NotifyOnStop != nil && *in.NotifyOnStop {
-		if err := a.addWatch(id, caller.ID); writeAgentErr(w, err) {
+	if in.NotifyOnStop != nil {
+		var werr error
+		if *in.NotifyOnStop {
+			werr = a.addWatch(id, caller.ID)
+		} else {
+			werr = a.removeWatch(id, caller.ID)
+		}
+		if writeAgentErr(w, werr) {
 			return
 		}
 	}
@@ -463,10 +495,10 @@ func (a *App) handleDelete(w http.ResponseWriter, r *http.Request, caller AgentI
 		http.Error(w, "target permissions exceed caller", http.StatusForbidden)
 		return
 	}
-	a.clearWatch(id)
 	if err := a.host.DeleteAgent(r.Context(), id, "agent:"+caller.ID); writeAgentErr(w, err) {
 		return
 	}
+	a.clearWatch(id)
 	w.WriteHeader(http.StatusNoContent)
 }
 

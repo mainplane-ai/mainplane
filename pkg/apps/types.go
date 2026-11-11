@@ -20,6 +20,7 @@ type (
 // Host is the narrow surface of the harness that apps and built-ins call.
 type Host interface {
 	LiveAgent(sessionID string) (AgentInfo, bool)
+	SessionAgent(sessionID string) (AgentInfo, bool)
 	AgentHasApp(agentID, app string) bool
 	GetAgent(id string) (AgentInfo, error)
 	ListAgents() ([]AgentInfo, error)

@@ -31,6 +31,7 @@ type session struct {
 	retry    bool            // a run asked to step past a failed tip
 	stopped  string          // who asked for the stop, while one is in flight
 	rollover string          // next session ID allocated on mid-run rollover
+	retired  bool            // session has rolled over; PostAgent redirects to the successor
 	logs     sync.Mutex      // held by copyLogs from Load to the last Write, so an older copy never lands last
 	exports  atomic.Int64    // copyLogs calls asked for; a waiting one leaves to a newer one
 	conn     provider.Conn   // the provider's socket, kept from step to step within a run
@@ -102,6 +103,47 @@ type Part struct {
 	Body []byte
 }
 
+var errSessionRetired = errors.New("session retired by rollover")
+
+func (h *Harness) postAppend(id, via, key string, parts []Part, checkRetired bool) (int, error) {
+	s := h.session(id)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if checkRetired && s.retired {
+		return 0, errSessionRetired
+	}
+	var done, n int
+	if key != "" {
+		chain, err := h.Sessions.Load(id)
+		if err != nil {
+			return 0, err
+		}
+		for _, r := range chain {
+			if r.Kind == statefile.Message && r.IdempotencyKey == key {
+				done, n = done+1, r.N
+			}
+		}
+	}
+	if done >= len(parts) {
+		return n, nil
+	}
+	f := s.f
+	if f == nil {
+		var err error
+		if f, err = h.Sessions.Open(id); err != nil {
+			return 0, err
+		}
+		defer func() { _ = f.Close() }()
+	}
+	for _, p := range parts[done:] {
+		var err error
+		if n, err = h.write(s, f, statefile.Record{Header: statefile.Header{Kind: statefile.Message, Type: p.Type, Via: via, IdempotencyKey: key}, Body: p.Body}); err != nil {
+			return 0, err
+		}
+	}
+	return n, nil
+}
+
 // Post appends one message record per part under one lock and kicks the
 // session once, so a text and an image reach the model as one turn. The
 // append is the acknowledgement: a closed session starts stepping on it, a
@@ -109,41 +151,7 @@ type Part struct {
 // with a key appends only the parts the file does not hold with that key, so
 // a connector that lost the reply posts again and the post ends whole, once.
 func (h *Harness) Post(ctx context.Context, id, via, key string, parts []Part) (int, error) {
-	s := h.session(id)
-	n, err := func() (int, error) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		var done, n int
-		if key != "" {
-			chain, err := h.Sessions.Load(id)
-			if err != nil {
-				return 0, err
-			}
-			for _, r := range chain {
-				if r.Kind == statefile.Message && r.IdempotencyKey == key {
-					done, n = done+1, r.N
-				}
-			}
-		}
-		if done >= len(parts) {
-			return n, nil
-		}
-		f := s.f
-		if f == nil {
-			var err error
-			if f, err = h.Sessions.Open(id); err != nil {
-				return 0, err
-			}
-			defer func() { _ = f.Close() }()
-		}
-		for _, p := range parts[done:] {
-			var err error
-			if n, err = h.write(s, f, statefile.Record{Header: statefile.Header{Kind: statefile.Message, Type: p.Type, Via: via, IdempotencyKey: key}, Body: p.Body}); err != nil {
-				return 0, err
-			}
-		}
-		return n, nil
-	}()
+	n, err := h.postAppend(id, via, key, parts, false)
 	if err != nil {
 		return 0, err
 	}
@@ -370,10 +378,18 @@ func (s *session) stoppedBy() string {
 	return s.stopped
 }
 
-func (s *session) setRollover(nextID string) {
+func (h *Harness) retireForRollover(s *session, nextID, reason string) error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := h.write(s, s.f, system("continue", nextID)); err != nil {
+		return err
+	}
+	if _, err := h.write(s, s.f, errorRecord("", reason)); err != nil {
+		return err
+	}
 	s.rollover = nextID
-	s.mu.Unlock()
+	s.retired = true
+	return nil
 }
 
 // Stop ends everything the session is doing. A running step is cut now: the
@@ -403,6 +419,11 @@ func (h *Harness) Stop(ctx context.Context, id, via string) error {
 		}
 	}
 	h.killAll(ctx, id, chain)
+	if !running {
+		if ag, ok := h.LiveAgent(id); ok && h.Apps != nil {
+			h.Apps.NotifyAgentStop(ctx, ag)
+		}
+	}
 	return nil
 }
 

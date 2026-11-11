@@ -173,7 +173,7 @@ func (t *Terminal) Size() (int, int) {
 func (t *Terminal) Write(s string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if !t.closed {
+	if !t.closed && t.w != nil {
 		_, _ = t.w.WriteString(s)
 	}
 }
@@ -181,7 +181,7 @@ func (t *Terminal) Write(s string) {
 func (t *Terminal) Flush() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if !t.closed {
+	if !t.closed && t.w != nil {
 		_ = t.w.Flush()
 	}
 }

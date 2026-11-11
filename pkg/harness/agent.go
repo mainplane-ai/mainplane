@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -41,8 +42,9 @@ type agentFile struct {
 }
 
 type agentEntry struct {
-	mu sync.Mutex
-	a  agentFile
+	mu       sync.Mutex
+	a        agentFile
+	deleting bool
 }
 
 func (h *Harness) agentsDir() string {
@@ -462,11 +464,41 @@ func (h *Harness) LiveAgent(sessionID string) (AgentInfo, bool) {
 		return AgentInfo{}, false
 	}
 	e.mu.Lock()
+	if e.deleting {
+		e.mu.Unlock()
+		return AgentInfo{}, false
+	}
 	af := e.a
 	e.mu.Unlock()
 	if len(af.Sessions) == 0 || af.Sessions[len(af.Sessions)-1] != sessionID {
 		return AgentInfo{}, false
 	}
+	in, err := h.agentInfoFromFile(af)
+	return in, err == nil
+}
+
+// SessionAgent returns the agent that owns sessionID (live or historical).
+func (h *Harness) SessionAgent(sessionID string) (AgentInfo, bool) {
+	if err := h.initAgents(); err != nil {
+		return AgentInfo{}, false
+	}
+	h.amu.Lock()
+	aid, ok := h.ownAgent[sessionID]
+	var e *agentEntry
+	if ok {
+		e = h.agentMap[aid]
+	}
+	h.amu.Unlock()
+	if e == nil {
+		return AgentInfo{}, false
+	}
+	e.mu.Lock()
+	if e.deleting {
+		e.mu.Unlock()
+		return AgentInfo{}, false
+	}
+	af := e.a
+	e.mu.Unlock()
 	in, err := h.agentInfoFromFile(af)
 	return in, err == nil
 }
@@ -478,7 +510,7 @@ func (h *Harness) AgentHasApp(agentID, app string) bool {
 		return false
 	}
 	e.mu.Lock()
-	has := slices.Contains(e.a.Apps, app)
+	has := !e.deleting && slices.Contains(e.a.Apps, app)
 	e.mu.Unlock()
 	return has
 }
@@ -497,10 +529,13 @@ func (h *Harness) ListAgents() ([]AgentInfo, error) {
 	out := make([]AgentInfo, 0, len(entries))
 	for _, e := range entries {
 		e.mu.Lock()
+		deleting := e.deleting
 		af := e.a
 		e.mu.Unlock()
-		if in, err := h.agentInfoFromFile(af); err == nil {
-			out = append(out, in)
+		if !deleting {
+			if in, err := h.agentInfoFromFile(af); err == nil {
+				out = append(out, in)
+			}
 		}
 	}
 	slices.SortFunc(out, func(a, b AgentInfo) int { return b.Updated.Compare(a.Updated) })
@@ -518,10 +553,15 @@ func (h *Harness) SetAgentName(id, via, n string) error {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.a.Name = n
-	if err := h.saveAgentFile(e.a); err != nil {
+	if e.deleting {
+		return fmt.Errorf("agent %s is being deleted", id)
+	}
+	next := e.a
+	next.Name = n
+	if err := h.saveAgentFile(next); err != nil {
 		return err
 	}
+	e.a = next
 	cur := e.a.Sessions[len(e.a.Sessions)-1]
 	_, err = h.SetName(cur, via, n)
 	return err
@@ -539,6 +579,9 @@ func (h *Harness) SetAgentConfig(id, via string, cfg AgentConfig) error {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.deleting {
+		return fmt.Errorf("agent %s is being deleted", id)
+	}
 	cur := e.a.Sessions[len(e.a.Sessions)-1]
 	if chain, err := h.Sessions.Load(cur); err == nil {
 		if sConf, err := config(chain); err == nil {
@@ -549,8 +592,13 @@ func (h *Harness) SetAgentConfig(id, via string, cfg AgentConfig) error {
 			}
 		}
 	}
-	e.a.Config = cfg
-	return h.saveAgentFile(e.a)
+	next := e.a
+	next.Config = cfg
+	if err := h.saveAgentFile(next); err != nil {
+		return err
+	}
+	e.a = next
+	return nil
 }
 
 // SetAgentApps updates an agent's granted apps and appends an apps system note
@@ -566,10 +614,15 @@ func (h *Harness) SetAgentApps(id, _ string, list []string) error {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.a.Apps = clean
-	if err := h.saveAgentFile(e.a); err != nil {
+	if e.deleting {
+		return fmt.Errorf("agent %s is being deleted", id)
+	}
+	next := e.a
+	next.Apps = clean
+	if err := h.saveAgentFile(next); err != nil {
 		return err
 	}
+	e.a = next
 	cur := e.a.Sessions[len(e.a.Sessions)-1]
 	return h.note(h.session(cur), cur, system("apps", h.appsSummary(clean, true)))
 }
@@ -581,6 +634,10 @@ func (h *Harness) StopAgent(ctx context.Context, id, via string) error {
 		return err
 	}
 	e.mu.Lock()
+	if e.deleting {
+		e.mu.Unlock()
+		return fmt.Errorf("agent %s is being deleted", id)
+	}
 	cur := e.a.Sessions[len(e.a.Sessions)-1]
 	e.mu.Unlock()
 	return h.Stop(ctx, cur, via)
@@ -593,6 +650,10 @@ func (h *Harness) RetryAgent(ctx context.Context, id string) error {
 		return err
 	}
 	e.mu.Lock()
+	if e.deleting {
+		e.mu.Unlock()
+		return fmt.Errorf("agent %s is being deleted", id)
+	}
 	cur := e.a.Sessions[len(e.a.Sessions)-1]
 	e.mu.Unlock()
 	if _, err := h.Info(cur); err != nil {
@@ -610,8 +671,14 @@ func (h *Harness) DeleteAgent(ctx context.Context, id, via string) error {
 		return err
 	}
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	if e.deleting {
+		e.mu.Unlock()
+		return fmt.Errorf("agent %s is already being deleted", id)
+	}
+	e.deleting = true
 	cur := e.a.Sessions[len(e.a.Sessions)-1]
+	e.mu.Unlock()
+
 	_ = h.Stop(ctx, cur, via)
 	s := h.session(cur)
 	h.mu.Lock()
@@ -621,18 +688,25 @@ func (h *Harness) DeleteAgent(ctx context.Context, id, via string) error {
 		select {
 		case <-done:
 		case <-ctx.Done():
+			e.mu.Lock()
+			e.deleting = false
+			e.mu.Unlock()
 			return ctx.Err()
 		}
 	} else {
 		h.mu.Unlock()
 	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if err := os.Remove(h.agentPath(id)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		e.deleting = false
 		return err
 	}
 	h.amu.Lock()
 	delete(h.agentMap, id)
-	delete(h.liveAgent, cur)
 	for _, sid := range e.a.Sessions {
+		delete(h.liveAgent, sid)
 		delete(h.ownAgent, sid)
 	}
 	h.amu.Unlock()
@@ -688,51 +762,94 @@ func (h *Harness) shouldIdleRollover(chain []statefile.Record, cfg AgentConfig) 
 	return false
 }
 
+func (h *Harness) cleanupFailedNextSession(nextID string) {
+	_ = os.Remove(h.Sessions.Path(nextID))
+	h.lockIndex()
+	delete(h.index, nextID)
+	delete(h.dirty, nextID)
+	h.imu.Unlock()
+}
+
+func (h *Harness) maybeIdleRolloverLocked(ctx context.Context, e *agentEntry, cur string, s *session) (string, error) {
+	chain, err := h.Sessions.Load(cur)
+	if err != nil {
+		return "", err
+	}
+	if !h.shouldIdleRollover(chain, e.a.Config) {
+		return cur, nil
+	}
+	h.copyLogsForce(ctx, s)
+	nextID := statefile.NewID()
+	if err := h.createAgentSession(ctx, nextID, e.a.ID, e.a.Name, e.a.Config, e.a.Apps, cur, e.a.Sessions); err != nil {
+		return "", err
+	}
+	if err := h.note(s, cur, system("continue", nextID)); err != nil {
+		h.cleanupFailedNextSession(nextID)
+		return "", err
+	}
+	next := e.a
+	next.Sessions = append(slices.Clone(e.a.Sessions), nextID)
+	if err := h.saveAgentFile(next); err != nil {
+		h.cleanupFailedNextSession(nextID)
+		return "", err
+	}
+	s.mu.Lock()
+	s.retired = true
+	s.mu.Unlock()
+	e.a = next
+	h.amu.Lock()
+	delete(h.liveAgent, cur)
+	h.liveAgent[nextID] = e.a.ID
+	h.ownAgent[nextID] = e.a.ID
+	h.amu.Unlock()
+	return nextID, nil
+}
+
 // PostAgent appends parts to an agent, rolling over first if Rule 2 triggers.
 func (h *Harness) PostAgent(ctx context.Context, id, via, key string, parts []Part) (string, int, error) {
 	e, err := h.lookupAgentEntry(id)
 	if err != nil {
 		return "", 0, err
 	}
-	e.mu.Lock()
-	cur := e.a.Sessions[len(e.a.Sessions)-1]
-	s := h.session(cur)
-	h.mu.Lock()
-	running := s.running
-	h.mu.Unlock()
-	if !running {
-		chain, err := h.Sessions.Load(cur)
+	for {
+		e.mu.Lock()
+		if e.deleting {
+			e.mu.Unlock()
+			return "", 0, fmt.Errorf("agent %s is being deleted", id)
+		}
+		cur := e.a.Sessions[len(e.a.Sessions)-1]
+		s := h.session(cur)
+		h.mu.Lock()
+		running := s.running
+		done := s.done
+		h.mu.Unlock()
+		if !running {
+			cur, err = h.maybeIdleRolloverLocked(ctx, e, cur, s)
+			if err != nil {
+				e.mu.Unlock()
+				return "", 0, err
+			}
+		}
+		n, err := h.postAppend(cur, via, key, parts, true)
+		if errors.Is(err, errSessionRetired) {
+			e.mu.Unlock()
+			if running && done != nil {
+				select {
+				case <-done:
+				case <-ctx.Done():
+					return "", 0, ctx.Err()
+				}
+			}
+			continue
+		}
 		if err != nil {
 			e.mu.Unlock()
 			return "", 0, err
 		}
-		if h.shouldIdleRollover(chain, e.a.Config) {
-			h.copyLogsForce(ctx, s)
-			nextID := statefile.NewID()
-			if err := h.createAgentSession(ctx, nextID, e.a.ID, e.a.Name, e.a.Config, e.a.Apps, cur, e.a.Sessions); err != nil {
-				e.mu.Unlock()
-				return "", 0, err
-			}
-			if err := h.note(s, cur, system("continue", nextID)); err != nil {
-				e.mu.Unlock()
-				return "", 0, err
-			}
-			e.a.Sessions = append(e.a.Sessions, nextID)
-			if err := h.saveAgentFile(e.a); err != nil {
-				e.mu.Unlock()
-				return "", 0, err
-			}
-			h.amu.Lock()
-			delete(h.liveAgent, cur)
-			h.liveAgent[nextID] = e.a.ID
-			h.ownAgent[nextID] = e.a.ID
-			h.amu.Unlock()
-			cur = nextID
-		}
+		h.Kick(ctx, cur)
+		e.mu.Unlock()
+		return cur, n, nil
 	}
-	e.mu.Unlock()
-	n, err := h.Post(ctx, cur, via, key, parts)
-	return cur, n, err
 }
 
 // PostText posts a single text/plain message to an agent using the harness's
@@ -750,6 +867,10 @@ func (h *Harness) checkMidRunRollover(id string, conf statefile.Conf, chain []st
 		return "", ""
 	}
 	e.mu.Lock()
+	if e.deleting {
+		e.mu.Unlock()
+		return "", ""
+	}
 	af := e.a
 	e.mu.Unlock()
 	if len(af.Sessions) == 0 || af.Sessions[len(af.Sessions)-1] != id {
@@ -767,37 +888,48 @@ func (h *Harness) checkMidRunRollover(id string, conf statefile.Conf, chain []st
 	}
 }
 
-// finishMidRunRollover runs after copyLogsForce(s) completes on workers,
-// creating nextID, revoking cur's session key, moving unaddressed mid-step
-// messages to nextID, and kicking nextID.
-func (h *Harness) finishMidRunRollover(ctx context.Context, cur, nextID string, s *session) {
-	e, ok := h.liveEntryForSession(cur)
-	if !ok {
-		h.mu.Lock()
-		s.running, s.cancel, s.kicked = false, nil, false
-		h.mu.Unlock()
-		return
-	}
-	e.mu.Lock()
-	if len(e.a.Sessions) == 0 || e.a.Sessions[len(e.a.Sessions)-1] != cur {
-		e.mu.Unlock()
-		h.mu.Lock()
-		s.running, s.cancel, s.kicked = false, nil, false
-		h.mu.Unlock()
-		return
-	}
-	if err := h.createAgentSession(ctx, nextID, e.a.ID, e.a.Name, e.a.Config, e.a.Apps, cur, e.a.Sessions); err != nil {
-		e.mu.Unlock()
-		h.mu.Lock()
-		s.running, s.cancel, s.kicked = false, nil, false
-		h.mu.Unlock()
-		return
-	}
-	// Transition s out of running while holding e.mu so new PostAgent calls
-	// wait for e.mu and land cleanly on nextID.
+func (h *Harness) abortMidRunRollover(ctx context.Context, cur string, s *session) {
+	s.mu.Lock()
+	s.retired = false
+	s.mu.Unlock()
 	h.mu.Lock()
 	s.running, s.cancel, s.kicked = false, nil, false
 	h.mu.Unlock()
+	if ag, ok := h.LiveAgent(cur); ok && h.Apps != nil {
+		h.Apps.NotifyAgentStop(ctx, ag)
+	}
+}
+
+// finishMidRunRollover runs after copyLogsForce(s) completes on workers,
+// creating nextID, persisting agents/<id>.json, revoking cur's session key,
+// moving unaddressed mid-step messages to nextID, and kicking nextID.
+func (h *Harness) finishMidRunRollover(ctx context.Context, cur, nextID string, s *session) {
+	e, ok := h.liveEntryForSession(cur)
+	if !ok {
+		h.abortMidRunRollover(ctx, cur, s)
+		return
+	}
+	e.mu.Lock()
+	if e.deleting || len(e.a.Sessions) == 0 || e.a.Sessions[len(e.a.Sessions)-1] != cur {
+		e.mu.Unlock()
+		h.abortMidRunRollover(ctx, cur, s)
+		return
+	}
+	if err := h.createAgentSession(ctx, nextID, e.a.ID, e.a.Name, e.a.Config, e.a.Apps, cur, e.a.Sessions); err != nil {
+		log.Printf("agent %s: rollover create session: %v", e.a.ID, err)
+		e.mu.Unlock()
+		h.abortMidRunRollover(ctx, cur, s)
+		return
+	}
+	next := e.a
+	next.Sessions = append(slices.Clone(e.a.Sessions), nextID)
+	if err := h.saveAgentFile(next); err != nil {
+		log.Printf("agent %s: rollover save: %v", e.a.ID, err)
+		h.cleanupFailedNextSession(nextID)
+		e.mu.Unlock()
+		h.abortMidRunRollover(ctx, cur, s)
+		return
+	}
 
 	s.mu.Lock()
 	chain, loadErr := h.Sessions.Load(cur)
@@ -816,14 +948,15 @@ func (h *Harness) finishMidRunRollover(ctx context.Context, cur, nextID string, 
 		}
 	}
 
-	e.a.Sessions = append(e.a.Sessions, nextID)
-	_ = h.saveAgentFile(e.a)
+	e.a = next
 	h.amu.Lock()
 	delete(h.liveAgent, cur)
 	h.liveAgent[nextID] = e.a.ID
 	h.ownAgent[nextID] = e.a.ID
 	h.amu.Unlock()
-	e.mu.Unlock()
+	h.mu.Lock()
+	s.running, s.cancel, s.kicked = false, nil, false
+	h.mu.Unlock()
 
 	ns := h.session(nextID)
 	for _, r := range carry {
@@ -834,6 +967,7 @@ func (h *Harness) finishMidRunRollover(ctx context.Context, cur, nextID string, 
 	}
 	contMsg := fmt.Sprintf("Session %s hit its context limit mid-task; retrieve from <scratch>/logs/%s.log and continue", cur, cur)
 	_, _ = h.Post(ctx, nextID, "continue", "", []Part{{Type: "text/plain", Body: []byte(contMsg)}})
+	e.mu.Unlock()
 }
 
 // registerAgentRoutes mounts the 10 /agents HTTP routes on mux.

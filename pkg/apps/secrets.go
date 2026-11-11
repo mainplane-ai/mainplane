@@ -48,7 +48,13 @@ func (s *Secrets) loadLocked() (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return m, json.Unmarshal(b, &m)
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		m = map[string]string{}
+	}
+	return m, nil
 }
 
 func (s *Secrets) saveLocked(m map[string]string) error {
@@ -88,15 +94,15 @@ func (s *Secrets) List() ([]string, error) {
 }
 
 // Get reads one secret value for internal injection into an app that declared it.
-func (s *Secrets) Get(name string) (string, bool) {
+func (s *Secrets) Get(name string) (string, bool, error) {
 	s.mu.RLock()
 	m, err := s.loadLocked()
 	s.mu.RUnlock()
 	if err != nil {
-		return "", false
+		return "", false, err
 	}
 	v, ok := m[name]
-	return v, ok
+	return v, ok, nil
 }
 
 // Set stores a secret value and notifies the manager so waiting apps can start.

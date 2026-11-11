@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -32,14 +33,18 @@ type daemon struct {
 	dir     string
 	dataDir string
 
+	lifeMu sync.Mutex // serializes ensure, stop, enable, disable
+
 	mu      sync.Mutex
 	enabled bool
 	running bool
 	failed  bool
 	port    int
 	secret  string
+	env     []string
 	cancel  context.CancelFunc
 	done    chan struct{}
+	ready   chan struct{}
 }
 
 func newDaemon(name, dir, dataDir string) *daemon {
@@ -74,11 +79,10 @@ func (d *daemon) status(missing []string) string {
 	return "stopped"
 }
 
-func (d *daemon) stop() {
+func (d *daemon) stopLocked() {
 	d.mu.Lock()
 	cancel := d.cancel
 	done := d.done
-	d.cancel = nil
 	d.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -86,53 +90,80 @@ func (d *daemon) stop() {
 	if done != nil {
 		<-done
 	}
+	d.mu.Lock()
+	d.cancel, d.done, d.ready = nil, nil, nil
+	d.running, d.port, d.secret, d.env = false, 0, "", nil
+	d.mu.Unlock()
+}
+
+func (d *daemon) stop() {
+	d.lifeMu.Lock()
+	defer d.lifeMu.Unlock()
+	d.stopLocked()
 }
 
 func (d *daemon) disable() {
+	d.lifeMu.Lock()
+	defer d.lifeMu.Unlock()
 	d.mu.Lock()
 	d.enabled = false
 	d.mu.Unlock()
-	d.stop()
+	d.stopLocked()
 }
 
 func (d *daemon) enable() {
+	d.lifeMu.Lock()
+	defer d.lifeMu.Unlock()
 	d.mu.Lock()
 	d.enabled = true
 	d.failed = false
 	d.mu.Unlock()
 }
 
-func (d *daemon) ensure(parent context.Context, m Manifest, env []string) error {
+func (d *daemon) ensure(supCtx, waitCtx context.Context, m Manifest, env []string) error {
+	d.lifeMu.Lock()
+	defer d.lifeMu.Unlock()
+
 	d.mu.Lock()
 	if !d.enabled {
 		d.mu.Unlock()
 		return fmt.Errorf("app %s is stopped", d.name)
 	}
-	if d.cancel != nil {
-		port := d.port
+	if d.cancel != nil && !slices.Equal(d.env, env) {
 		d.mu.Unlock()
-		return waitPort(parent, port)
+		d.stopLocked()
+		d.mu.Lock()
 	}
-	if err := os.MkdirAll(d.dataDir, 0o700); err != nil {
-		d.mu.Unlock()
-		return err
+	if d.cancel == nil {
+		if err := os.MkdirAll(d.dataDir, 0o700); err != nil {
+			d.mu.Unlock()
+			return err
+		}
+		ctx, cancel := context.WithCancel(supCtx)
+		done := make(chan struct{})
+		ready := make(chan struct{})
+		d.cancel, d.done, d.ready, d.env = cancel, done, ready, slices.Clone(env)
+		go d.supervise(ctx, done, m.Run, slices.Clone(env))
 	}
-	port, err := freePort()
-	if err != nil {
-		d.mu.Unlock()
-		return err
-	}
-	secret := rand.Text()
-	ctx, cancel := context.WithCancel(parent)
-	done := make(chan struct{})
-	d.port, d.secret, d.cancel, d.done = port, secret, cancel, done
+	ready := d.ready
+	done := d.done
 	d.mu.Unlock()
 
-	go d.supervise(ctx, done, m.Run, port, secret, env)
-	return waitPort(parent, port)
+	timer := time.NewTimer(readyWait)
+	defer timer.Stop()
+	select {
+	case <-ready:
+		return nil
+	case <-done:
+		return fmt.Errorf("app %s exited before listening", d.name)
+	case <-waitCtx.Done():
+		return waitCtx.Err()
+	case <-timer.C:
+		return fmt.Errorf("app %s did not listen within %s", d.name, readyWait)
+	}
 }
 
-func (d *daemon) supervise(ctx context.Context, done chan struct{}, argv []string, port int, secret string, extraEnv []string) {
+func (d *daemon) supervise(ctx context.Context, done chan struct{}, argv, extraEnv []string) {
 	defer close(done)
 	backoff := restartMin
 	for {
@@ -140,7 +171,7 @@ func (d *daemon) supervise(ctx context.Context, done chan struct{}, argv []strin
 			return
 		}
 		start := time.Now()
-		err := d.runOnce(ctx, argv, port, secret, extraEnv)
+		err := d.runOnce(ctx, argv, extraEnv)
 		if ctx.Err() != nil {
 			return
 		}
@@ -162,13 +193,17 @@ func (d *daemon) supervise(ctx context.Context, done chan struct{}, argv []strin
 	}
 }
 
-func (d *daemon) runOnce(ctx context.Context, argv []string, port int, secret string, extraEnv []string) error {
+func (d *daemon) runOnce(ctx context.Context, argv, extraEnv []string) error {
 	if len(argv) == 0 {
 		return errors.New("empty run command")
 	}
+	port, err := freePort()
+	if err != nil {
+		return err
+	}
+	secret := rand.Text()
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = d.dir
-	setProcGroup(cmd)
 	var env []string
 	for _, k := range safeEnvKeys {
 		if v, ok := os.LookupEnv(k); ok {
@@ -181,34 +216,78 @@ func (d *daemon) runOnce(ctx context.Context, argv []string, port int, secret st
 		"MAINPLANE_PROXY_SECRET="+secret,
 	)
 	cmd.Env = append(env, extraEnv...)
-	if err := cmd.Start(); err != nil {
+
+	pg, err := startProcGroup(cmd)
+	if err != nil {
 		return err
 	}
+	var waitErr error
+	waitDone := make(chan struct{})
+	go func() {
+		waitErr = cmd.Wait()
+		close(waitDone)
+	}()
+	stop := context.AfterFunc(ctx, pg.kill)
+	defer func() {
+		stop()
+		pg.kill()
+	}()
+
+	if err := waitOwnedPort(ctx, port, pg, waitDone, &waitErr); err != nil {
+		pg.kill()
+		<-waitDone
+		return err
+	}
+
 	d.mu.Lock()
+	d.port, d.secret = port, secret
 	d.running, d.failed = true, false
+	select {
+	case <-d.ready:
+	default:
+		if d.ready != nil {
+			close(d.ready)
+		}
+	}
 	d.mu.Unlock()
-	stop := context.AfterFunc(ctx, func() { killProcGroup(cmd.Process) })
-	err := cmd.Wait()
-	stop()
-	killProcGroup(cmd.Process)
+
+	<-waitDone
 	d.mu.Lock()
 	d.running = false
+	d.port, d.secret = 0, ""
+	if d.cancel != nil {
+		d.ready = make(chan struct{})
+	}
 	d.mu.Unlock()
-	return err
+	return waitErr
 }
 
-func waitPort(ctx context.Context, port int) error {
+func waitOwnedPort(ctx context.Context, port int, pg *procGroup, waitDone <-chan struct{}, waitErr *error) error {
 	addr := "127.0.0.1:" + strconv.Itoa(port)
 	deadline := time.Now().Add(readyWait)
 	for time.Now().Before(deadline) {
-		c, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
-		if err == nil {
-			_ = c.Close()
-			return nil
+		select {
+		case <-waitDone:
+			if *waitErr != nil {
+				return *waitErr
+			}
+			return errors.New("daemon exited before listening")
+		default:
+		}
+		if pg.ownsTCPPort(port) {
+			if c, err := net.DialTimeout("tcp", addr, 50*time.Millisecond); err == nil {
+				_ = c.Close()
+				return nil
+			}
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-waitDone:
+			if *waitErr != nil {
+				return *waitErr
+			}
+			return errors.New("daemon exited before listening")
 		case <-time.After(25 * time.Millisecond):
 		}
 	}
@@ -219,6 +298,10 @@ func (d *daemon) proxy(w http.ResponseWriter, r *http.Request, targetPath string
 	d.mu.Lock()
 	port, secret := d.port, d.secret
 	d.mu.Unlock()
+	if port == 0 {
+		http.Error(w, fmt.Sprintf("app %s is not ready", d.name), http.StatusServiceUnavailable)
+		return
+	}
 	u := &url.URL{Scheme: "http", Host: "127.0.0.1:" + strconv.Itoa(port)}
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {

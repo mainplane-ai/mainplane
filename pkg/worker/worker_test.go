@@ -51,7 +51,7 @@ func TestWorkerInjectsKeyAndURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := readUntilResult(t, br, "r1")
+	out := readUntilResult(t, c1, br, "r1")
 	want := "s1111111|mp_skey_test.s1111111:mac|http://[fd00::1]:8080"
 	if strings.TrimSpace(out) != want {
 		t.Fatalf("persistent env got %q, want %q", out, want)
@@ -73,14 +73,18 @@ func TestWorkerInjectsKeyAndURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	jobOut := readJobResult(t, br)
+	jobOut := readJobResult(t, c1, br)
 	if !strings.Contains(jobOut, want) {
 		t.Fatalf("job output got %q, want substring %q (log in %s)", jobOut, want, filepath.Join(scratch, "jobs"))
 	}
 }
 
-func readUntilResult(t *testing.T, br *bufio.Reader, id string) string {
+func readUntilResult(t *testing.T, conn net.Conn, br *bufio.Reader, id string) string {
 	t.Helper()
+	if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	defer func() { _ = conn.SetReadDeadline(time.Time{}) }()
 	var b strings.Builder
 	for {
 		f, err := Decode(br)
@@ -101,10 +105,13 @@ func readUntilResult(t *testing.T, br *bufio.Reader, id string) string {
 	}
 }
 
-func readJobResult(t *testing.T, br *bufio.Reader) string {
+func readJobResult(t *testing.T, conn net.Conn, br *bufio.Reader) string {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	defer func() { _ = conn.SetReadDeadline(time.Time{}) }()
+	for {
 		f, err := Decode(br)
 		if err != nil {
 			t.Fatalf("decode job: %v", err)
@@ -113,6 +120,4 @@ func readJobResult(t *testing.T, br *bufio.Reader) string {
 			return string(f.Body)
 		}
 	}
-	t.Fatal("timed out waiting for job result")
-	return ""
 }

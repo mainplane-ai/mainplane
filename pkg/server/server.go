@@ -310,7 +310,6 @@ func Harness(ctx context.Context, path string) error {
 	if err := h.Resume(ctx); err != nil {
 		return err
 	}
-	appMgr.Start(ctx)
 	ln, err := net.Listen("tcp", c.HTTP)
 	if err != nil {
 		return err
@@ -318,6 +317,7 @@ func Harness(ctx context.Context, path string) error {
 	log.Printf("harness: http on %s, sessions in %s, %d api keys", c.HTTP, sessions, len(t[auth.Key]))
 	errs := make(chan error, 4)
 	go func() { errs <- srv.Serve(ln) }()
+	appMgr.Start(ctx)
 	go func() {
 		ls, err := coord.Listen(ctx, filepath.Join(dir, "mesh"), "http://"+c.HTTP, worker.Port, worker.APIPort)
 		if err != nil {

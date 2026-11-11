@@ -282,6 +282,7 @@ func (s *session) switchTo(a *App, to *session) {
 	s.cancel()
 	s.list.leave()
 	s.list.cur = to
+	s.list.applyFilter()
 	a.T.Progress(false)
 	a.SetScreen(to)
 	s.list.tick(a)

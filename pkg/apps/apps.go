@@ -293,14 +293,18 @@ func (m *Manager) Summary(names []string, changed bool) string {
 	return b.String()
 }
 
-func (m *Manager) missingSecrets(man Manifest) []string {
+func (m *Manager) missingSecrets(man Manifest) ([]string, error) {
 	out := []string{}
 	for _, s := range man.Secrets {
-		if _, ok := m.Secrets.Get(s); !ok {
+		_, ok, err := m.Secrets.Get(s)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
 			out = append(out, s)
 		}
 	}
-	return out
+	return out, nil
 }
 
 func (m *Manager) daemonFor(def appDef) *daemon {
@@ -314,7 +318,7 @@ func (m *Manager) daemonFor(def appDef) *daemon {
 	return d
 }
 
-func (m *Manager) daemonEnv(def appDef) []string {
+func (m *Manager) daemonEnv(def appDef) ([]string, error) {
 	var env []string
 	if m.loopback != nil {
 		if u := m.loopback(); u != "" {
@@ -327,11 +331,15 @@ func (m *Manager) daemonEnv(def appDef) []string {
 		}
 	}
 	for _, s := range def.manifest.Secrets {
-		if v, ok := m.Secrets.Get(s); ok {
+		v, ok, err := m.Secrets.Get(s)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
 			env = append(env, s+"="+v)
 		}
 	}
-	return env
+	return env, nil
 }
 
 func (m *Manager) reconcileDaemons() {
@@ -343,7 +351,12 @@ func (m *Manager) reconcileDaemons() {
 			continue
 		}
 		d := m.daemonFor(def)
-		if len(m.missingSecrets(def.manifest)) > 0 {
+		missing, err := m.missingSecrets(def.manifest)
+		if err != nil {
+			log.Printf("app %s: secrets: %v", def.name, err)
+			continue
+		}
+		if len(missing) > 0 {
 			d.stop()
 			continue
 		}
@@ -351,7 +364,12 @@ func (m *Manager) reconcileDaemons() {
 		enabled := d.enabled
 		d.mu.Unlock()
 		if enabled {
-			if err := d.ensure(ctx, def.manifest, m.daemonEnv(def)); err != nil {
+			env, err := m.daemonEnv(def)
+			if err != nil {
+				log.Printf("app %s: secrets: %v", def.name, err)
+				continue
+			}
+			if err := d.ensure(ctx, ctx, def.manifest, env); err != nil {
 				log.Printf("app %s: start: %v", def.name, err)
 			}
 		}
@@ -369,13 +387,21 @@ func (m *Manager) StartApp(name string) error {
 	}
 	d := m.daemonFor(def)
 	d.enable()
-	if missing := m.missingSecrets(def.manifest); len(missing) > 0 {
+	missing, err := m.missingSecrets(def.manifest)
+	if err != nil {
+		return err
+	}
+	if len(missing) > 0 {
 		return nil
+	}
+	env, err := m.daemonEnv(def)
+	if err != nil {
+		return err
 	}
 	m.mu.Lock()
 	ctx := m.ctx
 	m.mu.Unlock()
-	return d.ensure(ctx, def.manifest, m.daemonEnv(def))
+	return d.ensure(ctx, ctx, def.manifest, env)
 }
 
 // StopApp disables and stops a daemon app.
@@ -392,11 +418,14 @@ func (m *Manager) StopApp(name string) error {
 }
 
 // List returns the status of every installed app.
-func (m *Manager) List() []AppEntry {
+func (m *Manager) List() ([]AppEntry, error) {
 	defs := m.allApps()
 	out := make([]AppEntry, 0, len(defs))
 	for _, def := range defs {
-		missing := m.missingSecrets(def.manifest)
+		missing, err := m.missingSecrets(def.manifest)
+		if err != nil {
+			return nil, err
+		}
 		status := "running"
 		if len(missing) > 0 {
 			status = "missing_secrets"
@@ -417,7 +446,7 @@ func (m *Manager) List() []AppEntry {
 			MissingSecrets: missing,
 		})
 	}
-	return out
+	return out, nil
 }
 
 // Register mounts /secrets, /skills, and /apps onto mux.
@@ -512,7 +541,12 @@ func (m *Manager) serveSkillGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) serveAppsList(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, m.List())
+	list, err := m.List()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, list)
 }
 
 func (m *Manager) serveApp(w http.ResponseWriter, r *http.Request) {
@@ -577,7 +611,12 @@ func (m *Manager) serveWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) dispatch(w http.ResponseWriter, r *http.Request, def appDef, targetPath string, hdr http.Header) {
-	if missing := m.missingSecrets(def.manifest); len(missing) > 0 {
+	missing, err := m.missingSecrets(def.manifest)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if len(missing) > 0 {
 		http.Error(w, fmt.Sprintf("app %s: missing secrets: %s", def.name, strings.Join(missing, ", ")), http.StatusServiceUnavailable)
 		return
 	}
@@ -591,11 +630,16 @@ func (m *Manager) dispatch(w http.ResponseWriter, r *http.Request, def appDef, t
 	case KindProxy:
 		m.proxyURL(w, r, def, targetPath, hdr)
 	case KindDaemon:
+		env, err := m.daemonEnv(def)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		d := m.daemonFor(def)
 		m.mu.Lock()
 		ctx := m.ctx
 		m.mu.Unlock()
-		if err := d.ensure(ctx, def.manifest, m.daemonEnv(def)); err != nil {
+		if err := d.ensure(ctx, r.Context(), def.manifest, env); err != nil {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
@@ -613,7 +657,12 @@ func (m *Manager) proxyURL(w http.ResponseWriter, r *http.Request, def appDef, t
 	}
 	allowed := map[string]string{}
 	for _, s := range def.manifest.Secrets {
-		if v, ok := m.Secrets.Get(s); ok {
+		v, ok, err := m.Secrets.Get(s)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if ok {
 			allowed[s] = v
 		}
 	}
@@ -623,7 +672,13 @@ func (m *Manager) proxyURL(w http.ResponseWriter, r *http.Request, def appDef, t
 			pr.Out.URL.Host = base.Host
 			pr.Out.URL.Path = joinURLPath(base.Path, targetPath)
 			pr.Out.URL.RawPath = ""
-			pr.Out.URL.RawQuery = r.URL.RawQuery
+			pr.Out.URL.RawQuery = base.RawQuery
+			if r.URL.RawQuery != "" {
+				if pr.Out.URL.RawQuery != "" {
+					pr.Out.URL.RawQuery += "&"
+				}
+				pr.Out.URL.RawQuery += r.URL.RawQuery
+			}
 			pr.Out.Host = base.Host
 			pr.Out.Header = hdr.Clone()
 			for k, v := range def.manifest.Headers {

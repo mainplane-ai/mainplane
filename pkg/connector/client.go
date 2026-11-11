@@ -94,19 +94,36 @@ func Login(ctx context.Context, token string) (c *Client, old *Client, version s
 	return c, old, version, c.Save()
 }
 
+func checkEnvPin() error {
+	key := strings.TrimSpace(os.Getenv("MAINPLANE_KEY"))
+	if key == "" {
+		return nil
+	}
+	_, pinned, err := auth.Unpin(key)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(key, "@") && pinned == "" {
+		return errors.New("empty @ pin in MAINPLANE_KEY")
+	}
+	return nil
+}
+
 // EnvClient returns a client configured from MAINPLANE_KEY and MAINPLANE_URL
 // (or a @url-pinned MAINPLANE_KEY) when present in the environment.
 func EnvClient() (*Client, bool) {
+	if checkEnvPin() != nil {
+		return nil, false
+	}
 	key := strings.TrimSpace(os.Getenv("MAINPLANE_KEY"))
 	if key == "" {
 		return nil, false
 	}
+	raw, pinned, _ := auth.Unpin(key)
+	key = raw
 	u := strings.TrimRight(strings.TrimSpace(os.Getenv("MAINPLANE_URL")), "/")
-	if raw, pinned, err := auth.Unpin(key); err == nil && pinned != "" {
-		key = raw
-		if u == "" {
-			u = strings.TrimRight(pinned, "/")
-		}
+	if u == "" && pinned != "" {
+		u = strings.TrimRight(pinned, "/")
 	}
 	if u == "" {
 		return nil, false
@@ -124,6 +141,9 @@ func (c *Client) IsScopedKey() bool {
 // (so worker shells use their session token even on machines with login.json),
 // falling back to Load otherwise.
 func LoadScoped(ctx context.Context) (*Client, error) {
+	if err := checkEnvPin(); err != nil {
+		return nil, err
+	}
 	if ec, ok := EnvClient(); ok {
 		return ec, nil
 	}
@@ -136,6 +156,9 @@ func LoadScoped(ctx context.Context) (*Client, error) {
 // through the pointer and saved. When no login file exists (or a non-session
 // MAINPLANE_KEY is set in the environment), EnvClient is used if available.
 func Load(ctx context.Context) (*Client, error) {
+	if err := checkEnvPin(); err != nil {
+		return nil, err
+	}
 	if ec, ok := EnvClient(); ok && !strings.HasPrefix(ec.Key, "mp_"+auth.Session+"_") {
 		return ec, nil
 	}

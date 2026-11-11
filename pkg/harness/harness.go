@@ -374,12 +374,10 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	}
 	if nextID, reason := h.checkMidRunRollover(id, conf, chain); nextID != "" {
 		h.killAll(ctx, id, chain)
-		if _, err := h.append(s, system("continue", nextID)); err != nil {
+		if err := h.retireForRollover(s, nextID, reason); err != nil {
 			return "", err
 		}
-		_, err := h.append(s, errorRecord("", reason))
-		s.setRollover(nextID)
-		return statefile.StatusFailed, err
+		return statefile.StatusFailed, nil
 	}
 	if p := statefile.ContextUsed(chain); p > conf.ContextLimit {
 		h.killAll(ctx, id, chain)

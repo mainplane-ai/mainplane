@@ -131,13 +131,12 @@ func (a *App) Start(ctx context.Context) {
 }
 
 type dueItem struct {
+	id    string
 	agent string
 	text  string
 }
 
-func (a *App) fireDue(ctx context.Context) time.Duration {
-	now := time.Now().UTC()
-	a.mu.Lock()
+func (a *App) collectDueLocked(now time.Time) []dueItem {
 	var due []dueItem
 	changed := false
 	kept := a.jobs[:0]
@@ -146,22 +145,57 @@ func (a *App) fireDue(ctx context.Context) time.Duration {
 			kept = append(kept, j)
 			continue
 		}
-		changed = true
 		if a.host == nil || !a.host.AgentHasApp(j.Agent, "schedule") {
+			changed = true
 			continue
 		}
-		due = append(due, dueItem{agent: j.Agent, text: j.Text})
-		if j.Cron != "" {
-			if spec, err := parseCron(j.Cron); err == nil {
-				if next, ok := spec.next(now); ok {
-					j.NextRun = next
-					kept = append(kept, j)
-				}
-			}
-		}
+		kept = append(kept, j)
+		due = append(due, dueItem{id: j.ID, agent: j.Agent, text: j.Text})
 	}
 	a.jobs = kept
 	if changed {
+		if err := a.saveLocked(); err != nil {
+			log.Printf("schedule: save: %v", err)
+		}
+	}
+	return due
+}
+
+func advanceCronJob(j *Job, ref time.Time) bool {
+	if j.Cron == "" {
+		return false
+	}
+	spec, err := parseCron(j.Cron)
+	if err != nil {
+		return false
+	}
+	next, ok := spec.next(ref)
+	if !ok {
+		return false
+	}
+	j.NextRun = next
+	return true
+}
+
+func (a *App) applyDueResultsLocked(now time.Time, delivered, drop map[string]bool) time.Time {
+	if len(delivered) > 0 || len(drop) > 0 {
+		ref := time.Now().UTC()
+		if now.After(ref) {
+			ref = now
+		}
+		kept := a.jobs[:0]
+		for _, j := range a.jobs {
+			switch {
+			case drop[j.ID]:
+			case delivered[j.ID]:
+				if advanceCronJob(j, ref) {
+					kept = append(kept, j)
+				}
+			default:
+				kept = append(kept, j)
+			}
+		}
+		a.jobs = kept
 		if err := a.saveLocked(); err != nil {
 			log.Printf("schedule: save: %v", err)
 		}
@@ -172,17 +206,46 @@ func (a *App) fireDue(ctx context.Context) time.Duration {
 			earliest = j.NextRun
 		}
 	}
+	return earliest
+}
+
+func (a *App) fireDue(ctx context.Context) time.Duration {
+	now := time.Now().UTC()
+	a.mu.Lock()
+	due := a.collectDueLocked(now)
 	a.mu.Unlock()
 
+	delivered := map[string]bool{}
+	drop := map[string]bool{}
+	retrySoon := false
 	for _, d := range due {
-		if _, _, err := a.host.PostText(ctx, d.agent, "app:schedule", d.text); err != nil {
+		if ctx.Err() != nil {
+			break
+		}
+		_, _, err := a.host.PostText(ctx, d.agent, "app:schedule", d.text)
+		switch {
+		case err == nil:
+			delivered[d.id] = true
+		case errors.Is(err, fs.ErrNotExist):
+			drop[d.id] = true
+		default:
 			log.Printf("schedule: post to %s: %v", d.agent, err)
+			retrySoon = true
 		}
 	}
+
+	a.mu.Lock()
+	earliest := a.applyDueResultsLocked(now, delivered, drop)
+	a.mu.Unlock()
+
 	if earliest.IsZero() {
 		return -1
 	}
-	return max(time.Until(earliest), 0)
+	wait := max(time.Until(earliest), 0)
+	if retrySoon && wait < time.Second {
+		wait = time.Second
+	}
+	return wait
 }
 
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -316,6 +379,7 @@ func (a *App) handleDelete(w http.ResponseWriter, agent, id string) {
 
 type cronSpec struct {
 	min, hour, dom, mon, dow uint64
+	domWild, dowWild         bool
 }
 
 func parseCron(s string) (cronSpec, error) {
@@ -343,7 +407,15 @@ func parseCron(s string) (cronSpec, error) {
 	if err != nil {
 		return cronSpec{}, err
 	}
-	return cronSpec{min: minB, hour: hourB, dom: domB, mon: monB, dow: dowB}, nil
+	return cronSpec{
+		min:     minB,
+		hour:    hourB,
+		dom:     domB,
+		mon:     monB,
+		dow:     dowB,
+		domWild: f[2] == "*",
+		dowWild: f[4] == "*",
+	}, nil
 }
 
 func parseCronField(field string, lo, hi int, sunday7 bool) (uint64, error) {
@@ -400,9 +472,14 @@ func parseCronPart(part string, lo, hi int, sunday7 bool) (uint64, error) {
 func (c cronSpec) next(after time.Time) (time.Time, bool) {
 	t := after.UTC().Truncate(time.Minute).Add(time.Minute)
 	for range horizon {
+		domMatch := c.dom&(1<<uint(t.Day())) != 0
+		dowMatch := c.dow&(1<<uint(t.Weekday())) != 0
+		dayMatch := domMatch && dowMatch
+		if !c.domWild && !c.dowWild {
+			dayMatch = domMatch || dowMatch
+		}
 		if c.mon&(1<<uint(t.Month())) != 0 &&
-			c.dom&(1<<uint(t.Day())) != 0 &&
-			c.dow&(1<<uint(t.Weekday())) != 0 &&
+			dayMatch &&
 			c.hour&(1<<uint(t.Hour())) != 0 &&
 			c.min&(1<<uint(t.Minute())) != 0 {
 			return t, true

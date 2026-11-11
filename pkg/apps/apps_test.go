@@ -7,11 +7,14 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -52,9 +55,10 @@ func TestHelperDaemonProcess(t *testing.T) {
 }
 
 type fakeHost struct {
-	mu     sync.Mutex
-	agents map[string]AgentInfo
-	posts  []postedMsg
+	mu      sync.Mutex
+	agents  map[string]AgentInfo
+	posts   []postedMsg
+	postErr error
 }
 
 type postedMsg struct {
@@ -63,6 +67,12 @@ type postedMsg struct {
 
 func newFakeHost() *fakeHost {
 	return &fakeHost{agents: map[string]AgentInfo{}}
+}
+
+func (f *fakeHost) setPostErr(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.postErr = err
 }
 
 func (f *fakeHost) setAgent(a AgentInfo) {
@@ -76,6 +86,17 @@ func (f *fakeHost) LiveAgent(sid string) (AgentInfo, bool) {
 	defer f.mu.Unlock()
 	for _, a := range f.agents {
 		if a.CurrentSession == sid {
+			return a, true
+		}
+	}
+	return AgentInfo{}, false
+}
+
+func (f *fakeHost) SessionAgent(sid string) (AgentInfo, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, a := range f.agents {
+		if a.CurrentSession == sid || slices.Contains(a.Sessions, sid) {
 			return a, true
 		}
 	}
@@ -116,6 +137,9 @@ func (f *fakeHost) CreateAgent(_ context.Context, _ AgentCreate, _ string) (stri
 func (f *fakeHost) PostText(_ context.Context, id, via, text string) (string, int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.postErr != nil {
+		return "", 0, f.postErr
+	}
 	a, ok := f.agents[id]
 	if !ok {
 		return "", 0, fs.ErrNotExist
@@ -442,7 +466,9 @@ func TestScheduleAndMessageBuiltins(t *testing.T) {
 	}
 
 	// Remove "schedule" from agent A and fire a short timer -> dropped without posting.
-	doReq(t, "POST", ah2.srv.URL+"/apps/schedule", skeyA2, `{"text":"dropped-timer","in":"80ms"}`, nil)
+	if c, b := doReq(t, "POST", ah2.srv.URL+"/apps/schedule", skeyA2, `{"text":"dropped-timer","in":"80ms"}`, nil); c != http.StatusOK {
+		t.Fatalf("POST dropped timer: %d %s", c, b)
+	}
 	host.setAgent(AgentInfo{ID: "a1111111", CurrentSession: "s1111111", Apps: []string{"message"}})
 	time.Sleep(350 * time.Millisecond)
 	host.mu.Lock()
@@ -469,4 +495,236 @@ func waitForSchedulePost(t *testing.T, host *fakeHost, want string) {
 		time.Sleep(40 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for schedule post %q", want)
+}
+
+func TestDaemonSecretRotationAndPortOwnership(t *testing.T) {
+	dir := t.TempDir()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeDiskApp(t, dir, "rotapp", "Rotatable daemon\n", &Manifest{
+		Run:     []string{exe, "-test.run=^TestHelperDaemonProcess$", "--", "daemon-mode"},
+		Secrets: []string{"ROT_KEY"},
+	})
+	host := newFakeHost()
+	host.setAgent(AgentInfo{ID: "a1111111", CurrentSession: "s1111111", Apps: []string{"rotapp"}})
+	ah, _ := setupAppsHarness(t, dir, host)
+	skey := auth.SessionToken(ah.priv, ah.hkey, "s1111111")
+
+	if c, _ := doReq(t, "PUT", ah.srv.URL+"/secrets/ROT_KEY", ah.fullKey, "val-v1", nil); c != http.StatusNoContent {
+		t.Fatalf("PUT ROT_KEY v1: %d", c)
+	}
+	if c, b := doReq(t, "GET", ah.srv.URL+"/apps/rotapp/check", skey, "", nil); c != http.StatusOK || !bytes.Contains(b, []byte(`"path":"/check"`)) {
+		t.Fatalf("rotapp initial call: %d %s", c, b)
+	}
+
+	// Re-test with SECRET_K which TestHelperDaemonProcess echoes back in JSON.
+	writeDiskApp(t, dir, "rotapp", "Rotatable daemon\n", &Manifest{
+		Run:     []string{exe, "-test.run=^TestHelperDaemonProcess$", "--", "daemon-mode"},
+		Secrets: []string{"SECRET_K"},
+	})
+	if c, _ := doReq(t, "PUT", ah.srv.URL+"/secrets/SECRET_K", ah.fullKey, "first-secret", nil); c != http.StatusNoContent {
+		t.Fatalf("PUT SECRET_K v1: %d", c)
+	}
+	c, body := doReq(t, "GET", ah.srv.URL+"/apps/rotapp/echo", skey, "", nil)
+	if c != http.StatusOK || !bytes.Contains(body, []byte(`"secret_k":"first-secret"`)) {
+		t.Fatalf("expected first-secret, got %d %s", c, body)
+	}
+	if c, _ := doReq(t, "PUT", ah.srv.URL+"/secrets/SECRET_K", ah.fullKey, "rotated-secret", nil); c != http.StatusNoContent {
+		t.Fatalf("PUT SECRET_K v2: %d", c)
+	}
+	c, body = doReq(t, "GET", ah.srv.URL+"/apps/rotapp/echo", skey, "", nil)
+	if c != http.StatusOK || !bytes.Contains(body, []byte(`"secret_k":"rotated-secret"`)) {
+		t.Fatalf("expected daemon restart with rotated-secret, got %d %s", c, body)
+	}
+
+	verifyForeignPortRejected(t, exe)
+}
+
+func verifyForeignPortRejected(t *testing.T, exe string) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	foreignPort := ln.Addr().(*net.TCPAddr).Port
+
+	// Spawn an idle helper subprocess in its own procGroup that does NOT own foreignPort.
+	cmd := exec.Command(exe, "-test.run=^TestNonExistentHelper$")
+	pg, err := startProcGroup(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var waitErr error
+	waitDone := make(chan struct{})
+	go func() {
+		waitErr = cmd.Wait()
+		close(waitDone)
+	}()
+	defer func() {
+		pg.kill()
+		<-waitDone
+	}()
+
+	if pg.ownsTCPPort(foreignPort) {
+		t.Fatalf("procGroup claimed ownership of foreign port %d held by test runner", foreignPort)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	if err := waitOwnedPort(ctx, foreignPort, pg, waitDone, &waitErr); err == nil {
+		t.Fatal("waitOwnedPort accepted a port owned by a foreign process")
+	}
+}
+
+func TestSecretsNullAndCorruptStore(t *testing.T) {
+	dir := t.TempDir()
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer up.Close()
+
+	writeDiskApp(t, dir, "sproxy", "Secret proxy\n", &Manifest{
+		URL:     up.URL,
+		Secrets: []string{"API_TOK"},
+	})
+	host := newFakeHost()
+	host.setAgent(AgentInfo{ID: "a1111111", CurrentSession: "s1111111", Apps: []string{"sproxy"}})
+	ah, _ := setupAppsHarness(t, dir, host)
+	skey := auth.SessionToken(ah.priv, ah.hkey, "s1111111")
+
+	// 1. JSON "null" in .secrets must not panic Set or List.
+	secPath := filepath.Join(dir, ".secrets")
+	if err := os.WriteFile(secPath, []byte("null\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if c, b := doReq(t, "PUT", ah.srv.URL+"/secrets/API_TOK", ah.fullKey, "tok123", nil); c != http.StatusNoContent {
+		t.Fatalf("PUT secret over JSON null failed: %d %s", c, b)
+	}
+	if c, _ := doReq(t, "GET", ah.srv.URL+"/apps/sproxy/ping", skey, "", nil); c != http.StatusOK {
+		t.Fatalf("sproxy after setting secret got %d, want 200", c)
+	}
+
+	// 2. Corrupt .secrets must surface 500 (storage failure), not 200/503 missing_secrets.
+	if err := os.WriteFile(secPath, []byte("{corrupt-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := doReq(t, "GET", ah.srv.URL+"/apps", ah.fullKey, "", nil); c != http.StatusInternalServerError {
+		t.Fatalf("GET /apps on corrupt .secrets got %d, want 500", c)
+	}
+	if c, _ := doReq(t, "GET", ah.srv.URL+"/apps/sproxy/ping", skey, "", nil); c != http.StatusInternalServerError {
+		t.Fatalf("dispatch on corrupt .secrets got %d, want 500 (not 503 missing_secrets)", c)
+	}
+}
+
+func TestProxyQueryMerge(t *testing.T) {
+	var mu sync.Mutex
+	var gotQuery, gotPath string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer up.Close()
+
+	dir := t.TempDir()
+	writeDiskApp(t, dir, "qapp", "Query merge proxy\n", &Manifest{
+		URL: up.URL + "/v2?api-version=2026-01&tenant=main",
+	})
+	host := newFakeHost()
+	host.setAgent(AgentInfo{ID: "a1111111", CurrentSession: "s1111111", Apps: []string{"qapp"}})
+	ah, _ := setupAppsHarness(t, dir, host)
+	skey := auth.SessionToken(ah.priv, ah.hkey, "s1111111")
+
+	if c, _ := doReq(t, "GET", ah.srv.URL+"/apps/qapp/items?q=test&limit=5", skey, "", nil); c != http.StatusOK {
+		t.Fatalf("merged query call failed: %d", c)
+	}
+	mu.Lock()
+	if gotPath != "/v2/items" || gotQuery != "api-version=2026-01&tenant=main&q=test&limit=5" {
+		t.Fatalf("query merge got path=%q query=%q", gotPath, gotQuery)
+	}
+	mu.Unlock()
+
+	if c, _ := doReq(t, "GET", ah.srv.URL+"/apps/qapp/items", skey, "", nil); c != http.StatusOK {
+		t.Fatalf("base-only query call failed: %d", c)
+	}
+	mu.Lock()
+	if gotQuery != "api-version=2026-01&tenant=main" {
+		t.Fatalf("base query lost: got %q", gotQuery)
+	}
+	mu.Unlock()
+}
+
+func TestScheduleTransientRetryAndCronOR(t *testing.T) {
+	dir := t.TempDir()
+	host := newFakeHost()
+	host.setAgent(AgentInfo{ID: "a1111111", CurrentSession: "s1111111", Apps: []string{"schedule"}})
+	ah, _ := setupAppsHarness(t, dir, host)
+	skey := auth.SessionToken(ah.priv, ah.hkey, "s1111111")
+
+	// 1. Transient PostText failure keeps one-shot job in schedule and retries until delivered.
+	host.setPostErr(errors.New("transient io failure"))
+	if c, b := doReq(t, "POST", ah.srv.URL+"/apps/schedule", skey, `{"text":"retry-shot","in":"60ms"}`, nil); c != http.StatusOK {
+		t.Fatalf("POST retry-shot: %d %s", c, b)
+	}
+	time.Sleep(220 * time.Millisecond)
+	if c, listBody := doReq(t, "GET", ah.srv.URL+"/apps/schedule", skey, "", nil); c != http.StatusOK || !bytes.Contains(listBody, []byte("retry-shot")) {
+		t.Fatalf("transiently failed one-shot job was dropped prematurely: %d %s", c, listBody)
+	}
+	host.setPostErr(nil)
+	waitForSchedulePost(t, host, "retry-shot")
+	if c, listBody := doReq(t, "GET", ah.srv.URL+"/apps/schedule", skey, "", nil); c != http.StatusOK || bytes.Contains(listBody, []byte("retry-shot")) {
+		t.Fatalf("delivered one-shot job should be removed: %d %s", c, listBody)
+	}
+
+	// 2. Cron DOM/DOW OR rule: when both DOM and DOW are restricted, either matching day fires.
+	verifyCronDomDowSemantics(t, ah, skey)
+}
+
+func verifyCronDomDowSemantics(t *testing.T, ah *appsHarness, skey string) {
+	t.Helper()
+	now := time.Now().UTC()
+	targetDOW := (int(now.Weekday()) + 2) % 7
+	dom := 15
+	for off := range 4 {
+		if now.AddDate(0, 0, off).Day() == dom {
+			dom = 22
+			break
+		}
+	}
+	// Restricted DOM + restricted DOW -> OR semantics: must fire within ~2-3 days on targetDOW.
+	exprBoth := fmt.Sprintf("0 12 %d * %d", dom, targetDOW)
+	c, b := doReq(t, "POST", ah.srv.URL+"/apps/schedule", skey, fmt.Sprintf(`{"text":"both","cron":%q}`, exprBoth), nil)
+	if c != http.StatusOK {
+		t.Fatalf("POST cron both: %d %s", c, b)
+	}
+	var jBoth struct {
+		NextRun time.Time `json:"next_run"`
+	}
+	if err := json.Unmarshal(b, &jBoth); err != nil {
+		t.Fatal(err)
+	}
+	if jBoth.NextRun.Sub(now) > 72*time.Hour || int(jBoth.NextRun.Weekday()) != targetDOW {
+		t.Fatalf("cron %q did not apply DOM/DOW OR rule: now=%s next_run=%s (weekday=%v, want %d)",
+			exprBoth, now.Format(time.RFC3339), jBoth.NextRun.Format(time.RFC3339), jBoth.NextRun.Weekday(), targetDOW)
+	}
+
+	// Wildcard DOM + restricted DOW -> AND semantics: must match targetDOW only.
+	exprDOWOnly := fmt.Sprintf("0 12 * * %d", targetDOW)
+	c, b = doReq(t, "POST", ah.srv.URL+"/apps/schedule", skey, fmt.Sprintf(`{"text":"dow-only","cron":%q}`, exprDOWOnly), nil)
+	if c != http.StatusOK {
+		t.Fatalf("POST cron dow-only: %d %s", c, b)
+	}
+	var jDOW struct {
+		NextRun time.Time `json:"next_run"`
+	}
+	if err := json.Unmarshal(b, &jDOW); err != nil {
+		t.Fatal(err)
+	}
+	if int(jDOW.NextRun.Weekday()) != targetDOW {
+		t.Fatalf("cron %q matched wrong weekday %v, want %d", exprDOWOnly, jDOW.NextRun.Weekday(), targetDOW)
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -60,6 +61,7 @@ type fakeWorker struct {
 	mu      sync.Mutex
 	files   map[string][]byte
 	onRun   func(f worker.Frame) string
+	onWrite func(path string)
 }
 
 func startFakeWorker(t *testing.T, pool *harness.Pool, name string) *fakeWorker {
@@ -105,7 +107,11 @@ func (fw *fakeWorker) handleFrame(conn net.Conn, f worker.Frame) {
 	case worker.Write:
 		fw.mu.Lock()
 		fw.files[f.Path] = append([]byte(nil), f.Body...)
+		wfn := fw.onWrite
 		fw.mu.Unlock()
+		if wfn != nil {
+			wfn(f.Path)
+		}
 		_ = os.MkdirAll(filepath.Dir(f.Path), 0o755)
 		_ = os.WriteFile(f.Path, f.Body, 0o600)
 		_ = worker.Encode(conn, worker.Frame{Header: worker.Header{ID: f.ID, Kind: worker.Done}})
@@ -802,4 +808,294 @@ func verifyOrchestrateNotifyAfterRollover(t *testing.T, rig *testRig, bossCli *c
 	if notices != 1 {
 		t.Fatalf("expected 1 app:orchestrate notice on boss after C2 terminal close, got %d", notices)
 	}
+}
+
+func TestActiveDeleteAgentNoDeadlock(t *testing.T) {
+	rig := newTestRig(t)
+	ctx := context.Background()
+
+	bossID, bossS1, err := rig.cli.CreateAgent(ctx, harness.AgentCreate{
+		Name:   "boss-del",
+		Config: defaultAgentCfg(),
+		Apps:   []string{"orchestrate"},
+	}, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bossCli := &connector.Client{URL: rig.srv.URL, Pinned: true, Key: auth.SessionToken(rig.priv, rig.hkey, bossS1), Local: rig.srv.URL}
+
+	stepEntered := make(chan struct{})
+	var once sync.Once
+	rig.setStep(func(sctx context.Context, _ string, _ string, _ []statefile.Record, _ *provider.Cache, _ func(statefile.Record)) (statefile.Header, error) {
+		once.Do(func() { close(stepEntered) })
+		<-sctx.Done()
+		return statefile.Header{}, sctx.Err()
+	})
+
+	raw, err := bossCli.CallApp(ctx, "orchestrate", "POST", "/spawn", "application/json",
+		strings.NewReader(`{"name":"doomed","text":"block in step","notify_on_stop":true}`))
+	if err != nil {
+		t.Fatalf("spawn doomed: %v", err)
+	}
+	var sp struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(raw, &sp)
+	<-stepEntered
+
+	delCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if _, err := bossCli.CallApp(delCtx, "orchestrate", "DELETE", "/"+sp.ID, "", nil); err != nil {
+		t.Fatalf("DELETE active agent deadlocked or failed: %v", err)
+	}
+	if _, err := rig.cli.Agent(ctx, sp.ID); err == nil {
+		t.Fatal("deleted agent still returned by GET /agents/{id}")
+	}
+	time.Sleep(100 * time.Millisecond)
+	bc, _ := rig.h.Sessions.Load(bossS1)
+	if slices.ContainsFunc(bc, func(r statefile.Record) bool { return r.Kind == statefile.Message }) {
+		t.Fatalf("deleting watched agent %s spuriously sent a stop notice to %s", sp.ID, bossID)
+	}
+}
+
+func TestConcurrentPostDuringMidRunRollover(t *testing.T) {
+	rig := newTestRig(t)
+	fw := startFakeWorker(t, rig.pool, "w1")
+	ctx := context.Background()
+
+	cfg := defaultAgentCfg("w1")
+	cfg.ContextLimit = 50000
+	aid, s1, err := rig.cli.CreateAgent(ctx, harness.AgentCreate{Config: cfg}, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Fire 4 concurrent PostAgent calls right in the window after S1 is retired
+	// and while copyLogsForce writes <S1>.log before finishMidRunRollover runs.
+	var burstWG sync.WaitGroup
+	var postSessions [4]string
+	var postErrs [4]error
+	var triggered atomic.Bool
+	fw.onWrite = func(path string) {
+		if strings.HasSuffix(path, s1+".log") && triggered.CompareAndSwap(false, true) {
+			for i := range 4 {
+				burstWG.Add(1)
+				go func(idx int) {
+					defer burstWG.Done()
+					postSessions[idx], _, postErrs[idx] = rig.cli.PostAgent(ctx, aid, "web", fmt.Sprintf("burst-%d", idx), nil)
+				}(i)
+			}
+			time.Sleep(80 * time.Millisecond)
+		}
+	}
+
+	var steps atomic.Int32
+	rig.setStep(func(_ context.Context, model, _ string, _ []statefile.Record, _ *provider.Cache, emit func(statefile.Record)) (statefile.Header, error) {
+		if steps.Add(1) == 1 {
+			callBody, _ := json.Marshal(map[string]any{
+				"name":      "run",
+				"arguments": map[string]any{"worker": "w1", "code": "echo roll"},
+			})
+			emit(statefile.Record{Header: statefile.Header{Kind: statefile.Call, Type: "application/json"}, Body: callBody})
+			return statefile.Header{Model: model, Stop: "tool_use", Usage: &statefile.Usage{Input: 58000, Output: 500}}, nil
+		}
+		emit(statefile.Record{Header: statefile.Header{Kind: statefile.Text, Type: "text/plain"}, Body: []byte("ok")})
+		return statefile.Header{Model: model, Stop: "end_turn", Usage: &statefile.Usage{Input: 2000, Output: 50}}, nil
+	})
+
+	if _, _, err := rig.cli.PostAgent(ctx, aid, "web", "kickoff", nil); err != nil {
+		t.Fatal(err)
+	}
+	burstWG.Wait()
+	in := rig.waitAgentIdle(t, aid)
+	s2 := in.CurrentSession
+	if s2 == s1 {
+		t.Fatalf("expected rollover from %s", s1)
+	}
+	c2, _ := rig.h.Sessions.Load(s2)
+	for i := range 4 {
+		if postErrs[i] != nil {
+			t.Fatalf("concurrent PostAgent %d failed: %v", i, postErrs[i])
+		}
+		if postSessions[i] != s2 {
+			t.Fatalf("concurrent PostAgent %d landed on %s, want successor %s", i, postSessions[i], s2)
+		}
+		want := fmt.Sprintf("burst-%d", i)
+		if !slices.ContainsFunc(c2, func(r statefile.Record) bool { return r.Kind == statefile.Message && string(r.Body) == want }) {
+			t.Fatalf("message %q missing from successor session %s", want, s2)
+		}
+	}
+}
+
+func TestRolloverSaveFailureRollback(t *testing.T) {
+	rig := newTestRig(t)
+	fw := startFakeWorker(t, rig.pool, "w1")
+	ctx := context.Background()
+	agentsDir := filepath.Join(rig.dir, "agents")
+	t.Cleanup(func() { _ = os.Chmod(agentsDir, 0o755) })
+
+	cfg := defaultAgentCfg("w1")
+	cfg.ContextLimit = 50000
+	aid, s1, err := rig.cli.CreateAgent(ctx, harness.AgentCreate{Config: cfg}, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var locked atomic.Bool
+	fw.onWrite = func(path string) {
+		if strings.HasSuffix(path, s1+".log") && locked.CompareAndSwap(false, true) {
+			_ = os.Chmod(agentsDir, 0o500)
+		}
+	}
+	var steps atomic.Int32
+	rig.setStep(func(_ context.Context, model, _ string, _ []statefile.Record, _ *provider.Cache, emit func(statefile.Record)) (statefile.Header, error) {
+		if steps.Add(1) == 1 {
+			callBody, _ := json.Marshal(map[string]any{
+				"name":      "run",
+				"arguments": map[string]any{"worker": "w1", "code": "echo s1"},
+			})
+			emit(statefile.Record{Header: statefile.Header{Kind: statefile.Call, Type: "application/json"}, Body: callBody})
+			return statefile.Header{Model: model, Stop: "tool_use", Usage: &statefile.Usage{Input: 58000, Output: 500}}, nil
+		}
+		emit(statefile.Record{Header: statefile.Header{Kind: statefile.Text, Type: "text/plain"}, Body: []byte("recovered")})
+		return statefile.Header{Model: model, Stop: "end_turn", Usage: &statefile.Usage{Input: 1000, Output: 50}}, nil
+	})
+
+	if _, _, err := rig.cli.PostAgent(ctx, aid, "web", "hit-limit", nil); err != nil {
+		t.Fatal(err)
+	}
+	in := rig.waitAgentIdle(t, aid)
+	if in.CurrentSession != s1 || len(in.Sessions) != 1 || in.Status != statefile.StatusFailed {
+		t.Fatalf("failed saveAgentFile should keep agent on S1 failed, got %+v", in)
+	}
+
+	// Restore write permission: next PostAgent rolls over cleanly to S2!
+	if err := os.Chmod(agentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s2, _, err := rig.cli.PostAgent(ctx, aid, "web", "continue-after-disk-recovery", nil)
+	if err != nil || s2 == s1 {
+		t.Fatalf("expected recovery rollover to S2, got s2=%s err=%v", s2, err)
+	}
+	in2 := rig.waitAgentIdle(t, aid)
+	if in2.CurrentSession != s2 || len(in2.Sessions) != 2 || in2.Status != statefile.StatusClosed {
+		t.Fatalf("unexpected state after recovery rollover: %+v", in2)
+	}
+}
+
+func TestOrchestrateScopeAndWatchControls(t *testing.T) {
+	rig := newTestRig(t)
+	startFakeWorker(t, rig.pool, "w1")
+	startFakeWorker(t, rig.pool, "w2")
+	ctx := context.Background()
+	agentsDir := filepath.Join(rig.dir, "agents")
+	t.Cleanup(func() { _ = os.Chmod(agentsDir, 0o755) })
+
+	widerID, widerS1, err := rig.cli.CreateAgent(ctx, harness.AgentCreate{
+		Name:   "wider",
+		Config: defaultAgentCfg("w1", "w2"),
+		Apps:   []string{"orchestrate", "schedule", "message"},
+	}, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainSid, err := rig.cli.Create(ctx, harness.Create{
+		Model: "anthropic/claude-opus-4-6", Tools: "default", ContextLimit: 200000,
+	}, "tui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	callerID, callerS1, err := rig.cli.CreateAgent(ctx, harness.AgentCreate{
+		Name:   "caller",
+		Config: defaultAgentCfg("w1"),
+		Apps:   []string{"orchestrate", "message"},
+	}, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	callerCli := &connector.Client{URL: rig.srv.URL, Pinned: true, Key: auth.SessionToken(rig.priv, rig.hkey, callerS1), Local: rig.srv.URL}
+
+	// 1. Scope checks on list, get, and records.
+	listRaw, err := callerCli.CallApp(ctx, "orchestrate", "GET", "/list", "", nil)
+	if err != nil || bytes.Contains(listRaw, []byte(widerID)) || !bytes.Contains(listRaw, []byte(callerID)) {
+		t.Fatalf("orchestrate list leaked wider agent: %s (err=%v)", listRaw, err)
+	}
+	if _, err := callerCli.CallApp(ctx, "orchestrate", "GET", "/get/"+widerID, "", nil); err == nil || !strings.Contains(err.Error(), "403") {
+		t.Fatalf("expected 403 on get wider agent, got %v", err)
+	}
+	if _, err := callerCli.CallApp(ctx, "orchestrate", "GET", "/records/"+widerS1, "", nil); err == nil || !strings.Contains(err.Error(), "403") {
+		t.Fatalf("expected 403 on records of wider agent session, got %v", err)
+	}
+	if _, err := callerCli.CallApp(ctx, "orchestrate", "GET", "/records/"+plainSid, "", nil); err == nil || !strings.Contains(err.Error(), "403") {
+		t.Fatalf("expected 403 on records of non-agent plain session, got %v", err)
+	}
+
+	verifyWatchDisableIdleStopAndDelete(t, rig, callerCli, callerID, callerS1, agentsDir)
+}
+
+func verifyWatchDisableIdleStopAndDelete(t *testing.T, rig *testRig, callerCli *connector.Client, callerID, callerS1, agentsDir string) {
+	t.Helper()
+	ctx := context.Background()
+
+	// Spawn idle child with notify_on_stop=true; caller can read child get & records.
+	raw, err := callerCli.CallApp(ctx, "orchestrate", "POST", "/spawn", "application/json",
+		strings.NewReader(`{"name":"sub","apps":["message"],"notify_on_stop":true}`))
+	if err != nil {
+		t.Fatalf("spawn sub: %v", err)
+	}
+	var sub struct {
+		ID      string `json:"id"`
+		Session string `json:"session"`
+	}
+	_ = json.Unmarshal(raw, &sub)
+	if _, err := callerCli.CallApp(ctx, "orchestrate", "GET", "/get/"+sub.ID, "", nil); err != nil {
+		t.Fatalf("caller get sub failed: %v", err)
+	}
+	if _, err := callerCli.CallApp(ctx, "orchestrate", "GET", "/records/"+sub.Session, "", nil); err != nil {
+		t.Fatalf("caller records sub failed: %v", err)
+	}
+
+	// Disable watch via update notify_on_stop=false, then stop idle child -> NO stop notice!
+	if _, err := callerCli.CallApp(ctx, "orchestrate", "POST", "/update/"+sub.ID, "application/json",
+		strings.NewReader(`{"notify_on_stop":false}`)); err != nil {
+		t.Fatalf("update notify_on_stop=false: %v", err)
+	}
+	if _, err := callerCli.CallApp(ctx, "orchestrate", "POST", "/stop/"+sub.ID, "", nil); err != nil {
+		t.Fatalf("idle stop 1: %v", err)
+	}
+	time.Sleep(80 * time.Millisecond)
+	cc, _ := rig.h.Sessions.Load(callerS1)
+	if slices.ContainsFunc(cc, func(r statefile.Record) bool { return r.Kind == statefile.Message }) {
+		t.Fatal("disabled notify_on_stop=false watch still fired on idle stop")
+	}
+
+	// Re-watch, force DeleteAgent to fail via read-only agentsDir -> watch must survive and fire on next idle stop!
+	if _, err := callerCli.CallApp(ctx, "orchestrate", "POST", "/watch/"+sub.ID, "", nil); err != nil {
+		t.Fatalf("watch sub: %v", err)
+	}
+	_ = os.Chmod(agentsDir, 0o500)
+	if _, err := callerCli.CallApp(ctx, "orchestrate", "DELETE", "/"+sub.ID, "", nil); err == nil {
+		t.Fatal("expected DELETE to fail when agentsDir is read-only")
+	}
+	_ = os.Chmod(agentsDir, 0o755)
+	if _, err := callerCli.CallApp(ctx, "orchestrate", "POST", "/stop/"+sub.ID, "", nil); err != nil {
+		t.Fatalf("idle stop 2: %v", err)
+	}
+	waitForCallerOrchestrateNotice(t, rig, callerID, callerS1, sub.ID)
+}
+
+func waitForCallerOrchestrateNotice(t *testing.T, rig *testRig, callerID, callerS1, subID string) {
+	t.Helper()
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		cc, _ := rig.h.Sessions.Load(callerS1)
+		if slices.ContainsFunc(cc, func(r statefile.Record) bool {
+			return r.Kind == statefile.Message && r.Via == "app:orchestrate" && strings.Contains(string(r.Body), subID)
+		}) {
+			rig.waitAgentIdle(t, callerID)
+			return
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	t.Fatalf("expected app:orchestrate notice for %s on idle stop after failed delete", subID)
 }
