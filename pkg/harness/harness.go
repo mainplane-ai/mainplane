@@ -55,6 +55,7 @@ type Harness struct {
 	Signer   auth.Signer    // signs each session's key
 	url      atomic.Value   // the API on the mesh, for MAINPLANE_URL
 
+	adopt sync.Mutex // held by an adoption, from its check to its save
 	amu   sync.Mutex
 	byID  map[string]*agent
 	live  map[string]string // live session -> agent
@@ -146,12 +147,15 @@ func (h *Harness) create(ctx context.Context, id string, c Create, via string, e
 		}
 		return h.copy(c.From, id, c.N)
 	}
-	p, model, err := h.provider(c.Model)
-	if err != nil {
-		return err
+	if c.Tools == "" {
+		c.Tools = "default"
 	}
-	if c.ContextLimit <= 0 {
-		return fmt.Errorf("context_limit must be set")
+	conf := statefile.Conf{Model: c.Model, Tools: c.Tools, Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params, Preset: c.Preset}
+	if conf.Workers == nil {
+		conf.Workers = []statefile.Worker{}
+	}
+	if err := h.check(conf); err != nil {
+		return err
 	}
 	if err := checkName(c.Name); err != nil {
 		return err
@@ -159,25 +163,9 @@ func (h *Harness) create(ctx context.Context, id string, c Create, via string, e
 	if c.Name != "" && via == "" {
 		return errors.New("a name needs ?via= naming who is acting")
 	}
-	for _, t := range c.Input {
-		if !p.Envelope.Accepts(t) {
-			return fmt.Errorf("%s does not take %s as input", p.Envelope.Name(), t)
-		}
-	}
-	for k := range c.Params {
-		if p.Envelope.Owns(k) {
-			return fmt.Errorf("%s builds %s from the session, a param cannot set it", p.Envelope.Name(), k)
-		}
-	}
-	if c.Tools == "" {
-		c.Tools = "default"
-	}
-	if Tools(c.Tools, nil) == nil {
-		return fmt.Errorf("unknown tools %q; sets: default, patch", c.Tools)
-	}
-	conf := statefile.Conf{Model: c.Model, Tools: c.Tools, Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params, Preset: c.Preset}
-	if conf.Workers == nil {
-		conf.Workers = []statefile.Worker{}
+	_, model, err := h.provider(c.Model)
+	if err != nil {
+		return err
 	}
 	body, err := json.Marshal(conf)
 	if err != nil {
@@ -212,6 +200,32 @@ func (h *Harness) create(ctx context.Context, id string, c Create, via string, e
 	}
 	h.touch(id)
 	return f.Close()
+}
+
+// check is whether a session can start on c: its provider is there and
+// takes its input and params, and its limit and tools are set.
+func (h *Harness) check(c statefile.Conf) error {
+	p, _, err := h.provider(c.Model)
+	if err != nil {
+		return err
+	}
+	if c.ContextLimit <= 0 {
+		return fmt.Errorf("context_limit must be set")
+	}
+	for _, t := range c.Input {
+		if !p.Envelope.Accepts(t) {
+			return fmt.Errorf("%s does not take %s as input", p.Envelope.Name(), t)
+		}
+	}
+	for k := range c.Params {
+		if p.Envelope.Owns(k) {
+			return fmt.Errorf("%s builds %s from the session, a param cannot set it", p.Envelope.Name(), k)
+		}
+	}
+	if Tools(c.Tools, nil) == nil {
+		return fmt.Errorf("unknown tools %q; sets: default, patch", c.Tools)
+	}
+	return nil
 }
 
 // copy copies session from up to record n as id, and answers each call the
@@ -357,15 +371,15 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	if err != nil {
 		return "", err
 	}
-	why := ""
+	stop, why := "", ""
 	if p := statefile.ContextUsed(chain); p > conf.ContextLimit {
-		why = fmt.Sprintf("context %d exceeds limit %d", p, conf.ContextLimit)
+		stop, why = fmt.Sprintf("context %d exceeds limit %d", p, conf.ContextLimit), whyMidLimit
 	} else if a, ok := h.LiveAgent(id); ok && status == statefile.StatusOpen && !sameConf(conf, a.Config.Conf) {
-		why = "the agent's config changed mid-task"
+		stop, why = "the agent's model, tools, input, params or preset changed", whyMidConfig
 	}
-	if why != "" {
+	if stop != "" {
 		h.killAll(ctx, id, chain)
-		if moved, err := h.handoff(ctx, s, id, why); moved || err != nil {
+		if moved, err := h.handoff(ctx, s, id, stop, why); moved || err != nil {
 			return statefile.StatusFailed, err
 		}
 	}

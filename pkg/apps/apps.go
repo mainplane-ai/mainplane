@@ -163,8 +163,8 @@ func (r *Registry) Builtin(name string, skill []byte, serve func(ctx context.Con
 	return nil
 }
 
-// Load adds every app in <dir>/apps/ and starts the run apps that have their
-// secrets. A folder that is not an app is logged and left out.
+// Load adds every app in <dir>/apps/; Up starts its run apps. A folder that
+// is not an app is logged and left out.
 func (r *Registry) Load() error {
 	root := filepath.Join(r.Dir, "apps")
 	ents, err := os.ReadDir(root)
@@ -188,11 +188,20 @@ func (r *Registry) Load() error {
 			log.Printf("app %s: the name of a built-in, left out", a.Name)
 		} else {
 			r.apps[a.Name] = a
-			r.launch(a)
 		}
 		r.mu.Unlock()
 	}
 	return nil
+}
+
+// Up starts each run app that has its secrets, once the API it may call at
+// $MAINPLANE_URL takes connections.
+func (r *Registry) Up() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, a := range r.apps {
+		r.launch(a)
+	}
 }
 
 func load(dir string) (*App, error) {
@@ -217,8 +226,13 @@ func load(dir string) (*App, error) {
 	if a.URL != "" && len(a.Run) > 0 {
 		return nil, errors.New("app.json sets both url and run")
 	}
-	if u, err := url.Parse(a.URL); a.URL != "" && (err != nil || u.Scheme != "http" && u.Scheme != "https") {
-		return nil, fmt.Errorf("app.json url %q is not http(s)", a.URL)
+	if u, err := url.Parse(a.URL); a.URL != "" && (err != nil || u.Scheme != "http" && u.Scheme != "https" || u.Hostname() == "") {
+		return nil, fmt.Errorf("app.json url %q is not http(s)://host", a.URL)
+	}
+	for k := range a.Headers {
+		if strings.HasPrefix(http.CanonicalHeaderKey(k), "X-Mainplane-") {
+			return nil, fmt.Errorf("app.json header %s: X-Mainplane- headers are the harness's", k)
+		}
 	}
 	for _, e := range a.Entitlements {
 		if e != Post && e != List {

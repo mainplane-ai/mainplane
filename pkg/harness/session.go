@@ -227,6 +227,9 @@ func (h *Harness) SetName(id, via, n string) (int, error) {
 // the lock a post takes, so no post does. Copies keep their own files,
 // workers their logs.
 func (h *Harness) Delete(ctx context.Context, id, via string) error {
+	if a, ok := h.LiveAgent(id); ok {
+		return fmt.Errorf("session %s is the live session of agent %s: delete the agent first", id, a.ID)
+	}
 	s := h.session(id)
 	h.mu.Lock()
 	if s.deleting {

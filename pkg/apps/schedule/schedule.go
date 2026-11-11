@@ -35,6 +35,11 @@ const Name = "schedule"
 // idle is how long the loop sleeps with no timer set; a new one wakes it.
 const idle = 24 * time.Hour
 
+// retryDelay is how long a timer whose post failed waits to try again: long
+// enough not to spin on a session that does not load, short next to the
+// minute that is a cron line's finest step.
+const retryDelay = 5 * time.Second
+
 // Timer is one timer. Next is when it fires; a cron timer then moves Next on.
 type Timer struct {
 	ID    string    `json:"id"`
@@ -51,12 +56,21 @@ type schedule struct {
 
 	mu     sync.Mutex
 	timers []Timer
+	retry  map[string]time.Time // timer -> not before, after its post failed
+}
+
+// due is when t fires next, under mu.
+func (s *schedule) due(t Timer) time.Time {
+	if r := s.retry[t.ID]; r.After(t.Next) {
+		return r
+	}
+	return t.Next
 }
 
 // New loads the timers and fires them under ctx: one past due at load, set
 // before a restart, fires at once.
 func New(ctx context.Context, h *harness.Harness, dir string) (http.Handler, error) {
-	s := &schedule{h: h, path: filepath.Join(dir, "timers.json"), wake: make(chan struct{}, 1), timers: []Timer{}}
+	s := &schedule{h: h, path: filepath.Join(dir, "timers.json"), wake: make(chan struct{}, 1), timers: []Timer{}, retry: map[string]time.Time{}}
 	b, err := os.ReadFile(s.path)
 	if err == nil {
 		err = json.Unmarshal(b, &s.timers)
@@ -83,6 +97,7 @@ func New(ctx context.Context, h *harness.Harness, dir string) (http.Handler, err
 			http.Error(w, "no timer "+r.PathValue("id"), http.StatusNotFound)
 			return
 		}
+		delete(s.retry, s.timers[i].ID)
 		s.timers = slices.Delete(s.timers, i, i+1)
 		if err := s.save(); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -166,7 +181,7 @@ func (s *schedule) run(ctx context.Context) {
 		s.mu.Lock()
 		wait := idle
 		for _, t := range s.timers {
-			wait = min(wait, time.Until(t.Next))
+			wait = min(wait, time.Until(s.due(t)))
 		}
 		s.mu.Unlock()
 		select {
@@ -180,41 +195,52 @@ func (s *schedule) run(ctx context.Context) {
 }
 
 // fire posts every timer due. A timer whose agent is gone, or no longer has
-// the app, is dropped: no one is there to read it.
+// the app, is dropped: no one is there to read it. A timer moves on only
+// once its post lands; a failed one is tried again with the same key.
 func (s *schedule) fire(ctx context.Context) {
 	now := time.Now()
 	var due []Timer
 	s.mu.Lock()
-	keep := s.timers[:0]
-	for _, t := range s.timers {
+	s.timers = slices.DeleteFunc(s.timers, func(t Timer) bool {
 		a, err := s.h.GetAgent(t.Agent)
-		switch {
-		case err != nil || !slices.Contains(a.Apps, Name):
+		if err != nil || !slices.Contains(a.Apps, Name) {
 			log.Printf("schedule: timer %s dropped: agent %s is gone or has no %s app", t.ID, t.Agent, Name)
-			continue
-		case t.Next.After(now):
-		case t.Cron == "":
-			due = append(due, t)
-			continue
-		default:
-			due = append(due, t)
-			c, _ := parseCron(t.Cron) // add parsed it
-			t.Next = c.next(now)
+			delete(s.retry, t.ID)
+			return true
 		}
-		keep = append(keep, t)
-	}
-	s.timers = keep
-	if err := s.save(); err != nil {
-		log.Printf("schedule: %v", err)
-	}
+		if !s.due(t).After(now) {
+			due = append(due, t)
+		}
+		return false
+	})
 	s.mu.Unlock()
 	for _, t := range due {
 		body := fmt.Sprintf("Timer %s fired: %s", t.ID, t.Text)
 		key := "schedule:" + t.ID + ":" + strconv.FormatInt(t.Next.Unix(), 10)
-		if _, _, err := s.h.PostAgent(ctx, t.Agent, "app:"+Name, key, []harness.Part{{Type: "text/plain", Body: []byte(body)}}); err != nil {
-			log.Printf("schedule: timer %s to agent %s: %v", t.ID, t.Agent, err)
+		_, _, err := s.h.PostAgent(ctx, t.Agent, "app:"+Name, key, []harness.Part{{Type: "text/plain", Body: []byte(body)}})
+		s.mu.Lock()
+		i := slices.IndexFunc(s.timers, func(x Timer) bool { return x.ID == t.ID })
+		switch {
+		case err != nil:
+			log.Printf("schedule: timer %s to agent %s: %v; trying again in %s", t.ID, t.Agent, err, retryDelay)
+			s.retry[t.ID] = time.Now().Add(retryDelay)
+		case i < 0: // deleted while it posted
+			delete(s.retry, t.ID)
+		case t.Cron == "":
+			delete(s.retry, t.ID)
+			s.timers = slices.Delete(s.timers, i, i+1)
+		default:
+			delete(s.retry, t.ID)
+			c, _ := parseCron(t.Cron) // add parsed it
+			s.timers[i].Next = c.next(now)
 		}
+		s.mu.Unlock()
 	}
+	s.mu.Lock()
+	if err := s.save(); err != nil {
+		log.Printf("schedule: %v", err)
+	}
+	s.mu.Unlock()
 }
 
 func reply(w http.ResponseWriter, v any) {

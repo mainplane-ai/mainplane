@@ -318,6 +318,7 @@ func Harness(ctx context.Context, path string) error {
 	log.Printf("harness: http on %s, sessions in %s, %d api keys", c.HTTP, sessions, len(t[auth.Key]))
 	errs := make(chan error, 4)
 	go func() { errs <- srv.Serve(ln) }()
+	h.Apps.Up() // after the listen: a run app may call back as it starts
 	go func() {
 		ls, err := coord.Listen(ctx, filepath.Join(dir, "mesh"), "http://"+c.HTTP, worker.Port, worker.APIPort)
 		if err != nil {

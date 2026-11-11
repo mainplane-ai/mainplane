@@ -121,14 +121,16 @@ func (o *orchestrate) spawn(w http.ResponseWriter, r *http.Request, caller harne
 		return nil, err
 	}
 	if in.NotifyOnStop {
-		if err := o.setWatch(a.ID, caller.ID, true); err != nil {
-			return nil, err
-		}
+		err = o.setWatch(a.ID, caller.ID, true)
 	}
-	if in.Task != "" {
-		if _, _, err := o.h.PostAgent(o.ctx, a.ID, via(caller), "", []harness.Part{{Type: "text/plain", Body: []byte(in.Task)}}); err != nil {
-			return nil, err
+	if err == nil && in.Task != "" {
+		_, _, err = o.h.PostAgent(o.ctx, a.ID, via(caller), "", []harness.Part{{Type: "text/plain", Body: []byte(in.Task)}})
+	}
+	if err != nil { // a spawn is whole or not at all
+		if derr := errors.Join(o.h.DeleteAgent(o.ctx, a.ID, via(caller)), o.setWatch(a.ID, caller.ID, false)); derr != nil {
+			log.Printf("orchestrate: undo of the spawn of %s: %v", a.ID, derr)
 		}
+		return nil, err
 	}
 	return map[string]string{"id": a.ID, "session": a.Live()}, nil
 }

@@ -154,6 +154,7 @@ func newRig(t *testing.T, dir string) *rig {
 	})
 	srv.Config.Handler = mux
 	srv.Start()
+	r.h.Apps.Up()
 	must(t, r.h.Resume(ctx))
 	r.stop = func() {
 		cancel()
@@ -718,13 +719,162 @@ func TestSchedule(t *testing.T) {
 		t.Fatalf("timers after firing: %s", b)
 	}
 	// A timer due while the harness was down fires when it starts again.
-	r.do(key, "POST", "/apps/schedule", `{"text":"after restart","in":"300ms"}`)
 	r.idle(id)
+	code, set := r.do(key, "POST", "/apps/schedule", `{"text":"after restart","in":"1s"}`)
+	var later timerReply
+	if code != 200 || json.Unmarshal([]byte(set), &later) != nil {
+		t.Fatalf("set: %d %s", code, set)
+	}
 	r.stop()
-	time.Sleep(500 * time.Millisecond)
+	if !time.Now().Before(later.Next) {
+		t.Fatal("the harness stopped after the timer was due")
+	}
+	time.Sleep(time.Until(later.Next) + 100*time.Millisecond)
+	if n := len(messages(r.chain(sid), "app:schedule")); n != 1 {
+		t.Fatalf("%d timer messages before the restart", n)
+	}
 	restarted := newRig(t, dir)
 	eventually(t, "the timer fired after a restart", func() bool {
 		ms := messages(restarted.chain(restarted.info(id).CurrentSession), "app:schedule")
 		return len(ms) == 2 && strings.HasSuffix(ms[1], " fired: after restart")
 	})
+}
+
+// timerReply is a timer as the schedule app returns it.
+type timerReply struct{ Next time.Time }
+
+func TestScheduleRetry(t *testing.T) {
+	r := newRig(t, t.TempDir())
+	id, sid := r.agent(conf("fake/m", 1000, 0), "schedule")
+	key := r.signer.Sign(auth.SessionKey, sid)
+	path := r.h.Sessions.Path(sid)
+	must(t, os.Rename(path, path+".away")) // the post cannot load the session
+	if code, b := r.do(key, "POST", "/apps/schedule", `{"text":"again","in":"100ms"}`); code != 200 {
+		t.Fatalf("set: %d %s", code, b)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if _, b := r.do(key, "GET", "/apps/schedule", ""); !strings.Contains(b, `"again"`) {
+		t.Fatalf("a failed timer was dropped: %s", b)
+	}
+	must(t, os.Rename(path+".away", path))
+	for range 100 {
+		if len(messages(r.chain(r.info(id).CurrentSession), "app:schedule")) == 1 {
+			if _, b := r.do(key, "GET", "/apps/schedule", ""); strings.TrimSpace(b) != "[]" {
+				t.Fatalf("a timer that landed stayed: %s", b)
+			}
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("the failed timer never landed")
+}
+
+func TestMidrunConfig(t *testing.T) {
+	r := newRig(t, t.TempDir())
+	release := make(chan struct{})
+	r.step = func(n int64, body []byte) ([]statefile.Record, int) {
+		if n == 1 {
+			<-release
+			return []statefile.Record{{Header: statefile.Header{Kind: statefile.Call, ID: "c1", Type: "application/json"}, Body: []byte(`{"name":"run","arguments":{"worker":"w1","code":"true"}}`)}}, 100
+		}
+		return []statefile.Record{text("ok")}, 100
+	}
+	id, s1 := r.agent(conf("fake/a", 1000, 0, "w1"))
+	r.ok("POST", "/agents/"+id+"/records?via=web", "go", nil)
+	eventually(t, "stepping", func() bool { return r.info(id).Status == statefile.StatusStepping })
+	r.ok("PUT", "/agents/"+id+"/config?via=web", conf("fake/b", 1000, 0, "w1"), nil)
+	close(release)
+	eventually(t, "a second session", func() bool { return len(r.info(id).Sessions) == 2 })
+	info := r.idle(id)
+	c2 := r.chain(info.Sessions[1])
+	if h := messages(c2, "harness"); len(h) != 1 || !strings.Contains(h[0], "Session "+s1+" stopped mid-task because the agent's config changed") {
+		t.Fatalf("continue message %v", h)
+	}
+	if c := lastSystem(c2, "continue"); !strings.Contains(c, "which stopped mid-task because the agent's config changed") {
+		t.Fatalf("continue note %q", c)
+	}
+}
+
+func TestAgentEdges(t *testing.T) {
+	dir := t.TempDir()
+	install(t, dir, "opaque", `{"url":"http:vendor"}`)
+	install(t, dir, "forger", `{"url":"http://vendor.example","headers":{"x-mainplane-agent":"a1"}}`)
+	r := newRig(t, dir)
+	if _, b := r.do(r.key, "GET", "/apps", ""); strings.Contains(b, "opaque") || strings.Contains(b, "forger") {
+		t.Fatalf("a bad app.json loaded: %s", b)
+	}
+	if code, b := r.do(r.key, "POST", "/agents?via=web", `{"session":"../../x"}`); code != 400 || !strings.Contains(b, "bad session id") {
+		t.Fatalf("adopt a path: %d %s", code, b)
+	}
+	id, sid := r.agent(conf("fake/m", 1000, 0))
+	for _, c := range []string{`{"model":"fake/m","context_limit":1000,"tools":"bogus"}`, `{"model":"fake/m","context_limit":1000,"input":["application/x-nope"]}`} {
+		if code, b := r.do(r.key, "PUT", "/agents/"+id+"/config?via=web", c); code != 400 {
+			t.Fatalf("config %s: %d %s", c, code, b)
+		}
+	}
+	if info := r.info(id); info.Config.Tools != "default" || info.Config.Input != nil {
+		t.Fatalf("a refused config was kept: %+v", info.Config)
+	}
+	if code, b := r.do(r.key, "DELETE", "/sessions/"+sid+"?via=web", ""); code != 400 || !strings.Contains(b, "live session of agent "+id) {
+		t.Fatalf("delete a live session: %d %s", code, b)
+	}
+	// A delete waits for the step it stops; the session is then no agent's.
+	r.step = func(int64, []byte) ([]statefile.Record, int) {
+		time.Sleep(300 * time.Millisecond)
+		return []statefile.Record{text("ok")}, 100
+	}
+	r.ok("POST", "/agents/"+id+"/records?via=web", "slow", nil)
+	eventually(t, "stepping", func() bool { return r.info(id).Status == statefile.StatusStepping })
+	r.ok("DELETE", "/agents/"+id+"?via=web", "", nil)
+	var si struct{ Status statefile.Status }
+	r.ok("GET", "/sessions/"+sid, "", &si)
+	if si.Status == statefile.StatusStepping {
+		t.Fatal("a deleted agent's session still steps")
+	}
+	if code, _ := r.do(r.signer.Sign(auth.SessionKey, sid), "GET", "/skills", ""); code != 403 {
+		t.Fatalf("a deleted agent's key: %d", code)
+	}
+	r.ok("DELETE", "/sessions/"+sid+"?via=web", "", nil)
+	// Secrets: names the harness sets in a run app are refused; a null file is empty.
+	for _, n := range []string{"PORT", "DATA_DIR", "MAINPLANE_APP_KEY"} {
+		if code, _ := r.do(r.key, "PUT", "/secrets/"+n, "x"); code != 400 {
+			t.Fatalf("secret %s: %d", n, code)
+		}
+	}
+	must(t, os.WriteFile(filepath.Join(dir, ".secrets"), []byte("null"), 0o600))
+	r.ok("PUT", "/secrets/K", "v", nil)
+}
+
+func TestAdoptWhileRenaming(t *testing.T) {
+	r := newRig(t, t.TempDir())
+	id, _ := r.agent(conf("fake/m", 1000, 0))
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := range 30 {
+			r.ok("PUT", "/agents/"+id+"/name?via=web", fmt.Sprintf("n%d", i), nil)
+		}
+	}()
+	for range 30 {
+		var s struct{ ID string }
+		r.ok("POST", "/sessions?via=tui", `{"model":"fake/m","context_limit":1000}`, &s)
+		r.ok("POST", "/agents?via=web", `{"session":"`+s.ID+`"}`, nil)
+	}
+	<-done
+}
+
+func TestSpawnUndo(t *testing.T) {
+	dir := t.TempDir()
+	r := newRig(t, dir)
+	parent, ps := r.agent(conf("fake/m", 1000, 0), "orchestrate")
+	must(t, os.MkdirAll(filepath.Join(dir, "app-data", "orchestrate", "watch.json.tmp"), 0o755)) // the watch cannot save
+	key := r.signer.Sign(auth.SessionKey, ps)
+	if code, b := r.do(key, "POST", "/apps/orchestrate/spawn", `{"task":"work","notify_on_stop":true}`); code == 200 {
+		t.Fatalf("spawn: %d %s", code, b)
+	}
+	var all []harness.AgentInfo
+	r.ok("GET", "/agents", "", &all)
+	if len(all) != 1 || all[0].ID != parent {
+		t.Fatalf("a failed spawn left an agent: %+v", all)
+	}
 }

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 	"sync"
 )
 
@@ -34,6 +35,9 @@ func (r *Registry) secrets() map[string]string {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		log.Printf("apps: %s: %v", r.secretsPath(), err)
 	}
+	if m == nil { // the file says null
+		m = map[string]string{}
+	}
 	return m
 }
 
@@ -47,14 +51,13 @@ func (r *Registry) SetSecret(name, value string) error {
 	if !secretName.MatchString(name) {
 		return fmt.Errorf("a secret's name is an environment variable's: [A-Za-z_][A-Za-z0-9_]*")
 	}
+	if name == "PORT" || name == "DATA_DIR" || strings.HasPrefix(name, "MAINPLANE_") {
+		return fmt.Errorf("%s is set by the harness in a run app's environment, so no secret takes the name", name)
+	}
 	if err := r.edit(func(m map[string]string) { m[name] = value }); err != nil {
 		return err
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, a := range r.apps {
-		r.launch(a)
-	}
+	r.Up()
 	return nil
 }
 

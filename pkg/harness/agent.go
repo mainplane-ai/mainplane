@@ -63,10 +63,12 @@ type NewAgent struct {
 
 // agent is one agent in memory: the file's value, under mu, which every
 // change and every rollover holds, so a message never lands on a session
-// the agent is leaving.
+// the agent is leaving. Gone is set by a delete, for a call that waited on
+// mu meanwhile.
 type agent struct {
-	mu sync.Mutex
-	a  Agent
+	mu   sync.Mutex
+	a    Agent
+	gone bool
 }
 
 // Rollover reasons, as the continue note tells the next session.
@@ -75,7 +77,10 @@ const (
 	whyLimit   = "reached %d tokens of its %d token context limit"
 	whyCold    = "was at %d tokens, over the %d token cold limit, with its prompt cache expired"
 	whyRebuilt = "was built by another harness version"
-	whyMidrun  = "Session %s hit its context limit mid-task (%s). Retrieve what you need from <scratch>/logs/%s.log and continue the task."
+	whyMidrun  = "Session %s %s (%s). Retrieve what you need from <scratch>/logs/%s.log and continue the task."
+
+	whyMidLimit  = "hit its context limit mid-task"
+	whyMidConfig = "stopped mid-task because the agent's config changed"
 )
 
 // LoadAgents reads agents/ and maps each live session to its agent.
@@ -144,13 +149,26 @@ func (h *Harness) agent(id string) (*agent, error) {
 	return nil, fmt.Errorf("no agent %s", id)
 }
 
+// lock is agent id with its mu held, unless a delete took it meanwhile.
+func (h *Harness) lock(id string) (*agent, error) {
+	ag, err := h.agent(id)
+	if err != nil {
+		return nil, err
+	}
+	ag.mu.Lock()
+	if ag.gone {
+		ag.mu.Unlock()
+		return nil, fmt.Errorf("no agent %s", id)
+	}
+	return ag, nil
+}
+
 // GetAgent is the agent's file as it is now.
 func (h *Harness) GetAgent(id string) (Agent, error) {
-	ag, err := h.agent(id)
+	ag, err := h.lock(id)
 	if err != nil {
 		return Agent{}, err
 	}
-	ag.mu.Lock()
 	defer ag.mu.Unlock()
 	return ag.a, nil
 }
@@ -247,7 +265,9 @@ func (h *Harness) cached(id string) (Info, error) {
 }
 
 // checkAgent normalizes a config as Create would store it, so a comparison
-// with a session's config sees only real changes, and checks the apps.
+// with a session's config sees only real changes, and checks it as Create
+// would, so a rollover never meets a config it cannot start. It checks the
+// apps too.
 func (h *Harness) checkAgent(c *AgentConfig, apps []string) error {
 	if c.Tools == "" {
 		c.Tools = "default"
@@ -255,11 +275,11 @@ func (h *Harness) checkAgent(c *AgentConfig, apps []string) error {
 	if c.Workers == nil {
 		c.Workers = []statefile.Worker{}
 	}
-	if _, _, err := h.provider(c.Model); err != nil {
+	if err := h.check(c.Conf); err != nil {
 		return err
 	}
-	if c.ContextLimit <= 0 || c.ColdLimit < 0 {
-		return errors.New("context_limit must be set, and cold_limit is not negative")
+	if c.ColdLimit < 0 {
+		return errors.New("cold_limit is not negative")
 	}
 	for _, n := range apps {
 		if _, ok := h.Apps.Get(n); !ok {
@@ -279,6 +299,9 @@ func (h *Harness) CreateAgent(ctx context.Context, n NewAgent, via string) (Agen
 		a.Apps = []string{}
 	}
 	if n.Session != "" {
+		if !statefile.ValidID(n.Session) {
+			return Agent{}, fmt.Errorf("bad session id %q", n.Session)
+		}
 		chain, err := h.Sessions.Load(n.Session)
 		if err != nil {
 			return Agent{}, err
@@ -308,20 +331,16 @@ func (h *Harness) CreateAgent(ctx context.Context, n NewAgent, via string) (Agen
 		}
 		a.Sessions = []string{sid}
 	} else {
-		h.amu.Lock()
-		for _, other := range h.byID {
-			other.mu.Lock()
-			held := slices.Contains(other.a.Sessions, n.Session)
-			other.mu.Unlock()
-			if held {
-				h.amu.Unlock()
-				return Agent{}, fmt.Errorf("session %s belongs to agent %s", n.Session, other.a.ID)
+		// One adoption at a time, through the save that maps the session,
+		// so two never take one session. Agents are read one lock at a
+		// time, never under amu: save takes an agent's mu, then amu.
+		h.adopt.Lock()
+		defer h.adopt.Unlock()
+		for _, other := range h.AllAgents() {
+			if slices.Contains(other.Sessions, n.Session) {
+				return Agent{}, fmt.Errorf("session %s belongs to agent %s", n.Session, other.ID)
 			}
 		}
-		// claimed before the unlock, so a second adoption at once is refused
-		h.live[n.Session] = a.ID
-		h.byID[a.ID] = ag
-		h.amu.Unlock()
 		a.Sessions = []string{n.Session}
 		if err := h.note(h.session(n.Session), n.Session, h.appsNote(a)); err != nil {
 			return Agent{}, err
@@ -407,11 +426,10 @@ func cold(chain []statefile.Record) bool {
 // the post as any post mid-step, so one agent never steps two sessions. An
 // idle one that is stale rolls over first, and the post lands on the next.
 func (h *Harness) PostAgent(ctx context.Context, id, via, key string, parts []Part) (string, int, error) {
-	ag, err := h.agent(id)
+	ag, err := h.lock(id)
 	if err != nil {
 		return "", 0, err
 	}
-	ag.mu.Lock()
 	defer ag.mu.Unlock()
 	a := ag.a
 	sid := a.Live()
@@ -455,19 +473,18 @@ func (h *Harness) rollover(ctx context.Context, ag *agent, why string) (string, 
 
 // handoff is Rule 3, from Step on the live session of an agent past its
 // limit or off its config mid-task, with the step's file held. The session
-// ends failed, its tip an error so Resume never kicks it again; its log is
+// ends failed, its tip an error saying stop so Resume never kicks it again; its log is
 // on every worker before the next session's first step; messages the model
 // never saw move with the task. False when the session is no agent's.
-func (h *Harness) handoff(ctx context.Context, s *session, id, why string) (bool, error) {
+func (h *Harness) handoff(ctx context.Context, s *session, id, stop, why string) (bool, error) {
 	a, ok := h.LiveAgent(id)
 	if !ok {
 		return false, nil
 	}
-	ag, err := h.agent(a.ID)
+	ag, err := h.lock(a.ID)
 	if err != nil {
-		return false, err
+		return false, nil // deleted since
 	}
-	ag.mu.Lock()
 	defer ag.mu.Unlock()
 	if a = ag.a; a.Live() != id {
 		return false, nil
@@ -476,7 +493,7 @@ func (h *Harness) handoff(ctx context.Context, s *session, id, why string) (bool
 	if _, err := h.append(s, system("continue", next)); err != nil {
 		return true, err
 	}
-	if _, err := h.append(s, errorRecord("", why)); err != nil {
+	if _, err := h.append(s, errorRecord("", stop)); err != nil {
 		return true, err
 	}
 	chain, err := h.Sessions.Load(id) // with every post that came before ag.mu
@@ -484,7 +501,7 @@ func (h *Harness) handoff(ctx context.Context, s *session, id, why string) (bool
 		return true, err
 	}
 	h.copyLogs(ctx, s)
-	if err := h.start(ctx, next, a, continueNote(a, id, "hit its context limit mid-task")); err != nil {
+	if err := h.start(ctx, next, a, continueNote(a, id, why)); err != nil {
 		return true, err
 	}
 	a.Sessions = append(slices.Clone(a.Sessions), next)
@@ -495,7 +512,7 @@ func (h *Harness) handoff(ctx context.Context, s *session, id, why string) (bool
 	if st := statefile.LastStep(chain); st != nil {
 		upto = st.Upto
 	}
-	carry := []statefile.Record{{Header: statefile.Header{Kind: statefile.Message, Type: "text/plain", Via: "harness"}, Body: fmt.Appendf(nil, whyMidrun, id, why, id)}}
+	carry := []statefile.Record{{Header: statefile.Header{Kind: statefile.Message, Type: "text/plain", Via: "harness"}, Body: fmt.Appendf(nil, whyMidrun, id, why, stop, id)}}
 	for _, r := range chain {
 		if r.Kind == statefile.Message && r.N > upto {
 			carry = append(carry, statefile.Record{Header: statefile.Header{Kind: statefile.Message, Type: r.Type, Via: r.Via, IdempotencyKey: r.IdempotencyKey}, Body: r.Body})
@@ -507,7 +524,7 @@ func (h *Harness) handoff(ctx context.Context, s *session, id, why string) (bool
 			return true, err
 		}
 	}
-	log.Printf("agent %s: %s -> %s mid-task: %s", a.ID, id, next, why)
+	log.Printf("agent %s: %s -> %s: session %s (%s)", a.ID, id, next, why, stop)
 	h.Kick(context.WithoutCancel(ctx), next)
 	return true, nil
 }
@@ -516,11 +533,10 @@ func (h *Harness) handoff(ctx context.Context, s *session, id, why string) (bool
 // next post rolls over if the config needs it. A change of workers alone
 // goes into the live session at once, unless that session is done.
 func (h *Harness) SetAgentConfig(id, via string, c AgentConfig) error {
-	ag, err := h.agent(id)
+	ag, err := h.lock(id)
 	if err != nil {
 		return err
 	}
-	ag.mu.Lock()
 	defer ag.mu.Unlock()
 	a := ag.a
 	if err := h.checkAgent(&c, a.Apps); err != nil {
@@ -544,11 +560,10 @@ func (h *Harness) SetAgentConfig(id, via string, c AgentConfig) error {
 // in an apps note at its tip, so its cached prefix holds, and its key loses
 // every app taken away at once.
 func (h *Harness) SetAgentApps(id string, apps []string) error {
-	ag, err := h.agent(id)
+	ag, err := h.lock(id)
 	if err != nil {
 		return err
 	}
-	ag.mu.Lock()
 	defer ag.mu.Unlock()
 	a := ag.a
 	if apps == nil {
@@ -569,11 +584,10 @@ func (h *Harness) SetAgentName(id, n string) error {
 	if err := checkName(n); err != nil {
 		return err
 	}
-	ag, err := h.agent(id)
+	ag, err := h.lock(id)
 	if err != nil {
 		return err
 	}
-	ag.mu.Lock()
 	defer ag.mu.Unlock()
 	a := ag.a
 	a.Name = n
@@ -599,25 +613,40 @@ func (h *Harness) RetryAgent(ctx context.Context, id string) error {
 	return nil
 }
 
-// DeleteAgent stops the live session and removes the file. The sessions'
+// DeleteAgent removes the file, then stops the live session and waits for
+// its step to end. Unmapped first, the session is no agent's: its key is
+// revoked, no post reaches it, and its stop calls no OnStop. The sessions'
 // files stay: /sessions deletes those.
 func (h *Harness) DeleteAgent(ctx context.Context, id, via string) error {
-	ag, err := h.agent(id)
+	ag, err := h.lock(id)
 	if err != nil {
 		return err
 	}
-	ag.mu.Lock()
-	defer ag.mu.Unlock()
-	if err := h.Stop(ctx, ag.a.Live(), via); err != nil {
-		log.Printf("agent %s: stop before delete: %v", id, err)
-	}
+	live := ag.a.Live()
 	if err := os.Remove(filepath.Join(h.AgentDir, id+".json")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		ag.mu.Unlock()
 		return err
 	}
+	ag.gone = true
 	h.amu.Lock()
 	delete(h.byID, id)
-	delete(h.live, ag.a.Live())
+	delete(h.live, live)
 	h.amu.Unlock()
+	ag.mu.Unlock()
 	log.Printf("agent %s: deleted by %s", id, via)
+	if err := h.Stop(ctx, live, via); err != nil {
+		log.Printf("agent %s: stop of %s after delete: %v", id, live, err)
+	}
+	s := h.session(live)
+	h.mu.Lock()
+	running, done := s.running, s.done
+	h.mu.Unlock()
+	if running {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	return nil
 }
