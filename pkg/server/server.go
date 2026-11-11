@@ -284,6 +284,12 @@ func Harness(ctx context.Context, path string) error {
 	a := &api{dir: dir, path: path, k: k, noPointer: c.NoPointer, at: func() string { return at.Load().(string) }, coord: coord, pool: pool}
 	a.handle(routes)
 	go ship(ctx, dir, path)
+	// The port is taken before the apps start: a daemon that calls
+	// $MAINPLANE_URL as it starts waits for Serve, and is not refused.
+	ln, err := net.Listen("tcp", c.HTTP)
+	if err != nil {
+		return err
+	}
 	am, err := apps.New(ctx, h, dir, k, pointer.Encode(k), "http://"+c.HTTP)
 	if err != nil {
 		return err
@@ -301,10 +307,6 @@ func Harness(ctx context.Context, path string) error {
 		_ = derp.Close()
 	}()
 	if err := h.Resume(ctx); err != nil {
-		return err
-	}
-	ln, err := net.Listen("tcp", c.HTTP)
-	if err != nil {
 		return err
 	}
 	log.Printf("harness: http on %s, sessions in %s, %d api keys", c.HTTP, sessions, len(t[auth.Key]))
