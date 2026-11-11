@@ -215,17 +215,23 @@ func (s *schedule) fire(ctx context.Context) {
 	})
 	s.mu.Unlock()
 	for _, t := range due {
+		s.mu.Lock()
+		gone := !slices.ContainsFunc(s.timers, func(x Timer) bool { return x.ID == t.ID })
+		s.mu.Unlock()
+		if gone { // deleted while an earlier timer posted
+			continue
+		}
 		body := fmt.Sprintf("Timer %s fired: %s", t.ID, t.Text)
 		key := "schedule:" + t.ID + ":" + strconv.FormatInt(t.Next.Unix(), 10)
 		_, _, err := s.h.PostAgent(ctx, t.Agent, "app:"+Name, key, []harness.Part{{Type: "text/plain", Body: []byte(body)}})
 		s.mu.Lock()
 		i := slices.IndexFunc(s.timers, func(x Timer) bool { return x.ID == t.ID })
 		switch {
+		case i < 0: // deleted while it posted
+			delete(s.retry, t.ID)
 		case err != nil:
 			log.Printf("schedule: timer %s to agent %s: %v; trying again in %s", t.ID, t.Agent, err, retryDelay)
 			s.retry[t.ID] = time.Now().Add(retryDelay)
-		case i < 0: // deleted while it posted
-			delete(s.retry, t.ID)
 		case t.Cron == "":
 			delete(s.retry, t.ID)
 			s.timers = slices.Delete(s.timers, i, i+1)
