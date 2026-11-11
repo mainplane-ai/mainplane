@@ -415,7 +415,9 @@ func (h *Harness) SetAgentName(id, via, name string) error {
 // returns. The agent goes first: from then its key is refused, no post
 // finds it, and a step that is handing the session over does not wait on
 // an agent that waits on the step. Its sessions' files stay: they go
-// through /sessions.
+// through /sessions, and the live one is a plain session from here. A post
+// to it that landed while it was held had its kick refused, so it is kicked
+// once more: stopped, it steps only if such a post is at its tip.
 func (h *Harness) DeleteAgent(ctx context.Context, id, via string) error {
 	a, unlock, err := h.holdAgent(id)
 	if err != nil {
@@ -438,6 +440,7 @@ func (h *Harness) DeleteAgent(ctx context.Context, id, via string) error {
 		return err
 	}
 	release()
+	h.Kick(context.WithoutCancel(ctx), a.live())
 	log.Printf("agent %s: deleted by %s", id, via)
 	return nil
 }

@@ -419,7 +419,7 @@ func TestLimitRollover(t *testing.T) {
 func TestMidRunRollover(t *testing.T) {
 	r := newRig(t)
 	var atS2 string // the log of s1 on the worker when s2 first stepped
-	a := r.create(AgentCreate{Config: r.conf(1000, 0, "w1")}, "web")
+	a := r.create(AgentCreate{Config: r.conf(1000, 0, "w1", "away")}, "web")
 	s1 := a.Sessions[0]
 	log := filepath.Join(r.dir, "scratch", "logs", s1+".log")
 	r.step = func(body string) turn {
@@ -474,6 +474,10 @@ func TestMidRunRollover(t *testing.T) {
 	if kill < 0 || write < kill {
 		t.Fatalf("worker: %v", r.events)
 	}
+	// the end of s1's run does not write w1 the log it has, though a worker that is away has none
+	if slices.Contains(r.events[write+1:], r.events[write]) {
+		t.Fatalf("the log of s1 was written twice: %v", r.events)
+	}
 	if r.steps != 2 {
 		t.Fatalf("%d model calls, want 2", r.steps)
 	}
@@ -492,17 +496,19 @@ func TestDeleteAgent(t *testing.T) {
 	}
 	<-r.started
 	r.h.Kick(context.Background(), s1) // one more pass is owed when this run ends
+	s := r.h.session(s1)
+	r.h.mu.Lock()
+	run := s.done
+	r.h.mu.Unlock()
 	if err := r.h.DeleteAgent(context.Background(), a.ID, "web"); err != nil {
 		t.Fatal(err)
 	}
-	s := r.h.session(s1)
-	r.h.mu.Lock()
-	running := s.running
-	r.h.mu.Unlock()
-	if running {
+	select {
+	case <-run:
+	default:
 		t.Fatal("the delete returned while the agent's session was still running")
 	}
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond) // the kick the delete ends with finds a stopped session
 	r.mu.Lock()
 	steps, stopped := r.steps, slices.Clone(r.stopped)
 	r.mu.Unlock()

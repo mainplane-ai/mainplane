@@ -31,7 +31,7 @@ type session struct {
 	retry   bool            // a run asked to step past a failed tip
 	stopped string          // who asked for the stop, while one is in flight
 	logs    sync.Mutex      // held by copyLogs from Load to the last Write, so an older copy never lands last
-	copied  int             // under logs: the n of the tip every worker's copy ends at
+	copied  map[string]int  // under logs: for each worker, the n of the tip its copy ends at
 	exports atomic.Int64    // copyLogs calls asked for; a waiting one leaves to a newer one
 	conn    provider.Conn   // the provider's socket, kept from step to step within a run
 
@@ -280,9 +280,9 @@ func (h *Harness) halt(ctx context.Context, s *session, via string) (func(), err
 		log.Printf("session %s: stop before delete: %v", s.id, err) // a broken file still goes
 	}
 	h.mu.Lock()
-	running, done := s.running, s.done
+	done := s.done
 	h.mu.Unlock()
-	if running {
+	if done != nil { // closed after the runner's last write, which is later than running going false
 		select {
 		case <-done:
 		case <-ctx.Done():

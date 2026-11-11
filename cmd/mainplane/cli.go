@@ -40,8 +40,9 @@ var arity = map[string][2]int{
 	"apps": {0, 0}, "app start": {1, 1}, "app stop": {1, 1}, "secrets": {0, 0}, "secret set": {1, 2}, "secret delete": {1, 1}, "skill": {0, 1}, "app": {3, 4},
 }
 
-// methods are what the app verb calls an app with.
-var methods = []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}
+// methods are what the app verb calls an app with: the standard ones. A
+// word that is none of them is a slip, not a method.
+var methods = []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE"}
 
 // cli is the harness API as verbs: one verb, one route, its reply printed.
 // The harness and the key come from login; nothing else is remembered or
@@ -251,6 +252,11 @@ func skill(verb string, args []string) {
 	if a := arity[verb]; len(args) < a[0] || len(args) > a[1] {
 		usage()
 	}
+	// The method is checked before the harness is asked or even found:
+	// "app stop x y" is a slip for the stop verb, not a call of an app named stop.
+	if verb == "app" && !slices.Contains(methods, strings.ToUpper(args[1])) {
+		usage()
+	}
 	s, ok := connector.Session()
 	if !ok {
 		c, err := login()
@@ -277,11 +283,6 @@ func skill(verb string, args []string) {
 		}
 		fmt.Print(text)
 	default:
-		// The method is checked before the harness is asked: "app stop x y" is
-		// a slip for the stop verb, not a call of an app named stop.
-		if !slices.Contains(methods, strings.ToUpper(args[1])) {
-			usage()
-		}
 		var body io.Reader
 		ctype := ""
 		if len(args) == 4 {
