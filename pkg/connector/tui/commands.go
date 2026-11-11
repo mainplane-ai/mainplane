@@ -783,8 +783,10 @@ func (s *session) models(a *App) {
 					a.SayError(err)
 				}
 				m.Items = append(m.Items, items...)
-				if len(m.Items) == 0 {
+				if len(m.Items) == 0 && len(errs) == 0 {
 					a.Say("No provider is connected: /providers")
+				}
+				if len(m.Items) == 0 {
 					return
 				}
 				a.OpenMenu("Model for a new session", m)

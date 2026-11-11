@@ -447,6 +447,7 @@ func saveProvider(path, name string, in Provider, serve func(map[string]provider
 			*f[0] = *f[1]
 		}
 	}
+	p.ContextLimit = cmp.Or(in.ContextLimit, p.ContextLimit)
 	c.Providers[name] = p
 	ps, err := providers(filepath.Dir(path), c.Providers)
 	if err != nil {

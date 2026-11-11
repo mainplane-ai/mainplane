@@ -121,8 +121,10 @@ func connected(cat *catalog.Catalog, ps []harness.ProviderInfo) []string {
 func defaultConf(cat *catalog.Catalog, ps []harness.ProviderInfo, newest []harness.Info) (statefile.Conf, error) {
 	if len(newest) > 0 {
 		cf := newest[0].Config
-		name, _, _ := strings.Cut(cf.Model, "/")
-		if slices.ContainsFunc(custom(cat, ps), func(p harness.ProviderInfo) bool { return p.Name == name }) {
+		name, model, _ := strings.Cut(cf.Model, "/")
+		own := custom(cat, ps)
+		if i := slices.IndexFunc(own, func(p harness.ProviderInfo) bool { return p.Name == name }); i >= 0 {
+			cf.ContextLimit = customConf(own[i], model).ContextLimit // the provider's now
 			return cf, nil
 		}
 	}

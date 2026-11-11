@@ -190,20 +190,30 @@ func (h *Harness) serveModels(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimSuffix(p.URL, "/chat/completions")+"/models", nil)
+	u, err := url.Parse(p.URL)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	u.Path = strings.TrimSuffix(u.Path, "/chat/completions") + "/models"
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
 	if err != nil {
 		fail(w, err)
 		return
 	}
 	p.Headers(req, p.Key)
 	res, err := http.DefaultClient.Do(req)
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		err = ue.Err // without the url, whose query may hold a key
+	}
 	if err != nil {
-		fail(w, err)
+		fail(w, fmt.Errorf("GET %s: %w", u.Path, err))
 		return
 	}
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
-		fail(w, fmt.Errorf("%s: %s", req.URL.Redacted(), res.Status))
+		fail(w, fmt.Errorf("GET %s: %s", u.Path, res.Status))
 		return
 	}
 	var list struct {
