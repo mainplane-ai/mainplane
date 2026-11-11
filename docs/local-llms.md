@@ -1,0 +1,86 @@
+# Local LLMs
+
+```
+ harness --mesh--> http://gpu-box:11434/v1 --> model server --> GPU
+```
+
+A model you run yourself is a provider like any other. Any server that speaks
+OpenAI Chat Completions works: Ollama, LM Studio, the llama.cpp server, vLLM.
+The harness needs its base url and nothing else. The steps below use Ollama.
+Another server needs the same two things in step 1: an address the harness
+machine reaches, and a context window.
+
+## Setup
+
+1. Serve the model where the harness machine can reach it. On the harness's
+   own machine, the default `http://localhost:11434/v1` is enough. On another
+   machine, make that machine a worker and link it to the harness machine's
+   worker in the config ([the mesh](self-hosting.md#the-mesh)):
+   `"links": [["admin", "gpu-box"]]`. The harness machine then reaches it by
+   its worker name over the mesh, and no port opens to the internet. The mesh
+   is IPv6, so the server must listen on every address, not on loopback alone.
+   With `0.0.0.0`, Ollama listens on IPv4 and IPv6. Set both in the
+   environment of the Ollama server (its FAQ says how for the app and for the
+   service), restart it, and pull a model:
+
+   ```
+   OLLAMA_HOST=0.0.0.0
+   OLLAMA_CONTEXT_LENGTH=32768
+   ```
+
+   ```
+   ollama pull <model>
+   ```
+
+2. Add the provider. Its name is free, its shape is `openai-chat`, its url is
+   the server's base url. A local server takes no key:
+
+   ```
+   mainplane provider ollama openai-chat http://gpu-box:11434/v1
+   ```
+
+   or in the harness config:
+
+   ```
+   "providers": {"ollama": {"shape": "openai-chat", "url": "http://gpu-box:11434/v1"}}
+   ```
+
+3. Start a session. The catalog has no local models, so the terminal app does
+   not list them: make the session from the CLI, then open it. The model is
+   `<provider>/<the server's model name>`, and the context limit is yours to
+   set:
+
+   ```
+   echo '{"model":"ollama/<model>","context_limit":30000,"workers":[{"name":"gpu-box"}]}' | mainplane new
+   mainplane <session id>
+   ```
+
+## The context window
+
+A local server loads a model with a fixed context window, often far smaller
+than the model's own. The system prompt and the tools take about 4,000 tokens
+before the first message, and each root AGENTS.md adds to that.
+
+- Set the server's window on the server: `OLLAMA_CONTEXT_LENGTH` for Ollama,
+  `--ctx-size` for llama.cpp, `--max-model-len` for vLLM. 32,000 tokens is a
+  workable floor.
+- Set the session's `context_limit` under the server's window. The harness
+  then ends the session in order before the server's window is full.
+- Past its window, Ollama's Chat Completions endpoint cuts the prompt and
+  answers as if nothing happened. A first prompt that is too large loses its
+  start, the system prompt and the tools with it, and the model calls tools
+  that do not exist. Later, the oldest messages go, the task first.
+- The harness fails a step whose prompt is smaller than the prompt of the step
+  before it in the same turn, and does not run that step's calls. It compares
+  the token counts the server reports for one model, so a server that reports
+  no usage is not checked. It cannot see a first prompt that is already too
+  large, nor a cut that leaves the prompt larger than the one before.
+- A stop of `length` after a few output tokens can also mean the window is
+  full, not the output limit.
+
+## The model
+
+The model must support tool calls: every action of a Mainplane agent is one.
+Small models call tools poorly; they name workers that are not in the session
+or stop mid-task. Pick the largest model with tool support that fits the GPU
+with the window above.

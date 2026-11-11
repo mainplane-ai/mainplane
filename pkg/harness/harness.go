@@ -27,11 +27,15 @@ import (
 // retry adds resume as a message, so the model goes on rather than stopping.
 // abnormal is the error after a step with no call that the model did not end
 // itself: without it the session would close on a cut-off, refused, or
-// filtered reply, or on thinking alone.
+// filtered reply, or on thinking alone. cut is the error after a step whose
+// prompt the provider shortened: a local server past its context window drops
+// the start of the prompt, the system prompt and the tools with it, and
+// answers as if nothing happened.
 const (
 	halted   = "The session was stopped during the last step by %s. Running calls were cancelled. Every job and environment of the session on a connected worker was killed; a worker that was not connected keeps its jobs."
 	idleStop = "The session was stopped by %s while it was not stepping. Every job and environment of the session on a connected worker was killed; a worker that was not connected keeps its jobs."
 	abnormal = "The last step ended with stop %q (%d output tokens) and no call, so its reply may be cut short, refused, or missing. If the stop is the output token limit, raise the provider's output token limit in params. Retry to continue."
+	cut      = "The last step's prompt was %d tokens, fewer than the %d of the step before, though it held all of that step and its results. The provider cut the context, as a local model server does past its context window, so the model may have lost the system prompt and the tools. The step's calls were not run. Raise the server's context window, or go on in a new session with a context limit under it. Retry to continue as it is."
 	resume   = "Continue"
 )
 
@@ -393,6 +397,20 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 	}
 	records, upto := statefile.Build(chain)
 	records = clock(records, chain[0].Time, conf.ContextLimit, conf.Input)
+	// floor is the last step when calls followed it: this step's prompt holds
+	// all of that one's and the results, so a smaller one was cut. After a
+	// turn the model ended, a vendor may drop its thinking, and a prompt may
+	// shrink.
+	var last, floor statefile.Header
+	for _, r := range chain {
+		switch r.Kind {
+		case statefile.Step:
+			last, floor = r.Header, statefile.Header{}
+		case statefile.Result:
+			floor = last
+		case statefile.Start, statefile.Config, statefile.System, statefile.Message, statefile.Text, statefile.Thinking, statefile.Call, statefile.Error, statefile.Name:
+		}
+	}
 	stepID := statefile.NewID()
 	var calls []statefile.Record
 	var appendErr error
@@ -424,9 +442,11 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 	if _, err := h.append(s, statefile.Record{Header: hdr}); err != nil {
 		return "", err
 	}
+	// the same model only: a copy may go on with another, which counts tokens its own way
+	short := hdr.Provider == floor.Provider && hdr.Model == floor.Model && hdr.Usage.Prompt() > 0 && hdr.Usage.Prompt() < floor.Usage.Prompt()
 	for _, c := range calls {
 		r := result(c.ID, "not run")
-		if ctx.Err() == nil {
+		if ctx.Err() == nil && !short {
 			r = h.execute(ctx, id, conf, c)
 			if ctx.Err() != nil {
 				r = result(c.ID, "stopped, effect unknown")
@@ -438,6 +458,10 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 	}
 	if via := s.stoppedBy(); via != "" {
 		_, err := h.append(s, errorRecord(via, fmt.Sprintf(halted, via)))
+		return statefile.StatusFailed, err
+	}
+	if short {
+		_, err := h.append(s, errorRecord("", fmt.Sprintf(cut, hdr.Usage.Prompt(), floor.Usage.Prompt())))
 		return statefile.StatusFailed, err
 	}
 	if len(calls) == 0 && !provider.Normal(hdr) {

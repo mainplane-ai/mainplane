@@ -22,7 +22,11 @@ func Gemini(url, key string) Provider {
 		URL:      base(url, "https://generativelanguage.googleapis.com") + "/v1beta/models",
 		Key:      key,
 		Envelope: gemini{},
-		Headers:  func(r *http.Request, key string) { r.Header.Set("x-goog-api-key", key) },
+		Headers: func(r *http.Request, key string) {
+			if key != "" {
+				r.Header.Set("x-goog-api-key", key)
+			}
+		},
 		Endpoint: func(url, model string) string { return url + "/" + model + ":streamGenerateContent?alt=sse" },
 	}
 }

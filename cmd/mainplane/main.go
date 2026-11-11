@@ -405,6 +405,10 @@ func usage() {
   worker     rename <name> <new>     PUT  /workers/{name}/name: same keys and address; links, drives and sessions
                                      keep naming the old name. Refused for a drive's server
   providers                          GET  /providers: each one's name, shape and url
+  provider   <name> <shape> <url> [key]
+                                     PUT  /providers/{name}: a provider the catalog does not have, such as a local
+                                     model server: its shape is the API it speaks, its url the server's base url.
+                                     With no key, the provider has none
   key        <provider> <key>        PUT  /providers/{provider}: the harness saves the key, with the shape and url
                                      the catalog gives the provider, in its config, and serves it at once
   signin     <provider>              POST /providers/{provider}/login: sign in where a provider takes no key, such as

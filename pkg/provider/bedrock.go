@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
-	"net/http"
 	"slices"
 	"strings"
 
@@ -34,7 +33,7 @@ func Bedrock(url, region, key string) Provider {
 		URL:      base(url, "https://bedrock-runtime."+region+".amazonaws.com") + "/model",
 		Key:      key,
 		Envelope: bedrock{},
-		Headers:  func(r *http.Request, key string) { r.Header.Set("Authorization", "Bearer "+key) },
+		Headers:  bearer,
 		Endpoint: func(url, model string) string { return url + "/" + model + "/converse-stream" },
 	}
 }
