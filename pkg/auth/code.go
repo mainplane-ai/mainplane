@@ -65,6 +65,20 @@ func Secret(k ed25519.PrivateKey, code string) string {
 	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(m.Sum(nil))
 }
 
+// Sign is the token of kind for subject, a session's id or an app's name. No
+// table holds it: the harness key makes it and checks it, so it is revoked
+// by what the subject may do, not by a write.
+func Sign(k ed25519.PrivateKey, kind, harness, subject string) string {
+	return Token(kind, harness, subject+":"+Secret(k, kind+" "+subject))
+}
+
+// Signed is the subject of a token of kind that Sign made with k.
+func Signed(k ed25519.PrivateKey, kind, token string) (string, bool) {
+	_, secret, err := Parse(kind, token)
+	subject, mac, ok := strings.Cut(secret, ":")
+	return subject, err == nil && ok && hmac.Equal([]byte(mac), []byte(Secret(k, kind+" "+subject)))
+}
+
 // pake binds the exchange to the harness key both sides expect, so a harness
 // with another key derives another key even if it knew the code.
 func pake(key string) *cpace.ContextInfo {

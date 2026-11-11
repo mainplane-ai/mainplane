@@ -66,6 +66,7 @@ type Header struct {
 	Len  int    `json:"len"`
 
 	Session string `json:"session,omitempty"` // run, kill: environments live per session
+	Key     string `json:"key,omitempty"`     // run: the session's key for the harness's skills and apps, MAINPLANE_KEY in its environments
 	Interp  string `json:"interp,omitempty"`  // run: empty means the worker's first
 	Timeout int    `json:"timeout,omitempty"` // run: seconds before the environment is killed
 	Job     string `json:"job,omitempty"`     // run: a background job of this id, in an interpreter of its own

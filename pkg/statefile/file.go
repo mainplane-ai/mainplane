@@ -47,14 +47,15 @@ type File struct {
 	n    int
 }
 
-// Create makes a new file whose first two records are start and config.
-func Create(path string, config []byte) (*File, error) {
+// Create makes a new file whose first two records are start and config. The
+// start record says who made the session; no model request holds it.
+func Create(path, via string, config []byte) (*File, error) {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return nil, err
 	}
 	sf := &File{Path: path, f: f}
-	if err := sf.Append(Record{Header: Header{Kind: Start}}); err != nil {
+	if err := sf.Append(Record{Header: Header{Kind: Start, Via: via}}); err != nil {
 		return nil, err
 	}
 	return sf, sf.Append(Record{Header: Header{Kind: Config, Type: "application/json"}, Body: config})

@@ -300,36 +300,39 @@ func (c *Client) Stop(ctx context.Context, id, via string) error {
 // is refused, not guessed. Returns the last record's n.
 func (c *Client) Post(ctx context.Context, id, via, text string, files []string) (int, error) {
 	var out struct{ N int }
-	path := "/sessions/" + id + "/records?via=" + url.QueryEscape(via)
+	err := c.post(ctx, "/sessions/"+id+"/records?via="+url.QueryEscape(via), text, files, &out)
+	return out.N, err
+}
+
+// post is the turn posted to path, a session's records or an agent's.
+func (c *Client) post(ctx context.Context, path, text string, files []string, out any) error {
 	if len(files) == 0 {
-		err := c.Call(ctx, "POST", path, "text/plain", strings.NewReader(text), &out)
-		return out.N, err
+		return c.Call(ctx, "POST", path, "text/plain", strings.NewReader(text), out)
 	}
 	var b bytes.Buffer
 	mw := multipart.NewWriter(&b)
 	w, err := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"text/plain"}})
 	if err != nil {
-		return 0, err
+		return err
 	}
 	_, _ = w.Write([]byte(text))
 	for _, f := range files {
 		t := mime.TypeByExtension(filepath.Ext(f))
 		if t == "" {
-			return 0, fmt.Errorf("%s: no content type for %q", f, filepath.Ext(f))
+			return fmt.Errorf("%s: no content type for %q", f, filepath.Ext(f))
 		}
 		data, err := os.ReadFile(f)
 		if err != nil {
-			return 0, err
+			return err
 		}
 		w, err := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {t}})
 		if err != nil {
-			return 0, err
+			return err
 		}
 		_, _ = w.Write(data)
 	}
 	_ = mw.Close()
-	err = c.Call(ctx, "POST", path, mw.FormDataContentType(), &b, &out)
-	return out.N, err
+	return c.Call(ctx, "POST", path, mw.FormDataContentType(), &b, out)
 }
 
 // Records is the file after record n; with wait, a long poll.

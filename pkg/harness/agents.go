@@ -29,7 +29,7 @@ const agentsTimeout = 30 * time.Second
 // at once, and one that does not must not hold Create.
 const killTimeout = 5 * time.Second
 
-// agents is the body of the agents system record, written once at the start
+// scan is the body of the agents system record, written once at the start
 // of every file: for every drive a session worker mounts, and for every
 // worker's scratch, the root AGENTS.md read and the ones below it listed. A
 // drive is scanned on the worker serving it, where a listing takes
@@ -38,7 +38,7 @@ const killTimeout = 5 * time.Second
 // mounts it. The calls show verbatim with the worker they ran on, so the
 // model knows what ran and how to run more. The scans run at once, each
 // under agentsTimeout, and print in a fixed order.
-func (h *Harness) agents(ctx context.Context, id string, conf statefile.Conf) string {
+func (h *Harness) scan(ctx context.Context, id string, conf statefile.Conf) string {
 	var scans []func(context.Context) string
 	seen := map[string]bool{}
 	for _, w := range conf.Workers {

@@ -31,8 +31,10 @@ import (
 )
 
 const (
-	Key  = "key"  // a connector's credential: every HTTP route
-	Join = "join" // a worker's credential: joining the mesh
+	Key     = "key"  // a connector's credential: every HTTP route
+	Join    = "join" // a worker's credential: joining the mesh
+	Session = "skey" // a session's credential on its workers: the skills and apps of the agent whose live session it is
+	App     = "akey" // a daemon app's credential: the routes its entitlements name
 )
 
 // An address has this many refusals a window. That is more than a worker

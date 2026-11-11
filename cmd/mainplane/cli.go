@@ -36,6 +36,8 @@ const resultLines = 20
 var arity = map[string][2]int{
 	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {0, 1}, "retry": {1, 1}, "stop": {1, 1}, "delete": {1, 1},
 	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "worker remove": {1, 1}, "worker rename": {2, 2}, "providers": {0, 0}, "provider": {3, 4}, "key": {2, 2}, "signin": {1, 1},
+	"agents": {0, 1}, "agent new": {0, 0}, "agent info": {1, 1}, "agent message": {2, -1}, "agent retry": {1, 1}, "agent stop": {1, 1}, "agent delete": {1, 1}, "agent name": {1, -1}, "agent config": {1, 1}, "agent apps": {1, -1},
+	"apps": {0, 0}, "app start": {1, 1}, "app stop": {1, 1}, "secrets": {0, 0}, "secret set": {1, 2}, "secret delete": {1, 1}, "skill": {0, 1}, "app": {3, 4},
 }
 
 // cli is the harness API as verbs: one verb, one route, its reply printed.
@@ -135,6 +137,136 @@ func cli(verb string, args []string) {
 		c.key(args[0], args[1])
 	case "signin":
 		c.signin(args[0])
+	default:
+		c.agent(verb, args)
+	}
+}
+
+// agent is the verbs on agents, apps and secrets.
+func (c client) agent(verb string, args []string) {
+	switch verb {
+	case "agents":
+		infos, err := c.Agents(context.Background(), "", strings.Join(args, ""))
+		if err != nil {
+			die(err)
+		}
+		for _, i := range infos {
+			fmt.Printf("%s  %-11s  %-40s  session=%s  context=%d/%d  %s  %-14s  %s\n", i.ID, i.Status, i.Config.Model, i.CurrentSession, i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime), i.Via, i.Name)
+		}
+	case "agent new":
+		var out struct{ ID, Session string }
+		c.call("POST", "/agents?via="+via, "application/json", os.Stdin, &out)
+		fmt.Println(out.ID, out.Session)
+	case "agent info":
+		c.raw("/agents/" + args[0])
+	case "agent message":
+		s, n, err := c.PostAgent(context.Background(), args[0], via, args[1], args[2:])
+		if err != nil {
+			die(err)
+		}
+		fmt.Println(s, n)
+	case "agent retry":
+		var out struct{ Status string }
+		c.call("POST", "/agents/"+args[0]+"/retry", "", nil, &out)
+		fmt.Println(out.Status)
+	case "agent stop":
+		c.call("POST", "/agents/"+args[0]+"/stop?via="+via, "", nil, nil)
+	case "agent delete":
+		c.call("DELETE", "/agents/"+args[0]+"?via="+via, "", nil, nil)
+	case "agent name":
+		c.call("PUT", "/agents/"+args[0]+"/name?via="+via, "text/plain", strings.NewReader(strings.Join(args[1:], " ")), nil)
+	case "agent config":
+		c.call("PUT", "/agents/"+args[0]+"/config?via="+via, "application/json", os.Stdin, nil)
+	case "agent apps":
+		b, _ := json.Marshal(args[1:]) // names are strings: it cannot fail
+		c.call("PUT", "/agents/"+args[0]+"/apps?via="+via, "application/json", bytes.NewReader(b), nil)
+	case "apps":
+		infos, err := c.Apps(context.Background())
+		if err != nil {
+			die(err)
+		}
+		for _, i := range infos {
+			fmt.Printf("%-20s  %-8s  %-15s  %s\n", i.Name, i.Kind, strings.TrimSpace(i.Status+" "+strings.Join(i.MissingSecrets, ",")), i.Description)
+		}
+	case "app start", "app stop":
+		c.call("POST", "/apps/"+url.PathEscape(args[0])+"/"+strings.TrimPrefix(verb, "app "), "", nil, nil)
+	case "secrets":
+		names, err := c.Secrets(context.Background())
+		if err != nil {
+			die(err)
+		}
+		for _, n := range names {
+			fmt.Println(n)
+		}
+	case "secret set":
+		value := strings.Join(args[1:], "")
+		if len(args) == 1 { // from stdin a value stays out of the shell's history, and may be many lines
+			b, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				die(err)
+			}
+			value = strings.TrimRight(string(b), "\r\n")
+		}
+		if err := c.SetSecret(context.Background(), args[0], value); err != nil {
+			die(err)
+		}
+	case "secret delete":
+		if err := c.DeleteSecret(context.Background(), args[0]); err != nil {
+			die(err)
+		}
+	}
+}
+
+// skill is the two verbs an agent uses: with one argument or none, read a
+// skill or list them; with more, call the app and print its reply as it came.
+// In an agent's session on a worker the environment is the login: the
+// session's key, which reaches the agent's skills and apps and no more.
+func skill(verb string, args []string) {
+	if a := arity[verb]; len(args) < a[0] || len(args) > a[1] {
+		usage()
+	}
+	s, ok := connector.Session()
+	if !ok {
+		c, err := login()
+		if err != nil {
+			die(err)
+		}
+		s = c.Client
+	}
+	c := client{s}
+	ctx := context.Background()
+	switch len(args) {
+	case 0:
+		skills, err := c.Skills(ctx)
+		if err != nil {
+			die(err)
+		}
+		for _, s := range skills {
+			fmt.Printf("%-20s  %s\n", s.Name, s.Description)
+		}
+	case 1:
+		text, err := c.Skill(ctx, args[0])
+		if err != nil {
+			die(err)
+		}
+		fmt.Print(text)
+	default:
+		var body io.Reader
+		ctype := ""
+		if len(args) == 4 {
+			body, ctype = strings.NewReader(args[3]), "application/json"
+			if args[3] == "-" {
+				body = os.Stdin
+			}
+		}
+		resp, err := c.App(ctx, args[0], strings.ToUpper(args[1]), args[2], ctype, body)
+		if err != nil {
+			die(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if _, err := io.Copy(os.Stdout, resp.Body); err != nil {
+			die(err)
+		}
 	}
 }
 

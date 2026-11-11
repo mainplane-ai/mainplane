@@ -71,7 +71,7 @@ type Header struct {
 	Truncated  bool   `json:"truncated,omitempty"`   // result
 	FullOutput string `json:"full_output,omitempty"` // result: path in worker scratch
 
-	Via            string `json:"via,omitempty"`             // message: connector name. error: who stopped the session. config: who changed it
+	Via            string `json:"via,omitempty"`             // start: who made the session. message: connector name. error: who stopped the session. config: who changed it
 	IdempotencyKey string `json:"idempotency_key,omitempty"` // message: the poster's key; a repost with it appends nothing. job system record: the job's call id
 	Source         string `json:"source,omitempty"`          // system: where the text came from
 

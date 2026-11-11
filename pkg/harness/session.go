@@ -320,6 +320,9 @@ func (h *Harness) Kick(ctx context.Context, id string) {
 				h.touch(id)
 				if st == statefile.StatusClosed || st == statefile.StatusFailed {
 					h.copyLogs(ctx, s)
+					if a, ok := h.Holder(id); ok && h.Stopped != nil {
+						h.Stopped(a, st)
+					}
 				}
 				close(done)
 				return
@@ -431,6 +434,9 @@ func (h *Harness) killAll(ctx context.Context, id string, chain []statefile.Reco
 // message. A file that does not read is logged and left out, not a reason to
 // stay down.
 func (h *Harness) Resume(ctx context.Context) error {
+	if err := h.LoadAgents(); err != nil {
+		return err
+	}
 	ids, err := h.Sessions.List()
 	if err != nil {
 		return err
