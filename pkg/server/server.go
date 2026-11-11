@@ -163,6 +163,9 @@ func providers(dir string, cfg map[string]Provider) (map[string]provider.Provide
 		if p.Shape == "bedrock" && os.ExpandEnv(p.Region) == "" && os.ExpandEnv(p.URL) == "" {
 			return nil, fmt.Errorf("provider %s: a bedrock provider needs region or url", name)
 		}
+		if p.ContextLimit < 0 {
+			return nil, fmt.Errorf("provider %s: context_limit %d is under 0", name, p.ContextLimit)
+		}
 		if p.Session != "" && !httpguts.ValidHeaderFieldName(p.Session) {
 			return nil, fmt.Errorf("provider %s: session %q is not a header name", name, p.Session)
 		}
