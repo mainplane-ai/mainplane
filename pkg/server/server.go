@@ -101,6 +101,9 @@ type Provider struct {
 	URL     string `json:"url,omitempty"`     // the base url its SDK takes; none is the vendor's own
 	Region  string `json:"region,omitempty"`  // bedrock
 	Session string `json:"session,omitempty"` // the header the session's routing key goes in, for a server that routes its cache on one
+	// ContextLimit is a session's on a model the catalog does not have: under
+	// the window a local server loads its models with
+	ContextLimit int `json:"context_limit,omitempty"`
 }
 
 // providerDir is the directory of provider name's own state, such as a
@@ -165,6 +168,7 @@ func providers(dir string, cfg map[string]Provider) (map[string]provider.Provide
 		}
 		pp := build(provider.Config{Key: os.ExpandEnv(p.Key), URL: os.ExpandEnv(p.URL), Region: os.ExpandEnv(p.Region), Dir: providerDir(dir, name)})
 		pp.Session = cmp.Or(p.Session, pp.Session)
+		pp.ContextLimit = p.ContextLimit
 		out[name] = pp
 	}
 	return out, nil

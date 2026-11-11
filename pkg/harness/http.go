@@ -90,10 +90,11 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 				return
 			}
 			u.User, u.RawQuery = nil, "" // where a URL may carry a secret
-			out = append(out, ProviderInfo{name, ps[name].Envelope.Name(), u.String()})
+			out = append(out, ProviderInfo{name, ps[name].Envelope.Name(), u.String(), ps[name].ContextLimit})
 		}
 		reply(w, out)
 	})
+	mux.HandleFunc("GET /providers/{name}/models", h.serveModels)
 	mux.HandleFunc("GET /sessions", func(w http.ResponseWriter, r *http.Request) {
 		infos, err := h.List()
 		if err != nil {
@@ -173,9 +174,52 @@ func fail(w http.ResponseWriter, err error) { http.Error(w, err.Error(), http.St
 
 // ProviderInfo is a provider as GET /providers shows it: no key.
 type ProviderInfo struct {
-	Name  string `json:"name"`
-	Shape string `json:"shape"`
-	URL   string `json:"url"`
+	Name         string `json:"name"`
+	Shape        string `json:"shape"`
+	URL          string `json:"url"`
+	ContextLimit int    `json:"context_limit,omitempty"`
+}
+
+// serveModels is the model ids an openai-chat provider's server lists at
+// GET /models, such as a local server's: the catalog has none of them.
+func (h *Harness) serveModels(w http.ResponseWriter, r *http.Request) {
+	p, ok := h.providers()[r.PathValue("name")]
+	if !ok || p.Envelope.Name() != "openai-chat" {
+		fail(w, errors.New("only an openai-chat provider lists its models"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimSuffix(p.URL, "/chat/completions")+"/models", nil)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	p.Headers(req, p.Key)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		fail(w, fmt.Errorf("%s: %s", req.URL.Redacted(), res.Status))
+		return
+	}
+	var list struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, 4<<20)).Decode(&list); err != nil {
+		fail(w, err)
+		return
+	}
+	ids := []string{}
+	for _, m := range list.Data {
+		ids = append(ids, m.ID)
+	}
+	reply(w, ids)
 }
 
 func reply(w http.ResponseWriter, v any) {

@@ -39,20 +39,20 @@ machine reaches, and a context window.
    mainplane provider ollama openai-chat http://gpu-box:11434/v1
    ```
 
-   or in the harness config:
+   or in the harness config, where `context_limit` is the context limit of a
+   session on its models (30,000 if unset):
 
    ```
-   "providers": {"ollama": {"shape": "openai-chat", "url": "http://gpu-box:11434/v1"}}
+   "providers": {"ollama": {"shape": "openai-chat", "url": "http://gpu-box:11434/v1", "context_limit": 30000}}
    ```
 
-3. Start a session. The catalog has no local models, so the terminal app does
-   not list them: make the session from the CLI, then open it. The model is
-   `<provider>/<the server's model name>`, and the context limit is yours to
-   set:
+3. Start a session. In the terminal app, `/model` lists the server's models
+   under Custom, and a new session takes the one picked. From the CLI, the
+   model is `<provider>/<the server's model name>`, and the context limit is
+   the session's own:
 
    ```
    echo '{"model":"ollama/<model>","context_limit":30000,"workers":[{"name":"gpu-box"}]}' | mainplane new
-   mainplane <session id>
    ```
 
 ## The context window
@@ -64,7 +64,7 @@ before the first message, and each root AGENTS.md adds to that.
 - Set the server's window on the server: `OLLAMA_CONTEXT_LENGTH` for Ollama,
   `--ctx-size` for llama.cpp, `--max-model-len` for vLLM. 32,000 tokens is a
   workable floor.
-- Set the session's `context_limit` under the server's window. The harness
+- Set the provider's `context_limit` under the server's window. The harness
   then ends the session in order before the server's window is full.
 - Past its window, Ollama's Chat Completions endpoint cuts the prompt and
   answers as if nothing happened. A first prompt that is too large loses its
