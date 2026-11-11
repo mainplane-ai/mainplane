@@ -13,3 +13,7 @@ import (
 func own(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} }
 
 func killTree(p *os.Process) error { return syscall.Kill(-p.Pid, syscall.SIGKILL) }
+
+// sweep kills what an exited daemon left behind: the group outlives its
+// first process, and an empty one answers ESRCH.
+func sweep(p *os.Process) { _ = killTree(p) }

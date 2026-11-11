@@ -683,6 +683,51 @@ func TestDeleteLiveSession(t *testing.T) {
 	}
 }
 
+// A delete and an adoption of one session exclude each other: the delete
+// never stops a session and then finds it an agent's.
+func TestDeleteExcludesAdopt(t *testing.T) {
+	r := newRig(t)
+	t.Cleanup(func() { close(r.release) })
+	ctx := context.Background()
+	stepping, hold := make(chan struct{}), make(chan struct{})
+	r.mu.Lock()
+	r.step = func(string) turn { // a step that outlasts its stop, so the delete waits
+		close(stepping)
+		<-hold
+		return turn{input: 10}
+	}
+	r.mu.Unlock()
+	id, err := r.h.Create(ctx, Create{Model: "fake/m1", ContextLimit: 1000}, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.h.Post(ctx, id, "test", "", []Part{{Type: "text/plain", Body: []byte("go")}}); err != nil {
+		t.Fatal(err)
+	}
+	<-stepping
+	deleted := make(chan error, 1)
+	go func() { deleted <- r.h.Delete(ctx, id, "test") }()
+	s := r.h.session(id)
+	r.until(func() bool {
+		r.h.mu.Lock()
+		defer r.h.mu.Unlock()
+		return s.deleting
+	})
+	if a, err := r.h.CreateAgent(ctx, AgentCreate{Session: id}, "web"); err == nil {
+		t.Fatalf("agent %s adopted a session that is being deleted", a.ID)
+	}
+	close(hold)
+	if err := <-deleted; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.h.Sessions.Load(id); err == nil {
+		t.Fatal("the session is still there")
+	}
+	if agents := r.h.ListAgents(func(Agent) bool { return true }); len(agents) != 0 {
+		t.Fatalf("agents: %v", agents)
+	}
+}
+
 // An id a caller made up reaches no file and keeps no lock.
 func TestMadeUpIDs(t *testing.T) {
 	r := newRig(t)

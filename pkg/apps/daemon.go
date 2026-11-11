@@ -60,15 +60,20 @@ func (m *Manager) sync() error {
 // enable is an admin's start or stop of a daemon app.
 func (m *Manager) enable(name string, on bool) error {
 	a, err := m.load(name)
+	if err == nil && a.kind() != "daemon" {
+		err = fmt.Errorf("app %s is not a daemon: nothing to start or stop", name)
+	}
+	m.mu.Lock()
+	if !on && m.daemons[name] != nil {
+		err = nil // it runs from the app.json it started with, and stops though the file no longer loads
+	}
+	if err == nil {
+		m.stopped[name] = !on
+	}
+	m.mu.Unlock()
 	if err != nil {
 		return err
 	}
-	if a.kind() != "daemon" {
-		return fmt.Errorf("app %s is not a daemon: nothing to start or stop", name)
-	}
-	m.mu.Lock()
-	m.stopped[name] = !on
-	m.mu.Unlock()
 	if !on {
 		m.stop(name)
 		return nil
@@ -104,7 +109,8 @@ func reserved(name string) bool {
 // data folder, the secrets it names, and a key of its own only when it has
 // entitlements. It does not get the harness's environment, where provider
 // keys may be. It leads a process tree of its own, which ends whole when the
-// daemon is stopped or its first process exits.
+// daemon is stopped, and where the system can still find it (not Windows)
+// when its first process exits.
 func (m *Manager) supervise(ctx context.Context, a app, d *daemon, secrets map[string]string) {
 	data := m.data(a.name)
 	if err := os.MkdirAll(data, 0o755); err != nil {
@@ -136,8 +142,8 @@ func (m *Manager) supervise(ctx context.Context, a app, d *daemon, secrets map[s
 		log.Printf("app %s: %v on port %d", a.name, a.spec.Run, port)
 		err = cmd.Run()
 		launched()
-		if cmd.Process != nil && ctx.Err() == nil {
-			_ = killTree(cmd.Process) // what it started and left behind would pile up, one per launch
+		if cmd.Process != nil {
+			sweep(cmd.Process) // what it started and left behind would pile up, one per launch
 		}
 		if ctx.Err() != nil {
 			return

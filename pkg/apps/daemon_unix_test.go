@@ -11,8 +11,9 @@ import (
 	"testing"
 )
 
-// A daemon's whole process tree ends with it: when an admin stops it, and
-// when its first process exits and leaves others behind.
+// A daemon's whole process tree ends with it: when an admin stops it, even
+// after its app.json changed, and when its first process exits and leaves
+// others behind.
 func TestDaemonTree(t *testing.T) {
 	r := newRig(t)
 	r.install("stays", Spec{Run: []string{"sh", "-c", "sleep 300 & echo $! > $DATA_DIR/child; exec sleep 300"}})
@@ -36,6 +37,9 @@ func TestDaemonTree(t *testing.T) {
 	if gone(stays) {
 		t.Fatal("the running daemon's child is gone")
 	}
+	// a daemon stops though its app.json has become one the harness refuses
+	r.install("stays", Spec{Run: []string{"true"}, Secrets: []string{"PATH"}})
+	r.want(400, "full", "POST", "/apps/stays/start", "")
 	r.want(204, "full", "POST", "/apps/stays/stop", "")
 	r.want(204, "full", "POST", "/apps/leaves/stop", "")
 	r.until(func() bool { return gone(stays) })

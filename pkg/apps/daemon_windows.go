@@ -12,3 +12,7 @@ func own(*exec.Cmd) {}
 func killTree(p *os.Process) error {
 	return exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(p.Pid)).Run()
 }
+
+// sweep leaves what an exited daemon left behind: taskkill finds a tree by
+// its root, and the root's pid may be another process's by now.
+func sweep(*os.Process) {}

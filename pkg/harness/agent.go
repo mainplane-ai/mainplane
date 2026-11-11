@@ -249,9 +249,11 @@ func (h *Harness) CreateAgent(ctx context.Context, c AgentCreate, via string) (A
 	if a.Config.Conf, _, err = h.valid(a.Config.Conf); err != nil {
 		return a, err
 	}
-	// The claim and the check are one step under amu, so two agents adopting
-	// one session at once cannot both pass.
+	// The claim and the checks are one step under amu, so two agents adopting
+	// one session at once cannot both pass, and a delete of the session
+	// either sees the claim before it stops anything or refuses this one.
 	a.Sessions = []string{c.Session}
+	s := h.session(c.Session)
 	h.lockAgents()
 	for _, o := range h.agents {
 		if slices.Contains(o.Sessions, c.Session) {
@@ -259,9 +261,16 @@ func (h *Harness) CreateAgent(ctx context.Context, c AgentCreate, via string) (A
 			return a, fmt.Errorf("session %s is agent %s's", c.Session, o.ID)
 		}
 	}
+	h.mu.Lock() // amu, then mu: never the reverse
+	deleting := s.deleting
+	h.mu.Unlock()
+	if deleting {
+		h.amu.Unlock()
+		return a, fmt.Errorf("session %s is being stopped for a delete", c.Session)
+	}
 	h.agents[a.ID], h.live[c.Session] = a, a.ID
 	h.amu.Unlock()
-	if err = h.note(h.session(c.Session), c.Session, system("apps", note)); err == nil {
+	if err = h.note(s, c.Session, system("apps", note)); err == nil {
 		err = h.save(a)
 	}
 	if err != nil {
@@ -443,7 +452,7 @@ func (h *Harness) DeleteAgent(ctx context.Context, id, via string) error {
 	if err != nil {
 		return err
 	}
-	release, err := h.halt(ctx, h.session(a.live()), via)
+	release, err := h.halt(ctx, h.session(a.live()), via, nil)
 	if err != nil {
 		return err
 	}

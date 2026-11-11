@@ -40,7 +40,7 @@ type session struct {
 	kicked   bool               // a kick arrived while running: look again before stopping
 	cancel   context.CancelFunc // ends the running step
 	done     chan struct{}      // closed when the runner goroutine ends
-	deleting bool               // no kick starts or continues a runner
+	deleting bool               // no kick starts or continues a runner, no agent adopts the session
 }
 
 func (h *Harness) session(id string) *session {
@@ -228,20 +228,15 @@ func (h *Harness) SetName(id, via, n string) (int, error) {
 // the lock a post takes, so no post does. Copies keep their own files,
 // workers their logs.
 func (h *Harness) Delete(ctx context.Context, id, via string) error {
-	// An agent always has its live session: asked before the stop, so a
-	// refusal leaves the session as it was, and again under the lock an
-	// adoption writes under, so one that came since is seen.
-	live := func() error {
+	// An agent always has its live session: asked once no agent can adopt
+	// the session and before the stop, so a refusal leaves it as it was.
+	s := h.session(id)
+	release, err := h.halt(ctx, s, via, func() error {
 		if a, ok := h.Holder(id); ok {
 			return fmt.Errorf("%w: session %s is the live session of agent %s: delete the agent, or let it roll over to a new session", ErrLive, id, a.ID)
 		}
 		return nil
-	}
-	if err := live(); err != nil {
-		return err
-	}
-	s := h.session(id)
-	release, err := h.halt(ctx, s, via)
+	})
 	if err != nil {
 		return err
 	}
@@ -249,10 +244,7 @@ func (h *Harness) Delete(ctx context.Context, id, via string) error {
 	h.mu.Lock()
 	s.mu.Lock()
 	h.mu.Unlock()
-	if err = live(); err == nil {
-		err = os.Remove(h.Sessions.Path(id))
-	}
-	if err == nil {
+	if err = os.Remove(h.Sessions.Path(id)); err == nil {
 		h.lockIndex()
 		delete(h.index, id)
 		delete(h.dirty, id)
@@ -275,9 +267,10 @@ func (h *Harness) Delete(ctx context.Context, id, via string) error {
 }
 
 // halt stops the session and waits for its runner to end. Until the func it
-// returns is called no kick starts another, so the caller finds the session
-// still.
-func (h *Harness) halt(ctx context.Context, s *session, via string) (func(), error) {
+// returns is called no kick starts another and no agent adopts the session,
+// so the caller finds it still. ok, when given, is asked once that holds and
+// before the stop: its error ends the halt with the session as it was.
+func (h *Harness) halt(ctx context.Context, s *session, via string, ok func() error) (func(), error) {
 	h.mu.Lock()
 	if s.deleting {
 		h.mu.Unlock()
@@ -289,6 +282,12 @@ func (h *Harness) halt(ctx context.Context, s *session, via string) (func(), err
 		h.mu.Lock()
 		s.deleting = false
 		h.mu.Unlock()
+	}
+	if ok != nil {
+		if err := ok(); err != nil {
+			release()
+			return nil, err
+		}
 	}
 	if err := h.Stop(ctx, s.id, via); err != nil {
 		log.Printf("session %s: stop before delete: %v", s.id, err) // a broken file still goes
