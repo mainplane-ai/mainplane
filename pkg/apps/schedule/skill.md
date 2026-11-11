@@ -12,5 +12,5 @@ curl -H "$A" -X DELETE $MAINPLANE_URL/apps/schedule/<id>
 ```
 
 - Give exactly one of `in` (a duration: 90s, 45m, 36h), `at` (RFC 3339) or `cron`. The answer is the timer with its `id` and `next` time.
-- `cron` is five fields in UTC: minute hour day-of-month month day-of-week (0 is Sunday). Each is `*`, a number, `a-b`, a list `a,b`, or any of these with a step `/n`. All five must match.
+- `cron` is five fields in UTC: minute hour day-of-month month day-of-week (0 is Sunday). Each is `*`, a number, `a-b`, a list `a,b`, or any of these with a step `/n`. All five must match, but when day-of-month and day-of-week are both given (neither starts with `*`) a day matches if either does: `0 9 1 * 1` is the 1st and every Monday.
 - A one-shot timer is gone once it fires. A cron timer fires until you delete it.

@@ -14,6 +14,12 @@ func TestCronNext(t *testing.T) {
 		"30 6 * * 0,6":     "2026-11-14T06:30:00Z",
 		"0 0 1 1 *":        "2027-01-01T00:00:00Z",
 		"5-10/5 12 29 2 *": "2028-02-29T12:05:00Z",
+		"0 0 15 * 1":       "2026-11-15T00:00:00Z", // both days given: the 15th, a Sunday, or a Monday
+		"0 0 20 * 1":       "2026-11-16T00:00:00Z", // the Monday comes first
+		"0 0 20,25 12 2-3": "2026-12-01T00:00:00Z", // a Tuesday; the month still has to match
+		"0 0 */2 * 1":      "2026-11-23T00:00:00Z", // a day-of-month that starts with * restricts: an odd Monday
+		"0 0 15 * */2":     "2026-11-15T00:00:00Z", // and so does such a day-of-week: the 15th is a Sunday
+		"0 0 16 * */2":     "2027-01-16T00:00:00Z", // the first 16th on an even day of the week, a Saturday
 	} {
 		got, err := next(expr, at)
 		if err != nil || got.Format(time.RFC3339) != want {

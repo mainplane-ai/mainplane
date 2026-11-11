@@ -187,6 +187,12 @@ func (a *app) run(ctx context.Context) {
 		}
 		a.mu.Unlock()
 		for _, t := range due {
+			a.mu.Lock()
+			there := slices.ContainsFunc(a.timers, func(o Timer) bool { return o.ID == t.ID })
+			a.mu.Unlock()
+			if !there { // deleted while an earlier one of the batch was posted
+				continue
+			}
 			_, _, err := a.h.PostAgent(ctx, t.Agent, "app:schedule", t.ID+"@"+t.Next.Format(time.RFC3339Nano), []harness.Part{{Type: "text/plain", Body: fmt.Appendf(nil, "[timer %s] %s", t.ID, t.Text)}})
 			gone := errors.Is(err, harness.ErrNoAgent) || err == nil && t.Cron == ""
 			switch {
@@ -221,6 +227,8 @@ func (a *app) run(ctx context.Context) {
 }
 
 // next is the first minute after t that the cron expression matches, in UTC.
+// When day-of-month and day-of-week are both restricted, neither starting
+// with *, a day matches if either does, as cron has always had it.
 func next(expr string, t time.Time) (time.Time, error) {
 	fields := strings.Fields(expr)
 	if len(fields) != 5 {
@@ -233,10 +241,12 @@ func next(expr string, t time.Time) (time.Time, error) {
 			return t, fmt.Errorf("cron %q: %w", expr, err)
 		}
 	}
+	either := !strings.HasPrefix(fields[2], "*") && !strings.HasPrefix(fields[4], "*")
 	t = t.UTC().Truncate(time.Minute)
 	for end := t.AddDate(horizon, 0, 0); t.Before(end); {
 		t = t.Add(time.Minute)
-		if sets[0]>>t.Minute()&1 == 1 && sets[1]>>t.Hour()&1 == 1 && sets[2]>>t.Day()&1 == 1 && sets[3]>>int(t.Month())&1 == 1 && sets[4]>>int(t.Weekday())&1 == 1 {
+		dom, dow := sets[2]>>t.Day()&1 == 1, sets[4]>>int(t.Weekday())&1 == 1
+		if sets[0]>>t.Minute()&1 == 1 && sets[1]>>t.Hour()&1 == 1 && sets[3]>>int(t.Month())&1 == 1 && (dom && dow || either && (dom || dow)) {
 			return t, nil
 		}
 	}
