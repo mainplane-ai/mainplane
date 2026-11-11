@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/catalog"
@@ -33,15 +34,34 @@ const (
 // sessionsEvery. It outlives the session screens: the sidebar shows it and
 // Ctrl+Up/Down step through it.
 type sessionList struct {
-	c      *connector.Client
-	cat    *catalog.Catalog // nil until loaded
-	cur    *session         // the screen showing now
-	infos  []harness.Info
-	seen   map[string]time.Time // per session, its update when last read here
-	drafts map[string][]elem    // per session, "" for home, the input it was left with
-	loaded bool
-	top    int  // the first row the sidebar shows
-	reveal bool // scroll the open session into view at the next draw
+	c          *connector.Client
+	cat        *catalog.Catalog // nil until loaded
+	cur        *session         // the screen showing now
+	all        []harness.Info   // unfiltered sessions from GET /sessions
+	infos      []harness.Info
+	showAgents bool
+	seen       map[string]time.Time // per session, its update when last read here
+	drafts     map[string][]elem    // per session, "" for home, the input it was left with
+	loaded     bool
+	top        int  // the first row the sidebar shows
+	reveal     bool // scroll the open session into view at the next draw
+}
+
+func isAgentSession(in harness.Info) bool {
+	return strings.HasPrefix(in.Via, "agent:")
+}
+
+func (l *sessionList) applyFilter() {
+	if l.showAgents {
+		l.infos = append(l.infos[:0], l.all...)
+		return
+	}
+	l.infos = l.infos[:0]
+	for _, in := range l.all {
+		if !isAgentSession(in) || (l.cur != nil && in.ID == l.cur.id) {
+			l.infos = append(l.infos, in)
+		}
+	}
 }
 
 // newSessionList starts reading the sessions and loads the catalog. A session is unread once it
@@ -71,7 +91,8 @@ func (l *sessionList) update(a *App, infos []harness.Info, err error) {
 			l.seen[in.ID] = in.Updated
 		}
 	}
-	l.infos, l.loaded = infos, true
+	l.all, l.loaded = infos, true
+	l.applyFilter()
 	l.tick(a)
 }
 

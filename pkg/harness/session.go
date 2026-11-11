@@ -24,15 +24,16 @@ import (
 // run, so a message posted mid-step appends to the same handle and returns at
 // once.
 type session struct {
-	id      string
-	mu      sync.Mutex
-	f       *statefile.File // the file, while a step holds it
-	changed chan struct{}   // closed and replaced on every append
-	retry   bool            // a run asked to step past a failed tip
-	stopped string          // who asked for the stop, while one is in flight
-	logs    sync.Mutex      // held by copyLogs from Load to the last Write, so an older copy never lands last
-	exports atomic.Int64    // copyLogs calls asked for; a waiting one leaves to a newer one
-	conn    provider.Conn   // the provider's socket, kept from step to step within a run
+	id       string
+	mu       sync.Mutex
+	f        *statefile.File // the file, while a step holds it
+	changed  chan struct{}   // closed and replaced on every append
+	retry    bool            // a run asked to step past a failed tip
+	stopped  string          // who asked for the stop, while one is in flight
+	rollover string          // next session ID allocated on mid-run rollover
+	logs     sync.Mutex      // held by copyLogs from Load to the last Write, so an older copy never lands last
+	exports  atomic.Int64    // copyLogs calls asked for; a waiting one leaves to a newer one
+	conn     provider.Conn   // the provider's socket, kept from step to step within a run
 
 	// under Harness.mu
 	running  bool               // a runner goroutine is stepping this session
@@ -312,7 +313,16 @@ func (h *Harness) Kick(ctx context.Context, id string) {
 			}
 			s.mu.Lock()
 			s.stopped = ""
+			nextID := s.rollover
+			s.rollover = ""
 			s.mu.Unlock()
+			if nextID != "" {
+				h.touch(id)
+				h.copyLogsForce(ctx, s)
+				h.finishMidRunRollover(ctx, id, nextID, s)
+				close(done)
+				return
+			}
 			h.mu.Lock()
 			if !s.kicked || s.deleting {
 				s.running, s.cancel, s.kicked = false, nil, false
@@ -320,6 +330,9 @@ func (h *Harness) Kick(ctx context.Context, id string) {
 				h.touch(id)
 				if st == statefile.StatusClosed || st == statefile.StatusFailed {
 					h.copyLogs(ctx, s)
+					if ag, ok := h.LiveAgent(id); ok && h.Apps != nil {
+						h.Apps.NotifyAgentStop(ctx, ag)
+					}
 				}
 				close(done)
 				return
@@ -355,6 +368,12 @@ func (s *session) stoppedBy() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.stopped
+}
+
+func (s *session) setRollover(nextID string) {
+	s.mu.Lock()
+	s.rollover = nextID
+	s.mu.Unlock()
 }
 
 // Stop ends everything the session is doing. A running step is cut now: the
@@ -431,6 +450,12 @@ func (h *Harness) killAll(ctx context.Context, id string, chain []statefile.Reco
 // message. A file that does not read is logged and left out, not a reason to
 // stay down.
 func (h *Harness) Resume(ctx context.Context) error {
+	h.amu.Lock()
+	h.runCtx = ctx
+	h.amu.Unlock()
+	if err := h.initAgents(); err != nil {
+		return err
+	}
 	ids, err := h.Sessions.List()
 	if err != nil {
 		return err

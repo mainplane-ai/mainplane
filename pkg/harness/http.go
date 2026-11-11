@@ -94,14 +94,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		}
 		reply(w, out)
 	})
-	mux.HandleFunc("GET /sessions", func(w http.ResponseWriter, r *http.Request) {
-		infos, err := h.List()
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		reply(w, page(infos, r.URL.Query().Get("status"), r.URL.Query().Get("after"), r.URL.Query().Get("limit")))
-	})
+	mux.HandleFunc("GET /sessions", h.serveSessionsList)
 	mux.HandleFunc("POST /sessions", func(w http.ResponseWriter, r *http.Request) {
 		var c Create
 		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
@@ -166,6 +159,10 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 	handle("DELETE /sessions/{id}", h.serveDelete)
 	handle("PUT /sessions/{id}/workers", h.serveWorkers)
 	handle("PUT /sessions/{id}/name", h.serveName)
+	h.registerAgentRoutes(ctx, mux)
+	if h.Apps != nil {
+		h.Apps.Register(mux)
+	}
 	return mux
 }
 
@@ -258,6 +255,19 @@ func (h *Harness) serveName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reply(w, map[string]int{"n": n})
+}
+
+func (h *Harness) serveSessionsList(w http.ResponseWriter, r *http.Request) {
+	infos, err := h.List()
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	q := r.URL.Query()
+	if v := q.Get("via"); v != "" {
+		infos = slices.DeleteFunc(infos, func(i Info) bool { return i.Via != v })
+	}
+	reply(w, page(infos, q.Get("status"), q.Get("after"), q.Get("limit")))
 }
 
 // page filters a list by status, skips through the entry named by after, and

@@ -43,17 +43,40 @@ import (
 // opens.
 const startTime = 15 * time.Second
 
+func subverb(args []string) (string, []string, bool) {
+	if len(args) < 2 {
+		return "", nil, false
+	}
+	switch args[1] {
+	case "worker":
+		if len(args) > 2 && (args[2] == "remove" || args[2] == "rename") {
+			return "worker " + args[2], args[3:], true
+		}
+	case "workers":
+		if len(args) > 2 {
+			return "workers set", args[2:], true
+		}
+	case "agent", "secret":
+		if len(args) < 3 {
+			usage()
+		}
+		return args[1] + " " + args[2], args[3:], true
+	case "app":
+		if len(args) == 4 && (args[2] == "start" || args[2] == "stop") {
+			return "app " + args[2], args[3:], true
+		}
+		return "app call", args[2:], true
+	}
+	return "", nil, false
+}
+
 func main() {
 	if len(os.Args) == 1 || len(os.Args) == 2 && statefile.ValidID(os.Args[1]) {
 		app(strings.Join(os.Args[1:], ""), false)
 		return
 	}
-	if len(os.Args) > 2 && os.Args[1] == "worker" && (os.Args[2] == "remove" || os.Args[2] == "rename") {
-		cli("worker "+os.Args[2], os.Args[3:])
-		return
-	}
-	if len(os.Args) > 2 && os.Args[1] == "workers" {
-		cli("workers set", os.Args[2:])
+	if v, rest, ok := subverb(os.Args); ok {
+		cli(v, rest)
 		return
 	}
 	switch os.Args[1] {
@@ -413,6 +436,26 @@ func usage() {
                                      the catalog gives the provider, in its config, and serves it at once
   signin     <provider>              POST /providers/{provider}/login: sign in where a provider takes no key, such as
                                      chatgpt; prints the URL to open, reads what to paste back, waits for the end
+  agents     [status]                GET  /agents
+  agent      new                     POST /agents, body from stdin: {"name","config","apps","session"}
+  agent      info <id>               GET  /agents/{id}
+  agent      message <id> <text> [file...]
+                                     POST /agents/{id}/records, rolling over first if needed
+  agent      stop <id>               POST /agents/{id}/stop
+  agent      retry <id>              POST /agents/{id}/retry
+  agent      delete <id>             DELETE /agents/{id}
+  agent      name <id> [text]        PUT  /agents/{id}/name
+  agent      config <id>             PUT  /agents/{id}/config, JSON body from stdin
+  agent      apps <id> [app...]      PUT  /agents/{id}/apps
+  skills                             GET  /skills
+  skill      <app>                   GET  /skills/{app}
+  apps                               GET  /apps
+  app        start|stop <name>       POST /apps/{name}/start|stop
+  app        <app> <METHOD> <path> [body]
+                                     ANY  /apps/{app}/{path} (pass - as body to read stdin)
+  secrets                            GET  /secrets
+  secret     set <name> [value]      PUT  /secrets/{name} (value from stdin when omitted)
+  secret     delete <name>           DELETE /secrets/{name}
 `)
 	os.Exit(2)
 }

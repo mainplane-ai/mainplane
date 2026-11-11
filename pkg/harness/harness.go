@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/apps"
 	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/version"
@@ -41,6 +42,8 @@ const (
 
 type Harness struct {
 	Sessions  statefile.Sessions
+	AgentsDir string                       // directory holding agents/<id>.json; defaults to ../agents beside Sessions.Dir
+	Apps      *apps.Manager                // optional app, skill, and secret manager
 	Providers map[string]provider.Provider // read and replaced under pmu once the harness runs
 	Workers   *Pool
 	Remove    func(name string) error      // the coordinator's: the worker leaves the mesh for good
@@ -55,6 +58,23 @@ type Harness struct {
 	index map[string]Info
 	dirty map[string]bool
 	gone  map[string]bool // deleted; ids are never reused
+
+	amu          sync.Mutex
+	runCtx       context.Context
+	agentsLoaded bool
+	agentMap     map[string]*agentEntry
+	liveAgent    map[string]string
+	ownAgent     map[string]string
+}
+
+func (h *Harness) stepCtx(fallback context.Context) context.Context {
+	h.amu.Lock()
+	c := h.runCtx
+	h.amu.Unlock()
+	if c != nil {
+		return c
+	}
+	return context.WithoutCancel(fallback)
 }
 
 // provider splits a config's provider/model string and finds the provider.
@@ -127,34 +147,41 @@ func (h *Harness) Create(ctx context.Context, c Create, via string) (string, err
 		}
 		return id, nil
 	}
+	if err := h.createSession(ctx, id, c, via); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (h *Harness) createSession(ctx context.Context, id string, c Create, via string, extra ...statefile.Record) error {
 	p, model, err := h.provider(c.Model)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if c.ContextLimit <= 0 {
-		return "", fmt.Errorf("context_limit must be set")
+		return fmt.Errorf("context_limit must be set")
 	}
 	if err := checkName(c.Name); err != nil {
-		return "", err
+		return err
 	}
 	if c.Name != "" && via == "" {
-		return "", errors.New("a name needs ?via= naming who is acting")
+		return errors.New("a name needs ?via= naming who is acting")
 	}
 	for _, t := range c.Input {
 		if !p.Envelope.Accepts(t) {
-			return "", fmt.Errorf("%s does not take %s as input", p.Envelope.Name(), t)
+			return fmt.Errorf("%s does not take %s as input", p.Envelope.Name(), t)
 		}
 	}
 	for k := range c.Params {
 		if p.Envelope.Owns(k) {
-			return "", fmt.Errorf("%s builds %s from the session, a param cannot set it", p.Envelope.Name(), k)
+			return fmt.Errorf("%s builds %s from the session, a param cannot set it", p.Envelope.Name(), k)
 		}
 	}
 	if c.Tools == "" {
 		c.Tools = "default"
 	}
 	if Tools(c.Tools, nil) == nil {
-		return "", fmt.Errorf("unknown tools %q; sets: default, patch", c.Tools)
+		return fmt.Errorf("unknown tools %q; sets: default, patch", c.Tools)
 	}
 	conf := statefile.Conf{Model: c.Model, Tools: c.Tools, Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params, Preset: c.Preset}
 	if conf.Workers == nil {
@@ -162,32 +189,44 @@ func (h *Harness) Create(ctx context.Context, c Create, via string) (string, err
 	}
 	body, err := json.Marshal(conf)
 	if err != nil {
-		return "", err
+		return err
 	}
-	prompt, err := h.Prompt()
-	if err != nil {
-		return "", err
+	var prompt []string
+	if h.Prompt != nil {
+		if prompt, err = h.Prompt(); err != nil {
+			return err
+		}
 	}
-	f, err := h.Sessions.Start(id, body)
+	f, err := h.Sessions.Start(id, via, body)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if err := f.Append(system("harness", System(model, prompt))); err != nil {
-		return "", err
+		_ = f.Close()
+		return err
 	}
 	if err := f.Append(system("agents", h.agents(ctx, id, conf))); err != nil {
-		return "", err
+		_ = f.Close()
+		return err
 	}
 	if err := f.Append(system("workers", workersFirst+h.workers(conf.Workers))); err != nil {
-		return "", err
+		_ = f.Close()
+		return err
+	}
+	for _, r := range extra {
+		if err := f.Append(r); err != nil {
+			_ = f.Close()
+			return err
+		}
 	}
 	if c.Name != "" {
 		if err := f.Append(name(via, c.Name)); err != nil {
-			return "", err
+			_ = f.Close()
+			return err
 		}
 	}
 	h.touch(id)
-	return id, f.Close()
+	return f.Close()
 }
 
 // copy copies session from up to record n as id, and answers each call the
@@ -332,6 +371,15 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	conf, err := config(chain)
 	if err != nil {
 		return "", err
+	}
+	if nextID, reason := h.checkMidRunRollover(id, conf, chain); nextID != "" {
+		h.killAll(ctx, id, chain)
+		if _, err := h.append(s, system("continue", nextID)); err != nil {
+			return "", err
+		}
+		_, err := h.append(s, errorRecord("", reason))
+		s.setRollover(nextID)
+		return statefile.StatusFailed, err
 	}
 	if p := statefile.ContextUsed(chain); p > conf.ContextLimit {
 		h.killAll(ctx, id, chain)

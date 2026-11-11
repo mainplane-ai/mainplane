@@ -18,6 +18,9 @@ import (
 // known the moment they say hello; a lost connection forgets the worker until
 // it dials again.
 type Pool struct {
+	// Env returns MAINPLANE_KEY and MAINPLANE_URL for session on a worker.
+	Env func(session string) (key, url string)
+
 	mu      sync.Mutex
 	m       map[string]*Remote
 	refused map[string]Listed // admitted workers the last connection of which was refused
@@ -52,6 +55,7 @@ func (p *Pool) Resend() {
 
 func (p *Pool) Add(r *Remote) {
 	p.mu.Lock()
+	r.Env = p.Env
 	p.m[r.Name] = r
 	delete(p.refused, r.Name)
 	p.mu.Unlock()

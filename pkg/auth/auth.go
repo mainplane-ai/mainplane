@@ -10,6 +10,9 @@
 package auth
 
 import (
+	"context"
+	"crypto/ed25519"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -31,9 +34,32 @@ import (
 )
 
 const (
-	Key  = "key"  // a connector's credential: every HTTP route
-	Join = "join" // a worker's credential: joining the mesh
+	Key     = "key"  // a connector's credential: every HTTP route
+	Join    = "join" // a worker's credential: joining the mesh
+	Session = "skey" // a worker session's credential: /skills and /apps/{app}
+	App     = "akey" // an app's credential: entitlement-gated routes
 )
+
+// Caller is who authenticated an HTTP request. A request that reached an
+// internal handler directly without a gate has Key access.
+type Caller struct {
+	Kind    string
+	Session string
+	App     string
+}
+
+type callerKey struct{}
+
+func WithCaller(ctx context.Context, c Caller) context.Context {
+	return context.WithValue(ctx, callerKey{}, c)
+}
+
+func CallerFrom(ctx context.Context) Caller {
+	if c, ok := ctx.Value(callerKey{}).(Caller); ok {
+		return c
+	}
+	return Caller{Kind: Key}
+}
 
 // An address has this many refusals a window. That is more than a worker
 // with a stale token makes, redialing every 5s, so it never locks out the
@@ -149,6 +175,121 @@ func (s Store) Check(kind, secret string) bool {
 	return ok
 }
 
+// CheckKey is whether bearer is a live api key, as a raw secret or as a full
+// mp_key_ token (pinned or unpinned). When hkey is set, a full token must
+// name that harness key.
+func (s Store) CheckKey(hkey, bearer string) bool {
+	if s.Check(Key, bearer) {
+		return true
+	}
+	raw, _, _ := strings.Cut(bearer, "@")
+	tk, secret, err := Parse(Key, raw)
+	return err == nil && (hkey == "" || tk == hkey) && s.Check(Key, secret)
+}
+
+func sign(k ed25519.PrivateKey, msg string) string {
+	m := hmac.New(sha256.New, k.Seed())
+	m.Write([]byte(msg))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+// SessionToken is the stateless credential a worker holds for session sid.
+func SessionToken(k ed25519.PrivateKey, hkey, sid string) string {
+	return Token(Session, hkey, sid+":"+sign(k, "skey "+sid))
+}
+
+// CheckSession verifies a session token and returns its session id.
+func CheckSession(k ed25519.PrivateKey, hkey, token string) (string, bool) {
+	tk, secret, err := Parse(Session, token)
+	sid, mac, ok := strings.Cut(secret, ":")
+	if err != nil || tk != hkey || !ok || sid == "" {
+		return "", false
+	}
+	return sid, hmac.Equal([]byte(mac), []byte(sign(k, "skey "+sid)))
+}
+
+// AppToken is the stateless credential an entitled daemon app holds.
+func AppToken(k ed25519.PrivateKey, hkey, app string) string {
+	return Token(App, hkey, app+":"+sign(k, "akey "+app))
+}
+
+// CheckApp verifies an app token and returns its app name.
+func CheckApp(k ed25519.PrivateKey, hkey, token string) (string, bool) {
+	tk, secret, err := Parse(App, token)
+	i := strings.LastIndexByte(secret, ':')
+	if err != nil || tk != hkey || i <= 0 {
+		return "", false
+	}
+	app, mac := secret[:i], secret[i+1:]
+	return app, hmac.Equal([]byte(mac), []byte(sign(k, "akey "+app)))
+}
+
+func sessionRouteAllowed(method, path string) bool {
+	if method == http.MethodGet && (path == "/skills" || strings.HasPrefix(path, "/skills/")) {
+		return true
+	}
+	return strings.HasPrefix(path, "/apps/") && len(path) > len("/apps/")
+}
+
+func appRouteAllowed(method, path string) bool {
+	if method == http.MethodGet && path == "/agents" {
+		return true
+	}
+	return method == http.MethodPost && strings.HasPrefix(path, "/agents/") && strings.HasSuffix(path, "/records")
+}
+
+// Gate checks Authorization: Bearer for a live api key, a stateless session
+// token, or a stateless app token, enforces the route family of scoped
+// tokens, and attaches the verified Caller to the request context.
+func (s Store) Gate(k ed25519.PrivateKey, hkey string, l *Limit, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		a := Addr(r)
+		if err := l.Wait(a); err != nil {
+			http.Error(w, err.Error(), http.StatusTooManyRequests)
+			return
+		}
+		bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if !ok {
+			http.Error(w, "api key refused", http.StatusUnauthorized)
+			return
+		}
+		raw, _, _ := strings.Cut(bearer, "@")
+		switch {
+		case strings.HasPrefix(raw, "mp_"+Session+"_"):
+			sid, valid := CheckSession(k, hkey, raw)
+			if !valid {
+				l.Refused(a)
+				http.Error(w, "session key refused", http.StatusUnauthorized)
+				return
+			}
+			if !sessionRouteAllowed(r.Method, r.URL.Path) {
+				http.Error(w, "session key forbidden on this route", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(WithCaller(r.Context(), Caller{Kind: Session, Session: sid})))
+		case strings.HasPrefix(raw, "mp_"+App+"_"):
+			app, valid := CheckApp(k, hkey, raw)
+			if !valid {
+				l.Refused(a)
+				http.Error(w, "app key refused", http.StatusUnauthorized)
+				return
+			}
+			if !appRouteAllowed(r.Method, r.URL.Path) {
+				http.Error(w, "app key forbidden on this route", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(WithCaller(r.Context(), Caller{Kind: App, App: app})))
+		default:
+			if !s.CheckKey(hkey, bearer) {
+				l.Refused(a)
+				http.Error(w, "api key refused", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(WithCaller(r.Context(), Caller{Kind: Key})))
+		}
+	})
+}
+
 // Bearer refuses a request whose Authorization: Bearer is not a live api key,
 // and one from an address l turns away. A request with no key is refused but
 // not counted: it guesses nothing.
@@ -160,14 +301,14 @@ func (s Store) Bearer(l *Limit, next http.Handler) http.Handler {
 			return
 		}
 		secret, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if !ok || !s.Check(Key, secret) {
+		if !ok || !s.CheckKey("", secret) {
 			if ok {
 				l.Refused(a)
 			}
 			http.Error(w, "api key refused", http.StatusUnauthorized)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(WithCaller(r.Context(), Caller{Kind: Key})))
 	})
 }
 

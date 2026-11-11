@@ -248,6 +248,17 @@ func (c *Coordinator) Node(a netip.Addr) (string, bool) {
 	return c.st.Nodes[i].Name, true
 }
 
+// Address is the mesh address of the registered node named name.
+func (c *Coordinator) Address(name string) (netip.Addr, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := c.byName(name)
+	if n == nil {
+		return netip.Addr{}, false
+	}
+	return address(n.ID), true
+}
+
 // Remove takes the worker named name off the mesh for good. Its poll ends
 // and peers drop it at once. Its next poll finds it no longer authorized,
 // which its worker takes as the word to leave. Its keys stay refused; the

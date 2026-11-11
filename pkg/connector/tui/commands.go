@@ -48,6 +48,7 @@ func commands() []command {
 	return []command{
 		{"new", []string{"clear"}, "New session", "ctrl+n", (*session).fresh},
 		{"sessions", []string{"resume"}, "Sessions", "ctrl+o", (*session).sessions},
+		{"agents", nil, "Toggle agent sessions", "", (*session).toggleAgents},
 		{"continue", []string{"compact"}, "Continue in a new session", "", (*session).carryOn},
 		{"config", []string{"effort"}, "Config for a new session", "", (*session).config},
 		{"rename", nil, "Rename the session", "", (*session).renameDialog},
@@ -333,6 +334,19 @@ func (s *session) continueAs(a *App, cf statefile.Conf, p *catalog.Cost) {
 	s.switchTo(a, to)
 }
 
+// toggleAgents toggles whether agent sessions (via starting with "agent:")
+// appear alongside plain sessions in the sidebar and /sessions menu.
+func (s *session) toggleAgents(a *App) {
+	s.list.showAgents = !s.list.showAgents
+	s.list.applyFilter()
+	s.list.tick(a)
+	if s.list.showAgents {
+		a.Say("Showing agent sessions")
+	} else {
+		a.Say("Hiding agent sessions")
+	}
+}
+
 // sessions is the menu of sessions, newest updated first.
 func (s *session) sessions(a *App) {
 	a.Go(func() {
@@ -348,7 +362,12 @@ func (s *session) sessions(a *App) {
 				return
 			}
 			m := &Menu{}
+			hidden := 0
 			for _, in := range infos {
+				if !s.list.showAgents && isAgentSession(in) && in.ID != s.id {
+					hidden++
+					continue
+				}
 				id := in.ID
 				label := id
 				if in.Name != "" {
@@ -359,6 +378,17 @@ func (s *session) sessions(a *App) {
 				}
 				m.Items = append(m.Items, MenuItem{Label: label, Hint: string(in.Status) + " · " + stamp(in.Updated), Pick: func(a *App, _ *MenuItem) {
 					s.list.open(a, id)
+				}})
+			}
+			if s.list.showAgents {
+				m.Items = append(m.Items, MenuItem{Label: "Hide agent sessions", Hint: "/agents", Section: "Filter", Pick: func(a *App, _ *MenuItem) {
+					s.toggleAgents(a)
+					s.sessions(a)
+				}})
+			} else if hidden > 0 {
+				m.Items = append(m.Items, MenuItem{Label: fmt.Sprintf("Show %d agent sessions", hidden), Hint: "/agents", Section: "Filter", Pick: func(a *App, _ *MenuItem) {
+					s.toggleAgents(a)
+					s.sessions(a)
 				}})
 			}
 			a.OpenMenu("Sessions", m)
@@ -654,6 +684,7 @@ func (s *session) remove(a *App, id string) {
 				return
 			}
 			delete(s.list.drafts, id)
+			s.list.all = slices.DeleteFunc(s.list.all, func(in harness.Info) bool { return in.ID == id })
 			s.list.infos = slices.DeleteFunc(s.list.infos, func(in harness.Info) bool { return in.ID == id })
 			a.Say("Deleted session " + id)
 			if s.ctx.Err() == nil {

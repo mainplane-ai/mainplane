@@ -26,6 +26,7 @@ import (
 
 	"golang.org/x/net/http/httpguts"
 
+	"github.com/mainplane-ai/mainplane/pkg/apps"
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/coordinator"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
@@ -236,7 +237,8 @@ func Harness(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	pool := harness.NewPool(coord.Desired)
+	hkey := pointer.Encode(k)
+	pool := newMeshPool(coord, k, hkey, c.HTTP)
 	coord.Gone = pool.Drop
 	coord.Link(c.Links)
 	setDrives(coord, pool, c.Drives)
@@ -244,7 +246,17 @@ func Harness(ctx context.Context, path string) error {
 		c, err := loadConfig(path)
 		return c.prompt(), err
 	}
-	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove, Rename: coord.Rename, Prompt: prompt}
+	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, AgentsDir: filepath.Join(dir, "agents"), Providers: ps, Workers: pool, Remove: coord.Remove, Rename: coord.Rename, Prompt: prompt}
+	appMgr, err := apps.New(apps.Config{
+		Dir:         dir,
+		Host:        h,
+		LoopbackURL: func() string { return "http://" + c.HTTP },
+		AppToken:    func(app string) string { return auth.AppToken(k, hkey, app) },
+	})
+	if err != nil {
+		return err
+	}
+	h.Apps = appMgr
 	go watch(ctx, path, func(c Config) error {
 		ps, err := providers(dir, c.Providers)
 		if err == nil {
@@ -283,7 +295,8 @@ func Harness(ctx context.Context, path string) error {
 	a := &api{dir: dir, path: path, k: k, noPointer: c.NoPointer, at: func() string { return at.Load().(string) }, coord: coord, pool: pool}
 	a.handle(routes)
 	go ship(ctx, dir, path)
-	api := store.Bearer(limit, routes)
+	appMgr.RegisterWebhooks(mux)
+	api := store.Gate(k, hkey, limit, routes)
 	mux.Handle("/", api)
 	srv := &http.Server{Addr: c.HTTP, Handler: mux}
 	if c.URL != "" {
@@ -297,6 +310,7 @@ func Harness(ctx context.Context, path string) error {
 	if err := h.Resume(ctx); err != nil {
 		return err
 	}
+	appMgr.Start(ctx)
 	ln, err := net.Listen("tcp", c.HTTP)
 	if err != nil {
 		return err
@@ -344,6 +358,18 @@ func Harness(ctx context.Context, path string) error {
 		return err
 	}
 	return nil
+}
+
+func newMeshPool(coord *coordinator.Coordinator, k ed25519.PrivateKey, hkey, httpAddr string) *harness.Pool {
+	pool := harness.NewPool(coord.Desired)
+	pool.Env = func(sid string) (string, string) {
+		key := auth.SessionToken(k, hkey, sid)
+		if addr, ok := coord.Address(worker.Harness); ok {
+			return key, fmt.Sprintf("http://[%s]:%d", addr, worker.APIPort)
+		}
+		return key, "http://" + httpAddr
+	}
+	return pool
 }
 
 // way is why c gives the harness no one way in, if it does not.

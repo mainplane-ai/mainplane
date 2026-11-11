@@ -36,25 +36,47 @@ const resultLines = 20
 var arity = map[string][2]int{
 	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {0, 1}, "retry": {1, 1}, "stop": {1, 1}, "delete": {1, 1},
 	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "worker remove": {1, 1}, "worker rename": {2, 2}, "providers": {0, 0}, "provider": {3, 4}, "key": {2, 2}, "signin": {1, 1},
+	"agents": {0, 1}, "agent new": {0, 0}, "agent info": {1, 1}, "agent message": {2, -1}, "agent stop": {1, 1}, "agent retry": {1, 1}, "agent delete": {1, 1}, "agent name": {1, -1}, "agent config": {1, 1}, "agent apps": {1, -1},
+	"skills": {0, 0}, "skill": {1, 1}, "apps": {0, 0}, "app start": {1, 1}, "app stop": {1, 1}, "app call": {3, 4},
+	"secrets": {0, 0}, "secret set": {1, 2}, "secret delete": {1, 1},
 }
 
-// cli is the harness API as verbs: one verb, one route, its reply printed.
-// The harness and the key come from login; nothing else is remembered or
-// defaulted, and a reply the harness refuses is printed as it came and exits
-// 1. The command line is checked whole before the harness is asked anything.
-func cli(verb string, args []string) {
-	a, ok := arity[verb]
-	if !ok || len(args) < a[0] || a[1] >= 0 && len(args) > a[1] {
-		usage()
+func isScopedVerb(verb string) bool {
+	return verb == "skills" || verb == "skill" || verb == "app call"
+}
+
+func openClient(verb string) (client, string) {
+	fn := login
+	if isScopedVerb(verb) {
+		fn = loginScoped
 	}
-	c, err := login()
+	c, err := fn()
 	if errors.Is(err, fs.ErrNotExist) {
 		die(fmt.Errorf("not logged in: mainplane login <api key>"))
 	}
 	if err != nil {
 		die(err)
 	}
-	hv := c.version()
+	if c.IsScopedKey() {
+		return c, ""
+	}
+	return c, c.version()
+}
+
+// cli is the harness API as verbs: one verb, one route, its reply printed.
+// The harness and the key come from login (or MAINPLANE_KEY + MAINPLANE_URL);
+// nothing else is remembered or defaulted, and a reply the harness refuses is
+// printed as it came and exits 1. The command line is checked whole before the
+// harness is asked anything.
+func cli(verb string, args []string) {
+	a, ok := arity[verb]
+	if !ok || len(args) < a[0] || a[1] >= 0 && len(args) > a[1] {
+		usage()
+	}
+	c, hv := openClient(verb)
+	if c.cliAgentApp(verb, args) {
+		return
+	}
 	switch verb {
 	case "new":
 		var out struct{ ID string }
@@ -215,6 +237,182 @@ type client struct{ *connector.Client }
 func login() (client, error) {
 	c, err := connector.Load(context.Background())
 	return client{c}, err
+}
+
+func loginScoped() (client, error) {
+	c, err := connector.LoadScoped(context.Background())
+	return client{c}, err
+}
+
+func (c client) cliAgentApp(verb string, args []string) bool {
+	return c.cliAgent(verb, args) || c.cliApps(verb, args) || c.cliSecrets(verb, args)
+}
+
+func (c client) cliAgent(verb string, args []string) bool {
+	ctx := context.Background()
+	switch verb {
+	case "agents":
+		infos, err := c.Agents(ctx, "", strings.Join(args, ""), 0)
+		if err != nil {
+			die(err)
+		}
+		for _, i := range infos {
+			fmt.Printf("%s  %-11s  %-10s  %-32s  sessions=%-3d context=%d/%d  %s  %s\n", i.ID, i.Status, i.CurrentSession, i.Config.Model, len(i.Sessions), i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime), i.Name)
+		}
+	case "agent new":
+		var out struct {
+			ID string `json:"id"`
+		}
+		c.call("POST", "/agents?via="+via, "application/json", os.Stdin, &out)
+		fmt.Println(out.ID)
+	case "agent info":
+		c.raw("/agents/" + args[0])
+	case "agent message":
+		sid, n, err := c.PostAgent(ctx, args[0], via, args[1], args[2:])
+		if err != nil {
+			die(err)
+		}
+		fmt.Printf("%s %d\n", sid, n)
+	case "agent stop":
+		if err := c.StopAgent(ctx, args[0], via); err != nil {
+			die(err)
+		}
+	case "agent retry":
+		st, err := c.RetryAgent(ctx, args[0])
+		if err != nil {
+			die(err)
+		}
+		fmt.Println(st)
+	case "agent delete":
+		if err := c.DeleteAgent(ctx, args[0], via); err != nil {
+			die(err)
+		}
+	case "agent name":
+		if err := c.SetAgentName(ctx, args[0], via, strings.Join(args[1:], " ")); err != nil {
+			die(err)
+		}
+	case "agent config":
+		c.call("PUT", "/agents/"+args[0]+"/config?via="+via, "application/json", os.Stdin, nil)
+	case "agent apps":
+		if err := c.SetAgentApps(ctx, args[0], via, args[1:]); err != nil {
+			die(err)
+		}
+	default:
+		return false
+	}
+	return true
+}
+
+func (c client) cliApps(verb string, args []string) bool {
+	ctx := context.Background()
+	switch verb {
+	case "skills":
+		list, err := c.Skills(ctx)
+		if err != nil {
+			die(err)
+		}
+		for _, s := range list {
+			fmt.Printf("%-20s  %s\n", s.Name, s.Description)
+		}
+	case "skill":
+		md, err := c.Skill(ctx, args[0])
+		if err != nil {
+			die(err)
+		}
+		fmt.Print(md)
+		if len(md) > 0 && md[len(md)-1] != '\n' {
+			fmt.Println()
+		}
+	case "apps":
+		list, err := c.Apps(ctx)
+		if err != nil {
+			die(err)
+		}
+		for _, a := range list {
+			fmt.Printf("%-20s  %-10s  %-16s  %s\n", a.Name, a.Kind, a.Status, a.Description)
+		}
+	case "app start":
+		if err := c.StartApp(ctx, args[0]); err != nil {
+			die(err)
+		}
+	case "app stop":
+		if err := c.StopApp(ctx, args[0]); err != nil {
+			die(err)
+		}
+	case "app call":
+		c.execAppCall(ctx, args)
+	default:
+		return false
+	}
+	return true
+}
+
+func (c client) cliSecrets(verb string, args []string) bool {
+	ctx := context.Background()
+	switch verb {
+	case "secrets":
+		names, err := c.Secrets(ctx)
+		if err != nil {
+			die(err)
+		}
+		for _, n := range names {
+			fmt.Println(n)
+		}
+	case "secret set":
+		val := ""
+		if len(args) == 2 {
+			val = args[1]
+		} else {
+			b, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				die(err)
+			}
+			val = string(b)
+		}
+		if err := c.SetSecret(ctx, args[0], val); err != nil {
+			die(err)
+		}
+	case "secret delete":
+		if err := c.DeleteSecret(ctx, args[0]); err != nil {
+			die(err)
+		}
+	default:
+		return false
+	}
+	return true
+}
+
+func (c client) execAppCall(ctx context.Context, args []string) {
+	var body io.Reader
+	ctype := ""
+	if len(args) == 4 {
+		var raw []byte
+		if args[3] == "-" {
+			var err error
+			if raw, err = io.ReadAll(os.Stdin); err != nil {
+				die(err)
+			}
+		} else {
+			raw = []byte(args[3])
+		}
+		trimmed := bytes.TrimSpace(raw)
+		if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
+			ctype = "application/json"
+		} else {
+			ctype = "text/plain; charset=utf-8"
+		}
+		body = bytes.NewReader(raw)
+	}
+	out, err := c.CallApp(ctx, args[0], args[1], args[2], ctype, body)
+	if err != nil {
+		die(err)
+	}
+	if len(out) > 0 {
+		_, _ = os.Stdout.Write(out)
+		if out[len(out)-1] != '\n' {
+			fmt.Println()
+		}
+	}
 }
 
 // call does one request. A JSON reply lands in out when out is given.

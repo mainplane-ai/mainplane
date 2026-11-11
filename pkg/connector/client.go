@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/apps"
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
@@ -93,11 +94,51 @@ func Login(ctx context.Context, token string) (c *Client, old *Client, version s
 	return c, old, version, c.Save()
 }
 
+// EnvClient returns a client configured from MAINPLANE_KEY and MAINPLANE_URL
+// (or a @url-pinned MAINPLANE_KEY) when present in the environment.
+func EnvClient() (*Client, bool) {
+	key := strings.TrimSpace(os.Getenv("MAINPLANE_KEY"))
+	if key == "" {
+		return nil, false
+	}
+	u := strings.TrimRight(strings.TrimSpace(os.Getenv("MAINPLANE_URL")), "/")
+	if raw, pinned, err := auth.Unpin(key); err == nil && pinned != "" {
+		key = raw
+		if u == "" {
+			u = strings.TrimRight(pinned, "/")
+		}
+	}
+	if u == "" {
+		return nil, false
+	}
+	return &Client{URL: u, Pinned: true, Key: key, Local: u}, true
+}
+
+// IsScopedKey reports whether the client holds a session or app token rather
+// than a full API key.
+func (c *Client) IsScopedKey() bool {
+	return strings.HasPrefix(c.Key, "mp_"+auth.Session+"_") || strings.HasPrefix(c.Key, "mp_"+auth.App+"_")
+}
+
+// LoadScoped returns EnvClient when MAINPLANE_KEY and MAINPLANE_URL are set
+// (so worker shells use their session token even on machines with login.json),
+// falling back to Load otherwise.
+func LoadScoped(ctx context.Context) (*Client, error) {
+	if ec, ok := EnvClient(); ok {
+		return ec, nil
+	}
+	return Load(ctx)
+}
+
 // Load is what login wrote, with the harness on loopback when it is the one
 // installed on this machine, on the mesh when the worker on this machine
 // follows the same harness key, else proved at its URL, or found again
-// through the pointer and saved.
+// through the pointer and saved. When no login file exists (or a non-session
+// MAINPLANE_KEY is set in the environment), EnvClient is used if available.
 func Load(ctx context.Context) (*Client, error) {
+	if ec, ok := EnvClient(); ok && !strings.HasPrefix(ec.Key, "mp_"+auth.Session+"_") {
+		return ec, nil
+	}
 	c := &Client{}
 	p, err := Path()
 	if err != nil {
@@ -105,6 +146,11 @@ func Load(ctx context.Context) (*Client, error) {
 	}
 	b, err := os.ReadFile(p)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if ec, ok := EnvClient(); ok {
+				return ec, nil
+			}
+		}
 		return c, err
 	}
 	if err := json.Unmarshal(b, c); err != nil {
@@ -301,35 +347,42 @@ func (c *Client) Stop(ctx context.Context, id, via string) error {
 func (c *Client) Post(ctx context.Context, id, via, text string, files []string) (int, error) {
 	var out struct{ N int }
 	path := "/sessions/" + id + "/records?via=" + url.QueryEscape(via)
+	ctype, body, err := postBody(text, files)
+	if err != nil {
+		return 0, err
+	}
+	err = c.Call(ctx, "POST", path, ctype, body, &out)
+	return out.N, err
+}
+
+func postBody(text string, files []string) (string, io.Reader, error) {
 	if len(files) == 0 {
-		err := c.Call(ctx, "POST", path, "text/plain", strings.NewReader(text), &out)
-		return out.N, err
+		return "text/plain", strings.NewReader(text), nil
 	}
 	var b bytes.Buffer
 	mw := multipart.NewWriter(&b)
 	w, err := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"text/plain"}})
 	if err != nil {
-		return 0, err
+		return "", nil, err
 	}
 	_, _ = w.Write([]byte(text))
 	for _, f := range files {
 		t := mime.TypeByExtension(filepath.Ext(f))
 		if t == "" {
-			return 0, fmt.Errorf("%s: no content type for %q", f, filepath.Ext(f))
+			return "", nil, fmt.Errorf("%s: no content type for %q", f, filepath.Ext(f))
 		}
 		data, err := os.ReadFile(f)
 		if err != nil {
-			return 0, err
+			return "", nil, err
 		}
 		w, err := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {t}})
 		if err != nil {
-			return 0, err
+			return "", nil, err
 		}
 		_, _ = w.Write(data)
 	}
 	_ = mw.Close()
-	err = c.Call(ctx, "POST", path, mw.FormDataContentType(), &b, &out)
-	return out.N, err
+	return mw.FormDataContentType(), &b, nil
 }
 
 // Records is the file after record n; with wait, a long poll.
@@ -499,4 +552,176 @@ func (c *Client) SetDrive(ctx context.Context, name, server string, workers []st
 		return err
 	}
 	return c.Call(ctx, "PUT", "/drives/"+url.PathEscape(name), "application/json", bytes.NewReader(b), nil)
+}
+
+// Agents lists agents, newest updated first.
+func (c *Client) Agents(ctx context.Context, via, status string, limit int) ([]harness.AgentInfo, error) {
+	q := url.Values{}
+	if via != "" {
+		q.Set("via", via)
+	}
+	if status != "" {
+		q.Set("status", status)
+	}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	path := "/agents"
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	var infos []harness.AgentInfo
+	err := c.Call(ctx, "GET", path, "", nil, &infos)
+	return infos, err
+}
+
+// CreateAgent makes an agent (or adopts a session) and returns its id and live session id.
+func (c *Client) CreateAgent(ctx context.Context, cr harness.AgentCreate, via string) (string, string, error) {
+	b, err := json.Marshal(cr)
+	if err != nil {
+		return "", "", err
+	}
+	var out struct {
+		ID      string `json:"id"`
+		Session string `json:"session"`
+	}
+	err = c.Call(ctx, "POST", "/agents?via="+url.QueryEscape(via), "application/json", bytes.NewReader(b), &out)
+	return out.ID, out.Session, err
+}
+
+// Agent fetches one agent's info.
+func (c *Client) Agent(ctx context.Context, id string) (harness.AgentInfo, error) {
+	var in harness.AgentInfo
+	err := c.Call(ctx, "GET", "/agents/"+id, "", nil, &in)
+	return in, err
+}
+
+// DeleteAgent stops an agent's live session and deletes the agent.
+func (c *Client) DeleteAgent(ctx context.Context, id, via string) error {
+	return c.Call(ctx, "DELETE", "/agents/"+id+"?via="+url.QueryEscape(via), "", nil, nil)
+}
+
+// PostAgent appends text and files to an agent, rolling over first if needed.
+func (c *Client) PostAgent(ctx context.Context, id, via, text string, files []string) (string, int, error) {
+	ctype, body, err := postBody(text, files)
+	if err != nil {
+		return "", 0, err
+	}
+	var out struct {
+		Session string `json:"session"`
+		N       int    `json:"n"`
+	}
+	err = c.Call(ctx, "POST", "/agents/"+id+"/records?via="+url.QueryEscape(via), ctype, body, &out)
+	return out.Session, out.N, err
+}
+
+// StopAgent stops an agent's live session.
+func (c *Client) StopAgent(ctx context.Context, id, via string) error {
+	return c.Call(ctx, "POST", "/agents/"+id+"/stop?via="+url.QueryEscape(via), "", nil, nil)
+}
+
+// RetryAgent retries a failed or idle agent session and returns its status.
+func (c *Client) RetryAgent(ctx context.Context, id string) (string, error) {
+	var out struct {
+		Status string `json:"status"`
+	}
+	err := c.Call(ctx, "POST", "/agents/"+id+"/retry", "", nil, &out)
+	return out.Status, err
+}
+
+// SetAgentName names an agent; an empty name clears it.
+func (c *Client) SetAgentName(ctx context.Context, id, via, name string) error {
+	return c.Call(ctx, "PUT", "/agents/"+id+"/name?via="+url.QueryEscape(via), "text/plain; charset=utf-8", strings.NewReader(name), nil)
+}
+
+// SetAgentConfig updates an agent's config (Rule 1).
+func (c *Client) SetAgentConfig(ctx context.Context, id, via string, cfg harness.AgentConfig) error {
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return c.Call(ctx, "PUT", "/agents/"+id+"/config?via="+url.QueryEscape(via), "application/json", bytes.NewReader(b), nil)
+}
+
+// SetAgentApps updates the list of apps an agent may call (Rule 1).
+func (c *Client) SetAgentApps(ctx context.Context, id, via string, appNames []string) error {
+	if appNames == nil {
+		appNames = []string{}
+	}
+	b, err := json.Marshal(appNames)
+	if err != nil {
+		return err
+	}
+	return c.Call(ctx, "PUT", "/agents/"+id+"/apps?via="+url.QueryEscape(via), "application/json", bytes.NewReader(b), nil)
+}
+
+// Skills lists the skills visible to the caller.
+func (c *Client) Skills(ctx context.Context) ([]apps.SkillEntry, error) {
+	var out []apps.SkillEntry
+	err := c.Call(ctx, "GET", "/skills", "", nil, &out)
+	return out, err
+}
+
+// Skill reads the full skill.md of app.
+func (c *Client) Skill(ctx context.Context, app string) (string, error) {
+	resp, err := c.Do(ctx, "GET", "/skills/"+url.PathEscape(app), "", nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, err := io.ReadAll(resp.Body)
+	return string(b), err
+}
+
+// Apps lists all apps on the harness.
+func (c *Client) Apps(ctx context.Context) ([]apps.AppEntry, error) {
+	var out []apps.AppEntry
+	err := c.Call(ctx, "GET", "/apps", "", nil, &out)
+	return out, err
+}
+
+// StartApp starts or enables a daemon app.
+func (c *Client) StartApp(ctx context.Context, name string) error {
+	return c.Call(ctx, "POST", "/apps/"+url.PathEscape(name)+"/start", "", nil, nil)
+}
+
+// StopApp stops a daemon app.
+func (c *Client) StopApp(ctx context.Context, name string) error {
+	return c.Call(ctx, "POST", "/apps/"+url.PathEscape(name)+"/stop", "", nil, nil)
+}
+
+// CallApp invokes ANY /apps/{app}[/{subpath}] and returns the raw response body.
+func (c *Client) CallApp(ctx context.Context, app, method, subpath, ctype string, body io.Reader) ([]byte, error) {
+	p, q, hasQ := strings.Cut(subpath, "?")
+	p = strings.TrimPrefix(p, "/")
+	full := "/apps/" + url.PathEscape(app)
+	if p != "" {
+		full += "/" + p
+	}
+	if hasQ {
+		full += "?" + q
+	}
+	resp, err := c.Do(ctx, strings.ToUpper(method), full, ctype, body)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return io.ReadAll(resp.Body)
+}
+
+// Secrets lists the names of secrets stored on the harness.
+func (c *Client) Secrets(ctx context.Context) ([]string, error) {
+	var out []string
+	err := c.Call(ctx, "GET", "/secrets", "", nil, &out)
+	return out, err
+}
+
+// SetSecret writes a secret value to the harness.
+func (c *Client) SetSecret(ctx context.Context, name, value string) error {
+	return c.Call(ctx, "PUT", "/secrets/"+url.PathEscape(name), "text/plain; charset=utf-8", strings.NewReader(value), nil)
+}
+
+// DeleteSecret deletes a secret from the harness.
+func (c *Client) DeleteSecret(ctx context.Context, name string) error {
+	return c.Call(ctx, "DELETE", "/secrets/"+url.PathEscape(name), "", nil, nil)
 }

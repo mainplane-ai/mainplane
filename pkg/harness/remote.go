@@ -50,6 +50,7 @@ var password = regexp.MustCompile(`"password":"[^"]*"`)
 // a stop cuts it short.
 type Remote struct {
 	worker.Header
+	Env   func(session string) (key, url string)
 	conn  net.Conn
 	wmu   sync.Mutex
 	cmu   sync.Mutex
@@ -263,8 +264,12 @@ func (r *Remote) Job(ctx context.Context, session, interpreter, code, job string
 	started, ended := make(chan worker.Frame, 1), make(chan error, 1)
 	var o Output
 	stopped := false
+	var key, url string
+	if r.Env != nil {
+		key, url = r.Env(session)
+	}
 	go func() {
-		ended <- r.call(ctx, worker.Header{Kind: worker.Run, Session: session, Interp: interpreter, Job: job}, []byte(code), func(f worker.Frame) {
+		ended <- r.call(ctx, worker.Header{Kind: worker.Run, Session: session, Key: key, URL: url, Interp: interpreter, Job: job}, []byte(code), func(f worker.Frame) {
 			switch f.Kind {
 			case worker.Started:
 				started <- f
@@ -307,9 +312,13 @@ func (r *Remote) Run(ctx context.Context, session, interpreter, code string, tim
 	if timeout == 0 {
 		timeout = int(runTimeout.Seconds())
 	}
+	var key, url string
+	if r.Env != nil {
+		key, url = r.Env(session)
+	}
 	var o Output
 	mid := false // the tail starts inside a line already counted
-	err := r.call(ctx, worker.Header{Kind: worker.Run, Session: session, Interp: interpreter, Timeout: timeout}, []byte(code), func(f worker.Frame) {
+	err := r.call(ctx, worker.Header{Kind: worker.Run, Session: session, Key: key, URL: url, Interp: interpreter, Timeout: timeout}, []byte(code), func(f worker.Frame) {
 		if f.Kind == worker.Result {
 			o.Exit, o.Full = f.Exit, f.Full
 			return

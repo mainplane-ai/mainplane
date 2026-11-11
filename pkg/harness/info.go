@@ -19,6 +19,7 @@ import (
 type Info struct {
 	ID          string           `json:"id"`
 	Name        string           `json:"name,omitempty"`
+	Via         string           `json:"via,omitempty"`
 	Status      statefile.Status `json:"status"`
 	Config      statefile.Conf   `json:"config"`
 	Created     time.Time        `json:"created"`
@@ -62,7 +63,7 @@ func (h *Harness) Info(id string) (Info, error) {
 		return Info{}, err
 	}
 	tip := chain[len(chain)-1]
-	info := Info{ID: id, Status: h.status(id, chain), Config: conf, Created: chain[0].Time, N: tip.N, ContextUsed: statefile.ContextUsed(chain)}
+	info := Info{ID: id, Via: chain[0].Via, Status: h.status(id, chain), Config: conf, Created: chain[0].Time, N: tip.N, ContextUsed: statefile.ContextUsed(chain)}
 	for _, r := range chain {
 		if r.Kind == statefile.Name {
 			info.Name = string(r.Body)
@@ -150,12 +151,22 @@ func (h *Harness) List() ([]Info, error) {
 // rg works on it. A
 // worker not connected is skipped; the session's next stop writes again.
 func (h *Harness) copyLogs(ctx context.Context, s *session) {
-	id, n := s.id, s.exports.Add(1)
+	n := s.exports.Add(1)
 	s.logs.Lock()
 	defer s.logs.Unlock()
 	if s.exports.Load() != n {
 		return // a newer call waits and writes a newer snapshot
 	}
+	h.writeLogsLocked(ctx, s.id)
+}
+
+func (h *Harness) copyLogsForce(ctx context.Context, s *session) {
+	s.logs.Lock()
+	defer s.logs.Unlock()
+	h.writeLogsLocked(ctx, s.id)
+}
+
+func (h *Harness) writeLogsLocked(ctx context.Context, id string) {
 	chain, err := h.Sessions.Load(id)
 	if err != nil {
 		log.Printf("session %s: log copy: %v", id, err)
@@ -182,6 +193,9 @@ func (h *Harness) copyLogs(ctx context.Context, s *session) {
 			return
 		}
 		b = append(b, enc...)
+	}
+	if h.Workers == nil {
+		return
 	}
 	for _, w := range conf.Workers {
 		r, ok := h.Workers.Get(w.Name)
