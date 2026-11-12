@@ -40,8 +40,10 @@ type AgentConfig struct {
 	ColdLimit int `json:"cold_limit,omitempty"`
 }
 
-// AgentInfo is an agent as GET /agents shows it. Status, ContextUsed, Usage
-// and Updated are its live session's.
+// AgentInfo is an agent as GET /agents shows it. Status, ContextUsed and
+// Updated are its live session's. Usage is the agent's: the sum over every
+// session it has had whose file is still there. The live session's own is
+// in GET /sessions/{current_session}.
 type AgentInfo struct {
 	Agent
 	Updated        time.Time        `json:"updated"`
@@ -305,14 +307,27 @@ func (h *Harness) AgentInfo(id string) (AgentInfo, error) {
 	return h.agentInfo(a)
 }
 
+// agentInfo reads the live session's file. The sessions before it come from
+// the index, so a list reads one file an agent, however long its chain.
 func (h *Harness) agentInfo(a Agent) (AgentInfo, error) {
 	i, err := h.Info(a.live())
-	return AgentInfo{Agent: a, Updated: i.Updated, Status: i.Status, CurrentSession: a.live(), ContextUsed: i.ContextUsed, Usage: i.Usage}, err
+	info := AgentInfo{Agent: a, Updated: i.Updated, Status: i.Status, CurrentSession: a.live(), ContextUsed: i.ContextUsed, Usage: i.Usage}
+	for _, id := range a.Sessions[:len(a.Sessions)-1] {
+		past, perr := h.cached(id)
+		if perr != nil {
+			continue // deleted through /sessions: what it cost is no longer known
+		}
+		info.Usage.Input += past.Usage.Input
+		info.Usage.Output += past.Usage.Output
+		info.Usage.CacheRead += past.Usage.CacheRead
+		info.Usage.CacheWrite += past.Usage.CacheWrite
+	}
+	return info, err
 }
 
 // ListAgents is every agent keep says yes to, newest updated first. Only
-// their live sessions are read. One whose live session does not read is
-// logged and left out.
+// their live sessions' files are read. One whose live session does not read
+// is logged and left out.
 func (h *Harness) ListAgents(keep func(Agent) bool) []AgentInfo {
 	h.lockAgents()
 	agents := make([]Agent, 0, len(h.agents))

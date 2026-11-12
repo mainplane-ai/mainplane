@@ -448,7 +448,9 @@ mainplane agents
 `mainplane agent` has `info`, `retry`, `stop`, `delete`, `name`, `config` and
 `apps` too; each is one `/agents` route, listed in `pkg/harness/http.go`. A
 change of config makes no session: the next message does. A change of only
-the workers or the apps reaches the live session in place.
+the workers or the apps reaches the live session in place. An agent's
+`usage` is the token count of all its sessions together; `status`,
+`context_used` and `updated` are its live session's.
 
 An app is something an agent can call. Every interpreter and job on a worker
 has `MAINPLANE_URL`, the harness on the mesh, and `MAINPLANE_KEY`, a key for

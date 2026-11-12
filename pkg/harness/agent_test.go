@@ -414,6 +414,58 @@ func TestLimitRollover(t *testing.T) {
 	}
 }
 
+// An agent's usage is the sum over its sessions, the earlier ones from the
+// index and not from their files; a deleted session's share goes with it.
+func TestAgentUsage(t *testing.T) {
+	r := newRig(t)
+	r.step = func(string) turn { return turn{input: 140_000} }
+	a := r.create(AgentCreate{Config: r.conf(140_000, 0, "w1")}, "web")
+	s1 := r.post(a.ID, "one")
+	s2 := r.post(a.ID, "two")
+	s3 := r.post(a.ID, "three")
+	if s1 == s2 || s2 == s3 {
+		t.Fatalf("no rollover: %s %s %s", s1, s2, s3)
+	}
+	usage := func() int {
+		t.Helper()
+		i, err := r.h.AgentInfo(a.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return i.Usage.Input
+	}
+	if got := usage(); got != 420_000 {
+		t.Fatalf("usage over three sessions: %d", got)
+	}
+	if i, err := r.h.Info(s3); err != nil || i.Usage.Input != 140_000 {
+		t.Fatalf("the live session's own usage: %v %v", i.Usage, err)
+	}
+	// with its file out of the way an earlier session still counts: nothing read it
+	if err := os.Rename(r.h.Sessions.Path(s1), r.h.Sessions.Path(s1)+".away"); err != nil {
+		t.Fatal(err)
+	}
+	if got := usage(); got != 420_000 {
+		t.Fatalf("usage with an earlier session's file away: %d", got)
+	}
+	if list := r.h.ListAgents(func(Agent) bool { return true }); len(list) != 1 || list[0].Usage.Input != 420_000 {
+		t.Fatalf("list: %+v", list)
+	}
+	if err := os.Rename(r.h.Sessions.Path(s1)+".away", r.h.Sessions.Path(s1)); err != nil {
+		t.Fatal(err)
+	}
+	// a write to an earlier session is read again
+	if _, err := r.h.Post(context.Background(), s2, "test", "", []Part{{Type: "text/plain", Body: []byte("more")}}); err != nil {
+		t.Fatal(err)
+	}
+	r.until(func() bool { return usage() == 560_000 })
+	if err := r.h.Delete(context.Background(), s1, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if got := usage(); got != 420_000 {
+		t.Fatalf("usage after an earlier session was deleted: %d", got)
+	}
+}
+
 // midrun-limit: a session that passes its limit between tool calls hands
 // the task to the next one, whose first step finds the log on the worker.
 func TestMidRunRollover(t *testing.T) {

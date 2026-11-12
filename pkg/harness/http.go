@@ -49,7 +49,8 @@ const MaxPost = 8 << 20
 //	                                  409 for an agent's live session
 //	GET  /agents                      ?via= ?status= ?limit= ?after=<id>           -> [AgentInfo], newest updated first
 //	POST /agents                      AgentCreate body; ?via= who makes it         -> {"id","session"}
-//	GET  /agents/{id}                 -> AgentInfo
+//	GET  /agents/{id}                 -> AgentInfo. usage is the sum over the agent's
+//	                                  sessions; the rest is its live session's
 //	POST /agents/{id}/records         as a session's; lands on the live session,   -> {"session","n"}
 //	                                  or on a new one when that one should not go on
 //	POST /agents/{id}/retry           retry the live session                       -> {"status"}

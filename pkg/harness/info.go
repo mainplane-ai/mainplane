@@ -87,6 +87,20 @@ func (h *Harness) Info(id string) (Info, error) {
 	return info, nil
 }
 
+// cached is a session's Info from the index. The file is read only when a
+// write touched it since the index last read it, or the index has none.
+func (h *Harness) cached(id string) (Info, error) {
+	h.lockIndex()
+	info, ok := h.index[id]
+	stale := h.dirty[id]
+	delete(h.dirty, id) // before the read, as List does
+	h.imu.Unlock()
+	if ok && !stale {
+		return info, nil
+	}
+	return h.Info(id)
+}
+
 // lockIndex takes imu with the maps ready.
 func (h *Harness) lockIndex() {
 	h.imu.Lock()
