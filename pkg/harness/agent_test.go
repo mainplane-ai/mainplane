@@ -47,7 +47,7 @@ type rig struct {
 	stopped []string               // each call of h.Stopped
 	started chan struct{}          // a run of "wait" began
 	release chan struct{}          // closed to let it end
-	writes  sync.WaitGroup         // files w1 is writing under dir
+	writes  sync.WaitGroup         // w1's read loop, and the files it is writing under dir
 }
 
 func newRig(t *testing.T) *rig {
@@ -90,14 +90,14 @@ func newRig(t *testing.T) *rig {
 		t.Fatal(err)
 	}
 	near, far := net.Pipe()
-	// A log copy can outlive its test. The folder goes only once w1 takes
-	// no more writes and has made the ones it took: Windows removes no
+	// A log copy can outlive its test. The folder goes only once w1 reads
+	// no more frames and has made the writes it took: Windows removes no
 	// folder a file is still landing in.
 	t.Cleanup(func() {
 		_ = near.Close()
 		r.writes.Wait()
 	})
-	go r.serve(far)
+	r.writes.Go(func() { r.serve(far) })
 	rem, err := Connect(near, func() (string, error) { return "w1", nil })
 	if err != nil {
 		t.Fatal(err)
