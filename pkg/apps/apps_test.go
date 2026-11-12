@@ -576,6 +576,28 @@ func TestSchedule(t *testing.T) {
 
 // A secret cannot take the name of a variable the harness sets for a daemon,
 // and an app.json cannot name one or set a header the harness speaks in.
+// An app.json that could only fail at its first call, or whose entitlement
+// would do nothing, is refused when it is read.
+func TestSpecRefused(t *testing.T) {
+	r := newRig(t)
+	for _, u := range []string{"example.com", "example.com:8080/v1", "ftp://example.com", "http://", "https:///path", "/local", "http://[::1", "file:///etc/passwd"} {
+		r.install("p", Spec{URL: u})
+		if got := r.want(404, "full", "GET", "/skills/p", ""); !strings.Contains(got, "url") {
+			t.Fatalf("app.json with url %s: %s", u, got)
+		}
+	}
+	for _, e := range []string{"Post", "admin", "", "post,list"} {
+		r.install("p", Spec{URL: "https://example.com", Entitlements: []string{"post", e}})
+		if got := r.want(404, "full", "GET", "/skills/p", ""); !strings.Contains(got, "entitlement") {
+			t.Fatalf("app.json with entitlement %q: %s", e, got)
+		}
+	}
+	for _, u := range []string{"https://example.com", "http://127.0.0.1:8080/v1?k=1", "HTTP://[::1]:9"} {
+		r.install("p", Spec{URL: u, Entitlements: []string{"post", "list"}})
+		r.want(200, "full", "GET", "/skills/p", "")
+	}
+}
+
 func TestReservedNames(t *testing.T) {
 	r := newRig(t)
 	for _, n := range []string{"PORT", "DATA_DIR", "PATH", "HOME", "Path", "MAINPLANE_URL", "MAINPLANE_PROXY_SECRET", "mainplane_app_key"} {

@@ -40,6 +40,13 @@ const (
 	proxyHeader = prefix + "Proxy-Secret"
 )
 
+// What an app.json may list under entitlements: the two things an app's own
+// key may ask of the harness.
+const (
+	entPost = "post" // a message to an agent that has the app
+	entList = "list" // the agents that have the app
+)
+
 // A secret's value is a key or a PEM file, far shorter than this.
 const maxSecret = 1 << 20
 
@@ -168,10 +175,19 @@ func (m *Manager) load(name string) (app, error) {
 
 // check refuses a spec that would speak for the harness: a secret named as a
 // variable the harness sets for a daemon, or a header under the prefix the
-// harness names the caller with.
+// harness names the caller with. It also refuses what could only fail later
+// or do nothing: a url no proxy can call, an entitlement the harness has not.
 func (s Spec) check() error {
 	if s.URL != "" && len(s.Run) > 0 {
 		return errors.New("url and run are both set")
+	}
+	if u, err := url.Parse(s.URL); s.URL != "" && (err != nil || u.Scheme != "http" && u.Scheme != "https" || u.Host == "") {
+		return fmt.Errorf("url %q: it must be http or https with a host", s.URL)
+	}
+	for _, e := range s.Entitlements {
+		if e != entPost && e != entList {
+			return fmt.Errorf("entitlement %q: it must be %s or %s", e, entPost, entList)
+		}
 	}
 	for _, n := range s.Secrets {
 		if reserved(n) {
@@ -416,7 +432,7 @@ func (m *Manager) app(w http.ResponseWriter, r *http.Request, token string, rout
 	}
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	switch {
-	case r.Method == http.MethodGet && r.URL.Path == "/agents" && slices.Contains(a.spec.Entitlements, "list"):
+	case r.Method == http.MethodGet && r.URL.Path == "/agents" && slices.Contains(a.spec.Entitlements, entList):
 		type agent struct {
 			ID   string `json:"id"`
 			Name string `json:"name"`
@@ -426,7 +442,7 @@ func (m *Manager) app(w http.ResponseWriter, r *http.Request, token string, rout
 			out = append(out, agent{i.ID, i.Name})
 		}
 		reply(w, out)
-	case r.Method == http.MethodPost && len(parts) == 3 && parts[0] == "agents" && parts[2] == "records" && slices.Contains(a.spec.Entitlements, "post"):
+	case r.Method == http.MethodPost && len(parts) == 3 && parts[0] == "agents" && parts[2] == "records" && slices.Contains(a.spec.Entitlements, entPost):
 		if t, err := m.h.Agent(parts[1]); err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return

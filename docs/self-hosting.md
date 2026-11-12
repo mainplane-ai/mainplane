@@ -484,6 +484,8 @@ optional:
 ```
 
 - With neither `url` nor `run` the app is only its `skill.md`: text an agent reads.
+- A `url` is `http` or `https` with a host, and an entitlement is `post` or
+  `list`. An `app.json` that says otherwise is refused whole.
 - The harness removes `Authorization` and every `X-Mainplane-*` header a
   caller sent, and sets `X-Mainplane-Agent` and `X-Mainplane-Session` to the
   agent and session it verified. A webhook has no `X-Mainplane-Agent`: the
