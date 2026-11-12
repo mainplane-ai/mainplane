@@ -52,6 +52,10 @@ func main() {
 		cli("worker "+os.Args[2], os.Args[3:])
 		return
 	}
+	if len(os.Args) > 2 && (os.Args[1] == "agent" || os.Args[1] == "secret" || (os.Args[1] == "app" && len(os.Args) == 4 && (os.Args[2] == "start" || os.Args[2] == "stop"))) {
+		cli(os.Args[1]+" "+os.Args[2], os.Args[3:])
+		return
+	}
 	if len(os.Args) > 2 && os.Args[1] == "workers" {
 		cli("workers set", os.Args[2:])
 		return
@@ -95,6 +99,8 @@ func main() {
 			usage()
 		}
 		fmt.Println(version.V)
+	case "skill", "app":
+		skill(os.Args[1], os.Args[2:])
 	default:
 		cli(os.Args[1], os.Args[2:])
 	}
@@ -413,6 +419,31 @@ func usage() {
                                      the catalog gives the provider, in its config, and serves it at once
   signin     <provider>              POST /providers/{provider}/login: sign in where a provider takes no key, such as
                                      chatgpt; prints the URL to open, reads what to paste back, waits for the end
+
+  agents     [status]                GET  /agents
+  agent      new                     POST /agents, body from stdin: {"name","config","apps"}, config as a session's
+                                     with "cold_limit", or {"session"} to adopt one; prints the agent's id and session
+  agent      info <id>               GET  /agents/{id}
+  agent      message <id> <text> [file...]
+                                     POST /agents/{id}/records: lands on the agent's live session, or on a new one
+                                     when that one should not go on; prints the session and the record's n
+  agent      retry <id>              POST /agents/{id}/retry
+  agent      stop <id>               POST /agents/{id}/stop
+  agent      delete <id>             DELETE /agents/{id}: the agent is gone, its sessions stay
+  agent      name <id> [text]        PUT  /agents/{id}/name
+  agent      config <id>             PUT  /agents/{id}/config, body from stdin: the config of the agent's next session
+  agent      apps <id> [app...]      PUT  /agents/{id}/apps: the apps the agent may call are these
+  apps                               GET  /apps: every app, its kind and status
+  app        start <name>            POST /apps/{name}/start: run a daemon app
+  app        stop <name>             POST /apps/{name}/stop: end it until a start
+  secrets                            GET  /secrets: the names; no verb reads a value
+  secret     set <name> [value]      PUT  /secrets/{name}: the value, or stdin with none; starts the apps that waited
+  secret     delete <name>           DELETE /secrets/{name}
+
+                                     in an agent's session on a worker, with no login: $MAINPLANE_KEY and $MAINPLANE_URL
+  skill      [app]                   GET  /skills/{app}: how to use the app; no app lists the agent's apps
+  app        <app> <method> <path> [body]
+                                     <method> /apps/{app}/{path}: call the app; the body is JSON, or - for stdin
 `)
 	os.Exit(2)
 }

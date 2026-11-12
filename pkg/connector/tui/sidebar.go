@@ -3,6 +3,9 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/catalog"
@@ -31,12 +34,15 @@ const (
 
 // sessionList is the sessions, newest updated first, read every
 // sessionsEvery. It outlives the session screens: the sidebar shows it and
-// Ctrl+Up/Down step through it.
+// Ctrl+Up/Down step through it. An agent's sessions are left out, by the
+// harness so the list is sessionsMax plain ones, unless agents is set, in
+// /settings: agents are other connectors' to show.
 type sessionList struct {
 	c      *connector.Client
 	cat    *catalog.Catalog // nil until loaded
 	cur    *session         // the screen showing now
 	infos  []harness.Info
+	agents atomic.Bool          // show the sessions of agents too: set on the app's loop, read by each read
 	seen   map[string]time.Time // per session, its update when last read here
 	drafts map[string][]elem    // per session, "" for home, the input it was left with
 	loaded bool
@@ -51,23 +57,52 @@ func newSessionList(a *App, c *connector.Client) *sessionList {
 	loadCatalog(a, l)
 	a.Go(func() {
 		for {
-			ctx, cancel := context.WithTimeout(context.Background(), callTime)
-			infos, err := c.Sessions(ctx, "", sessionsMax)
-			cancel()
-			a.Post(func() { l.update(a, infos, err) })
+			l.read(a)
 			time.Sleep(sessionsEvery)
 		}
 	})
 	return l
 }
 
-func (l *sessionList) update(a *App, infos []harness.Info, err error) {
+// read lists the sessions once.
+func (l *sessionList) read(a *App) {
+	ctx, cancel := context.WithTimeout(context.Background(), callTime)
+	agents := l.agents.Load()
+	infos, err := l.c.Sessions(ctx, "", sessionsMax, !agents)
+	cancel()
+	a.Post(func() { l.update(a, infos, agents, err) })
+}
+
+// theirs is whether an agent made the session.
+func theirs(in harness.Info) bool { return strings.HasPrefix(in.Via, harness.AgentVia) }
+
+// withOpen is a read of the sessions, agents whether it asked for those of
+// agents too, with the open session in it: an agent's session is in the
+// list while it is the open one, asked for or not, at its place by time.
+func (l *sessionList) withOpen(infos []harness.Info, agents bool) []harness.Info {
+	cur := l.cur.info
+	if agents || !theirs(cur) || slices.ContainsFunc(infos, func(in harness.Info) bool { return in.ID == cur.ID }) {
+		return infos
+	}
+	i, _ := slices.BinarySearchFunc(infos, cur.Updated, func(in harness.Info, t time.Time) int { return t.Compare(in.Updated) })
+	return slices.Insert(infos, i, cur)
+}
+
+// update takes a read of the sessions, agents whether it asked for those of
+// agents too: a read from before /settings changed that is dropped. One is
+// unread only once it changes after it first shows here, as those hidden
+// until now have not.
+func (l *sessionList) update(a *App, infos []harness.Info, agents bool, err error) {
 	if err != nil {
 		a.SayError(err)
 		return
 	}
+	if agents != l.agents.Load() {
+		return
+	}
+	infos = l.withOpen(infos, agents)
 	for _, in := range infos {
-		if !l.loaded || in.ID == l.cur.id {
+		if _, known := l.seen[in.ID]; !l.loaded || in.ID == l.cur.id || !known && theirs(in) {
 			l.seen[in.ID] = in.Updated
 		}
 	}

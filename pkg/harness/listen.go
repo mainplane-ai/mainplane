@@ -24,6 +24,7 @@ type Pool struct {
 
 	smu     sync.Mutex                  // one Resend at a time, so an older one never lands last
 	desired func(string) worker.Desired // the drives of the worker by name
+	key     func(session string) string // a session's MAINPLANE_KEY, which every run carries to the worker
 }
 
 // Listed is a worker as GET /workers shows it: its hello, and why its last
@@ -33,8 +34,8 @@ type Listed struct {
 	Refused string `json:"refused,omitempty"`
 }
 
-func NewPool(desired func(string) worker.Desired) *Pool {
-	return &Pool{m: map[string]*Remote{}, refused: map[string]Listed{}, desired: desired}
+func NewPool(desired func(string) worker.Desired, key func(session string) string) *Pool {
+	return &Pool{m: map[string]*Remote{}, refused: map[string]Listed{}, desired: desired, key: key}
 }
 
 // Resend sends each connected worker its drives when they changed: after
@@ -51,6 +52,7 @@ func (p *Pool) Resend() {
 }
 
 func (p *Pool) Add(r *Remote) {
+	r.key = p.key
 	p.mu.Lock()
 	p.m[r.Name] = r
 	delete(p.refused, r.Name)

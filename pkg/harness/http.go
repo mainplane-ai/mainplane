@@ -23,11 +23,15 @@ import (
 // person. A file goes to a worker, not into the state file.
 const MaxPost = 8 << 20
 
-// Handler is the harness's HTTP surface: ten verbs on a session, two
-// reads of the environment, and removing a worker. Records go out in the
-// state file's own bytes, one after another.
+// Handler is the harness's HTTP surface: ten verbs on a session, ten on an
+// agent, two reads of the environment, and removing a worker. Records go out
+// in the state file's own bytes, one after another.
 //
-//	GET  /sessions                    ?status= ?limit= ?after=<id>                 -> [Info], newest updated first
+//	GET  /sessions                    ?status= ?limit= ?after=<id> ?plain=1        -> [Info], newest updated first
+//	                                  an Info's via is who made the session,
+//	                                  a copy's who made the copy: agent:<id>
+//	                                  for a session of an agent, which
+//	                                  ?plain=1 leaves out
 //	POST /sessions                    Create body; ?via= required with a name      -> {"id"}
 //	GET  /sessions/{id}               -> Info
 //	GET  /sessions/{id}/records       ?after=N  ?wait=30s to long poll             -> records
@@ -45,7 +49,22 @@ const MaxPost = 8 << 20
 //	PUT  /sessions/{id}/name          the name as text; ?via= required. a name     -> {"n"}
 //	                                  record; empty removes the name
 //	DELETE /sessions/{id}             ?via= required. the file is gone for good;   -> 204
-//	                                  a running step is stopped first
+//	                                  a running step is stopped first.
+//	                                  409 for an agent's live session
+//	GET  /agents                      ?via= ?status= ?limit= ?after=<id>           -> [AgentInfo], newest updated first
+//	POST /agents                      AgentCreate body; ?via= who makes it         -> {"id","session"}
+//	GET  /agents/{id}                 -> AgentInfo. usage is the sum over the agent's
+//	                                  sessions; the rest is its live session's
+//	POST /agents/{id}/records         as a session's; lands on the live session,   -> {"session","n"}
+//	                                  or on a new one when that one should not go on
+//	POST /agents/{id}/retry           retry the live session                       -> {"status"}
+//	POST /agents/{id}/stop            ?via= required. stop the live session        -> 204
+//	PUT  /agents/{id}/name            the name as text; ?via= required             -> 204
+//	PUT  /agents/{id}/config          AgentConfig; ?via= required. no new session  -> 204
+//	                                  until a post finds the live one cannot go on
+//	PUT  /agents/{id}/apps            ["app"]; ?via= required                      -> 204
+//	DELETE /agents/{id}               ?via= required. the live session is stopped; -> 204
+//	                                  the sessions' files stay
 //	GET  /workers                     -> connected workers' hellos, and refused
 //	                                     ones with the reason
 //	DELETE /workers/{name}            the worker leaves the mesh for good; its     -> 204
@@ -100,7 +119,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 			fail(w, err)
 			return
 		}
-		reply(w, page(infos, r.URL.Query().Get("status"), r.URL.Query().Get("after"), r.URL.Query().Get("limit")))
+		reply(w, page(infos, r.URL.Query()))
 	})
 	mux.HandleFunc("POST /sessions", func(w http.ResponseWriter, r *http.Request) {
 		var c Create
@@ -166,10 +185,137 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 	handle("DELETE /sessions/{id}", h.serveDelete)
 	handle("PUT /sessions/{id}/workers", h.serveWorkers)
 	handle("PUT /sessions/{id}/name", h.serveName)
+	h.agentRoutes(ctx, mux, handle)
 	return mux
 }
 
-func fail(w http.ResponseWriter, err error) { http.Error(w, err.Error(), http.StatusBadRequest) }
+// agentRoutes are the ten verbs on an agent.
+func (h *Harness) agentRoutes(ctx context.Context, mux *http.ServeMux, handle func(string, http.HandlerFunc)) {
+	mux.HandleFunc("GET /agents", h.serveAgents)
+	mux.HandleFunc("POST /agents", func(w http.ResponseWriter, r *http.Request) { h.serveAgentCreate(ctx, w, r) })
+	handle("POST /agents/{id}/records", func(w http.ResponseWriter, r *http.Request) { h.serveAgentPost(ctx, w, r) })
+	handle("GET /agents/{id}", func(w http.ResponseWriter, r *http.Request) {
+		info, err := h.AgentInfo(r.PathValue("id"))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, info)
+	})
+	handle("POST /agents/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
+		a, err := h.Agent(r.PathValue("id"))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		h.Retry(ctx, a.live())
+		reply(w, map[string]statefile.Status{"status": statefile.StatusStepping})
+	})
+	// act is a change to an agent that says who made it and answers nothing.
+	act := func(pattern string, fn func(r *http.Request, id, via string) error) {
+		handle(pattern, func(w http.ResponseWriter, r *http.Request) {
+			via, err := via(r)
+			if err == nil {
+				r.Body = http.MaxBytesReader(w, r.Body, MaxPost)
+				err = fn(r, r.PathValue("id"), via)
+			}
+			if err != nil {
+				fail(w, err)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+	}
+	act("POST /agents/{id}/stop", func(r *http.Request, id, via string) error {
+		a, err := h.Agent(id)
+		if err != nil {
+			return err
+		}
+		return h.Stop(ctx, a.live(), via)
+	})
+	act("DELETE /agents/{id}", func(r *http.Request, id, via string) error { return h.DeleteAgent(r.Context(), id, via) })
+	act("PUT /agents/{id}/name", func(r *http.Request, id, via string) error {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			return err
+		}
+		return h.SetAgentName(id, via, string(b))
+	})
+	act("PUT /agents/{id}/config", func(r *http.Request, id, via string) error {
+		var c AgentConfig
+		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+			return err
+		}
+		return h.SetAgentConfig(id, via, c)
+	})
+	act("PUT /agents/{id}/apps", func(r *http.Request, id, via string) error {
+		var apps []string
+		if err := json.NewDecoder(r.Body).Decode(&apps); err != nil {
+			return err
+		}
+		return h.SetAgentApps(id, via, apps)
+	})
+}
+
+func (h *Harness) serveAgents(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	infos := h.ListAgents(func(a Agent) bool { return q.Get("via") == "" || a.Via == q.Get("via") })
+	infos = slices.DeleteFunc(infos, func(i AgentInfo) bool { return q.Get("status") != "" && string(i.Status) != q.Get("status") })
+	if i := slices.IndexFunc(infos, func(i AgentInfo) bool { return i.ID == q.Get("after") }); i >= 0 {
+		infos = infos[i+1:]
+	}
+	if n, err := strconv.Atoi(q.Get("limit")); err == nil && n >= 0 && n < len(infos) {
+		infos = infos[:n]
+	}
+	reply(w, infos)
+}
+
+func (h *Harness) serveAgentCreate(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	var c AgentCreate
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, MaxPost)).Decode(&c); err != nil {
+		fail(w, err)
+		return
+	}
+	a, err := h.CreateAgent(ctx, c, r.URL.Query().Get("via"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	reply(w, map[string]string{"id": a.ID, "session": a.live()})
+}
+
+func (h *Harness) serveAgentPost(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	via, err := via(r)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	parts, err := parts(r.Header.Get("Content-Type"), http.MaxBytesReader(w, r.Body, MaxPost))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	s, n, err := h.PostAgent(ctx, r.PathValue("id"), via, r.Header.Get("Idempotency-Key"), parts)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	reply(w, map[string]any{"session": s, "n": n})
+}
+
+// fail answers a request the harness refuses: an agent no file has is not
+// found, an agent's live session is not deleted, the rest is the caller's
+// to fix.
+func fail(w http.ResponseWriter, err error) {
+	code := http.StatusBadRequest
+	switch {
+	case errors.Is(err, ErrNoAgent):
+		code = http.StatusNotFound
+	case errors.Is(err, ErrLive):
+		code = http.StatusConflict
+	}
+	http.Error(w, err.Error(), code)
+}
 
 // ProviderInfo is a provider as GET /providers shows it: no key.
 type ProviderInfo struct {
@@ -260,18 +406,24 @@ func (h *Harness) serveName(w http.ResponseWriter, r *http.Request) {
 	reply(w, map[string]int{"n": n})
 }
 
-// page filters a list by status, skips through the entry named by after, and
-// cuts it to limit. Empty means no filter, no skip, no cut.
-func page(infos []Info, status, after, limit string) []Info {
+// page filters a list by ?status and ?plain, skips through the entry named
+// by ?after, and cuts it to ?limit. Empty means no filter, no skip, no cut.
+// The filters come before the cut, so a page of plain sessions is full
+// however many sessions of agents are newer.
+func page(infos []Info, q url.Values) []Info {
+	status, after := q.Get("status"), q.Get("after")
 	if status != "" {
 		infos = slices.DeleteFunc(infos, func(i Info) bool { return string(i.Status) != status })
+	}
+	if q.Get("plain") == "1" {
+		infos = slices.DeleteFunc(infos, func(i Info) bool { return strings.HasPrefix(i.Via, AgentVia) })
 	}
 	if after != "" {
 		if i := slices.IndexFunc(infos, func(i Info) bool { return i.ID == after }); i >= 0 {
 			infos = infos[i+1:]
 		}
 	}
-	if n, err := strconv.Atoi(limit); err == nil && n >= 0 && n < len(infos) {
+	if n, err := strconv.Atoi(q.Get("limit")); err == nil && n >= 0 && n < len(infos) {
 		infos = infos[:n]
 	}
 	return infos

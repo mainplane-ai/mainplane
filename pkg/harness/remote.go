@@ -54,8 +54,9 @@ type Remote struct {
 	wmu   sync.Mutex
 	cmu   sync.Mutex
 	calls map[string]chan worker.Frame
-	left  map[string]chan struct{} // closed by a call that stopped listening
-	done  chan struct{}            // closed when the connection ends
+	left  map[string]chan struct{}    // closed by a call that stopped listening
+	done  chan struct{}               // closed when the connection ends
+	key   func(session string) string // the pool's: a session's MAINPLANE_KEY
 
 	sent   []byte // the last drives frame, under wmu
 	dmu    sync.Mutex
@@ -264,7 +265,7 @@ func (r *Remote) Job(ctx context.Context, session, interpreter, code, job string
 	var o Output
 	stopped := false
 	go func() {
-		ended <- r.call(ctx, worker.Header{Kind: worker.Run, Session: session, Interp: interpreter, Job: job}, []byte(code), func(f worker.Frame) {
+		ended <- r.call(ctx, worker.Header{Kind: worker.Run, Session: session, Key: r.key(session), Interp: interpreter, Job: job}, []byte(code), func(f worker.Frame) {
 			switch f.Kind {
 			case worker.Started:
 				started <- f
@@ -309,7 +310,7 @@ func (r *Remote) Run(ctx context.Context, session, interpreter, code string, tim
 	}
 	var o Output
 	mid := false // the tail starts inside a line already counted
-	err := r.call(ctx, worker.Header{Kind: worker.Run, Session: session, Interp: interpreter, Timeout: timeout}, []byte(code), func(f worker.Frame) {
+	err := r.call(ctx, worker.Header{Kind: worker.Run, Session: session, Key: r.key(session), Interp: interpreter, Timeout: timeout}, []byte(code), func(f worker.Frame) {
 		if f.Kind == worker.Result {
 			o.Exit, o.Full = f.Exit, f.Full
 			return
