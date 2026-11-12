@@ -11,6 +11,7 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 - Sessions: record 1 of a state file has `via`, who made the session. A session of an agent says `agent:<id>`, and `GET /sessions?plain=1` leaves those out. `DELETE /sessions/{id}` answers 409 for an agent's live session
 - Terminal app: the session list leaves out the sessions of agents. "Sessions of agents" in /settings shows them for that run of the app
 - Local models: the new `docs/local-llms.md` says how to run a session on a model server of your own (Ollama, LM Studio, llama.cpp, vLLM). A provider with a url needs no key, and `mainplane provider <name> <shape> <url> [key]` adds a provider the catalog does not have. When a server past its context window cuts the prompt, as Ollama does, the step fails with an error that says so; before, the session went on with part of the conversation missing
+- Terminal app: `/model` lists the models of a local server under Custom, after the catalog's models. The list comes from the server itself (`GET /providers/{name}/models`, for `openai-chat` providers the catalog does not have). A provider's new `context_limit` in the config is the context limit of sessions on its models, 30,000 when unset
 - Catalog: Gemini 4 Carbon on Google and OpenRouter
 - Releases are built with Go 1.27.4, which fixes GO-2026-6859 in net/http
 
