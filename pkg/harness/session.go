@@ -521,14 +521,18 @@ func (h *Harness) lostJobs(ids []string) {
 
 // status is the file's word, or stepping while a runner holds the session.
 func (h *Harness) status(id string, chain []statefile.Record) statefile.Status {
-	s := h.session(id)
-	h.mu.Lock()
-	running := s.running
-	h.mu.Unlock()
-	if running {
+	if h.running(id) {
 		return statefile.StatusStepping
 	}
 	return statefile.Derive(chain)
+}
+
+// running is whether the session has a run going.
+func (h *Harness) running(id string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	s, ok := h.s[id]
+	return ok && s.running
 }
 
 // Changed is a channel closed at the session's next append.

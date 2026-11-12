@@ -523,6 +523,41 @@ func TestWorkersMidStep(t *testing.T) {
 	}
 }
 
+// An agent is stepping all through a handoff: the next session is live
+// before it is kicked, while the one before is still in the step that hands
+// the task off.
+func TestHandoffStepping(t *testing.T) {
+	r := newRig(t)
+	a := r.create(AgentCreate{Config: r.conf(1000, 0, "w1")}, "web")
+	next, seen := make(chan struct{}), make(chan struct{})
+	r.step = func(body string) turn {
+		if strings.Contains(body, "hit its limit mid-task") {
+			close(next)
+			<-seen // the next session's run does not end under the read below
+			return turn{input: 100}
+		}
+		return turn{code: "wait", input: 1500}
+	}
+	if _, _, err := r.h.PostAgent(context.Background(), a.ID, "web", "", []Part{{Type: "text/plain", Body: []byte("start")}}); err != nil {
+		t.Fatal(err)
+	}
+	<-r.started
+	close(r.release)
+	for stepped := false; !stepped; {
+		select {
+		case <-next:
+			stepped = true
+		default:
+		}
+		if i, err := r.h.AgentInfo(a.ID); err != nil || i.Status != statefile.StatusStepping {
+			t.Errorf("mid-handoff: status %s on session %s: %v", i.Status, i.CurrentSession, err)
+			break
+		}
+	}
+	close(seen)
+	r.settled(a.ID)
+}
+
 // midrun-limit: a session that passes its limit between tool calls hands
 // the task to the next one, whose first step finds the log on the worker.
 func TestMidRunRollover(t *testing.T) {

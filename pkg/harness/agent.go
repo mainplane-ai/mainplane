@@ -312,10 +312,20 @@ func (h *Harness) AgentInfo(id string) (AgentInfo, error) {
 }
 
 // agentInfo reads the live session's file. The sessions before it come from
-// the index, so a list reads one file an agent, however long its chain.
+// the index, so a list reads one file an agent, however long its chain. A
+// handoff makes the next session live before it kicks it, from inside a
+// step of the session before: while that one runs, the agent is stepping.
+// When another session became the live one under the read, the read is of
+// a session that ended, and is made again.
 func (h *Harness) agentInfo(a Agent) (AgentInfo, error) {
 	i, err := h.Info(a.live())
+	if now, nerr := h.Agent(a.ID); nerr == nil && now.live() != a.live() {
+		return h.agentInfo(now)
+	}
 	info := AgentInfo{Agent: a, Updated: i.Updated, Status: i.Status, CurrentSession: a.live(), ContextUsed: i.ContextUsed, Usage: i.Usage}
+	if n := len(a.Sessions); n > 1 && h.running(a.Sessions[n-2]) {
+		info.Status = statefile.StatusStepping
+	}
 	for _, id := range a.Sessions[:len(a.Sessions)-1] {
 		past, perr := h.cached(id)
 		if perr != nil {
