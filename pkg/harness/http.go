@@ -28,9 +28,10 @@ const MaxPost = 8 << 20
 // in the state file's own bytes, one after another.
 //
 //	GET  /sessions                    ?status= ?limit= ?after=<id> ?plain=1        -> [Info], newest updated first
-//	                                  an Info's via is who made the session:
-//	                                  agent:<id> for a session of an agent,
-//	                                  which ?plain=1 leaves out
+//	                                  an Info's via is who made the session,
+//	                                  a copy's who made the copy: agent:<id>
+//	                                  for a session of an agent, which
+//	                                  ?plain=1 leaves out
 //	POST /sessions                    Create body; ?via= required with a name      -> {"id"}
 //	GET  /sessions/{id}               -> Info
 //	GET  /sessions/{id}/records       ?after=N  ?wait=30s to long poll             -> records

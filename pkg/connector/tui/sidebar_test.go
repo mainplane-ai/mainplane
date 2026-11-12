@@ -1,10 +1,17 @@
 package tui
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 )
 
@@ -48,5 +55,56 @@ func TestAgentSessionsHidden(t *testing.T) {
 	theirs.Updated = at(8)
 	if !l.unread(theirs) {
 		t.Fatal("a session of an agent that changed since it showed is not unread")
+	}
+}
+
+// TestSessionsMenu: the /sessions menu holds what the list shows. The open
+// session is in it though it is an agent's and those are hidden, and a
+// reply from before /settings changed is asked for again, not shown.
+func TestSessionsMenu(t *testing.T) {
+	open := harness.Info{ID: "open", Via: harness.AgentVia + "a2", Updated: time.Date(2026, 1, 1, 0, 5, 0, 0, time.UTC)}
+	plain := harness.Info{ID: "plain", Via: "tui", Updated: open.Updated.Add(time.Minute)}
+	theirs := harness.Info{ID: "theirs", Via: harness.AgentVia + "a1", Updated: open.Updated.Add(-time.Minute)}
+	a := &App{Status: &Text{}, post: make(chan func(), 1)}
+	l := &sessionList{}
+	var flip atomic.Bool // the choice in /settings changes while the next reply is on its way
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		infos := []harness.Info{plain, open, theirs}
+		if r.URL.Query().Get("plain") == "1" {
+			infos = infos[:1]
+		}
+		if flip.Swap(false) {
+			l.agents.Store(true)
+		}
+		_ = json.NewEncoder(w).Encode(infos)
+	}))
+	defer srv.Close()
+	s := &session{id: "open", info: open, ctx: context.Background(), c: &connector.Client{Local: srv.URL}, list: l}
+	l.cur = s
+	menu := func() []string {
+		t.Helper()
+		a.layers = nil
+		s.sessions(a)
+		for len(a.layers) == 0 {
+			select {
+			case f := <-a.post:
+				f()
+			case <-time.After(10 * time.Second):
+				t.Fatal("no menu")
+			}
+		}
+		var ids []string
+		for _, it := range a.layers[0].Root.Kids[2].View.(*Menu).Items {
+			id, _, _ := strings.Cut(it.Label, " ")
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	if got, want := menu(), []string{"plain", "open"}; !slices.Equal(got, want) {
+		t.Fatalf("hidden: got %v, want %v", got, want)
+	}
+	flip.Store(true)
+	if got, want := menu(), []string{"plain", "open", "theirs"}; !slices.Equal(got, want) {
+		t.Fatalf("shown while the reply was on its way: got %v, want %v", got, want)
 	}
 }

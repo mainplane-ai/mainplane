@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -671,6 +672,33 @@ func TestSessionVia(t *testing.T) {
 		if err != nil || len(got) != 1 || got[0].ID != want {
 			t.Fatalf("GET /sessions%s: %+v %v, want %s", q, got, err, want)
 		}
+	}
+}
+
+// A copy of an agent's session is its maker's, so a list of plain sessions
+// holds it: record 1 says who made the copy, the rest is the source's.
+func TestCopyVia(t *testing.T) {
+	r := newRig(t)
+	a := r.create(AgentCreate{Config: r.conf(1000, 0)}, "web")
+	r.post(a.ID, "one")
+	src := r.chain(a.live())
+	first := slices.IndexFunc(src, func(rec statefile.Record) bool { return rec.Kind == statefile.Message })
+	for _, n := range []int{first + 1, len(src) + 1} {
+		id, err := r.h.Create(context.Background(), Create{From: a.live(), N: n}, "tui")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := r.chain(id)
+		if info, err := r.h.Info(id); err != nil || info.Via != "tui" || got[0].Via != "tui" {
+			t.Fatalf("copy to %d: via %q, record 1 %q, %v", n, info.Via, got[0].Via, err)
+		}
+		got[0].Via = src[0].Via
+		if !reflect.DeepEqual(got, src[:n-1]) {
+			t.Fatalf("copy to %d: %d records differ from the source's first %d", n, len(got), n-1)
+		}
+	}
+	if via := r.chain(a.live())[0].Via; via != AgentVia+a.ID {
+		t.Fatalf("the source after its copies: via %q", via)
 	}
 }
 

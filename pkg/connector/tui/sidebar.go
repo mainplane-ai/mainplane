@@ -73,11 +73,25 @@ func (l *sessionList) read(a *App) {
 	a.Post(func() { l.update(a, infos, agents, err) })
 }
 
+// theirs is whether an agent made the session.
+func theirs(in harness.Info) bool { return strings.HasPrefix(in.Via, harness.AgentVia) }
+
+// withOpen is a read of the sessions, agents whether it asked for those of
+// agents too, with the open session in it: an agent's session is in the
+// list while it is the open one, asked for or not, at its place by time.
+func (l *sessionList) withOpen(infos []harness.Info, agents bool) []harness.Info {
+	cur := l.cur.info
+	if agents || !theirs(cur) || slices.ContainsFunc(infos, func(in harness.Info) bool { return in.ID == cur.ID }) {
+		return infos
+	}
+	i, _ := slices.BinarySearchFunc(infos, cur.Updated, func(in harness.Info, t time.Time) int { return t.Compare(in.Updated) })
+	return slices.Insert(infos, i, cur)
+}
+
 // update takes a read of the sessions, agents whether it asked for those of
-// agents too: a read from before /settings changed that is dropped. An
-// agent's session is in the list while it is the open one, asked for or
-// not. One is unread only once it changes after it first shows here, as
-// those hidden until now have not.
+// agents too: a read from before /settings changed that is dropped. One is
+// unread only once it changes after it first shows here, as those hidden
+// until now have not.
 func (l *sessionList) update(a *App, infos []harness.Info, agents bool, err error) {
 	if err != nil {
 		a.SayError(err)
@@ -86,11 +100,7 @@ func (l *sessionList) update(a *App, infos []harness.Info, agents bool, err erro
 	if agents != l.agents.Load() {
 		return
 	}
-	theirs := func(in harness.Info) bool { return strings.HasPrefix(in.Via, harness.AgentVia) }
-	if cur := l.cur.info; !agents && theirs(cur) && !slices.ContainsFunc(infos, func(in harness.Info) bool { return in.ID == cur.ID }) {
-		i, _ := slices.BinarySearchFunc(infos, cur.Updated, func(in harness.Info, t time.Time) int { return t.Compare(in.Updated) })
-		infos = slices.Insert(infos, i, cur)
-	}
+	infos = l.withOpen(infos, agents)
 	for _, in := range infos {
 		if _, known := l.seen[in.ID]; !l.loaded || in.ID == l.cur.id || !known && theirs(in) {
 			l.seen[in.ID] = in.Updated

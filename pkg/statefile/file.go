@@ -61,29 +61,45 @@ func Create(path, via string, config []byte) (*File, error) {
 	return sf, sf.Append(Record{Header: Header{Kind: Config, Type: "application/json"}, Body: config})
 }
 
-// Copy makes dst from records 1 through n-1 of src, byte for byte. The
-// prefix of an append-only file never changes, so the copy is the same
-// value under a new name.
-func Copy(src, dst string, n int) error {
+// Copy makes dst from records 1 through n-1 of src: the start record with
+// via, who made the copy, and the rest byte for byte. The prefix of an
+// append-only file never changes, so the copy is the same session under a
+// new name, and its maker's.
+func Copy(src, dst, via string, n int) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = in.Close() }()
 	br := bufio.NewReader(in)
+	at := func() int64 {
+		pos, _ := in.Seek(0, io.SeekCurrent)
+		return pos - int64(br.Buffered())
+	}
+	var start []byte
+	var rest int64
 	for i := 1; i < n; i++ {
-		if _, err := Decode(br); err != nil {
+		r, err := Decode(br)
+		if err != nil {
 			return fmt.Errorf("record %d: %w", i, err)
 		}
+		if i == 1 {
+			r.Via = via
+			if start, err = Encode(r); err != nil {
+				return err
+			}
+			rest = at()
+		}
 	}
-	end, _ := in.Seek(0, io.SeekCurrent)
-	end -= int64(br.Buffered())
+	end := at()
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return err
 	}
-	if _, err = in.Seek(0, io.SeekStart); err == nil {
-		_, err = io.CopyN(out, in, end)
+	if _, err = out.Write(start); err == nil {
+		if _, err = in.Seek(rest, io.SeekStart); err == nil {
+			_, err = io.CopyN(out, in, end-rest)
+		}
 	}
 	if err != nil {
 		_ = out.Close()

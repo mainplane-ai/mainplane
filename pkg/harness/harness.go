@@ -121,16 +121,16 @@ func system(source, body string) statefile.Record {
 // Create makes a session and returns its id. A fresh one starts with the
 // system prompt, ending in the config's prompt lines as they are now, the
 // AGENTS.md scan, and the worker list, so all three reach the provider as
-// system text ahead of the first message. A copy is byte for byte and gets
-// nothing appended but a result for each call still open at its cut. It
-// does not step until a message or retry comes.
+// system text ahead of the first message. A copy is byte for byte but for
+// who made it, and gets nothing appended but a result for each call still
+// open at its cut. It does not step until a message or retry comes.
 func (h *Harness) Create(ctx context.Context, c Create, via string) (string, error) {
 	id := statefile.NewID()
 	if c.From != "" {
 		if c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Tools != "" || c.Input != nil || c.Params != nil || c.Preset != "" || c.Name != "" {
 			return "", fmt.Errorf("a copy takes no config and no name")
 		}
-		if err := h.copy(c.From, id, c.N); err != nil {
+		if err := h.copy(c.From, id, via, c.N); err != nil {
 			return "", err
 		}
 		return id, nil
@@ -212,14 +212,14 @@ func (h *Harness) create(ctx context.Context, id string, c Create, via string) e
 	return f.Close()
 }
 
-// copy copies session from up to record n as id, and answers each call the
-// cut leaves open.
-func (h *Harness) copy(from, id string, n int) error {
+// copy copies session from up to record n as id, made by via, and answers
+// each call the cut leaves open.
+func (h *Harness) copy(from, id, via string, n int) error {
 	open, err := h.cut(from, n)
 	if err != nil {
 		return err
 	}
-	if err := h.Sessions.Copy(from, id, n); err != nil {
+	if err := h.Sessions.Copy(from, id, via, n); err != nil {
 		return err
 	}
 	defer h.touch(id)
