@@ -102,6 +102,9 @@ type Provider struct {
 	URL     string `json:"url,omitempty"`     // the base url its SDK takes; none is the vendor's own
 	Region  string `json:"region,omitempty"`  // bedrock
 	Session string `json:"session,omitempty"` // the header the session's routing key goes in, for a server that routes its cache on one
+	// ContextLimit is a session's on a model the catalog does not have: under
+	// the window a local server loads its models with
+	ContextLimit int `json:"context_limit,omitempty"`
 }
 
 // providerDir is the directory of provider name's own state, such as a
@@ -161,11 +164,15 @@ func providers(dir string, cfg map[string]Provider) (map[string]provider.Provide
 		if p.Shape == "bedrock" && os.ExpandEnv(p.Region) == "" && os.ExpandEnv(p.URL) == "" {
 			return nil, fmt.Errorf("provider %s: a bedrock provider needs region or url", name)
 		}
+		if p.ContextLimit < 0 {
+			return nil, fmt.Errorf("provider %s: context_limit %d is under 0", name, p.ContextLimit)
+		}
 		if p.Session != "" && !httpguts.ValidHeaderFieldName(p.Session) {
 			return nil, fmt.Errorf("provider %s: session %q is not a header name", name, p.Session)
 		}
 		pp := build(provider.Config{Key: os.ExpandEnv(p.Key), URL: os.ExpandEnv(p.URL), Region: os.ExpandEnv(p.Region), Dir: providerDir(dir, name)})
 		pp.Session = cmp.Or(p.Session, pp.Session)
+		pp.ContextLimit = p.ContextLimit
 		out[name] = pp
 	}
 	return out, nil
@@ -452,6 +459,7 @@ func saveProvider(path, name string, in Provider, serve func(map[string]provider
 			*f[0] = *f[1]
 		}
 	}
+	p.ContextLimit = cmp.Or(in.ContextLimit, p.ContextLimit)
 	c.Providers[name] = p
 	ps, err := providers(filepath.Dir(path), c.Providers)
 	if err != nil {

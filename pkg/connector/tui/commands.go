@@ -766,25 +766,67 @@ func (s *session) withProviders(a *App, then func(cat *catalog.Catalog, ps []har
 }
 
 // models is the menu of the catalog's models whose provider the harness
-// serves, by provider. Picking one makes the next session from its preset.
+// serves, by provider, then under Custom the models each server of a provider
+// the catalog does not have lists. Picking one makes the next session from
+// its preset, or from the model and its provider's context limit.
 func (s *session) models(a *App) {
 	s.withProviders(a, func(cat *catalog.Catalog, ps []harness.ProviderInfo) {
 		m := &Menu{}
-		cur := s.base().Preset
+		cur := s.base()
 		for _, id := range connected(cat, ps) {
 			p := cat.Presets[id]
 			hint := tokens(p.ContextLimit)
-			if id == cur {
+			if id == cur.Preset {
 				hint = "current · " + hint
 			}
 			m.Items = append(m.Items, MenuItem{Label: p.Name, Hint: hint, Section: cat.Providers[p.Provider].Name, Pick: func(a *App, _ *MenuItem) { s.useModel(a, presetConf(id, p)) }})
 		}
-		if len(m.Items) == 0 {
-			a.Say("No provider is connected: /providers")
-			return
-		}
-		a.OpenMenu("Model for a new session", m)
+		own := custom(cat, ps)
+		a.Go(func() {
+			items, errs := s.customItems(own, cur)
+			a.Post(func() {
+				if s.ctx.Err() != nil {
+					return
+				}
+				for _, err := range errs {
+					a.SayError(err)
+				}
+				m.Items = append(m.Items, items...)
+				if len(m.Items) == 0 && len(errs) == 0 {
+					a.Say("No provider is connected: /providers")
+				}
+				if len(m.Items) == 0 {
+					return
+				}
+				a.OpenMenu("Model for a new session", m)
+			})
+		})
 	})
+}
+
+// customItems is the menu items of the models the servers of providers own
+// list, under Custom, cur marked. A server that does not answer gives an
+// error and no items.
+func (s *session) customItems(own []harness.ProviderInfo, cur statefile.Conf) ([]MenuItem, []error) {
+	ctx, cancel := context.WithTimeout(context.Background(), callTime)
+	defer cancel()
+	var items []MenuItem
+	var errs []error
+	for _, p := range own {
+		ids, err := s.c.Models(ctx, p.Name)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", p.Name, err))
+		}
+		for _, id := range ids {
+			cf := customConf(p, id)
+			hint := p.Name + " · " + tokens(cf.ContextLimit)
+			if cur.Preset == "" && cur.Model == cf.Model {
+				hint = "current · " + hint
+			}
+			items = append(items, MenuItem{Label: id, Hint: hint, Section: "Custom", Pick: func(a *App, _ *MenuItem) { s.useModel(a, cf) }})
+		}
+	}
+	return items, errs
 }
 
 // providerSections orders /providers: subscriptions first, then each kind

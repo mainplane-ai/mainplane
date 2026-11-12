@@ -169,6 +169,9 @@ type Provider struct {
 	// Run, if set, makes the step instead of an HTTP request: claude-code's
 	// process. It retries what it can itself.
 	Run func(ctx context.Context, body []byte, cache *Cache, emit func(statefile.Record)) (statefile.Header, error)
+	// ContextLimit is a session's on a model the catalog does not have; 0 is
+	// unset.
+	ContextLimit int
 }
 
 // Retry numbers are opencode's. A failure before the first block is out is

@@ -403,6 +403,14 @@ func (c *Client) Providers(ctx context.Context) ([]harness.ProviderInfo, error) 
 	return ps, err
 }
 
+// Models is the model ids provider's server lists: an openai-chat provider
+// the catalog does not have.
+func (c *Client) Models(ctx context.Context, provider string) ([]string, error) {
+	var ids []string
+	err := c.Call(ctx, "GET", "/providers/"+url.PathEscape(provider)+"/models", "", nil, &ids)
+	return ids, err
+}
+
 // loginPath is the route of provider name's login.
 func loginPath(name string) string { return "/providers/" + url.PathEscape(name) + "/login" }
 

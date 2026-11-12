@@ -109,8 +109,9 @@ and `opencode-go-google`; `mainplane key opencode-go <key>` sets all four. Insta
 takes keys from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`,
 `AWS_BEARER_TOKEN_BEDROCK` with `AWS_REGION`, and `OPENROUTER_API_KEY`.
 
-A model server of your own, such as Ollama or vLLM, is a provider too, and
-takes no key: see [Local LLMs](local-llms.md).
+A model server of your own, such as Ollama or vLLM, is a provider too. It
+takes no key, and its `context_limit` is the context limit of a session on the
+models the terminal app lists from it: see [Local LLMs](local-llms.md).
 
 The `chatgpt` shape takes no key: it uses the plan of a ChatGPT account, through
 OpenAI's [Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source)
