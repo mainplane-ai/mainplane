@@ -41,7 +41,7 @@ func (s *server) job(f Frame, it interp) (Frame, error) {
 	// Started and registered under one lock, so a kill sees every job whose
 	// process exists.
 	jobs.Lock()
-	e, err := start(it, s.Operator, f.Session)
+	e, err := start(it, s.Operator, f.Session, f.Key, s.api())
 	j := &job{session: f.Session}
 	if err == nil {
 		jobs.m[e] = j

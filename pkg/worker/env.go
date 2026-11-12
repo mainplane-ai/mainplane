@@ -61,7 +61,9 @@ type env struct {
 	reap sync.Once
 }
 
-func start(it interp, op *user.User, session string) (*env, error) {
+// Beside the session's id it holds the key and URL that reach the apps of
+// the session's agent on the harness.
+func start(it interp, op *user.User, session, key, url string) (*env, error) {
 	cmd := exec.Command(it.argv[0], it.argv[1:]...)
 	if err := prepare(cmd, op); err != nil {
 		return nil, err
@@ -69,7 +71,7 @@ func start(it interp, op *user.User, session string) (*env, error) {
 	// A drive's files are its owner's whoever wrote them, and git refuses a
 	// repository another user owns; this trusts every one without touching
 	// the operator's gitconfig.
-	cmd.Env = append(cmd.Env, "MAINPLANE_SESSION="+session, "NO_COLOR=1", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.directory", "GIT_CONFIG_VALUE_0=*")
+	cmd.Env = append(cmd.Env, "MAINPLANE_SESSION="+session, "MAINPLANE_KEY="+key, "MAINPLANE_URL="+url, "NO_COLOR=1", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.directory", "GIT_CONFIG_VALUE_0=*")
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

@@ -558,7 +558,7 @@ func (s *session) open(cf *statefile.Conf, cat *catalog.Catalog) (string, error)
 		if cat == nil {
 			return "", errors.New("the catalog is not loaded")
 		}
-		infos, err := s.c.Sessions(ctx, "", 1)
+		infos, err := s.c.Sessions(ctx, "", 1, true) // the last one a person made
 		if err != nil {
 			return "", err
 		}

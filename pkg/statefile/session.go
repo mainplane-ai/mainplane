@@ -33,14 +33,14 @@ func (s Sessions) List() ([]string, error) {
 }
 
 // Start creates a session: start, then config.
-func (s Sessions) Start(id string, config []byte) (*File, error) {
-	return Create(s.Path(id), config)
+func (s Sessions) Start(id, via string, config []byte) (*File, error) {
+	return Create(s.Path(id), via, config)
 }
 
-// Copy creates session id from records 1 through n-1 of session from. Fork
-// and revert are both this call.
-func (s Sessions) Copy(from, id string, n int) error {
-	return Copy(s.Path(from), s.Path(id), n)
+// Copy creates session id from records 1 through n-1 of session from, made
+// by via. Fork and revert are both this call.
+func (s Sessions) Copy(from, id, via string, n int) error {
+	return Copy(s.Path(from), s.Path(id), via, n)
 }
 
 // Open opens a session's file for appending.

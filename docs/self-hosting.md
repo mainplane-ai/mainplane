@@ -422,6 +422,94 @@ server. Nothing is shared until the harness config names a drive:
   for changes made on other workers; kqueue gets them after a few seconds. Poll,
   or run the watcher on the drive's server, where inotify sees every change.
 
+## Agents and apps
+
+```
+ agent  agents/<id>.json            sessions S1 -> S2 -> S3     the last one is live
+ app    apps/<name>/skill.md        + app.json: "url" or "run"  state in app-data/<name>/
+ secret .secrets                    0600, {"NAME": "value"}     an app gets the names its app.json lists
+```
+
+A session ends at its context limit. An agent does not: it is an id, a
+config and a list of apps over a chain of sessions. A message posted to an
+agent lands on its live session, or on a new one when the live one should not
+go on: its config changed, it is at `context_limit`, or its prompt cache is
+cold and it is past `cold_limit`. The new session is told where the old
+session's log is on its workers. Agents are for connectors that outlive a
+context: a web UI, a chat channel, a scheduler. The terminal app and the
+session verbs work on sessions, as before. A session an agent owns says so
+in its `via`, `agent:<id>`, and the terminal app leaves those out of its list
+unless /settings turns them on.
+
+```
+echo '{"name":"triage","config":{"model":"anthropic/claude-fable-5-2","workers":[{"name":"linuxbox"}],
+  "context_limit":250000,"cold_limit":100000},"apps":["schedule","message"]}' | mainplane agent new
+mainplane agent message <id> "watch the deploy and tell me when it is done"
+mainplane agents
+```
+
+`mainplane agent` has `info`, `retry`, `stop`, `delete`, `name`, `config` and
+`apps` too; each is one `/agents` route, listed in `pkg/harness/http.go`. A
+change of config makes no session: the next message does. A change of only
+the workers or the apps reaches the live session in place. An agent's
+`usage` is the token count of all its sessions together, less any session
+deleted since; `status`, `context_used` and `updated` are its live
+session's.
+
+An app is something an agent can call. Every interpreter and job on a worker
+has `MAINPLANE_URL`, the harness on the mesh, and `MAINPLANE_KEY`, a key for
+that one session. The key reaches `GET /skills`, `GET /skills/<app>` and
+`/apps/<app>/...`, only for the apps of the agent whose live session it is,
+and it stops working when the agent moves to a new session or loses the app.
+On a worker, `mainplane skill` lists the agent's apps, `mainplane skill <app>`
+prints how to use one, and `mainplane app <app> <method> <path> [body]` calls it.
+
+Three apps are built in:
+
+- `schedule`: timers, once or on a cron, that message the agent later. They
+  outlive sessions and harness restarts.
+- `message`: one agent messages another by its id.
+- `orchestrate`: an agent creates agents of its own, reads them and stops
+  them, with the `/agents` routes under `/apps/orchestrate`, which show it
+  only those agents. An agent it creates gets no worker and no app that it
+  lacks itself.
+
+More apps are folders in `apps/` beside the config. `skill.md` is what an
+agent reads; its first line is `# <name>: <what it does>`. `app.json` is
+optional:
+
+```
+{
+  "url": "https://api.example.com",        proxy /apps/<name>/... to it, or
+  "run": ["bun", "server.js"],             run this in the folder and proxy to 127.0.0.1:$PORT
+  "secrets": ["EXAMPLE_KEY"],              names in .secrets: a run app's environment
+  "headers": {"x-api-key": "$EXAMPLE_KEY"},  added to a url app's requests
+  "entitlements": ["post", "list"],        what a run app may ask the harness with $MAINPLANE_APP_KEY
+  "webhooks": true                         POST /webhooks/<name>/... reaches it with no key
+}
+```
+
+- With neither `url` nor `run` the app is only its `skill.md`: text an agent reads.
+- A `url` is `http` or `https` with a host, and an entitlement is `post` or
+  `list`. An `app.json` that says otherwise is refused whole.
+- The harness removes `Authorization` and every `X-Mainplane-*` header a
+  caller sent, and sets `X-Mainplane-Agent` and `X-Mainplane-Session` to the
+  agent and session it verified. A webhook has no `X-Mainplane-Agent`: the
+  app checks the sender's signature itself.
+- A `run` app starts with the harness once its secrets are all there, and is
+  restarted when it exits. It listens on `127.0.0.1:$PORT`, trusts only
+  requests whose `X-Mainplane-Proxy-Secret` is `$MAINPLANE_PROXY_SECRET`, and
+  keeps its state in `$DATA_DIR`. Its environment has no provider key and no
+  other app's secret.
+- With `"post"` an app may post to an agent that has the app, as
+  `via app:<name>`: `POST $MAINPLANE_URL/agents/<id>/records` with
+  `Authorization: Bearer $MAINPLANE_APP_KEY`. With `"list"`, `GET /agents`
+  gives it the agents that have the app.
+- No route installs an app or reads a secret. `mainplane secret set <name>`
+  reads the value from stdin; `mainplane secrets` lists the names;
+  `mainplane apps` shows each app's status and the secrets it waits for;
+  `mainplane app start <name>` runs an app added while the harness was up.
+
 ## What Cloudflare can read
 
 Through a tunnel, TLS ends at Cloudflare. Cloudflare can read all traffic between

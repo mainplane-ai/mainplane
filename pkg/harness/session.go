@@ -31,6 +31,7 @@ type session struct {
 	retry   bool            // a run asked to step past a failed tip
 	stopped string          // who asked for the stop, while one is in flight
 	logs    sync.Mutex      // held by copyLogs from Load to the last Write, so an older copy never lands last
+	copied  map[string]int  // under logs: for each worker, the n of the tip its copy ends at
 	exports atomic.Int64    // copyLogs calls asked for; a waiting one leaves to a newer one
 	conn    provider.Conn   // the provider's socket, kept from step to step within a run
 
@@ -39,7 +40,8 @@ type session struct {
 	kicked   bool               // a kick arrived while running: look again before stopping
 	cancel   context.CancelFunc // ends the running step
 	done     chan struct{}      // closed when the runner goroutine ends
-	deleting bool               // no kick starts or continues a runner
+	deleting bool               // no kick starts or continues a runner, no agent adopts the session
+	handoff  bool               // the run is handing its task to the agent's next session, until it ends
 }
 
 func (h *Harness) session(id string) *session {
@@ -227,38 +229,23 @@ func (h *Harness) SetName(id, via, n string) (int, error) {
 // the lock a post takes, so no post does. Copies keep their own files,
 // workers their logs.
 func (h *Harness) Delete(ctx context.Context, id, via string) error {
+	// An agent always has its live session: asked once no agent can adopt
+	// the session and before the stop, so a refusal leaves it as it was.
 	s := h.session(id)
-	h.mu.Lock()
-	if s.deleting {
-		h.mu.Unlock()
-		return fmt.Errorf("session %s is already being deleted", id)
-	}
-	s.deleting = true
-	h.mu.Unlock()
-	defer func() {
-		h.mu.Lock()
-		s.deleting = false
-		h.mu.Unlock()
-	}()
-	if err := h.Stop(ctx, id, via); err != nil {
-		log.Printf("session %s: stop before delete: %v", id, err) // a broken file still goes
-	}
-	h.mu.Lock()
-	if s.running {
-		done := s.done
-		h.mu.Unlock()
-		select {
-		case <-done:
-		case <-ctx.Done():
-			return ctx.Err()
+	release, err := h.halt(ctx, s, via, func() error {
+		if a, ok := h.Holder(id); ok {
+			return fmt.Errorf("%w: session %s is the live session of agent %s: delete the agent, or let it roll over to a new session", ErrLive, id, a.ID)
 		}
-		h.mu.Lock()
+		return nil
+	})
+	if err != nil {
+		return err
 	}
-
+	defer release()
+	h.mu.Lock()
 	s.mu.Lock()
 	h.mu.Unlock()
-	err := os.Remove(h.Sessions.Path(id))
-	if err == nil {
+	if err = os.Remove(h.Sessions.Path(id)); err == nil {
 		h.lockIndex()
 		delete(h.index, id)
 		delete(h.dirty, id)
@@ -278,6 +265,46 @@ func (h *Harness) Delete(ctx context.Context, id, via string) error {
 	h.mu.Unlock()
 	log.Printf("session %s: deleted by %s", id, via)
 	return nil
+}
+
+// halt stops the session and waits for its runner to end. Until the func it
+// returns is called no kick starts another and no agent adopts the session,
+// so the caller finds it still. ok, when given, is asked once that holds and
+// before the stop: its error ends the halt with the session as it was.
+func (h *Harness) halt(ctx context.Context, s *session, via string, ok func() error) (func(), error) {
+	h.mu.Lock()
+	if s.deleting {
+		h.mu.Unlock()
+		return nil, fmt.Errorf("session %s is already being deleted", s.id)
+	}
+	s.deleting = true
+	h.mu.Unlock()
+	release := func() {
+		h.mu.Lock()
+		s.deleting = false
+		h.mu.Unlock()
+	}
+	if ok != nil {
+		if err := ok(); err != nil {
+			release()
+			return nil, err
+		}
+	}
+	if err := h.Stop(ctx, s.id, via); err != nil {
+		log.Printf("session %s: stop before delete: %v", s.id, err) // a broken file still goes
+	}
+	h.mu.Lock()
+	done := s.done
+	h.mu.Unlock()
+	if done != nil { // closed after the runner's last write, which is later than running going false
+		select {
+		case <-done:
+		case <-ctx.Done():
+			release()
+			return nil, ctx.Err()
+		}
+	}
+	return release, nil
 }
 
 // Kick steps a session in the background until it is not open. A kick during
@@ -314,12 +341,16 @@ func (h *Harness) Kick(ctx context.Context, id string) {
 			s.stopped = ""
 			s.mu.Unlock()
 			h.mu.Lock()
+			s.handoff = false
 			if !s.kicked || s.deleting {
 				s.running, s.cancel, s.kicked = false, nil, false
 				h.mu.Unlock()
 				h.touch(id)
 				if st == statefile.StatusClosed || st == statefile.StatusFailed {
 					h.copyLogs(ctx, s)
+					if a, ok := h.Holder(id); ok && h.Stopped != nil {
+						h.Stopped(a, st)
+					}
 				}
 				close(done)
 				return
@@ -431,6 +462,9 @@ func (h *Harness) killAll(ctx context.Context, id string, chain []statefile.Reco
 // message. A file that does not read is logged and left out, not a reason to
 // stay down.
 func (h *Harness) Resume(ctx context.Context) error {
+	if err := h.LoadAgents(); err != nil {
+		return err
+	}
 	ids, err := h.Sessions.List()
 	if err != nil {
 		return err
@@ -497,6 +531,15 @@ func (h *Harness) status(id string, chain []statefile.Record) statefile.Status {
 		return statefile.StatusStepping
 	}
 	return statefile.Derive(chain)
+}
+
+// handing is whether a run of the session is handing its task to the
+// agent's next session.
+func (h *Harness) handing(id string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	s, ok := h.s[id]
+	return ok && s.handoff
 }
 
 // Changed is a channel closed at the session's next append.

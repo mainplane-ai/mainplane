@@ -201,7 +201,8 @@ func setSharing(a *App, c *connector.Client, share bool) {
 }
 
 // settingsMenu is the harness's version, with an update to the latest,
-// whether it shares data, and the prompt new sessions get.
+// whether it shares data, the prompt new sessions get, and whether the list
+// shows the sessions of agents: a choice of this run, hidden at each start.
 func (s *session) settingsMenu(a *App) {
 	a.Go(func() {
 		st, err := getSettings(s.c)
@@ -244,6 +245,15 @@ func (s *session) settingsMenu(a *App) {
 			if len(p.Lines) > 0 {
 				m.Items = append(m.Items, MenuItem{Section: "Prompt", Label: "Use none", Pick: func(a *App, _ *MenuItem) { setPrompt(a, s.c, map[string][]string{"lines": {}}, nil) }})
 			}
+			ag := MenuItem{Section: "Sessions of agents", Label: "Hidden", Hint: "Show"}
+			if s.list.agents.Load() {
+				ag.Label, ag.Hint = "Shown", "Hide"
+			}
+			ag.Pick = func(a *App, _ *MenuItem) {
+				s.list.agents.Store(!s.list.agents.Load())
+				a.Go(func() { s.list.read(a) })
+			}
+			m.Items = append(m.Items, ag)
 			a.OpenMenu("Settings", m)
 		})
 	})

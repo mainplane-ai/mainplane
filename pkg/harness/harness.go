@@ -43,9 +43,12 @@ type Harness struct {
 	Sessions  statefile.Sessions
 	Providers map[string]provider.Provider // read and replaced under pmu once the harness runs
 	Workers   *Pool
-	Remove    func(name string) error      // the coordinator's: the worker leaves the mesh for good
-	Rename    func(old, name string) error // the coordinator's: the worker takes another name
-	Prompt    func() ([]string, error)     // the config's prompt lines, read once per new session
+	Remove    func(name string) error            // the coordinator's: the worker leaves the mesh for good
+	Rename    func(old, name string) error       // the coordinator's: the worker takes another name
+	Prompt    func() ([]string, error)           // the config's prompt lines, read once per new session
+	Agents    string                             // the directory of agents/<id>.json
+	Skill     func(app string) (string, bool)    // line 1 of an app's skill, if the harness has the app
+	Stopped   func(a Agent, st statefile.Status) // an agent's live session ended a run closed or failed; a rollover is not one
 
 	pmu sync.RWMutex
 	mu  sync.Mutex
@@ -55,6 +58,11 @@ type Harness struct {
 	index map[string]Info
 	dirty map[string]bool
 	gone  map[string]bool // deleted; ids are never reused
+
+	amu    sync.Mutex
+	agents map[string]Agent       // a cache of the agents' files
+	live   map[string]string      // live session -> its agent
+	alocks map[string]*sync.Mutex // an agent's lock: one post or change at a time
 }
 
 // provider splits a config's provider/model string and finds the provider.
@@ -113,91 +121,105 @@ func system(source, body string) statefile.Record {
 // Create makes a session and returns its id. A fresh one starts with the
 // system prompt, ending in the config's prompt lines as they are now, the
 // AGENTS.md scan, and the worker list, so all three reach the provider as
-// system text ahead of the first message. A copy is byte for byte and gets
-// nothing appended but a result for each call still open at its cut. It
-// does not step until a message or retry comes.
+// system text ahead of the first message. A copy is byte for byte but for
+// who made it, and gets nothing appended but a result for each call still
+// open at its cut. It does not step until a message or retry comes.
 func (h *Harness) Create(ctx context.Context, c Create, via string) (string, error) {
 	id := statefile.NewID()
 	if c.From != "" {
 		if c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Tools != "" || c.Input != nil || c.Params != nil || c.Preset != "" || c.Name != "" {
 			return "", fmt.Errorf("a copy takes no config and no name")
 		}
-		if err := h.copy(c.From, id, c.N); err != nil {
+		if err := h.copy(c.From, id, via, c.N); err != nil {
 			return "", err
 		}
 		return id, nil
 	}
-	p, model, err := h.provider(c.Model)
+	return id, h.create(ctx, id, c, via)
+}
+
+// valid is the provider and model of a config a session can start from, with
+// its defaults filled in, or why it cannot.
+func (h *Harness) valid(conf statefile.Conf) (statefile.Conf, string, error) {
+	p, model, err := h.provider(conf.Model)
 	if err != nil {
-		return "", err
+		return conf, "", err
 	}
-	if c.ContextLimit <= 0 {
-		return "", fmt.Errorf("context_limit must be set")
+	if conf.ContextLimit <= 0 {
+		return conf, "", fmt.Errorf("context_limit must be set")
 	}
-	if err := checkName(c.Name); err != nil {
-		return "", err
-	}
-	if c.Name != "" && via == "" {
-		return "", errors.New("a name needs ?via= naming who is acting")
-	}
-	for _, t := range c.Input {
+	for _, t := range conf.Input {
 		if !p.Envelope.Accepts(t) {
-			return "", fmt.Errorf("%s does not take %s as input", p.Envelope.Name(), t)
+			return conf, "", fmt.Errorf("%s does not take %s as input", p.Envelope.Name(), t)
 		}
 	}
-	for k := range c.Params {
+	for k := range conf.Params {
 		if p.Envelope.Owns(k) {
-			return "", fmt.Errorf("%s builds %s from the session, a param cannot set it", p.Envelope.Name(), k)
+			return conf, "", fmt.Errorf("%s builds %s from the session, a param cannot set it", p.Envelope.Name(), k)
 		}
 	}
-	if c.Tools == "" {
-		c.Tools = "default"
+	if conf.Tools == "" {
+		conf.Tools = "default"
 	}
-	if Tools(c.Tools, nil) == nil {
-		return "", fmt.Errorf("unknown tools %q; sets: default, patch", c.Tools)
+	if Tools(conf.Tools, nil) == nil {
+		return conf, "", fmt.Errorf("unknown tools %q; sets: default, patch", conf.Tools)
 	}
-	conf := statefile.Conf{Model: c.Model, Tools: c.Tools, Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params, Preset: c.Preset}
 	if conf.Workers == nil {
 		conf.Workers = []statefile.Worker{}
 	}
+	return conf, model, nil
+}
+
+// create makes the fresh session id.
+func (h *Harness) create(ctx context.Context, id string, c Create, via string) error {
+	conf, model, err := h.valid(statefile.Conf{Model: c.Model, Tools: c.Tools, Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params, Preset: c.Preset})
+	if err != nil {
+		return err
+	}
+	if err := checkName(c.Name); err != nil {
+		return err
+	}
+	if c.Name != "" && via == "" {
+		return errors.New("a name needs ?via= naming who is acting")
+	}
 	body, err := json.Marshal(conf)
 	if err != nil {
-		return "", err
+		return err
 	}
 	prompt, err := h.Prompt()
 	if err != nil {
-		return "", err
+		return err
 	}
-	f, err := h.Sessions.Start(id, body)
+	f, err := h.Sessions.Start(id, via, body)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if err := f.Append(system("harness", System(model, prompt))); err != nil {
-		return "", err
+		return err
 	}
-	if err := f.Append(system("agents", h.agents(ctx, id, conf))); err != nil {
-		return "", err
+	if err := f.Append(system("agents", h.scan(ctx, id, conf))); err != nil {
+		return err
 	}
 	if err := f.Append(system("workers", workersFirst+h.workers(conf.Workers))); err != nil {
-		return "", err
+		return err
 	}
 	if c.Name != "" {
 		if err := f.Append(name(via, c.Name)); err != nil {
-			return "", err
+			return err
 		}
 	}
 	h.touch(id)
-	return id, f.Close()
+	return f.Close()
 }
 
-// copy copies session from up to record n as id, and answers each call the
-// cut leaves open.
-func (h *Harness) copy(from, id string, n int) error {
+// copy copies session from up to record n as id, made by via, and answers
+// each call the cut leaves open.
+func (h *Harness) copy(from, id, via string, n int) error {
 	open, err := h.cut(from, n)
 	if err != nil {
 		return err
 	}
-	if err := h.Sessions.Copy(from, id, n); err != nil {
+	if err := h.Sessions.Copy(from, id, via, n); err != nil {
 		return err
 	}
 	defer h.touch(id)
@@ -333,10 +355,18 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	if err != nil {
 		return "", err
 	}
-	if p := statefile.ContextUsed(chain); p > conf.ContextLimit {
+	// An agent's live session answers to the agent's config: past its limit,
+	// or under a config no longer the agent's, the agent goes on in a new one.
+	limit, changed := conf.ContextLimit, false
+	if a, ok := h.Holder(id); ok {
+		limit, changed = a.Config.ContextLimit, core(conf) != core(a.Config.Conf)
+	}
+	if p := statefile.ContextUsed(chain); p > limit {
 		h.killAll(ctx, id, chain)
-		_, err := h.append(s, errorRecord("", fmt.Sprintf("context %d exceeds limit %d", p, conf.ContextLimit)))
-		return statefile.StatusFailed, err
+		return h.handoff(ctx, s, fmt.Sprintf("context %d exceeds limit %d", p, limit))
+	} else if changed {
+		h.killAll(ctx, id, chain)
+		return h.handoff(ctx, s, "the agent's config changed")
 	}
 	var add []statefile.Record
 	if status == statefile.StatusFailed {

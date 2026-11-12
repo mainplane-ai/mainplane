@@ -36,7 +36,13 @@ const resultLines = 20
 var arity = map[string][2]int{
 	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {0, 1}, "retry": {1, 1}, "stop": {1, 1}, "delete": {1, 1},
 	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "worker remove": {1, 1}, "worker rename": {2, 2}, "providers": {0, 0}, "provider": {3, 4}, "key": {2, 2}, "signin": {1, 1},
+	"agents": {0, 1}, "agent new": {0, 0}, "agent info": {1, 1}, "agent message": {2, -1}, "agent retry": {1, 1}, "agent stop": {1, 1}, "agent delete": {1, 1}, "agent name": {1, -1}, "agent config": {1, 1}, "agent apps": {1, -1},
+	"apps": {0, 0}, "app start": {1, 1}, "app stop": {1, 1}, "secrets": {0, 0}, "secret set": {1, 2}, "secret delete": {1, 1}, "skill": {0, 1}, "app": {3, 4},
 }
+
+// methods are what the app verb calls an app with: the standard ones. A
+// word that is none of them is a slip, not a method.
+var methods = []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE"}
 
 // cli is the harness API as verbs: one verb, one route, its reply printed.
 // The harness and the key come from login; nothing else is remembered or
@@ -135,6 +141,164 @@ func cli(verb string, args []string) {
 		c.key(args[0], args[1])
 	case "signin":
 		c.signin(args[0])
+	default:
+		c.agent(verb, args)
+	}
+}
+
+// agent is the verbs on agents, apps and secrets. Each route is the
+// connector's to name; a body from stdin is read here, so one that is not
+// the JSON the route takes ends the verb before the harness is asked.
+func (c client) agent(verb string, args []string) {
+	ctx := context.Background()
+	var err error
+	switch verb {
+	case "agents":
+		infos, err := c.Agents(ctx, "", strings.Join(args, ""))
+		if err != nil {
+			die(err)
+		}
+		for _, i := range infos {
+			fmt.Printf("%s  %-11s  %-40s  session=%s  context=%d/%d  %s  %-14s  %s\n", i.ID, i.Status, i.Config.Model, i.CurrentSession, i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime), i.Via, i.Name)
+		}
+	case "agent new":
+		var cr harness.AgentCreate
+		if err := json.NewDecoder(os.Stdin).Decode(&cr); err != nil {
+			die(err)
+		}
+		id, session, err := c.CreateAgent(ctx, cr, via)
+		if err != nil {
+			die(err)
+		}
+		fmt.Println(id, session)
+	case "agent info":
+		c.raw("/agents/" + args[0]) // printed as it came, as info prints a session
+	case "agent message":
+		s, n, err := c.PostAgent(ctx, args[0], via, args[1], args[2:])
+		if err != nil {
+			die(err)
+		}
+		fmt.Println(s, n)
+	case "agent retry":
+		st, err := c.RetryAgent(ctx, args[0])
+		if err != nil {
+			die(err)
+		}
+		fmt.Println(st)
+	case "agent stop":
+		err = c.StopAgent(ctx, args[0], via)
+	case "agent delete":
+		err = c.DeleteAgent(ctx, args[0], via)
+	case "agent name":
+		err = c.SetAgentName(ctx, args[0], via, strings.Join(args[1:], " "))
+	case "agent config":
+		var conf harness.AgentConfig
+		if err = json.NewDecoder(os.Stdin).Decode(&conf); err == nil {
+			err = c.SetAgentConfig(ctx, args[0], via, conf)
+		}
+	case "agent apps":
+		err = c.SetAgentApps(ctx, args[0], via, args[1:])
+	case "apps":
+		infos, err := c.Apps(ctx)
+		if err != nil {
+			die(err)
+		}
+		for _, i := range infos {
+			fmt.Printf("%-20s  %-8s  %-15s  %s\n", i.Name, i.Kind, strings.TrimSpace(i.Status+" "+strings.Join(i.MissingSecrets, ",")), i.Description)
+		}
+	case "app start", "app stop":
+		err = c.RunApp(ctx, args[0], verb == "app start")
+	case "secrets":
+		names, err := c.Secrets(ctx)
+		if err != nil {
+			die(err)
+		}
+		for _, n := range names {
+			fmt.Println(n)
+		}
+	case "secret set":
+		err = c.SetSecret(ctx, args[0], secretValue(args[1:]))
+	case "secret delete":
+		err = c.DeleteSecret(ctx, args[0])
+	}
+	if err != nil {
+		die(err)
+	}
+}
+
+// secretValue is the value secret set was given: its arguments, or with none
+// stdin, where a value stays out of the shell's history and may be many
+// lines. An empty one would count as there, and start its apps with nothing.
+func secretValue(args []string) string {
+	value := strings.Join(args, "")
+	if len(args) == 0 {
+		b, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			die(err)
+		}
+		value = strings.TrimRight(string(b), "\r\n")
+	}
+	if strings.TrimSpace(value) == "" {
+		die(errors.New("a secret has a value: mainplane secret delete <name> removes one"))
+	}
+	return value
+}
+
+// skill is the two verbs an agent uses: with one argument or none, read a
+// skill or list them; with more, call the app and print its reply as it came.
+// In an agent's session on a worker the environment is the login: the
+// session's key, which reaches the agent's skills and apps and no more.
+func skill(verb string, args []string) {
+	if a := arity[verb]; len(args) < a[0] || len(args) > a[1] {
+		usage()
+	}
+	// The method is checked before the harness is asked or even found:
+	// "app stop x y" is a slip for the stop verb, not a call of an app named stop.
+	if verb == "app" && !slices.Contains(methods, strings.ToUpper(args[1])) {
+		usage()
+	}
+	s, ok := connector.Session()
+	if !ok {
+		c, err := login()
+		if err != nil {
+			die(err)
+		}
+		s = c.Client
+	}
+	c := client{s}
+	ctx := context.Background()
+	switch len(args) {
+	case 0:
+		skills, err := c.Skills(ctx)
+		if err != nil {
+			die(err)
+		}
+		for _, s := range skills {
+			fmt.Printf("%-20s  %s\n", s.Name, s.Description)
+		}
+	case 1:
+		text, err := c.Skill(ctx, args[0])
+		if err != nil {
+			die(err)
+		}
+		fmt.Print(text)
+	default:
+		var body io.Reader
+		ctype := ""
+		if len(args) == 4 {
+			body, ctype = strings.NewReader(args[3]), "application/json"
+			if args[3] == "-" {
+				body = os.Stdin
+			}
+		}
+		resp, err := c.App(ctx, args[0], strings.ToUpper(args[1]), args[2], ctype, body)
+		if err != nil {
+			die(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if _, err := io.Copy(os.Stdout, resp.Body); err != nil {
+			die(err)
+		}
 	}
 }
 
