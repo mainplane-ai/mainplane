@@ -458,6 +458,29 @@ func TestAgentUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.until(func() bool { return usage() == 560_000 })
+	r.until(func() bool { i, err := r.h.Info(s2); return err == nil && i.Status == statefile.StatusClosed })
+	// a touched session whose file does not read counts as it last read, and
+	// is read again once it does
+	r.h.touch(s2)
+	if err := os.Rename(r.h.Sessions.Path(s2), r.h.Sessions.Path(s2)+".away"); err != nil {
+		t.Fatal(err)
+	}
+	if got := usage(); got != 560_000 {
+		t.Fatalf("usage with a touched session's file away: %d", got)
+	}
+	if err := os.Rename(r.h.Sessions.Path(s1), r.h.Sessions.Path(s2)); err != nil {
+		t.Fatal(err)
+	}
+	if got := usage(); got != 420_000 {
+		t.Fatalf("usage with the file back, as another: %d", got)
+	}
+	if err := os.Rename(r.h.Sessions.Path(s2), r.h.Sessions.Path(s1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(r.h.Sessions.Path(s2)+".away", r.h.Sessions.Path(s2)); err != nil {
+		t.Fatal(err)
+	}
+	r.h.touch(s2)
 	if err := r.h.Delete(context.Background(), s1, "test"); err != nil {
 		t.Fatal(err)
 	}

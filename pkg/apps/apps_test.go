@@ -86,8 +86,8 @@ type rig struct {
 func newRig(t *testing.T) *rig {
 	t.Setenv("PROVIDER_KEY", "never an app's")
 	t.Setenv("LANG", "C.UTF-8") // a daemon's on Unix, set here or not
-	// The folder is made before the cancel is set, so at the end the daemons
-	// are told to end before their folders go: Windows removes none in use.
+	// The folder is made before the manager, so at the end the daemons have
+	// ended before their folders go: Windows removes none in use.
 	dir := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -117,6 +117,7 @@ func newRig(t *testing.T) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(m.Close)
 	routes := http.NewServeMux()
 	routes.Handle("/", harness.Handler(ctx, h))
 	m.Routes(routes)

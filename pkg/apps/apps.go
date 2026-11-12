@@ -108,9 +108,11 @@ type Manager struct {
 
 	builtin map[string]app
 
-	mu      sync.Mutex // daemons, stopped, and the secrets file
-	daemons map[string]*daemon
-	stopped map[string]bool // daemons an admin stopped, until a start or a restart of the harness
+	mu         sync.Mutex // daemons, stopped, and the secrets file
+	daemons    map[string]*daemon
+	supervised sync.WaitGroup  // every supervise, the stopped ones too, until its tree is gone
+	closed     bool            // Close was called: no daemon starts
+	stopped    map[string]bool // daemons an admin stopped, until a start or a restart of the harness
 }
 
 // New is the manager with the built-in apps in it, and starts every daemon

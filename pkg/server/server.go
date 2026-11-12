@@ -294,6 +294,7 @@ func Harness(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
+	defer am.Close()
 	am.Routes(routes)
 	api := am.Handler(store.Bearer(limit, routes), routes)
 	mux.Handle("/", api)

@@ -47,15 +47,29 @@ func (m *Manager) sync() error {
 			continue
 		}
 		m.mu.Lock()
-		if m.daemons[name] == nil && !m.stopped[name] {
+		if m.daemons[name] == nil && !m.stopped[name] && !m.closed {
 			ctx, cancel := context.WithCancel(m.ctx)
 			d := &daemon{cancel: cancel, ready: make(chan struct{})}
 			m.daemons[name] = d
-			go m.supervise(ctx, a, d, secrets)
+			m.supervised.Go(func() { m.supervise(ctx, a, d, secrets) })
 		}
 		m.mu.Unlock()
 	}
 	return nil
+}
+
+// Close ends every daemon and returns when their process trees are gone.
+// None starts after it. The harness exits only then, so no daemon is left
+// behind by an exit that outran its kill.
+func (m *Manager) Close() {
+	m.mu.Lock()
+	m.closed = true
+	for name, d := range m.daemons {
+		d.cancel()
+		delete(m.daemons, name)
+	}
+	m.mu.Unlock()
+	m.supervised.Wait()
 }
 
 // enable is an admin's start or stop of a daemon app.
