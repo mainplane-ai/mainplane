@@ -27,9 +27,10 @@ const MaxPost = 8 << 20
 // agent, two reads of the environment, and removing a worker. Records go out
 // in the state file's own bytes, one after another.
 //
-//	GET  /sessions                    ?status= ?limit= ?after=<id>                 -> [Info], newest updated first
+//	GET  /sessions                    ?status= ?limit= ?after=<id> ?plain=1        -> [Info], newest updated first
 //	                                  an Info's via is who made the session:
-//	                                  agent:<id> for a session of an agent
+//	                                  agent:<id> for a session of an agent,
+//	                                  which ?plain=1 leaves out
 //	POST /sessions                    Create body; ?via= required with a name      -> {"id"}
 //	GET  /sessions/{id}               -> Info
 //	GET  /sessions/{id}/records       ?after=N  ?wait=30s to long poll             -> records
@@ -117,7 +118,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 			fail(w, err)
 			return
 		}
-		reply(w, page(infos, r.URL.Query().Get("status"), r.URL.Query().Get("after"), r.URL.Query().Get("limit")))
+		reply(w, page(infos, r.URL.Query()))
 	})
 	mux.HandleFunc("POST /sessions", func(w http.ResponseWriter, r *http.Request) {
 		var c Create
@@ -404,18 +405,24 @@ func (h *Harness) serveName(w http.ResponseWriter, r *http.Request) {
 	reply(w, map[string]int{"n": n})
 }
 
-// page filters a list by status, skips through the entry named by after, and
-// cuts it to limit. Empty means no filter, no skip, no cut.
-func page(infos []Info, status, after, limit string) []Info {
+// page filters a list by ?status and ?plain, skips through the entry named
+// by ?after, and cuts it to ?limit. Empty means no filter, no skip, no cut.
+// The filters come before the cut, so a page of plain sessions is full
+// however many sessions of agents are newer.
+func page(infos []Info, q url.Values) []Info {
+	status, after := q.Get("status"), q.Get("after")
 	if status != "" {
 		infos = slices.DeleteFunc(infos, func(i Info) bool { return string(i.Status) != status })
+	}
+	if q.Get("plain") == "1" {
+		infos = slices.DeleteFunc(infos, func(i Info) bool { return strings.HasPrefix(i.Via, AgentVia) })
 	}
 	if after != "" {
 		if i := slices.IndexFunc(infos, func(i Info) bool { return i.ID == after }); i >= 0 {
 			infos = infos[i+1:]
 		}
 	}
-	if n, err := strconv.Atoi(limit); err == nil && n >= 0 && n < len(infos) {
+	if n, err := strconv.Atoi(q.Get("limit")); err == nil && n >= 0 && n < len(infos) {
 		infos = infos[:n]
 	}
 	return infos

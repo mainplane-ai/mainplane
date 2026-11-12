@@ -333,12 +333,13 @@ func (s *session) continueAs(a *App, cf statefile.Conf, p *catalog.Cost) {
 	s.switchTo(a, to)
 }
 
-// sessions is the menu of sessions, newest updated first.
+// sessions is the menu of sessions, newest updated first, with those of
+// agents only when the list shows them.
 func (s *session) sessions(a *App) {
 	a.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), callTime)
 		defer cancel()
-		infos, err := s.c.Sessions(ctx, "", 200)
+		infos, err := s.c.Sessions(ctx, "", 200, !s.list.agents.Load())
 		a.Post(func() {
 			if s.ctx.Err() != nil {
 				return

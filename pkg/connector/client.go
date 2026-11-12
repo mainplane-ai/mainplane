@@ -278,10 +278,15 @@ func (c *Client) Create(ctx context.Context, cr harness.Create, via string) (str
 	return out.ID, err
 }
 
-// Sessions lists sessions, newest updated first.
-func (c *Client) Sessions(ctx context.Context, status string, limit int) ([]harness.Info, error) {
+// Sessions lists sessions, newest updated first: with plain, only those no
+// agent made.
+func (c *Client) Sessions(ctx context.Context, status string, limit int, plain bool) ([]harness.Info, error) {
+	q := "/sessions?status=" + url.QueryEscape(status) + "&limit=" + strconv.Itoa(limit)
+	if plain {
+		q += "&plain=1"
+	}
 	var infos []harness.Info
-	err := c.Call(ctx, "GET", "/sessions?status="+url.QueryEscape(status)+"&limit="+strconv.Itoa(limit), "", nil, &infos)
+	err := c.Call(ctx, "GET", q, "", nil, &infos)
 	return infos, err
 }
 

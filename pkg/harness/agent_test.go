@@ -655,6 +655,23 @@ func TestSessionVia(t *testing.T) {
 			t.Fatalf("session %s: via %q, want %q", info.ID, info.Via, want)
 		}
 	}
+	// ?plain=1 leaves the agent's out before the limit, though it is the newest
+	time.Sleep(2 * time.Millisecond) // a record's time is in whole milliseconds
+	r.post(a.ID, "newer")
+	srv := httptest.NewServer(Handler(context.Background(), r.h))
+	defer srv.Close()
+	for q, want := range map[string]string{"?limit=1": a.live(), "?limit=1&plain=1": id} {
+		resp, err := http.Get(srv.URL + "/sessions" + q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []Info
+		err = json.NewDecoder(resp.Body).Decode(&got)
+		_ = resp.Body.Close()
+		if err != nil || len(got) != 1 || got[0].ID != want {
+			t.Fatalf("GET /sessions%s: %+v %v, want %s", q, got, err, want)
+		}
+	}
 }
 
 // The /agents routes.
