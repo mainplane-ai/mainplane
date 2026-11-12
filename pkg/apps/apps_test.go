@@ -417,21 +417,21 @@ func TestDaemonAndAppKey(t *testing.T) {
 	r.want(400, "full", "POST", "/apps/message/start", "")
 }
 
-// orchestrate and message: a spawned agent is the caller's, within what the
-// caller has; nothing wakes the caller unless it asked.
+// orchestrate and message: an agent the caller creates is the caller's,
+// within what the caller has; nothing wakes the caller unless it asked.
 func TestOrchestrateAndMessage(t *testing.T) {
 	r := newRig(t)
 	a := r.agent(conf("w1"), "orchestrate", "message")
 	other := r.agent(conf("w1"), "orchestrate")
 	key := r.key(a)
-	spawn := func(body string) string {
+	create := func(body string) string {
 		var v struct{ ID, Session string }
-		if err := json.Unmarshal([]byte(r.want(200, key, "POST", "/apps/orchestrate/spawn", body)), &v); err != nil || v.ID == "" || v.Session == "" {
-			t.Fatalf("spawn: %v %v", v, err)
+		if err := json.Unmarshal([]byte(r.want(200, key, "POST", "/apps/orchestrate/agents", body)), &v); err != nil || v.ID == "" || v.Session == "" {
+			t.Fatalf("create: %v %v", v, err)
 		}
 		return v.ID
 	}
-	c := spawn(`{"name":"child","apps":["message"],"message":"the task"}`)
+	c := create(`{"name":"child","apps":["message"],"message":"the task"}`)
 	child, err := r.h.Agent(c)
 	if err != nil || child.Via != "agent:"+a.ID || !slices.Equal(child.Apps, []string{"message"}) || child.Config.Workers[0].Name != "w1" {
 		t.Fatalf("child: %+v %v", child, err)
@@ -441,11 +441,9 @@ func TestOrchestrateAndMessage(t *testing.T) {
 		t.Fatalf("child vias: %v", got)
 	}
 	two, _ := json.Marshal(map[string]any{"config": conf("w1", "w2")})
-	r.want(403, key, "POST", "/apps/orchestrate/spawn", string(two))
-	r.want(403, key, "POST", "/apps/orchestrate/spawn", `{"apps":["schedule"]}`)
-	r.want(403, key, "PUT", "/apps/orchestrate/"+c, `{"apps":["schedule"]}`)
-	r.want(403, key, "PUT", "/apps/orchestrate/"+c, string(two))
-	r.want(403, r.key(child), "POST", "/apps/orchestrate/spawn", `{}`) // a leaf has no orchestrate
+	r.want(403, key, "POST", "/apps/orchestrate/agents", string(two))
+	r.want(403, key, "POST", "/apps/orchestrate/agents", `{"apps":["schedule"]}`)
+	r.want(403, r.key(child), "POST", "/apps/orchestrate/agents", `{}`) // a leaf has no orchestrate
 
 	// the child's own message app reaches the parent, who needs none to receive
 	r.want(204, r.key(child), "POST", "/apps/message", `{"to":"`+other.ID+`","text":"done"}`)
@@ -464,7 +462,7 @@ func TestOrchestrateAndMessage(t *testing.T) {
 		t.Fatalf("other vias after keyed posts: %v", got)
 	}
 
-	n := spawn(`{"notify_on_stop":true,"message":"task two"}`)
+	n := create(`{"notify_on_stop":true,"message":"task two"}`)
 	r.until(func() bool { return slices.Contains(r.vias(a.ID), "app:orchestrate") })
 	r.settled(a.ID)
 	r.want(204, key, "POST", "/apps/message", `{"to":"`+n+`","text":"more"}`)
@@ -475,28 +473,94 @@ func TestOrchestrateAndMessage(t *testing.T) {
 		t.Fatalf("parent vias: %v", got)
 	}
 
-	if got := r.want(200, key, "GET", "/apps/orchestrate", ""); !strings.Contains(got, c) || !strings.Contains(got, n) || strings.Contains(got, other.ID) {
+	if got := r.want(200, key, "GET", "/apps/orchestrate/agents", ""); !strings.Contains(got, c) || !strings.Contains(got, n) || strings.Contains(got, other.ID) {
 		t.Fatalf("list: %s", got)
 	}
-	if got := r.want(200, key, "GET", "/apps/orchestrate/"+c, ""); !strings.Contains(got, `"status":"closed"`) {
-		t.Fatalf("get: %s", got)
-	}
-	if got := r.want(200, key, "GET", "/apps/orchestrate/"+c+"/records", ""); !strings.Contains(got, "the task") {
-		t.Fatalf("records: %s", got)
-	}
-	r.want(404, r.key(other), "GET", "/apps/orchestrate/"+c, "") // not its child
-	r.want(204, key, "PUT", "/apps/orchestrate/"+c, `{"name":"renamed","apps":[]}`)
-	if child, _ = r.h.Agent(c); child.Name != "renamed" || len(child.Apps) != 0 {
-		t.Fatalf("update: %+v", child)
-	}
-	r.want(204, key, "POST", "/apps/orchestrate/"+c+"/stop", "")
-	r.want(204, key, "DELETE", "/apps/orchestrate/"+c, "")
-	r.want(404, key, "GET", "/apps/orchestrate/"+c, "")
 }
 
-// A spawn that fails after its agent was made leaves no agent, no session
+// The orchestrate routes are the harness's /agents routes for the agents
+// the caller created: the same bodies, codes and replies, the caller as the
+// via, 404 for an agent that is not the caller's, 403 for more than it has.
+func TestOrchestrateRoutes(t *testing.T) {
+	r := newRig(t)
+	a := r.agent(conf("w1"), "orchestrate", "message")
+	other := r.agent(conf("w1"), "orchestrate")
+	key, u := r.key(a), "/apps/orchestrate/agents"
+	var made struct{ ID, Session string }
+	if err := json.Unmarshal([]byte(r.want(200, key, "POST", u, `{"name":"child","apps":["message"],"message":"the task"}`)), &made); err != nil {
+		t.Fatal(err)
+	}
+	c := u + "/" + made.ID
+	r.settled(made.ID)
+	r.want(400, key, "POST", u, `{"session":"`+made.Session+`"}`) // it adopts no session
+
+	// reads: the harness's replies, and its filters on the list
+	var info harness.AgentInfo
+	if err := json.Unmarshal([]byte(r.want(200, key, "GET", c, "")), &info); err != nil || info.ID != made.ID || info.Status != statefile.StatusClosed || info.CurrentSession != made.Session {
+		t.Fatalf("get: %+v %v", info, err)
+	}
+	var infos []harness.AgentInfo
+	if err := json.Unmarshal([]byte(r.want(200, key, "GET", u+"?via=test&status=closed&limit=5", "")), &infos); err != nil || len(infos) != 1 || infos[0].ID != made.ID {
+		t.Fatalf("list: %+v %v", infos, err) // the via is the caller, whatever the query says
+	}
+	if got := r.want(200, key, "GET", u+"?status=stepping", ""); strings.TrimSpace(got) != "[]" {
+		t.Fatalf("list of stepping: %s", got)
+	}
+	if got := r.want(200, key, "GET", c+"/records", ""); !strings.Contains(got, "the task") || !strings.Contains(got, `"kind":"start"`) {
+		t.Fatalf("records: %s", got)
+	}
+	if got := r.want(200, key, "GET", c+"/records?after=1&session="+made.Session, ""); !strings.Contains(got, "the task") || strings.Contains(got, `"kind":"start"`) {
+		t.Fatalf("records after 1: %s", got)
+	}
+	r.want(400, key, "GET", c+"/records?session="+a.Sessions[0], "") // not a session of that agent
+	r.want(400, key, "GET", c+"/records?after=999", "")
+
+	// changes: one route each, as the harness has them
+	r.want(204, key, "PUT", c+"/name", "renamed")
+	r.want(204, key, "PUT", c+"/apps", `[]`)
+	one, _ := json.Marshal(conf())
+	r.want(204, key, "PUT", c+"/config", string(one))
+	child, err := r.h.Agent(made.ID)
+	if err != nil || child.Name != "renamed" || len(child.Apps) != 0 || len(child.Config.Workers) != 0 {
+		t.Fatalf("after the changes: %+v %v", child, err)
+	}
+	if got := r.want(200, key, "GET", c+"/records", ""); strings.Count(got, `"via":"agent:`+a.ID+`"`) < 3 { // the message, and a record for a change or more
+		t.Fatalf("the changes are not the caller's: %s", got)
+	}
+	two, _ := json.Marshal(conf("w1", "w2"))
+	r.want(403, key, "PUT", c+"/config", string(two))
+	r.want(403, key, "PUT", c+"/apps", `["schedule"]`)
+	r.want(400, key, "PUT", c+"/apps", `{"apps":[]}`)
+	r.want(400, key, "PUT", c+"/notify_on_stop", `"yes"`)
+
+	// notify_on_stop: on, the next stop tells the caller once; off, none does
+	r.want(204, key, "PUT", c+"/notify_on_stop", `true`)
+	r.want(204, key, "PUT", c+"/notify_on_stop", `false`)
+	r.want(204, key, "POST", c+"/stop", "")
+	r.want(204, key, "PUT", c+"/notify_on_stop", `true`)
+	if _, _, err := r.h.PostAgent(context.Background(), made.ID, "test", "", []harness.Part{{Type: "text/plain", Body: []byte("more")}}); err != nil {
+		t.Fatal(err)
+	}
+	r.until(func() bool { return slices.Contains(r.vias(a.ID), "app:orchestrate") })
+	r.settled(a.ID)
+	if got := r.vias(a.ID); !slices.Equal(got, []string{"app:orchestrate"}) {
+		t.Fatalf("parent vias: %v", got)
+	}
+
+	// an agent that is not the caller's is not there, on every route
+	routes := [][3]string{{"GET", "", ""}, {"GET", "/records", ""}, {"PUT", "/name", "x"}, {"PUT", "/config", string(one)}, {"PUT", "/apps", `[]`}, {"PUT", "/notify_on_stop", `true`}, {"POST", "/stop", ""}, {"DELETE", "", ""}}
+	for _, q := range routes {
+		r.want(404, r.key(other), q[0], c+q[1], q[2])
+		r.want(404, key, q[0], u+"/"+other.ID+q[1], q[2])
+	}
+	r.want(204, key, "DELETE", c, "")
+	r.want(404, key, "GET", c, "")
+	r.want(404, key, "DELETE", c, "")
+}
+
+// A create that fails after its agent was made leaves no agent, no session
 // and no watch: the caller was told no, and may try again.
-func TestSpawnUndone(t *testing.T) {
+func TestCreateUndone(t *testing.T) {
 	r := newRig(t)
 	a := r.agent(conf("w1"), "orchestrate")
 	key := r.key(a)
@@ -513,19 +577,19 @@ func TestSpawnUndone(t *testing.T) {
 		return len(names)
 	}
 	before := sessions()
-	if code, got := r.do(key, "POST", "/apps/orchestrate/spawn", `{"notify_on_stop":true,"message":"the task"}`); code == 200 {
-		t.Fatalf("a spawn whose watch was not kept: %s", got)
+	if code, got := r.do(key, "POST", "/apps/orchestrate/agents", `{"notify_on_stop":true,"message":"the task"}`); code == 200 {
+		t.Fatalf("a create whose watch was not kept: %s", got)
 	}
-	if got := r.want(200, key, "GET", "/apps/orchestrate", ""); strings.TrimSpace(got) != `[]` {
-		t.Fatalf("children after a failed spawn: %s", got)
+	if got := r.want(200, key, "GET", "/apps/orchestrate/agents", ""); strings.TrimSpace(got) != `[]` {
+		t.Fatalf("children after a failed create: %s", got)
 	}
 	if n := len(r.h.ListAgents(all)); n != 1 || sessions() != before {
-		t.Fatalf("after a failed spawn: %d agents, %d sessions, want 1 and %d", n, sessions(), before)
+		t.Fatalf("after a failed create: %d agents, %d sessions, want 1 and %d", n, sessions(), before)
 	}
 	if err := os.Remove(block); err != nil {
 		t.Fatal(err)
 	}
-	r.want(200, key, "POST", "/apps/orchestrate/spawn", `{"notify_on_stop":true,"message":"the task"}`)
+	r.want(200, key, "POST", "/apps/orchestrate/agents", `{"notify_on_stop":true,"message":"the task"}`)
 	if n := len(r.h.ListAgents(all)); n != 2 {
 		t.Fatalf("after the next try: %d agents", n)
 	}

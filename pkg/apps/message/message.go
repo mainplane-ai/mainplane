@@ -26,7 +26,7 @@ func New(ctx context.Context, h *harness.Harness) http.Handler {
 			http.Error(w, `the body is {"to":"<agent id>","text":"..."}`, http.StatusBadRequest)
 			return
 		}
-		from, key := "agent:"+r.Header.Get("X-Mainplane-Agent"), r.Header.Get("Idempotency-Key")
+		from, key := harness.AgentVia+r.Header.Get("X-Mainplane-Agent"), r.Header.Get("Idempotency-Key")
 		if key != "" {
 			key = from + ":" + key // a key is its sender's: two agents that pick the same one do not collide
 		}

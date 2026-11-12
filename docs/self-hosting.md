@@ -467,8 +467,10 @@ Three apps are built in:
 - `schedule`: timers, once or on a cron, that message the agent later. They
   outlive sessions and harness restarts.
 - `message`: one agent messages another by its id.
-- `orchestrate`: an agent spawns agents of its own, reads them and stops
-  them. A spawned agent gets no worker and no app that its parent lacks.
+- `orchestrate`: an agent creates agents of its own, reads them and stops
+  them, with the `/agents` routes under `/apps/orchestrate`, which show it
+  only those agents. An agent it creates gets no worker and no app that it
+  lacks itself.
 
 More apps are folders in `apps/` beside the config. `skill.md` is what an
 agent reads; its first line is `# <name>: <what it does>`. `app.json` is

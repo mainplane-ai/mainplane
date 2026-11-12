@@ -29,7 +29,7 @@ const AgentVia = "agent:"
 type Agent struct {
 	ID       string      `json:"id"`
 	Name     string      `json:"name,omitempty"`
-	Via      string      `json:"via,omitempty"` // who made it: a connector, or agent:<id> for one an agent spawned
+	Via      string      `json:"via,omitempty"` // who made it: a connector, or agent:<id> for one an agent created
 	Created  time.Time   `json:"created"`
 	Config   AgentConfig `json:"config"`
 	Apps     []string    `json:"apps"`
