@@ -47,6 +47,7 @@ type rig struct {
 	stopped []string               // each call of h.Stopped
 	started chan struct{}          // a run of "wait" began
 	release chan struct{}          // closed to let it end
+	writes  sync.WaitGroup         // files w1 is writing under dir
 }
 
 func newRig(t *testing.T) *rig {
@@ -89,7 +90,13 @@ func newRig(t *testing.T) *rig {
 		t.Fatal(err)
 	}
 	near, far := net.Pipe()
-	t.Cleanup(func() { _ = near.Close() })
+	// A log copy can outlive its test. The folder goes only once w1 takes
+	// no more writes and has made the ones it took: Windows removes no
+	// folder a file is still landing in.
+	t.Cleanup(func() {
+		_ = near.Close()
+		r.writes.Wait()
+	})
 	go r.serve(far)
 	rem, err := Connect(near, func() (string, error) { return "w1", nil })
 	if err != nil {
@@ -116,7 +123,13 @@ func (r *rig) serve(conn net.Conn) {
 		if err != nil {
 			return
 		}
+		if f.Kind == worker.Write {
+			r.writes.Add(1)
+		}
 		go func() {
+			if f.Kind == worker.Write {
+				defer r.writes.Done()
+			}
 			reply := worker.Frame{Header: worker.Header{ID: f.ID, Kind: worker.Done}}
 			event := f.Kind + " " + f.Session + f.Path
 			switch f.Kind {
@@ -427,6 +440,12 @@ func TestAgentUsage(t *testing.T) {
 	if s1 == s2 || s2 == s3 {
 		t.Fatalf("no rollover: %s %s %s", s1, s2, s3)
 	}
+	// Windows renames no file that anything still has open, so a move is
+	// tried until it holds.
+	move := func(from, to string) {
+		t.Helper()
+		r.until(func() bool { return os.Rename(from, to) == nil })
+	}
 	usage := func() int {
 		t.Helper()
 		i, err := r.h.AgentInfo(a.ID)
@@ -442,18 +461,14 @@ func TestAgentUsage(t *testing.T) {
 		t.Fatalf("the live session's own usage: %v %v", i.Usage, err)
 	}
 	// with its file out of the way an earlier session still counts: nothing read it
-	if err := os.Rename(r.h.Sessions.Path(s1), r.h.Sessions.Path(s1)+".away"); err != nil {
-		t.Fatal(err)
-	}
+	move(r.h.Sessions.Path(s1), r.h.Sessions.Path(s1)+".away")
 	if got := usage(); got != 420_000 {
 		t.Fatalf("usage with an earlier session's file away: %d", got)
 	}
 	if list := r.h.ListAgents(func(Agent) bool { return true }); len(list) != 1 || list[0].Usage.Input != 420_000 {
 		t.Fatalf("list: %+v", list)
 	}
-	if err := os.Rename(r.h.Sessions.Path(s1)+".away", r.h.Sessions.Path(s1)); err != nil {
-		t.Fatal(err)
-	}
+	move(r.h.Sessions.Path(s1)+".away", r.h.Sessions.Path(s1))
 	// a write to an earlier session is read again
 	if _, err := r.h.Post(context.Background(), s2, "test", "", []Part{{Type: "text/plain", Body: []byte("more")}}); err != nil {
 		t.Fatal(err)
@@ -463,24 +478,16 @@ func TestAgentUsage(t *testing.T) {
 	// a touched session whose file does not read counts as it last read, and
 	// is read again once it does
 	r.h.touch(s2)
-	if err := os.Rename(r.h.Sessions.Path(s2), r.h.Sessions.Path(s2)+".away"); err != nil {
-		t.Fatal(err)
-	}
+	move(r.h.Sessions.Path(s2), r.h.Sessions.Path(s2)+".away")
 	if got := usage(); got != 560_000 {
 		t.Fatalf("usage with a touched session's file away: %d", got)
 	}
-	if err := os.Rename(r.h.Sessions.Path(s1), r.h.Sessions.Path(s2)); err != nil {
-		t.Fatal(err)
-	}
+	move(r.h.Sessions.Path(s1), r.h.Sessions.Path(s2))
 	if got := usage(); got != 420_000 {
 		t.Fatalf("usage with the file back, as another: %d", got)
 	}
-	if err := os.Rename(r.h.Sessions.Path(s2), r.h.Sessions.Path(s1)); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(r.h.Sessions.Path(s2)+".away", r.h.Sessions.Path(s2)); err != nil {
-		t.Fatal(err)
-	}
+	move(r.h.Sessions.Path(s2), r.h.Sessions.Path(s1))
+	move(r.h.Sessions.Path(s2)+".away", r.h.Sessions.Path(s2))
 	r.h.touch(s2)
 	if err := r.h.Delete(context.Background(), s1, "test"); err != nil {
 		t.Fatal(err)
