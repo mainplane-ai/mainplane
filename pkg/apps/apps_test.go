@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -25,9 +26,14 @@ import (
 )
 
 // TestMain is also the daemon app of the tests: the manager runs this
-// binary with a proxy secret, and it serves what it was given.
+// binary with a proxy secret, and it serves what it was given, or with a
+// mode is a daemon of the tree tests.
 func TestMain(m *testing.M) {
 	if os.Getenv("MAINPLANE_PROXY_SECRET") != "" {
+		if len(os.Args) > 1 {
+			treeDaemon(os.Args[1])
+			return
+		}
 		serveDaemon()
 		return
 	}
@@ -79,9 +85,12 @@ type rig struct {
 // apps, and the front door on a loopback port. The full key is "full".
 func newRig(t *testing.T) *rig {
 	t.Setenv("PROVIDER_KEY", "never an app's")
+	t.Setenv("LANG", "C.UTF-8") // a daemon's on Unix, set here or not
+	// The folder is made before the cancel is set, so at the end the daemons
+	// are told to end before their folders go: Windows removes none in use.
+	dir := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	dir := t.TempDir()
 	_, k, _ := ed25519.GenerateKey(nil)
 	p := provider.Anthropic("", "k")
 	p.Run = func(ctx context.Context, body []byte, cache *provider.Cache, emit func(statefile.Record)) (statefile.Header, error) {
@@ -311,7 +320,7 @@ func TestProxySecretsWebhooks(t *testing.T) {
 	if got := r.want(200, "full", "GET", "/secrets", ""); strings.TrimSpace(got) != `["K"]` {
 		t.Fatalf("secrets: %s", got)
 	}
-	if fi, err := os.Stat(filepath.Join(r.dir, ".secrets")); err != nil || fi.Mode().Perm() != 0o600 {
+	if fi, err := os.Stat(filepath.Join(r.dir, ".secrets")); err != nil || fi.Mode().Perm() != 0o600 && runtime.GOOS != "windows" { // Windows has no such mode: the folder's ACL is what guards the file
 		t.Fatalf(".secrets: %v %v", fi, err)
 	}
 	path, h := seen(r.want(200, key, "POST", "/apps/prox/echo?q=1", "{}", "X-Mainplane-Agent", "forged", "X-Mainplane-Proxy-Secret", "forged"))
@@ -355,8 +364,21 @@ func TestDaemonAndAppKey(t *testing.T) {
 	}
 	r.want(503, key, "GET", "/apps/d0/env", "") // installed after the harness started: not yet run
 	r.want(204, "full", "POST", "/apps/d0/start", "")
-	if e := env("d0"); e["key"] != "" || e["K"] != "" || e["agent"] != a.ID || e["data"] != filepath.Join(r.dir, "app-data", "d0") || strings.Contains(e["environ"], "PROVIDER_KEY") {
-		t.Fatalf("d0: %v", e)
+	e0 := env("d0")
+	if e0["key"] != "" || e0["K"] != "" || e0["agent"] != a.ID || e0["data"] != filepath.Join(r.dir, "app-data", "d0") || strings.Contains(e0["environ"], "PROVIDER_KEY") {
+		t.Fatalf("d0: %v", e0)
+	}
+	// of the harness's environment a daemon has the names in inherit that are set, and no other
+	for _, n := range inherit {
+		if v, ok := os.LookupEnv(n); ok && !strings.Contains("\n"+e0["environ"]+"\n", "\n"+n+"="+v+"\n") {
+			t.Fatalf("d0 has no %s=%s: %s", n, v, e0["environ"])
+		}
+	}
+	for line := range strings.SplitSeq(e0["environ"], "\n") {
+		n, _, _ := strings.Cut(line, "=")
+		if !slices.Contains(inherit, strings.ToUpper(n)) && !slices.Contains([]string{"PORT", "DATA_DIR", "MAINPLANE_URL", "MAINPLANE_PROXY_SECRET"}, n) {
+			t.Fatalf("d0 has %s", line)
+		}
 	}
 	r.want(401, key, "GET", "/apps/d0/list", "") // no entitlement, so no key at all
 

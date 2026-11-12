@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -101,16 +102,16 @@ func (m *Manager) stop(name string) {
 // a secret of that name would replace. Windows reads names without case.
 func reserved(name string) bool {
 	n := strings.ToUpper(name)
-	return n == "PATH" || n == "HOME" || n == "PORT" || n == "DATA_DIR" || strings.HasPrefix(n, "MAINPLANE_")
+	return slices.Contains(inherit, n) || n == "PORT" || n == "DATA_DIR" || strings.HasPrefix(n, "MAINPLANE_")
 }
 
 // supervise runs the app's command until ctx ends, again each time it exits.
 // The process gets its port, the secret the harness proves itself with, its
 // data folder, the secrets it names, and a key of its own only when it has
-// entitlements. It does not get the harness's environment, where provider
-// keys may be. It leads a process tree of its own, which ends whole when the
-// daemon is stopped, and where the system can still find it (not Windows)
-// when its first process exits.
+// entitlements. Of the harness's environment, where provider keys may be,
+// it gets only the names in inherit. It leads a process tree of its own,
+// which ends whole when the daemon is stopped and when its first process
+// exits.
 func (m *Manager) supervise(ctx context.Context, a app, d *daemon, secrets map[string]string) {
 	data := m.data(a.name)
 	if err := os.MkdirAll(data, 0o755); err != nil {
@@ -125,8 +126,13 @@ func (m *Manager) supervise(ctx context.Context, a app, d *daemon, secrets map[s
 		m.mu.Lock()
 		ready := d.ready
 		d.port, d.secret = port, rand.Text()
-		env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), "PORT=" + strconv.Itoa(port), "MAINPLANE_PROXY_SECRET=" + d.secret, "DATA_DIR=" + data, "MAINPLANE_URL=" + m.url}
+		env := []string{"PORT=" + strconv.Itoa(port), "MAINPLANE_PROXY_SECRET=" + d.secret, "DATA_DIR=" + data, "MAINPLANE_URL=" + m.url}
 		m.mu.Unlock()
+		for _, n := range inherit {
+			if v, ok := os.LookupEnv(n); ok {
+				env = append(env, n+"="+v)
+			}
+		}
 		for _, n := range a.spec.Secrets {
 			env = append(env, n+"="+secrets[n])
 		}
@@ -135,16 +141,15 @@ func (m *Manager) supervise(ctx context.Context, a app, d *daemon, secrets map[s
 		}
 		cmd := exec.CommandContext(ctx, a.spec.Run[0], a.spec.Run[1:]...)
 		cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr, cmd.WaitDelay = a.dir, env, os.Stderr, os.Stderr, relaunch
-		cmd.Cancel = func() error { return killTree(cmd.Process) }
-		own(cmd)
 		lctx, launched := context.WithCancel(ctx) // a process that dies before it listens ends its poll
 		go listening(lctx, port, ready)
 		log.Printf("app %s: %v on port %d", a.name, a.spec.Run, port)
-		err = cmd.Run()
-		launched()
-		if cmd.Process != nil {
-			sweep(cmd.Process) // what it started and left behind would pile up, one per launch
+		t, err := start(cmd)
+		if err == nil {
+			err = cmd.Wait()
+			t.sweep() // what it started and left behind would pile up, one per launch
 		}
+		launched()
 		if ctx.Err() != nil {
 			return
 		}
