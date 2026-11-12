@@ -18,6 +18,10 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
+// AgentVia starts the via of what an agent does, its id after it: record 1
+// of each of its sessions, and what it posts or makes through an app.
+const AgentVia = "agent:"
+
 // Agent is agents/<id>.json: an identity that outlives a session. It holds
 // the config of its next session, the apps it may use, and every session it
 // has had, oldest first. The last one is live: the one a post lands on, and
@@ -292,7 +296,7 @@ func (h *Harness) next(ctx context.Context, a Agent, id string) (string, error) 
 		return "", err
 	}
 	c := a.Config
-	if err := h.create(ctx, id, Create{Model: c.Model, ContextLimit: c.ContextLimit, Workers: c.Workers, Tools: c.Tools, Input: c.Input, Params: c.Params, Preset: c.Preset}, "agent:"+a.ID); err != nil {
+	if err := h.create(ctx, id, Create{Model: c.Model, ContextLimit: c.ContextLimit, Workers: c.Workers, Tools: c.Tools, Input: c.Input, Params: c.Params, Preset: c.Preset}, AgentVia+a.ID); err != nil {
 		return "", err
 	}
 	return id, h.note(h.session(id), id, system("apps", note))

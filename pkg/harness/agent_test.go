@@ -611,6 +611,29 @@ func TestDeleteAgent(t *testing.T) {
 	}
 }
 
+// TestSessionVia: a session's Info says who made it, which is how a list of
+// sessions tells an agent's from a plain one.
+func TestSessionVia(t *testing.T) {
+	r := newRig(t)
+	a := r.create(AgentCreate{Config: r.conf(1000, 0)}, "web")
+	if info, err := r.h.Info(a.live()); err != nil || info.Via != AgentVia+a.ID {
+		t.Fatalf("an agent's session: via %q %v", info.Via, err)
+	}
+	id, err := r.h.Create(context.Background(), Create{Model: r.conf(1000, 0).Model, ContextLimit: 1000}, "tui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	infos, err := r.h.List()
+	if err != nil || len(infos) != 2 {
+		t.Fatalf("list: %+v %v", infos, err)
+	}
+	for _, info := range infos {
+		if want := map[string]string{id: "tui", a.live(): AgentVia + a.ID}[info.ID]; info.Via != want {
+			t.Fatalf("session %s: via %q, want %q", info.ID, info.Via, want)
+		}
+	}
+}
+
 // The /agents routes.
 func TestAgentRoutes(t *testing.T) {
 	r := newRig(t)

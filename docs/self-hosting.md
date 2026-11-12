@@ -436,7 +436,9 @@ go on: its config changed, it is at `context_limit`, or its prompt cache is
 cold and it is past `cold_limit`. The new session is told where the old
 session's log is on its workers. Agents are for connectors that outlive a
 context: a web UI, a chat channel, a scheduler. The terminal app and the
-session verbs work on sessions, as before.
+session verbs work on sessions, as before. A session an agent owns says so
+in its `via`, `agent:<id>`, and the terminal app leaves those out of its list
+unless /settings turns them on.
 
 ```
 echo '{"name":"triage","config":{"model":"anthropic/claude-fable-5-2","workers":[{"name":"linuxbox"}],

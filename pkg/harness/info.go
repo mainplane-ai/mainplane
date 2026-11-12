@@ -19,6 +19,7 @@ import (
 type Info struct {
 	ID          string           `json:"id"`
 	Name        string           `json:"name,omitempty"`
+	Via         string           `json:"via,omitempty"` // who made it: a connector, or agent:<id> for an agent's session
 	Status      statefile.Status `json:"status"`
 	Config      statefile.Conf   `json:"config"`
 	Created     time.Time        `json:"created"`
@@ -62,7 +63,7 @@ func (h *Harness) Info(id string) (Info, error) {
 		return Info{}, err
 	}
 	tip := chain[len(chain)-1]
-	info := Info{ID: id, Status: h.status(id, chain), Config: conf, Created: chain[0].Time, N: tip.N, ContextUsed: statefile.ContextUsed(chain)}
+	info := Info{ID: id, Via: chain[0].Via, Status: h.status(id, chain), Config: conf, Created: chain[0].Time, N: tip.N, ContextUsed: statefile.ContextUsed(chain)}
 	for _, r := range chain {
 		if r.Kind == statefile.Name {
 			info.Name = string(r.Body)

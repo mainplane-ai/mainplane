@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/catalog"
@@ -31,12 +33,14 @@ const (
 
 // sessionList is the sessions, newest updated first, read every
 // sessionsEvery. It outlives the session screens: the sidebar shows it and
-// Ctrl+Up/Down step through it.
+// Ctrl+Up/Down step through it. An agent's sessions are left out unless
+// agents is set, in /settings: agents are other connectors' to show.
 type sessionList struct {
 	c      *connector.Client
 	cat    *catalog.Catalog // nil until loaded
 	cur    *session         // the screen showing now
 	infos  []harness.Info
+	agents bool                 // show the sessions of agents too
 	seen   map[string]time.Time // per session, its update when last read here
 	drafts map[string][]elem    // per session, "" for home, the input it was left with
 	loaded bool
@@ -51,16 +55,23 @@ func newSessionList(a *App, c *connector.Client) *sessionList {
 	loadCatalog(a, l)
 	a.Go(func() {
 		for {
-			ctx, cancel := context.WithTimeout(context.Background(), callTime)
-			infos, err := c.Sessions(ctx, "", sessionsMax)
-			cancel()
-			a.Post(func() { l.update(a, infos, err) })
+			l.read(a)
 			time.Sleep(sessionsEvery)
 		}
 	})
 	return l
 }
 
+// read lists the sessions once.
+func (l *sessionList) read(a *App) {
+	ctx, cancel := context.WithTimeout(context.Background(), callTime)
+	infos, err := l.c.Sessions(ctx, "", sessionsMax)
+	cancel()
+	a.Post(func() { l.update(a, infos, err) })
+}
+
+// update takes a read of the sessions. An agent's session stays in the list
+// while it is the open one.
 func (l *sessionList) update(a *App, infos []harness.Info, err error) {
 	if err != nil {
 		a.SayError(err)
@@ -70,6 +81,11 @@ func (l *sessionList) update(a *App, infos []harness.Info, err error) {
 		if !l.loaded || in.ID == l.cur.id {
 			l.seen[in.ID] = in.Updated
 		}
+	}
+	if !l.agents {
+		infos = slices.DeleteFunc(infos, func(in harness.Info) bool {
+			return strings.HasPrefix(in.Via, harness.AgentVia) && in.ID != l.cur.id
+		})
 	}
 	l.infos, l.loaded = infos, true
 	l.tick(a)
