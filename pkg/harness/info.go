@@ -19,6 +19,7 @@ import (
 type Info struct {
 	ID          string           `json:"id"`
 	Name        string           `json:"name,omitempty"`
+	Via         string           `json:"via,omitempty"` // who made it: a connector, or agent:<id> for an agent's session
 	Status      statefile.Status `json:"status"`
 	Config      statefile.Conf   `json:"config"`
 	Created     time.Time        `json:"created"`
@@ -62,7 +63,7 @@ func (h *Harness) Info(id string) (Info, error) {
 		return Info{}, err
 	}
 	tip := chain[len(chain)-1]
-	info := Info{ID: id, Status: h.status(id, chain), Config: conf, Created: chain[0].Time, N: tip.N, ContextUsed: statefile.ContextUsed(chain)}
+	info := Info{ID: id, Via: chain[0].Via, Status: h.status(id, chain), Config: conf, Created: chain[0].Time, N: tip.N, ContextUsed: statefile.ContextUsed(chain)}
 	for _, r := range chain {
 		if r.Kind == statefile.Name {
 			info.Name = string(r.Body)
@@ -84,6 +85,28 @@ func (h *Harness) Info(id string) (Info, error) {
 		h.index[id] = info
 	}
 	h.imu.Unlock()
+	return info, nil
+}
+
+// cached is a session's Info from the index. The file is read only when a
+// write touched it since the index last read it, or the index has none. A
+// touched file that does not read keeps its mark, so the next call reads it
+// again, and what the index has of it is the answer until then.
+func (h *Harness) cached(id string) (Info, error) {
+	h.lockIndex()
+	info, ok := h.index[id]
+	stale := h.dirty[id]
+	delete(h.dirty, id) // before the read, as List does
+	h.imu.Unlock()
+	if ok && !stale {
+		return info, nil
+	}
+	fresh, err := h.Info(id)
+	if err == nil || !ok {
+		return fresh, err
+	}
+	log.Printf("session %s: %v", id, err)
+	h.touch(id)
 	return info, nil
 }
 
@@ -149,6 +172,9 @@ func (h *Harness) List() ([]Info, error) {
 // <scratch>/logs/<id>.log, the bodies the envelope takes as media dropped so
 // rg works on it. A
 // worker not connected is skipped; the session's next stop writes again.
+// A copy a worker already has whole is not written to it again: a write
+// empties the file first, under whoever reads it, and after a handoff that
+// is the next session's first run.
 func (h *Harness) copyLogs(ctx context.Context, s *session) {
 	id, n := s.id, s.exports.Add(1)
 	s.logs.Lock()
@@ -183,13 +209,19 @@ func (h *Harness) copyLogs(ctx context.Context, s *session) {
 		}
 		b = append(b, enc...)
 	}
+	tip := chain[len(chain)-1].N
 	for _, w := range conf.Workers {
 		r, ok := h.Workers.Get(w.Name)
-		if !ok {
+		if !ok || s.copied[w.Name] == tip {
 			continue
 		}
 		if err := r.Write(ctx, r.Scratch+"/logs/"+id+".log", b); err != nil {
 			log.Printf("session %s: log copy to %s: %v", id, w.Name, err)
+			continue
 		}
+		if s.copied == nil {
+			s.copied = map[string]int{}
+		}
+		s.copied[w.Name] = tip
 	}
 }

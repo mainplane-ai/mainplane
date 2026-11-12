@@ -820,7 +820,7 @@ func phase(listen, url, code, v string, oses []string, mode, text string) {
 	mux := http.NewServeMux()
 	mux.Handle("/id", pointer.ID(key(), func() string { return url }, coord.Public().String()))
 	mux.Handle("POST /join", auth.JoinHandler(key(), pointer.Encode(key()), func() (string, error) { return code, nil }, &auth.Limit{}))
-	p := harness.NewPool(coord.Desired)
+	p := harness.NewPool(coord.Desired, func(string) string { return "" })
 	coord.Gone = p.Drop
 	coord.Handle(mux)
 	relay.Handle(mux, derp)

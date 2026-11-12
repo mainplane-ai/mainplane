@@ -333,37 +333,46 @@ func (s *session) continueAs(a *App, cf statefile.Conf, p *catalog.Cost) {
 	s.switchTo(a, to)
 }
 
-// sessions is the menu of sessions, newest updated first.
+// sessions is the menu of sessions, newest updated first: the sessions the
+// list shows, so those of agents only when /settings shows them, and the
+// open one. A reply from before /settings changed is asked for again.
 func (s *session) sessions(a *App) {
+	agents := s.list.agents.Load()
 	a.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), callTime)
 		defer cancel()
-		infos, err := s.c.Sessions(ctx, "", 200)
+		infos, err := s.c.Sessions(ctx, "", 200, !agents)
 		a.Post(func() {
-			if s.ctx.Err() != nil {
-				return
-			}
-			if err != nil {
+			switch {
+			case s.ctx.Err() != nil:
+			case err != nil:
 				a.SayError(err)
-				return
+			case agents != s.list.agents.Load():
+				s.sessions(a)
+			default:
+				a.OpenMenu("Sessions", s.sessionMenu(s.list.withOpen(infos, agents)))
 			}
-			m := &Menu{}
-			for _, in := range infos {
-				id := in.ID
-				label := id
-				if in.Name != "" {
-					label += "  " + in.Name
-				}
-				if id == s.id {
-					label += "  (this one)"
-				}
-				m.Items = append(m.Items, MenuItem{Label: label, Hint: string(in.Status) + " · " + stamp(in.Updated), Pick: func(a *App, _ *MenuItem) {
-					s.list.open(a, id)
-				}})
-			}
-			a.OpenMenu("Sessions", m)
 		})
 	})
+}
+
+// sessionMenu is the menu of infos: a pick opens its session.
+func (s *session) sessionMenu(infos []harness.Info) *Menu {
+	m := &Menu{}
+	for _, in := range infos {
+		id := in.ID
+		label := id
+		if in.Name != "" {
+			label += "  " + in.Name
+		}
+		if id == s.id {
+			label += "  (this one)"
+		}
+		m.Items = append(m.Items, MenuItem{Label: label, Hint: string(in.Status) + " · " + stamp(in.Updated), Pick: func(a *App, _ *MenuItem) {
+			s.list.open(a, id)
+		}})
+	}
+	return m
 }
 
 // workers is the menu of workers, checked for those of this session, or on

@@ -26,6 +26,7 @@ import (
 
 	"golang.org/x/net/http/httpguts"
 
+	"github.com/mainplane-ai/mainplane/pkg/apps"
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/coordinator"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
@@ -236,7 +237,7 @@ func Harness(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	pool := harness.NewPool(coord.Desired)
+	pool := harness.NewPool(coord.Desired, func(session string) string { return auth.Sign(k, auth.Session, pointer.Encode(k), session) })
 	coord.Gone = pool.Drop
 	coord.Link(c.Links)
 	setDrives(coord, pool, c.Drives)
@@ -244,7 +245,7 @@ func Harness(ctx context.Context, path string) error {
 		c, err := loadConfig(path)
 		return c.prompt(), err
 	}
-	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove, Rename: coord.Rename, Prompt: prompt}
+	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove, Rename: coord.Rename, Prompt: prompt, Agents: filepath.Join(dir, "agents")}
 	go watch(ctx, path, func(c Config) error {
 		ps, err := providers(dir, c.Providers)
 		if err == nil {
@@ -283,7 +284,19 @@ func Harness(ctx context.Context, path string) error {
 	a := &api{dir: dir, path: path, k: k, noPointer: c.NoPointer, at: func() string { return at.Load().(string) }, coord: coord, pool: pool}
 	a.handle(routes)
 	go ship(ctx, dir, path)
-	api := store.Bearer(limit, routes)
+	// The port is taken before the apps start: a daemon that calls
+	// $MAINPLANE_URL as it starts waits for Serve, and is not refused.
+	ln, err := net.Listen("tcp", c.HTTP)
+	if err != nil {
+		return err
+	}
+	am, err := apps.New(ctx, h, dir, k, pointer.Encode(k), "http://"+c.HTTP)
+	if err != nil {
+		return err
+	}
+	defer am.Close()
+	am.Routes(routes)
+	api := am.Handler(store.Bearer(limit, routes), routes)
 	mux.Handle("/", api)
 	srv := &http.Server{Addr: c.HTTP, Handler: mux}
 	if c.URL != "" {
@@ -295,10 +308,6 @@ func Harness(ctx context.Context, path string) error {
 		_ = derp.Close()
 	}()
 	if err := h.Resume(ctx); err != nil {
-		return err
-	}
-	ln, err := net.Listen("tcp", c.HTTP)
-	if err != nil {
 		return err
 	}
 	log.Printf("harness: http on %s, sessions in %s, %d api keys", c.HTTP, sessions, len(t[auth.Key]))
