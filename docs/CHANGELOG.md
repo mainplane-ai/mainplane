@@ -2,6 +2,18 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.6.0
+
+- Agents: an agent is an id, a config and a list of apps over a chain of sessions, so it outlives a context limit. A message to an agent (`POST /agents/{id}/records`, `mainplane agent message`) lands on its live session, or on a new session when the live one should not go on: its config changed, it is at `context_limit`, or its prompt cache is cold and it is past the new `cold_limit`. A session that passes its limit mid-task hands off to the next one. The new session is told where the old session's log is on its workers. Agents are for connectors that outlive a context: a web UI, a chat channel, a scheduler. Ten `/agents` routes, with `mainplane agents` and `mainplane agent new|info|message|retry|stop|delete|name|config|apps`. An agent's `usage` is the sum over its sessions
+- Apps: something an agent calls from a worker. Every interpreter and job has `MAINPLANE_URL` and `MAINPLANE_KEY`, a key for that one session, which reaches only the apps of the agent whose live session it is. On a worker, `mainplane skill` lists the agent's apps and `mainplane app <app> <method> <path>` calls one, with no login. An app is a folder in `apps/` beside the config: a `skill.md` alone, or with an `app.json` that names a `url` the harness proxies to or a `run` command the harness runs and restarts. An app can take webhooks at `POST /webhooks/<name>/...`, and a `run` app can post to the agents that have it. `mainplane apps` shows each app's kind and status. The self-hosting guide has the `app.json` fields
+- Secrets for apps: `mainplane secret set <name>` reads a value from stdin into `.secrets` on the harness. No route and no verb reads a value back. An app gets only the secrets its `app.json` lists, and a `run` app's environment has no provider key
+- Built-in apps: `schedule` sets timers that message the agent later, once or on a cron, across sessions and harness restarts. `message` lets one agent message another by its id. `orchestrate` lets an agent create agents of its own and read, change and stop them with the `/agents` routes under `/apps/orchestrate`; an agent it creates gets no worker and no app that it lacks itself
+- Sessions: record 1 of a state file has `via`, who made the session. A session of an agent says `agent:<id>`, and `GET /sessions?plain=1` leaves those out. `DELETE /sessions/{id}` answers 409 for an agent's live session
+- Terminal app: the session list leaves out the sessions of agents. "Sessions of agents" in /settings shows them for that run of the app
+- Local models: the new `docs/local-llms.md` says how to run a session on a model server of your own (Ollama, LM Studio, llama.cpp, vLLM). A provider with a url needs no key, and `mainplane provider <name> <shape> <url> [key]` adds a provider the catalog does not have. When a server past its context window cuts the prompt, as Ollama does, the step fails with an error that says so; before, the session went on with part of the conversation missing
+- Catalog: Gemini 4 Carbon on Google and OpenRouter
+- Releases are built with Go 1.27.4, which fixes GO-2026-6859 in net/http
+
 ## v0.5.13
 
 - Claude subscription (`claude-code`): a Claude Fable 5.2 session no longer fails for good at about 177k tokens with "Prompt is too long". Claude Code took 200k as the window of a model newer than itself and refused the prompt with no request. It is now told 1M, so the session's context limit ends a session first. The error now says that the context is past the model's window and to use /continue, without the result subtype `success`
