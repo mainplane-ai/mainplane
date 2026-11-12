@@ -466,6 +466,39 @@ func TestAgentUsage(t *testing.T) {
 	}
 }
 
+// A change of only the workers reaches a live session that is stepping: the
+// step under way keeps its workers, the next one is told of the new ones,
+// and no session is made.
+func TestWorkersMidStep(t *testing.T) {
+	r := newRig(t)
+	var second string
+	r.step = func(body string) turn {
+		if strings.Contains(body, "start") && !strings.Contains(body, "tool_result") {
+			return turn{code: "wait", input: 1000}
+		}
+		second = body
+		return turn{input: 1000}
+	}
+	a := r.create(AgentCreate{Config: r.conf(1001, 0, "w1")}, "web")
+	if _, _, err := r.h.PostAgent(context.Background(), a.ID, "web", "", []Part{{Type: "text/plain", Body: []byte("start")}}); err != nil {
+		t.Fatal(err)
+	}
+	<-r.started
+	if err := r.h.SetAgentConfig(a.ID, "phone", *r.conf(1001, 0, "w1", "away")); err != nil {
+		t.Fatal(err)
+	}
+	close(r.release)
+	r.settled(a.ID)
+	chain := r.chain(a.Sessions[0])
+	conf, _ := config(chain)
+	if got := r.sessions(a.ID); len(got) != 1 || len(conf.Workers) != 2 {
+		t.Fatalf("sessions %v, workers %v", got, conf.Workers)
+	}
+	if !strings.Contains(second, "Workers (changed)") || !strings.Contains(second, "worker away") {
+		t.Fatalf("the step after the change was not told of the workers: %s", second)
+	}
+}
+
 // midrun-limit: a session that passes its limit between tool calls hands
 // the task to the next one, whose first step finds the log on the worker.
 func TestMidRunRollover(t *testing.T) {
