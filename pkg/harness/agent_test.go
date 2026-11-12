@@ -543,19 +543,30 @@ func TestHandoffStepping(t *testing.T) {
 	}
 	<-r.started
 	close(r.release)
-	for stepped := false; !stepped; {
+	for end, stepped := time.Now().Add(10*time.Second), false; !stepped && !t.Failed(); {
 		select {
 		case <-next:
 			stepped = true
 		default:
 		}
-		if i, err := r.h.AgentInfo(a.ID); err != nil || i.Status != statefile.StatusStepping {
+		if i, err := r.h.AgentInfo(a.ID); err != nil || i.Status != statefile.StatusStepping || time.Now().After(end) {
 			t.Errorf("mid-handoff: status %s on session %s: %v", i.Status, i.CurrentSession, err)
-			break
 		}
 	}
 	close(seen)
 	r.settled(a.ID)
+	// a later run of the session before, as from a post to it, is not the agent's
+	s1 := r.h.session(a.Sessions[0])
+	r.until(func() bool { return !r.h.handing(s1.id) })
+	r.h.mu.Lock()
+	s1.running = true
+	r.h.mu.Unlock()
+	if i, err := r.h.AgentInfo(a.ID); err != nil || i.Status != statefile.StatusClosed {
+		t.Errorf("the session before runs alone: the agent's status %s: %v", i.Status, err)
+	}
+	r.h.mu.Lock()
+	s1.running = false
+	r.h.mu.Unlock()
 }
 
 // midrun-limit: a session that passes its limit between tool calls hands

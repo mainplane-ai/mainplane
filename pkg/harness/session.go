@@ -41,6 +41,7 @@ type session struct {
 	cancel   context.CancelFunc // ends the running step
 	done     chan struct{}      // closed when the runner goroutine ends
 	deleting bool               // no kick starts or continues a runner, no agent adopts the session
+	handoff  bool               // the run is handing its task to the agent's next session, until it ends
 }
 
 func (h *Harness) session(id string) *session {
@@ -340,6 +341,7 @@ func (h *Harness) Kick(ctx context.Context, id string) {
 			s.stopped = ""
 			s.mu.Unlock()
 			h.mu.Lock()
+			s.handoff = false
 			if !s.kicked || s.deleting {
 				s.running, s.cancel, s.kicked = false, nil, false
 				h.mu.Unlock()
@@ -521,18 +523,23 @@ func (h *Harness) lostJobs(ids []string) {
 
 // status is the file's word, or stepping while a runner holds the session.
 func (h *Harness) status(id string, chain []statefile.Record) statefile.Status {
-	if h.running(id) {
+	s := h.session(id)
+	h.mu.Lock()
+	running := s.running
+	h.mu.Unlock()
+	if running {
 		return statefile.StatusStepping
 	}
 	return statefile.Derive(chain)
 }
 
-// running is whether the session has a run going.
-func (h *Harness) running(id string) bool {
+// handing is whether a run of the session is handing its task to the
+// agent's next session.
+func (h *Harness) handing(id string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	s, ok := h.s[id]
-	return ok && s.running
+	return ok && s.handoff
 }
 
 // Changed is a channel closed at the session's next append.
