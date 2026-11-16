@@ -52,7 +52,7 @@ func build() (root string, assets map[string][]byte) {
 // under /web/<hash of the build>/, and hands everything else to api.
 func Handler(api http.Handler) http.Handler {
 	root, assets := build()
-	shell := `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mainplane</title>` +
+	shell := `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mainplane</title><link rel="icon" href="data:,">` +
 		`<link rel="stylesheet" href="` + root + `app.css"><script type="module" src="` + root + `app.js"></script>`
 	if assets[path.Base(script)] == nil {
 		shell = unbuilt

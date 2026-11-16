@@ -20,7 +20,7 @@ import (
 
 const (
 	// group is the catalog's list of presets this app shows as models.
-	group = "self-hosted-all"
+	group = catalog.SelfHosted
 	// defaults is the catalog's list of the model a new session takes when none
 	// is chosen and no session names one this harness serves: one per provider,
 	// its middle one, so the first answer comes quickly.
@@ -30,7 +30,7 @@ const (
 	// customLimit is the context limit of a model the catalog does not have
 	// when its provider sets none: under the 32k window docs/local-llms.md
 	// asks a local server for.
-	customLimit = 30_000
+	customLimit = catalog.CustomLimit
 )
 
 // loadCatalog gives the list the catalog kept in ~/.mainplane at once, then

@@ -138,9 +138,10 @@ async function options(cur?: Agent): Promise<{ el: HTMLElement; value: () => { c
   const [models, workers, apps] = await Promise.all([get<Model[]>("/models").catch(() => []), get<{ name: string; refused?: string }[]>("/workers"), get<{ name: string }[]>("/apps")])
   const model = h("select", null, ...models.map(m => h("option", { value: m.id }, m.name)))
   // A model the catalog does not list stays as it is until another is picked.
-  const kept = cur && !models.some(m => m.id === cur.config.preset)
+  const has = cur && (cur.config.preset ?? cur.config.model)
+  const kept = cur && !models.some(m => m.id === has)
   if (kept) model.prepend(h("option", { value: "" }, cur.config.model))
-  model.value = cur ? (kept ? "" : cur.config.preset!) : (localStorage.getItem(lastModel) ?? "")
+  model.value = cur ? (kept ? "" : has!) : (localStorage.getItem(lastModel) ?? "")
   if (model.selectedIndex < 0) model.selectedIndex = 0
   const box = (value: string, checked: boolean, disabled = false) => h("label", null, h("input", { type: "checkbox", value, checked, disabled }), " " + value)
   const ticked = (set: HTMLElement) => [...set.querySelectorAll<HTMLInputElement>("input:checked")].map(i => i.value)
@@ -152,7 +153,8 @@ async function options(cur?: Agent): Promise<{ el: HTMLElement; value: () => { c
     value: () => {
       const picked = models.find(m => m.id === model.value)
       if (!picked && !cur) throw new Error("No model is connected: add a provider to the harness first.")
-      const base = picked && picked.id !== cur?.config.preset ? picked.config : cur!.config
+      const base = picked && picked.id !== has ? picked.config : cur!.config
+      localStorage.setItem(lastModel, model.value)
       return { config: { ...base, workers: ticked(ws).map(name => ({ name })) }, apps: ticked(as) }
     },
   }
@@ -166,7 +168,6 @@ async function createForm(): Promise<HTMLElement> {
   form.onsubmit = attempt(async () => {
     const v = o.value()
     const p: Project = await (await api("/projects?via=web", { json: { name: name.value, note: note.value, ...v } })).json()
-    localStorage.setItem(lastModel, v.config.preset ?? "")
     await refresh()
     go(`/projects/${p.id}/chat`) // where the orchestrator's first reply arrives
   })

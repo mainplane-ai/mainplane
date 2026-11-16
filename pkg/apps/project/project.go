@@ -7,6 +7,7 @@ package project
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -67,8 +68,6 @@ const (
 	depth = 64
 	// catalogAge is how long a fetched catalog is used before it is fetched again.
 	catalogAge = time.Hour
-	// group is the catalog's list of the presets a harness's own user picks from.
-	group = "self-hosted-all"
 	// Sandbox is the policy a dashboard is shown under, and each file of a
 	// store served with: an origin of its own, and no network.
 	Sandbox = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:"
@@ -571,9 +570,12 @@ func (a *App) write(w http.ResponseWriter, id, name string, body []byte) error {
 	return nil
 }
 
-// presets is the catalog's presets whose provider the harness serves, in the
-// catalog's order. The catalog is fetched at most once in catalogAge; when a
-// fetch fails the one before it is used.
+// presets is the models an agent of this harness can run on: the catalog's
+// presets whose provider the harness serves, in the catalog's order, then
+// what the server of each provider the catalog does not have lists itself,
+// such as a local one. The catalog is fetched at most once in catalogAge;
+// when a fetch fails the one before it is used. A server that does not
+// answer adds nothing.
 func (a *App) presets(ctx context.Context) ([]Model, error) {
 	a.cmu.Lock()
 	defer a.cmu.Unlock()
@@ -586,10 +588,27 @@ func (a *App) presets(ctx context.Context) ([]Model, error) {
 			a.cat, a.catAt = c, time.Now()
 		}
 	}
+	served, err := a.h.ProviderInfos()
+	if err != nil {
+		return nil, err
+	}
 	out := []Model{}
-	for _, id := range a.cat.Groups[group] {
-		if p := a.cat.Presets[id]; a.h.Serves(p.Provider) {
+	for _, id := range a.cat.Groups[catalog.SelfHosted] {
+		if p := a.cat.Presets[id]; slices.ContainsFunc(served, func(s harness.ProviderInfo) bool { return s.Name == p.Provider }) {
 			out = append(out, Model{id, p.Name, statefile.Conf{Model: p.Provider + "/" + p.Model, Tools: p.Tools, ContextLimit: p.ContextLimit, Input: p.Input, Params: p.Params, Preset: id}})
+		}
+	}
+	for _, s := range served {
+		if _, known := a.cat.Providers[s.Name]; known || s.Shape != "openai-chat" {
+			continue
+		}
+		ids, err := a.h.Models(ctx, s.Name)
+		if err != nil {
+			log.Printf("project: the models of %s: %v", s.Name, err)
+		}
+		for _, id := range ids {
+			model := s.Name + "/" + id
+			out = append(out, Model{model, id, statefile.Conf{Model: model, Tools: "default", ContextLimit: cmp.Or(s.ContextLimit, catalog.CustomLimit), Input: []string{}}})
 		}
 	}
 	return out, nil

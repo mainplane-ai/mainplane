@@ -763,7 +763,10 @@ func TestProject(t *testing.T) {
 			Groups:  map[string][]string{"self-hosted-all": {"gone/m2", "fake/m1"}},
 		}, nil
 	}
-	if got := r.want(200, "full", "GET", "/models", ""); !strings.Contains(got, `"id":"fake/m1"`) || strings.Contains(got, "gone") {
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"data":[{"id":"own:1b"}]}`)) }))
+	t.Cleanup(local.Close)
+	r.h.SetProviders(map[string]provider.Provider{"fake": r.h.Providers["fake"], "local": provider.OpenAIChat(local.URL+"/v1", "")})
+	if got := r.want(200, "full", "GET", "/models", ""); !strings.Contains(got, `"id":"fake/m1"`) || strings.Contains(got, "gone") || !strings.Contains(got, `"id":"local/own:1b"`) || !strings.Contains(got, `"context_limit":30000`) {
 		t.Fatalf("models: %s", got)
 	}
 	r.want(400, "full", "POST", "/projects", `{"name":" "}`)

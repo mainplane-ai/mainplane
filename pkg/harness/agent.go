@@ -665,9 +665,3 @@ func (h *Harness) NoteAgent(id, via, source, text string) error {
 	note.Via = via
 	return h.note(h.session(a.live()), a.live(), note)
 }
-
-// Serves is whether the harness has a provider of that name now.
-func (h *Harness) Serves(provider string) bool {
-	_, ok := h.providers()[provider]
-	return ok
-}
