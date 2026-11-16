@@ -769,7 +769,7 @@ func TestProject(t *testing.T) {
 	if got := r.want(200, "full", "GET", "/models", ""); !strings.Contains(got, `"id":"fake/m1"`) || strings.Contains(got, "gone") || !strings.Contains(got, `"id":"local/own:1b"`) || !strings.Contains(got, `"context_limit":30000`) {
 		t.Fatalf("models: %s", got)
 	}
-	r.want(400, "full", "POST", "/projects", `{"name":" "}`)
+	r.want(400, "full", "POST", "/projects", `{"name":" ","config":{"model":"fake/m1","context_limit":1000,"workers":[]}}`)
 	p := r.project()
 	orch, err := r.h.Agent(p.Orchestrator)
 	if err != nil || orch.Via != "web" || orch.Name != "Kimi evals" || !slices.Equal(orch.Apps, []string{"message", "orchestrate", "project", "schedule"}) {

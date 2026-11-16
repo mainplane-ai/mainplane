@@ -16,9 +16,11 @@ addEventListener("message", e => {
   if (w) { waiting.delete(e.data.id); "error" in e.data ? w.reject(new Error(e.data.error)) : w.resolve(e.data.result) }
   if (e.data.event === "changed") show()
 })
-async function show() {
-  const files = await call("list", { prefix: "" })
-  document.getElementById("files").replaceChildren(...files.map(f => Object.assign(document.createElement("li"), { textContent: f.name + " (" + f.size + " bytes)" })))
+function show() {
+  const list = document.getElementById("files")
+  call("list", { prefix: "" }).then(
+    files => list.replaceChildren(...files.map(f => Object.assign(document.createElement("li"), { textContent: f.name + " (" + f.size + " bytes)" }))),
+    err => { list.textContent = err.message })
 }
 show()
 </script>

@@ -23,9 +23,9 @@ if (linked) {
 
 let projects: Project[] = []
 
-// refresh reads the projects and draws the list, while the page is seen.
+// refresh reads the projects and draws the list.
 async function refresh() {
-  if (!key() || document.visibilityState !== "visible") return
+  if (!key()) return
   projects = await get<Project[]>("/projects")
   side.replaceChildren(h("a", { href: "/new" }, "New project"), h("hr"))
   for (const status of statuses) {
@@ -35,7 +35,8 @@ async function refresh() {
   side.append(h("hr"), h("button", { onclick: () => logout() }, "Log out"))
   dispatchEvent(new CustomEvent("projects", { detail: projects }))
 }
-const quietly = () => void refresh().catch(() => {}) // the next one may reach the harness
+// quietly does so while the page is seen. One that fails is left: the next may reach the harness.
+const quietly = () => document.visibilityState === "visible" && void refresh().catch(() => {})
 setInterval(quietly, 5000)
 document.addEventListener("visibilitychange", quietly)
 addEventListener("acted", quietly)
@@ -69,7 +70,8 @@ async function render() {
   document.body.className = !key() ? "out" : location.pathname === "/" ? "home" : ""
   const back = h("a", { href: "/", className: "back" }, "Projects")
   try {
-    main.replaceChildren(back, ...(await content(kind, id, sub, signal)))
+    const nodes = await content(kind, id, sub, signal)
+    if (!signal.aborted) main.replaceChildren(back, ...nodes) // a slow one must not draw over the view that came after it
   } catch (err) {
     if (!signal.aborted) main.replaceChildren(back, h("p", { className: "error" }, String(err)))
   }

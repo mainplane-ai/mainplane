@@ -418,7 +418,7 @@ func (c client) web() {
 	if err != nil {
 		die(err)
 	}
-	const quiet = 2 // the white edge a reader needs
+	const quiet = 4 // the white edge a reader needs
 	for y := -quiet; y < code.Size+quiet; y += 2 {
 		fmt.Print("\x1b[30;47m")
 		for x := -quiet; x < code.Size+quiet; x++ {

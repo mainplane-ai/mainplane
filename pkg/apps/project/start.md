@@ -9,4 +9,4 @@ Set up the project, in one reply to the user:
 2. Propose which models to use for which kinds of subagent tasks.
 3. Ask what the user wants done first, unless the note already says.
 
-Once the user answers: write <folder>/AGENTS.md with your role, the user's choices, and "in every new session, read this file first". Keep it short; you read it in every session. Name its path in your reply, so your next session finds it in this one's log. Give each agent you create the path of its own instructions. Set status open with a line, and make a first dashboard.
+Once the user answers, or at once when the note left nothing to ask: write <folder>/AGENTS.md with your role, the user's choices, and "in every new session, read this file first". Keep it short; you read it in every session. Name its path in your reply, so your next session finds it in this one's log. Give each agent you create the path of its own instructions. Set status open with a line, and make a first dashboard.

@@ -76,13 +76,13 @@ func (a *api) handle(mux *http.ServeMux) {
 }
 
 func (a *api) root(w http.ResponseWriter, r *http.Request) {
-	network := starting
-	if u, _ := a.reached.Load().(string); u != "" && u == a.at() {
+	network, at := starting, a.at()
+	if u, _ := a.reached.Load().(string); u != "" && u == at {
 		network = ready
 	} else if b, err := os.ReadFile(filepath.Join(a.dir, tunnelFailed)); err == nil {
 		network = string(b)
 	}
-	reply(w, map[string]string{"version": version.V, "network": network, "url": a.at()})
+	reply(w, map[string]string{"version": version.V, "network": network, "url": at})
 }
 
 // prove marks url reached once a worker can find the harness there and get

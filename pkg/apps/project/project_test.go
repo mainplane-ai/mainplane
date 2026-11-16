@@ -10,6 +10,7 @@ import (
 
 // A store takes no write past its cap, and a file written again counts once.
 func TestStoreCap(t *testing.T) {
+	defer func(was int64) { maxStore = was }(maxStore)
 	maxStore = 10
 	a := &App{dir: t.TempDir(), projects: map[string]Project{"p": {ID: "p"}}}
 	if err := os.Mkdir(filepath.Join(a.dir, "p"), 0o755); err != nil {

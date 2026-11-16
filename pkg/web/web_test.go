@@ -33,7 +33,7 @@ func TestHandler(t *testing.T) {
 		{"POST", "/projects", []string{"Sec-Fetch-Mode", "navigate"}, false},
 	} {
 		w := get(c.method, c.path, c.header...)
-		if page := w.Header().Get("Content-Security-Policy") == policy; page != c.page || !page && w.Body.String() != "api" || !strings.Contains(w.Header().Get("Vary"), "Sec-Fetch-Mode") {
+		if page := w.Header().Get("Content-Security-Policy") == policy; page != c.page || page == (w.Body.String() == "api") || !strings.Contains(w.Header().Get("Vary"), "Sec-Fetch-Mode") {
 			t.Errorf("%s %s %v: page %v, want %v; %q", c.method, c.path, c.header, page, c.page, w.Body)
 		}
 	}

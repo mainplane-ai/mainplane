@@ -641,12 +641,13 @@ func (h *Harness) AllAgents() []Agent {
 }
 
 // Working is whether the agent steps now: a runner holds its live session,
-// or the one before it while that hands its task over. No file is read.
+// or the one before it hands its task over. A run of an earlier session for
+// a post of its own is not the agent's. No file is read.
 func (h *Harness) Working(a Agent) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, id := range a.Sessions[max(len(a.Sessions)-2, 0):] {
-		if s, ok := h.s[id]; ok && (s.running || s.handoff) {
+		if s, ok := h.s[id]; ok && (s.handoff || s.running && id == a.live()) {
 			return true
 		}
 	}

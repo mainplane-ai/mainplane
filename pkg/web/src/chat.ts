@@ -47,7 +47,7 @@ export function chat(id: string, signal: AbortSignal): HTMLElement[] {
     more.onclick = async () => {
       const part = h("div")
       draw(await records(earlier.pop()!, 0, "", signal), part)
-      more.after(part, h("hr"))
+      more.after(part) // the session after it starts with a rule of its own
       more.hidden = !earlier.length
     }
     const live = h("div")

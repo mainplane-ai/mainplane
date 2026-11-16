@@ -26,7 +26,9 @@ const (
 	script  = "dist/app.js"
 	unbuilt = "This mainplane-server was built without its web interface: run go generate ./pkg/web, then build it again.\n"
 	// policy lets the page load only what this harness serves and call only
-	// this harness. Its one frame is frame.html, which shows a dashboard.
+	// this harness. Its one frame is frame.html, which shows a dashboard, and
+	// frame-src holds for the frame's whole life: a dashboard cannot send the
+	// frame to another site, to leak what it read or to lend it the bridge.
 	policy = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 	// forever is how long a browser keeps a file whose URL has the hash of
 	// the build in it: a new build is a new URL.

@@ -404,16 +404,17 @@ func (a *App) remove(w http.ResponseWriter, r *http.Request, p Project) error {
 	if by == "" {
 		return errors.New("?via= names who is acting")
 	}
-	members := a.members()[p.ID] // found before the project goes: after, they are in none
-	if err := a.drop(p.ID); err != nil {
-		return err
-	}
 	if r.URL.Query().Get("agents") == "1" {
-		for _, g := range members {
+		// The last made first, and the project last: when one fails the rest
+		// are still found by who made them, and the delete can be asked again.
+		for _, g := range slices.Backward(a.members()[p.ID]) {
 			if err := a.h.DeleteAgent(r.Context(), g.ID, by); err != nil && !errors.Is(err, harness.ErrNoAgent) {
 				return err
 			}
 		}
+	}
+	if err := a.drop(p.ID); err != nil {
+		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil
@@ -535,7 +536,7 @@ func (a *App) write(w http.ResponseWriter, id, name string, body []byte) error {
 	root := filepath.Join(a.dir, id)
 	file := filepath.Join(root, filepath.FromSlash(name))
 	if body == nil {
-		if err := os.Remove(file); err != nil {
+		if st, err := os.Stat(file); err != nil || st.IsDir() {
 			return fmt.Errorf("%w: no file %q", fs.ErrNotExist, name)
 		}
 	} else {
@@ -558,12 +559,19 @@ func (a *App) write(w http.ResponseWriter, id, name string, body []byte) error {
 		if err := os.WriteFile(file+"~", body, 0o644); err != nil {
 			return err
 		}
-		if err := os.Rename(file+"~", file); err != nil {
-			return err
-		}
 	}
+	// The count goes up before the file changes: a write that then fails
+	// costs a reader one list, and no change is ever left uncounted.
 	p.Counter++
 	if err := a.save(p); err != nil {
+		_ = os.Remove(file + "~") // there is none when the write is a delete
+		return err
+	}
+	if body == nil {
+		if err := os.Remove(file); err != nil {
+			return err
+		}
+	} else if err := os.Rename(file+"~", file); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
