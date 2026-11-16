@@ -48,6 +48,20 @@ What this means for where you connect a worker:
   any of them can try to steer an agent. Give a worker only what you would
   give an agent that reads all of them.
 
+### The web interface
+
+- The page keeps the API key in the browser's storage for the harness's URL
+  and sends it in a header. There is no cookie, so another site cannot make
+  the browser call the harness, and the API allows no other origin.
+- The page loads no file from any other server, and its content security
+  policy allows none. Text from a model is shown as text, never as HTML.
+- A project's dashboard is HTML that agents wrote. It runs in a sandboxed
+  frame with an origin of its own and no network, so it cannot read the key
+  or call the harness. It can ask the page for four things: list and read
+  its own project's files, send a message to the project's orchestrator as
+  you, and set the project's status.
+- A login link from `mainplane web` holds the API key. Treat it as the key.
+
 ### A harness with no admin worker
 
 To keep agents off the harness machine, install the harness with
