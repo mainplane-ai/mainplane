@@ -156,7 +156,7 @@ async function options(cur?: Agent): Promise<{ el: HTMLElement; value: () => { c
       const picked = models.find(m => m.id === model.value)
       if (!picked && !cur) throw new Error("No model is connected: add a provider to the harness first.")
       const base = picked && picked.id !== has ? picked.config : cur!.config
-      localStorage.setItem(lastModel, model.value)
+      if (picked) localStorage.setItem(lastModel, picked.id)
       return { config: { ...base, workers: ticked(ws).map(name => ({ name })) }, apps: ticked(as) }
     },
   }

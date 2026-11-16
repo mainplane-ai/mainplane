@@ -123,7 +123,7 @@ func run() error {
 			return fmt.Errorf("%s: twice in source.json", id)
 		}
 		c.Presets[id] = pr
-		c.Groups["self-hosted-all"] = append(c.Groups["self-hosted-all"], id)
+		c.Groups[catalog.SelfHosted] = append(c.Groups[catalog.SelfHosted], id)
 		if s.Default {
 			if d, twice := defaults[s.Provider]; twice {
 				return fmt.Errorf("%s: a second default for %s, after %s", id, s.Provider, d)
