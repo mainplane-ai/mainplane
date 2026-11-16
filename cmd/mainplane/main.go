@@ -419,6 +419,8 @@ func usage() {
                                      the catalog gives the provider, in its config, and serves it at once
   signin     <provider>              POST /providers/{provider}/login: sign in where a provider takes no key, such as
                                      chatgpt; prints the URL to open, reads what to paste back, waits for the end
+  web                                the link that logs a browser in to the harness's web interface, and in a
+                                     terminal its QR code for a phone. The link holds the API key
 
   agents     [status]                GET  /agents
   agent      new                     POST /agents, body from stdin: {"name","config","apps"}, config as a session's

@@ -20,6 +20,9 @@ jobs:
       - uses: useblacksmith/setup-go@647ac649bd5b480f2a262e3e3e5f4d150ed452ad # v6.0.1
         with:
           go-version-file: go.mod
+      # The web interface is built before anything compiles it in, and its types are checked.
+      - run: go generate ./pkg/web
+      - run: npx -y -p typescript@7.0.2 tsc -p pkg/web
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0

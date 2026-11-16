@@ -82,7 +82,7 @@ func (a *api) root(w http.ResponseWriter, r *http.Request) {
 	} else if b, err := os.ReadFile(filepath.Join(a.dir, tunnelFailed)); err == nil {
 		network = string(b)
 	}
-	reply(w, map[string]string{"version": version.V, "network": network})
+	reply(w, map[string]string{"version": version.V, "network": network, "url": a.at()})
 }
 
 // prove marks url reached once a worker can find the harness there and get

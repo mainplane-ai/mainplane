@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -132,6 +131,30 @@ func newRig(t *testing.T) *rig {
 		routes.ServeHTTP(w, r)
 	}), routes)
 	return &rig{t, h, m, k, dir, srv.URL}
+}
+
+// project is a new project, its orchestrator's first step over.
+func (r *rig) project() project.Project {
+	r.t.Helper()
+	body, _ := json.Marshal(map[string]any{"name": "Kimi evals", "note": "compare kimi", "config": conf("w1"), "apps": []string{"message"}})
+	var p project.Project
+	if err := json.Unmarshal([]byte(r.want(200, "full", "POST", "/projects?via=web", string(body))), &p); err != nil || p.Status != project.Open || p.Line == "" {
+		r.t.Fatalf("create: %+v %v", p, err)
+	}
+	r.settled(p.Orchestrator)
+	return p
+}
+
+// under is an agent that the agent of key makes, with the apps to make more.
+func (r *rig) under(key string) harness.Agent {
+	r.t.Helper()
+	var v struct{ ID string }
+	_ = json.Unmarshal([]byte(r.want(200, key, "POST", "/apps/orchestrate/agents", `{"apps":["orchestrate","project"]}`)), &v)
+	a, err := r.h.Agent(v.ID)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return a
 }
 
 func conf(workers ...string) *harness.AgentConfig {
@@ -744,11 +767,7 @@ func TestProject(t *testing.T) {
 		t.Fatalf("models: %s", got)
 	}
 	r.want(400, "full", "POST", "/projects", `{"name":" "}`)
-	body, _ := json.Marshal(map[string]any{"name": "Kimi evals", "note": "compare kimi", "config": conf("w1"), "apps": []string{"message"}})
-	var p project.Project
-	if err := json.Unmarshal([]byte(r.want(200, "full", "POST", "/projects?via=web", string(body))), &p); err != nil || p.Status != project.Open || p.Line == "" {
-		t.Fatalf("create: %+v %v", p, err)
-	}
+	p := r.project()
 	orch, err := r.h.Agent(p.Orchestrator)
 	if err != nil || orch.Via != "web" || orch.Name != "Kimi evals" || !slices.Equal(orch.Apps, []string{"message", "orchestrate", "project", "schedule"}) {
 		t.Fatalf("orchestrator: %+v %v", orch, err)
@@ -764,17 +783,8 @@ func TestProject(t *testing.T) {
 
 	// membership: the orchestrator, an agent it made, an agent that one made; nobody else
 	okey := r.key(orch)
-	make := func(key string) harness.Agent {
-		var v struct{ ID string }
-		_ = json.Unmarshal([]byte(r.want(200, key, "POST", "/apps/orchestrate/agents", `{"apps":["orchestrate","project"]}`)), &v)
-		a, err := r.h.Agent(v.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return a
-	}
-	child := make(okey)
-	grand := make(r.key(child))
+	child := r.under(okey)
+	grand := r.under(r.key(child))
 	outsider := r.agent(conf("w1"), "project")
 	for _, a := range []harness.Agent{orch, child, grand} {
 		if got := r.want(200, r.key(a), "GET", "/apps/project/", ""); !strings.Contains(got, `"id":"`+p.ID+`"`) {
@@ -833,13 +843,27 @@ func TestProject(t *testing.T) {
 	if len(list) != 1 || list[0].Status != project.Open || list[0].Line != "results" || list[0].Working {
 		t.Fatalf("list: %+v", list)
 	}
+}
 
+// store: a project's agents write its files by name and a full key reads
+// them; a delete takes the store, and the agents only when asked.
+func TestProjectStore(t *testing.T) {
+	r := newRig(t)
+	p := r.project()
+	orchestrator := func(p project.Project) harness.Agent {
+		a, err := r.h.Agent(p.Orchestrator)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	okey := r.key(orchestrator(p))
 	// store: the starter page, then files by name
 	files := "/projects/" + p.ID + "/files/"
 	if got := r.want(200, "full", "GET", files, ""); !strings.Contains(got, `"name":"index.html"`) {
 		t.Fatalf("starter store: %s", got)
 	}
-	ckey := r.key(grand)
+	ckey := r.key(r.under(okey))
 	r.want(204, ckey, "PUT", "/apps/project/files/cards/0001.json", `{"n":1}`)
 	r.want(204, ckey, "PUT", "/apps/project/files/cards/0002.json", `{"n":2}`)
 	r.want(204, ckey, "PUT", "/apps/project/files/other.txt", "o")
@@ -879,14 +903,14 @@ func TestProject(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(r.dir, "app-data", "project", p.ID)); !os.IsNotExist(err) {
 		t.Fatalf("the store stays: %v", err)
 	}
-	if _, err := r.h.Agent(grand.ID); err != nil {
+	if _, err := r.h.Agent(p.Orchestrator); err != nil {
 		t.Fatal(err)
 	}
-	_ = json.Unmarshal([]byte(r.want(200, "full", "POST", "/projects?via=web", string(body))), &p)
-	r.settled(p.Orchestrator)
+	p = r.project()
+	r.under(r.key(orchestrator(p)))
 	r.want(204, "full", "DELETE", "/projects/"+p.ID+"?via=web&agents=1", "")
-	if _, err := r.h.Agent(p.Orchestrator); !errors.Is(err, harness.ErrNoAgent) {
-		t.Fatalf("the orchestrator stays: %v", err)
+	if all := r.h.AllAgents(); len(all) != 2 {
+		t.Fatalf("agents after a delete with its agents: %d, want the two of the first project", len(all))
 	}
 	if got := r.want(200, "full", "GET", "/projects", ""); strings.TrimSpace(got) != "[]" {
 		t.Fatalf("projects after the deletes: %s", got)

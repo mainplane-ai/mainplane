@@ -39,6 +39,7 @@ jobs:
       # .syso files: the name and version Explorer and Defender see.
       - name: build
         run: |
+          go generate ./pkg/web # the web interface, which mainplane-server embeds
           for b in mainplane mainplane-server; do
             d="Mainplane Worker"; [ $b = mainplane-server ] && d="Mainplane Server"
             (cd "cmd/$b" && go run github.com/tc-hib/go-winres@v0.3.3 simply --arch amd64,arm64 --manifest cli --product-name Mainplane \

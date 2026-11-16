@@ -1,13 +1,21 @@
 version: "3"
 
 tasks:
+  # The web interface, built into pkg/web/dist, which go build embeds. A
+  # mainplane-server built without it says so in the browser.
+  web:
+    cmds:
+      - go generate ./pkg/web
+
   lint:
     cmds:
       - golangci-lint run ./...
       - gofumpt -l .
       - go mod tidy -diff
+      - npx -y -p typescript@7.0.2 tsc -p pkg/web
 
   test:
+    deps: [web]
     cmds:
       - go test -race ./...
 
@@ -25,6 +33,7 @@ tasks:
   # like the release one: rcodesign generate-self-signed-certificate --person-name "Mainplane Dev"
   #   --algorithm ecdsa --validity-days 7300 --pem-unified-file dev-signing.pem
   build-mac:
+    deps: [web]
     platforms: [darwin/arm64]
     requires:
       vars: [MAINPLANE_DEV_PEM]

@@ -69,9 +69,9 @@ const (
 	catalogAge = time.Hour
 	// group is the catalog's list of the presets a harness's own user picks from.
 	group = "self-hosted-all"
-	// sandbox is the policy a file of a store is served with: were it ever
-	// opened as a page it gets an origin of its own and no network.
-	sandbox = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:"
+	// Sandbox is the policy a dashboard is shown under, and each file of a
+	// store served with: an origin of its own, and no network.
+	Sandbox = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:"
 	// changed is the note an orchestrator reads when someone else set its
 	// project's status. It is a system record: it wakes nobody.
 	changed = "%s set the status of project %q to %s, with the line %q. This is a note, not a message: nobody waits for an answer to it."
@@ -163,8 +163,11 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 		if err == nil {
 			err = json.Unmarshal(b, &p)
 		}
-		if err != nil || p.ID != id {
-			return nil, fmt.Errorf("project: %s: not read: %v", e.Name(), err)
+		if err == nil && p.ID != id {
+			err = fmt.Errorf("it holds project %q", p.ID)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("project: %s: %w", e.Name(), err)
 		}
 		a.projects[id] = p
 	}
@@ -476,7 +479,7 @@ func (a *App) get(w http.ResponseWriter, r *http.Request, id string) error {
 	if err != nil || st.IsDir() {
 		return fmt.Errorf("%w: no file %q", fs.ErrNotExist, name)
 	}
-	w.Header().Set("Content-Security-Policy", sandbox)
+	w.Header().Set("Content-Security-Policy", Sandbox)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "private, no-cache") // asked again each time, and answered 304 when it is the same
 	http.ServeContent(w, r, name, st.ModTime(), f)
