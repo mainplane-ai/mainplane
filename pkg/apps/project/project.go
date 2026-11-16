@@ -60,11 +60,8 @@ const (
 	index = "index.html"
 	// maxLine bounds a status line: one line of a sidebar.
 	maxLine = 100
-	// maxFile bounds one file of a store, and maxStore a project's whole
-	// store: a page and a thousand cards with a screenshot each, and no more,
-	// so the stores cannot fill the harness's disk.
-	maxFile  = 8 << 20
-	maxStore = 256 << 20
+	// maxFile bounds one file of a store, so a write is held in memory.
+	maxFile = 8 << 20
 	// depth bounds the walk from an agent up to who made it. Nothing makes a
 	// loop, since an agent is made after its maker; a file edited by hand could.
 	depth = 64
@@ -79,6 +76,11 @@ const (
 	// project's status. It is a system record: it wakes nobody.
 	changed = "%s set the status of project %q to %s, with the line %q. This is a note, not a message: nobody waits for an answer to it."
 )
+
+// maxStore bounds a project's whole store: a page and a thousand cards with
+// a screenshot each, and no more, so the stores cannot fill the harness's
+// disk. A test lowers it.
+var maxStore int64 = 256 << 20
 
 // required are the apps every orchestrator has, whatever a create asks for.
 var required = []string{"message", "orchestrate", "project", "schedule"}

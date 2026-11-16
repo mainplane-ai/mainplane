@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -17,8 +18,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/apps/project"
 	"github.com/mainplane-ai/mainplane/pkg/apps/schedule"
 	"github.com/mainplane-ai/mainplane/pkg/auth"
+	"github.com/mainplane-ai/mainplane/pkg/catalog"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
@@ -722,5 +725,170 @@ func TestReservedNames(t *testing.T) {
 	a := r.agent(conf(), "forge")
 	if got := r.want(200, r.key(a), "GET", "/apps/forge/x?own=2", ""); got != a.ID+" base=1&own=2" {
 		t.Fatalf("forwarded: %s", got)
+	}
+}
+
+// project: a create makes the orchestrator and posts its first message; an
+// agent is in the project of whoever made it; a status set by anyone but
+// the orchestrator leaves it a note and wakes nobody; the store holds files
+// for the project's agents and a full key reads them.
+func TestProject(t *testing.T) {
+	r := newRig(t)
+	r.m.project.Catalog = func(context.Context) (catalog.Catalog, error) {
+		return catalog.Catalog{
+			Presets: map[string]catalog.Preset{"fake/m1": {Name: "M1", Provider: "fake", Model: "m1", ContextLimit: 1000}, "gone/m2": {Provider: "gone", Model: "m2"}},
+			Groups:  map[string][]string{"self-hosted-all": {"gone/m2", "fake/m1"}},
+		}, nil
+	}
+	if got := r.want(200, "full", "GET", "/models", ""); !strings.Contains(got, `"id":"fake/m1"`) || strings.Contains(got, "gone") {
+		t.Fatalf("models: %s", got)
+	}
+	r.want(400, "full", "POST", "/projects", `{"name":" "}`)
+	body, _ := json.Marshal(map[string]any{"name": "Kimi evals", "note": "compare kimi", "config": conf("w1"), "apps": []string{"message"}})
+	var p project.Project
+	if err := json.Unmarshal([]byte(r.want(200, "full", "POST", "/projects?via=web", string(body))), &p); err != nil || p.Status != project.Open || p.Line == "" {
+		t.Fatalf("create: %+v %v", p, err)
+	}
+	orch, err := r.h.Agent(p.Orchestrator)
+	if err != nil || orch.Via != "web" || orch.Name != "Kimi evals" || !slices.Equal(orch.Apps, []string{"message", "orchestrate", "project", "schedule"}) {
+		t.Fatalf("orchestrator: %+v %v", orch, err)
+	}
+	r.settled(orch.ID)
+	if got := r.vias(orch.ID); !slices.Equal(got, []string{"app:project"}) {
+		t.Fatalf("orchestrator vias: %v", got)
+	}
+	chain, _ := r.h.Sessions.Load(orch.Sessions[0])
+	if i := slices.IndexFunc(chain, func(rec statefile.Record) bool { return rec.Kind == statefile.Message }); !strings.Contains(string(chain[i].Body), `"Kimi evals"`) || !strings.Contains(string(chain[i].Body), "compare kimi") || !strings.Contains(string(chain[i].Body), "fake/m1") {
+		t.Fatalf("first message: %s", chain[i].Body)
+	}
+
+	// membership: the orchestrator, an agent it made, an agent that one made; nobody else
+	okey := r.key(orch)
+	make := func(key string) harness.Agent {
+		var v struct{ ID string }
+		_ = json.Unmarshal([]byte(r.want(200, key, "POST", "/apps/orchestrate/agents", `{"apps":["orchestrate","project"]}`)), &v)
+		a, err := r.h.Agent(v.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	child := make(okey)
+	grand := make(r.key(child))
+	outsider := r.agent(conf("w1"), "project")
+	for _, a := range []harness.Agent{orch, child, grand} {
+		if got := r.want(200, r.key(a), "GET", "/apps/project/", ""); !strings.Contains(got, `"id":"`+p.ID+`"`) {
+			t.Fatalf("project of %s: %s", a.ID, got)
+		}
+	}
+	r.want(404, r.key(outsider), "GET", "/apps/project/", "")
+	r.want(404, r.key(outsider), "PUT", "/apps/project/files/x", "x")
+	var members []harness.AgentInfo
+	_ = json.Unmarshal([]byte(r.want(200, "full", "GET", "/projects/"+p.ID+"/agents", "")), &members)
+	if len(members) != 3 || members[0].ID != orch.ID || members[1].ID != child.ID || members[2].ID != grand.ID {
+		t.Fatalf("members: %+v", members)
+	}
+
+	// status: the orchestrator's own leaves no note; the user's and a subagent's leave one each, and no step follows
+	notes := func() (out []string) {
+		chain, err := r.h.Sessions.Load(orch.Sessions[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, rec := range chain {
+			if rec.Kind == statefile.System && rec.Source == "project" {
+				out = append(out, rec.Via+": "+string(rec.Body))
+			}
+		}
+		return out
+	}
+	steps := func() int {
+		chain, _ := r.h.Sessions.Load(orch.Sessions[0])
+		return len(slices.DeleteFunc(chain, func(rec statefile.Record) bool { return rec.Kind != statefile.Step }))
+	}
+	before := steps()
+	r.want(200, okey, "PUT", "/apps/project/status", `{"status":"waiting","line":"on the cert"}`)
+	if got := notes(); len(got) != 0 {
+		t.Fatalf("notes after the orchestrator's own status: %v", got)
+	}
+	r.want(400, "full", "PUT", "/projects/"+p.ID+"/status", `{"status":"closed","line":"done"}`) // no via
+	r.want(400, "full", "PUT", "/projects/"+p.ID+"/status?via=web", `{"status":"done","line":""}`)
+	r.want(400, "full", "PUT", "/projects/"+p.ID+"/status?via=web", `{"status":"open","line":"`+strings.Repeat("x", 101)+`"}`)
+	r.want(404, "full", "PUT", "/projects/00000000/status?via=web", `{"status":"open","line":""}`)
+	r.want(200, "full", "PUT", "/projects/"+p.ID+"/status?via=web", `{"status":"closed","line":"done"}`)
+	r.want(200, r.key(child), "PUT", "/apps/project/status", `{"status":"open","line":"results"}`)
+	got := notes()
+	if len(got) != 2 || !strings.HasPrefix(got[0], "web: The user set") || !strings.Contains(got[0], "closed") || !strings.HasPrefix(got[1], "agent:"+child.ID+": Agent "+child.ID) {
+		t.Fatalf("notes: %v", got)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if i, _ := r.h.AgentInfo(orch.ID); steps() != before || i.Status != statefile.StatusClosed {
+		t.Fatalf("a note woke the orchestrator: %d steps, were %d, status %s", steps(), before, i.Status)
+	}
+	var list []struct {
+		project.Project
+		Working bool
+	}
+	_ = json.Unmarshal([]byte(r.want(200, "full", "GET", "/projects", "")), &list)
+	if len(list) != 1 || list[0].Status != project.Open || list[0].Line != "results" || list[0].Working {
+		t.Fatalf("list: %+v", list)
+	}
+
+	// store: the starter page, then files by name
+	files := "/projects/" + p.ID + "/files/"
+	if got := r.want(200, "full", "GET", files, ""); !strings.Contains(got, `"name":"index.html"`) {
+		t.Fatalf("starter store: %s", got)
+	}
+	ckey := r.key(grand)
+	r.want(204, ckey, "PUT", "/apps/project/files/cards/0001.json", `{"n":1}`)
+	r.want(204, ckey, "PUT", "/apps/project/files/cards/0002.json", `{"n":2}`)
+	r.want(204, ckey, "PUT", "/apps/project/files/other.txt", "o")
+	for _, bad := range []string{"a b", "x.json~", "x/", "a:b"} {
+		r.want(400, ckey, "PUT", "/apps/project/files/"+strings.ReplaceAll(bad, " ", "%20"), "x")
+	}
+	var listed []project.File
+	_ = json.Unmarshal([]byte(r.want(200, ckey, "GET", "/apps/project/files/?prefix=cards/", "")), &listed)
+	if len(listed) != 2 || listed[0].Name != "cards/0001.json" || listed[1].Size != 7 {
+		t.Fatalf("list by prefix: %+v", listed)
+	}
+	if got := r.want(200, okey, "GET", "/apps/project/files/cards/0002.json", ""); got != `{"n":2}` {
+		t.Fatalf("read: %s", got)
+	}
+	req, _ := http.NewRequest("GET", r.url+files+"index.html", nil)
+	req.Header.Set("Authorization", "Bearer full")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if csp := resp.Header.Get("Content-Security-Policy"); resp.StatusCode != 200 || !strings.HasPrefix(csp, "sandbox allow-scripts; default-src 'none'") {
+		t.Fatalf("page: %d, policy %q", resp.StatusCode, csp)
+	}
+	r.want(204, ckey, "DELETE", "/apps/project/files/cards/0001.json", "")
+	r.want(404, ckey, "DELETE", "/apps/project/files/cards/0001.json", "")
+	r.want(404, "full", "GET", files+"cards/0001.json", "")
+	_ = json.Unmarshal([]byte(r.want(200, okey, "GET", "/apps/project/", "")), &p)
+	if p.Counter != 4 {
+		t.Fatalf("counter: %d, want 4 writes", p.Counter)
+	}
+
+	// delete: without ?agents=1 the agents stay and are in no project; with it they go
+	r.want(400, "full", "DELETE", "/projects/"+p.ID, "")
+	r.want(204, "full", "DELETE", "/projects/"+p.ID+"?via=web", "")
+	r.want(404, okey, "GET", "/apps/project/", "")
+	if _, err := os.Stat(filepath.Join(r.dir, "app-data", "project", p.ID)); !os.IsNotExist(err) {
+		t.Fatalf("the store stays: %v", err)
+	}
+	if _, err := r.h.Agent(grand.ID); err != nil {
+		t.Fatal(err)
+	}
+	_ = json.Unmarshal([]byte(r.want(200, "full", "POST", "/projects?via=web", string(body))), &p)
+	r.settled(p.Orchestrator)
+	r.want(204, "full", "DELETE", "/projects/"+p.ID+"?via=web&agents=1", "")
+	if _, err := r.h.Agent(p.Orchestrator); !errors.Is(err, harness.ErrNoAgent) {
+		t.Fatalf("the orchestrator stays: %v", err)
+	}
+	if got := r.want(200, "full", "GET", "/projects", ""); strings.TrimSpace(got) != "[]" {
+		t.Fatalf("projects after the deletes: %s", got)
 	}
 }
