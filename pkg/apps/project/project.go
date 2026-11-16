@@ -388,15 +388,19 @@ func (a *App) create(w http.ResponseWriter, r *http.Request) error {
 	return reply(w, p)
 }
 
-// drop removes the project's file and its store.
+// drop removes the project's store, then its file, then the project: one
+// that could not all be removed is still there to remove again.
 func (a *App) drop(id string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	delete(a.projects, id)
+	if err := os.RemoveAll(filepath.Join(a.dir, id)); err != nil {
+		return err
+	}
 	if err := os.Remove(filepath.Join(a.dir, id+".json")); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	return os.RemoveAll(filepath.Join(a.dir, id))
+	delete(a.projects, id)
+	return nil
 }
 
 func (a *App) remove(w http.ResponseWriter, r *http.Request, p Project) error {
@@ -407,9 +411,13 @@ func (a *App) remove(w http.ResponseWriter, r *http.Request, p Project) error {
 	if r.URL.Query().Get("agents") == "1" {
 		// The last made first, and the project last: when one fails the rest
 		// are still found by who made them, and the delete can be asked again.
-		for _, g := range slices.Backward(a.members()[p.ID]) {
-			if err := a.h.DeleteAgent(r.Context(), g.ID, by); err != nil && !errors.Is(err, harness.ErrNoAgent) {
-				return err
+		// Then again, for the agents the orchestrator made meanwhile, until
+		// there are none: a deleted agent makes no more.
+		for members := a.members()[p.ID]; len(members) > 0; members = a.members()[p.ID] {
+			for _, g := range slices.Backward(members) {
+				if err := a.h.DeleteAgent(r.Context(), g.ID, by); err != nil && !errors.Is(err, harness.ErrNoAgent) {
+					return err
+				}
 			}
 		}
 	}
