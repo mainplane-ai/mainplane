@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -630,4 +631,43 @@ func (h *Harness) handoff(ctx context.Context, s *session, why string) (statefil
 		return "", err
 	}
 	return statefile.StatusFailed, nil
+}
+
+// AllAgents is every agent as its file has it now. No session is read.
+func (h *Harness) AllAgents() []Agent {
+	h.lockAgents()
+	defer h.amu.Unlock()
+	return slices.Collect(maps.Values(h.agents))
+}
+
+// Working is whether the agent steps now: a runner holds its live session,
+// or the one before it while that hands its task over. No file is read.
+func (h *Harness) Working(a Agent) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, id := range a.Sessions[max(len(a.Sessions)-2, 0):] {
+		if s, ok := h.s[id]; ok && (s.running || s.handoff) {
+			return true
+		}
+	}
+	return false
+}
+
+// NoteAgent appends a system record to the agent's live session, from via.
+// It wakes nobody: the model reads it at the session's next step.
+func (h *Harness) NoteAgent(id, via, source, text string) error {
+	a, unlock, err := h.holdAgent(id)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	note := system(source, text)
+	note.Via = via
+	return h.note(h.session(a.live()), a.live(), note)
+}
+
+// Serves is whether the harness has a provider of that name now.
+func (h *Harness) Serves(provider string) bool {
+	_, ok := h.providers()[provider]
+	return ok
 }

@@ -2,7 +2,7 @@
 // with its session's key. An app is a folder with skill.md, the instructions
 // an agent reads, and maybe app.json, which names the service behind it: a
 // URL the harness proxies to with the app's secrets, or a process the
-// harness runs. Three apps are compiled in. Secrets stay on the harness.
+// harness runs. Four apps are compiled in. Secrets stay on the harness.
 package apps
 
 import (
@@ -26,6 +26,7 @@ import (
 
 	"github.com/mainplane-ai/mainplane/pkg/apps/message"
 	"github.com/mainplane-ai/mainplane/pkg/apps/orchestrate"
+	"github.com/mainplane-ai/mainplane/pkg/apps/project"
 	"github.com/mainplane-ai/mainplane/pkg/apps/schedule"
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
@@ -107,6 +108,7 @@ type Manager struct {
 	ctx context.Context
 
 	builtin map[string]app
+	project *project.App // its routes for a full key are added with the manager's
 
 	mu         sync.Mutex // daemons, stopped, and the secrets file
 	daemons    map[string]*daemon
@@ -132,6 +134,10 @@ func New(ctx context.Context, h *harness.Harness, dir string, k ed25519.PrivateK
 	if err != nil {
 		return nil, err
 	}
+	if m.project, err = project.New(ctx, h, m.data("project")); err != nil {
+		return nil, err
+	}
+	m.builtin["project"] = app{name: "project", skill: project.Skill, handler: m.project}
 	m.builtin["schedule"] = app{name: "schedule", skill: schedule.Skill, handler: sched}
 	m.builtin["message"] = app{name: "message", skill: message.Skill, handler: message.New(ctx, h)}
 	m.builtin["orchestrate"] = app{name: "orchestrate", skill: orchestrate.Skill, handler: orch}
@@ -325,7 +331,10 @@ func missing(s Spec, secrets map[string]string) []string {
 //	PUT    /secrets/{name}       the value as the body; starts the   -> 204
 //	                             apps that waited for it
 //	DELETE /secrets/{name}       -> 204
+//
+// and the project app's own, which project.App.Routes lists.
 func (m *Manager) Routes(mux *http.ServeMux) {
+	m.project.Routes(mux)
 	mux.HandleFunc("GET /skills", func(w http.ResponseWriter, r *http.Request) { m.skills(w, m.names()) })
 	mux.HandleFunc("GET /skills/{app}", func(w http.ResponseWriter, r *http.Request) { m.skill(w, r.PathValue("app")) })
 	mux.HandleFunc("GET /apps", func(w http.ResponseWriter, r *http.Request) {
