@@ -17,6 +17,7 @@ iframe { flex: 1; min-height: 0; border: 1px solid #ccc }
 .composer { display: flex }
 .composer textarea { flex: 1 }
 label { display: block }
+label textarea { display: block; box-sizing: border-box; width: 100% }
 .back, body.out nav { display: none }
 @media (max-width: 700px) {
   nav { width: 100% }

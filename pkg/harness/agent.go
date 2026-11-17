@@ -490,9 +490,6 @@ func (h *Harness) SetAgentInstructions(id, via, text string) error {
 		return err
 	}
 	defer unlock()
-	if a.Instructions == text {
-		return nil // a form saved as it was tells the session nothing
-	}
 	a.Instructions = text
 	if err := h.save(a); err != nil || via == AgentVia+id {
 		return err

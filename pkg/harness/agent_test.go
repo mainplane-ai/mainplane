@@ -346,7 +346,6 @@ func TestInstructions(t *testing.T) {
 		}
 	}
 	set("web", "You review PRs of repo X.")
-	set("web", "You review PRs of repo X.") // saved as it was: no second note
 	set("agent:"+a.ID, "I review PRs of repo X and Y.")
 	chain := r.chain(s1)
 	if got := told(s1); len(got) != 2 || got[1] != instructionsHead+"You review PRs of repo X." || chain[len(chain)-1].Via != "web" || r.steps != 0 {
