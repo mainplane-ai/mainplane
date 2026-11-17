@@ -29,6 +29,12 @@ import (
 //go:embed skill.md
 var Skill string
 
+// coldLimit is the cold_limit of an agent made with none. Such an agent
+// waits long between messages, past any prompt cache: beyond this much
+// context a new session, which reads the old one's log for what it needs,
+// costs less than the old one sent again in full.
+const coldLimit = 100_000
+
 // stopped is what a watching agent is told, once.
 const stopped = "Agent %s%s, which you created, stopped: its session %s is %s."
 
@@ -61,7 +67,8 @@ var errEscalate = errors.New("an agent you create may use only workers and apps 
 //
 //	POST   /agents                      AgentCreate body, no "session"; and        -> {"id","session"}
 //	                                    "message", "notify_on_stop". With no
-//	                                    "config" the agent gets the caller's
+//	                                    "config" the agent gets the caller's,
+//	                                    with no "cold_limit" 100000
 //	GET    /agents                      ?status= ?limit= ?after=<id>               -> [AgentInfo]
 //	GET    /agents/{id}                 -> AgentInfo
 //	GET    /agents/{id}/records         ?session=, else the live one; then as      -> records
@@ -228,7 +235,8 @@ func peek(r *http.Request, v any) error {
 }
 
 // create makes an agent of the caller's: with no config it gets the
-// caller's. It adopts no session: the caller's key reaches none.
+// caller's, and with no cold limit coldLimit. It adopts no session: the
+// caller's key reaches none.
 func (o *App) create(w http.ResponseWriter, r *http.Request, caller harness.Agent) error {
 	var c create
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
@@ -239,6 +247,9 @@ func (o *App) create(w http.ResponseWriter, r *http.Request, caller harness.Agen
 	}
 	if c.Config == nil {
 		c.Config = &caller.Config
+	}
+	if c.Config.ColdLimit == 0 {
+		c.Config.ColdLimit = coldLimit
 	}
 	if err := within(caller, c.Config, c.Apps); err != nil {
 		return err

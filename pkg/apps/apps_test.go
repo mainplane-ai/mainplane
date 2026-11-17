@@ -148,6 +148,7 @@ func (r *rig) project() project.Project {
 // under is an agent that the agent of key makes, with the apps to make more.
 func (r *rig) under(key string) harness.Agent {
 	r.t.Helper()
+	time.Sleep(2 * time.Millisecond) // an agent's time is to the millisecond, and a project lists its agents oldest first
 	var v struct{ ID string }
 	_ = json.Unmarshal([]byte(r.want(200, key, "POST", "/apps/orchestrate/agents", `{"apps":["orchestrate","project"]}`)), &v)
 	a, err := r.h.Agent(v.ID)
@@ -460,7 +461,7 @@ func TestOrchestrateAndMessage(t *testing.T) {
 	}
 	c := create(`{"name":"child","apps":["message"],"instructions":"You fix PR 88.","message":"the task"}`)
 	child, err := r.h.Agent(c)
-	if err != nil || child.Via != "agent:"+a.ID || !slices.Equal(child.Apps, []string{"message"}) || child.Config.Workers[0].Name != "w1" || child.Instructions != "You fix PR 88." {
+	if err != nil || child.Via != "agent:"+a.ID || !slices.Equal(child.Apps, []string{"message"}) || child.Config.Workers[0].Name != "w1" || child.Instructions != "You fix PR 88." || child.Config.ColdLimit != 100_000 {
 		t.Fatalf("child: %+v %v", child, err)
 	}
 	r.settled(c)
@@ -489,7 +490,14 @@ func TestOrchestrateAndMessage(t *testing.T) {
 		t.Fatalf("other vias after keyed posts: %v", got)
 	}
 
-	n := create(`{"notify_on_stop":true,"message":"task two"}`)
+	cold := conf("w1")
+	cold.ColdLimit = 900_000
+	own, _ := json.Marshal(cold)
+	n := create(`{"notify_on_stop":true,"message":"task two","config":` + string(own) + `}`)
+	made, _ := r.h.Agent(n)
+	if caller, _ := r.h.Agent(a.ID); made.Config.ColdLimit != 900_000 || caller.Config.ColdLimit != 0 { // a limit asked for stays, and the default is not written into the caller
+		t.Fatalf("cold limits: the child's %d, the caller's %d", made.Config.ColdLimit, caller.Config.ColdLimit)
+	}
 	r.until(func() bool { return slices.Contains(r.vias(a.ID), "app:orchestrate") })
 	r.settled(a.ID)
 	r.want(204, key, "POST", "/apps/message", `{"to":"`+n+`","text":"more"}`)

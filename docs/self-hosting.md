@@ -483,7 +483,8 @@ Four apps are built in:
 - `orchestrate`: an agent creates agents of its own, reads them and stops
   them, with the `/agents` routes under `/apps/orchestrate`, which show it
   only those agents. An agent it creates gets no worker and no app that it
-  lacks itself. Of itself it can change only its instructions.
+  lacks itself, and `cold_limit` 100000 unless its config sets one. Of itself
+  it can change only its instructions.
 - `project`: the project an agent is in: its status and line, and the files
   of its dashboard ([web interface and projects](#web-interface-and-projects)).
 
