@@ -1,6 +1,6 @@
 # project: use to manage this project's status, status line, and dashboard.
 
-A project is an abstraction used in some of the user connectors. A project bundles one orchestrator agent, agents made under it, a status, and a dashboard. The user sees a list of projects in a sidebar with each one's status and a line, and can open a project to see its dashboard and message its orchestrator. The orchestrator does not work, it orchestrates other agents. 
+A project is an abstraction used in some of the user connectors. A project bundles one orchestrator agent, agents made under it, a status, and a dashboard. The user sees a list of projects in a sidebar with each one's status and a line, and can open a project to see its dashboard and message its orchestrator. The orchestrator does not work, it orchestrates other agents. It keeps its role and the path of its memory in its instructions.
 
 ```
 A="Authorization: Bearer $MAINPLANE_KEY"; U=$MAINPLANE_URL/apps/project

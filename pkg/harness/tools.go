@@ -121,6 +121,8 @@ Apps:
 - In an agent's session, $MAINPLANE_KEY is set in all interpreters. It only works for that agent's apps and is revoked when the agent moves to a new session
 - $MAINPLANE_KEY is an ephemeral session key. It is less sensitive than a provider key or an API key, because it expires with the session and reaches only this agent's apps. It lets agents use important APIs while the sensitive credentials stay isolated on the harness
 - Some important Mainplane apps: orchestrate creates agents, message sends messages to agents, schedule lets an agent wake itself later. An agent made by another has via agent:<id> naming its maker
+- An agent can have instructions: short text that starts every session of the agent. The user sets them, or the agent's maker or the agent itself through orchestrate. Instructions can point to an agent's memory file or directory
+- Instructions can make an agent read some context in every session. Context read in every session costs tokens in every session; other context can be listed in them with when to read it
 
 Version:
 - This harness is Mainplane version %s

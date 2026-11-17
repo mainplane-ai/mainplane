@@ -1,6 +1,6 @@
 # schedule: use to set timers that message yourself later, once or on a cron.
 
-A timer posts `[timer <id>] <text>` to you as a user message `via app:schedule`. It is addressed to the agent, not the session: it survives harness restarts and reaches whichever session is currently live.
+A timer posts `[timer <id>] <text>` to you as a user message `via app:schedule`. It is addressed to the agent, not the session: it survives harness restarts and reaches whichever session is currently live. Thus a timer may land in a session of the agent that does not remember setting it.
 
 ```
 A="Authorization: Bearer $MAINPLANE_KEY"
