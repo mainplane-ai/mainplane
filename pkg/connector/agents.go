@@ -87,6 +87,12 @@ func (c *Client) SetAgentConfig(ctx context.Context, id, via string, conf harnes
 	return c.put(ctx, "/agents/"+id+"/config?via="+url.QueryEscape(via), conf)
 }
 
+// SetAgentInstructions is the text every session of the agent starts with;
+// empty removes it.
+func (c *Client) SetAgentInstructions(ctx context.Context, id, via, text string) error {
+	return c.Call(ctx, "PUT", "/agents/"+id+"/instructions?via="+url.QueryEscape(via), "text/plain; charset=utf-8", strings.NewReader(text), nil)
+}
+
 // SetAgentApps makes names the apps the agent may call.
 func (c *Client) SetAgentApps(ctx context.Context, id, via string, names []string) error {
 	return c.put(ctx, "/agents/"+id+"/apps?via="+url.QueryEscape(via), names)

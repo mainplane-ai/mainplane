@@ -448,13 +448,24 @@ mainplane agent message <id> "watch the deploy and tell me when it is done"
 mainplane agents
 ```
 
-`mainplane agent` has `info`, `retry`, `stop`, `delete`, `name`, `config` and
-`apps` too; each is one `/agents` route, listed in `pkg/harness/http.go`. A
-change of config makes no session: the next message does. A change of only
-the workers or the apps reaches the live session in place. An agent's
-`usage` is the token count of all its sessions together, less any session
-deleted since; `status`, `context_used` and `updated` are its live
-session's.
+`mainplane agent` has `info`, `retry`, `stop`, `delete`, `name`, `config`,
+`apps` and `instructions` too; each is one `/agents` route, listed in
+`pkg/harness/http.go`. A change of config makes no session: the next message
+does. A change of only the workers or the apps reaches the live session in
+place. An agent's `usage` is the token count of all its sessions together,
+less any session deleted since; `status`, `context_used` and `updated` are
+its live session's.
+
+An agent's `instructions` are text of at most 4 KiB that every session of the
+agent starts with: its role, and what it must know wherever it works. They
+are not config, so a change makes no session; the live session reads the new
+text at its next step and is not woken.
+
+```
+mainplane agent instructions <id> < instructions.txt
+```
+
+The agent can also write its own, with the `orchestrate` app.
 
 An app is something an agent can call. Every interpreter and job on a worker
 has `MAINPLANE_URL`, the harness on the mesh, and `MAINPLANE_KEY`, a key for
@@ -464,7 +475,7 @@ and it stops working when the agent moves to a new session or loses the app.
 On a worker, `mainplane skill` lists the agent's apps, `mainplane skill <app>`
 prints how to use one, and `mainplane app <app> <method> <path> [body]` calls it.
 
-Three apps are built in:
+Four apps are built in:
 
 - `schedule`: timers, once or on a cron, that message the agent later. They
   outlive sessions and harness restarts.
@@ -472,7 +483,10 @@ Three apps are built in:
 - `orchestrate`: an agent creates agents of its own, reads them and stops
   them, with the `/agents` routes under `/apps/orchestrate`, which show it
   only those agents. An agent it creates gets no worker and no app that it
-  lacks itself.
+  lacks itself, and `cold_limit` 100000 unless its config sets one. Of itself
+  it can change only its instructions.
+- `project`: the project an agent is in: its status and line, and the files
+  of its dashboard ([web interface and projects](#web-interface-and-projects)).
 
 More apps are folders in `apps/` beside the config. `skill.md` is what an
 agent reads; its first line is `# <name>: <what it does>`. `app.json` is
@@ -509,6 +523,61 @@ optional:
   reads the value from stdin; `mainplane secrets` lists the names;
   `mainplane apps` shows each app's status and the secrets it waits for;
   `mainplane app start <name>` runs an app added while the harness was up.
+
+## Web interface and projects
+
+```
+ browser --navigation--> the page, at any path          key in localStorage, sent as a header
+         --fetch-------> the API, same URLs             no cookie, no CORS
+            page --postMessage--> dashboard frame       sandboxed: own origin, no network, no key
+```
+
+The harness serves a web interface at its own URL. Open the URL in a
+browser and enter an API key, or run `mainplane web` on a machine whose CLI
+is logged in: it prints a link that logs the browser in, and in a terminal
+the link's QR code for a phone. The link holds the API key after a `#`, which
+a browser sends to no server; the page saves the key and takes it out of the
+address bar. Whoever has the link controls the harness.
+
+A browser's navigation gets the page at every path. Every other request gets
+the API as before, so workers, the CLI and scripts see no change. The page's
+files are embedded in `mainplane-server` and served under `/web/<hash>/`. It
+loads nothing from any other server.
+
+The interface lists projects. A project is a name, one orchestrator agent,
+the agents made under it (by the `via` chain, `agent:<id>`), a status with a
+one-line note, and a dashboard. Creating one is one call:
+
+```
+POST /projects?via=<who>   {"name","note","config","apps"}
+```
+
+It creates the orchestrator from `config` with `apps` plus `message`,
+`orchestrate`, `project` and `schedule`, saves the project as `open`, copies a
+starter dashboard into its store, and posts the orchestrator its first
+message, `via app:project`, which tells it its role. The user starts by
+answering the orchestrator's reply. The other routes are listed in
+`pkg/apps/project/project.go`.
+
+- Status is `open` (you should look), `waiting` (on something outside) or
+  `closed` (nothing needs you), each with a line of at most 100 characters.
+  The orchestrator sets it with the `project` app. When you or another agent
+  set it, the orchestrator gets a system note that it reads at its next step.
+  The note does not wake it.
+- The dashboard is a store of files in `app-data/project/<id>/` beside the
+  config: `index.html` and whatever data it reads, at most 8 MiB a file and
+  256 MiB a project. Any agent of the project writes it through the `project`
+  app. The interface shows `index.html` in a sandboxed frame with an origin
+  of its own and no network. The page asks the interface for what it needs
+  by `postMessage`: list and read the store's files, message the
+  orchestrator, set the status. `mainplane skill project` on a worker prints
+  the calls.
+- Deleting a project removes its record and its store. `?agents=1` deletes
+  its agents too.
+
+To build from source, run `go generate ./pkg/web` before `go build`: it
+bundles the interface with esbuild, which `go run` fetches. A
+`mainplane-server` built without it serves a page that says so.
 
 ## What Cloudflare can read
 

@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
@@ -22,18 +24,24 @@ import (
 // of each of its sessions, and what it posts or makes through an app.
 const AgentVia = "agent:"
 
+// MaxInstructions is the most bytes of instructions an agent holds: every
+// session of the agent reads them whole, so they are a cost each one pays.
+const MaxInstructions = 4 << 10
+
 // Agent is agents/<id>.json: an identity that outlives a session. It holds
-// the config of its next session, the apps it may use, and every session it
-// has had, oldest first. The last one is live: the one a post lands on, and
-// the only one whose key reaches the agent's apps. There is always one.
+// the config of its next session, the apps it may use, the instructions
+// every session of it starts with, and every session it has had, oldest
+// first. The last one is live: the one a post lands on, and the only one
+// whose key reaches the agent's apps. There is always one.
 type Agent struct {
-	ID       string      `json:"id"`
-	Name     string      `json:"name,omitempty"`
-	Via      string      `json:"via,omitempty"` // who made it: a connector, or agent:<id> for one an agent created
-	Created  time.Time   `json:"created"`
-	Config   AgentConfig `json:"config"`
-	Apps     []string    `json:"apps"`
-	Sessions []string    `json:"sessions"`
+	ID           string      `json:"id"`
+	Name         string      `json:"name,omitempty"`
+	Via          string      `json:"via,omitempty"` // who made it: a connector, or agent:<id> for one an agent created
+	Created      time.Time   `json:"created"`
+	Config       AgentConfig `json:"config"`
+	Apps         []string    `json:"apps"`
+	Instructions string      `json:"instructions,omitempty"`
+	Sessions     []string    `json:"sessions"`
 }
 
 // AgentConfig is a session's config and the limit that is the agent's alone.
@@ -61,10 +69,11 @@ type AgentInfo struct {
 // session, and takes its config when it names none; without, Config is
 // required and the first session is made from it.
 type AgentCreate struct {
-	Name    string       `json:"name,omitempty"`
-	Config  *AgentConfig `json:"config,omitempty"`
-	Apps    []string     `json:"apps,omitempty"`
-	Session string       `json:"session,omitempty"`
+	Name         string       `json:"name,omitempty"`
+	Config       *AgentConfig `json:"config,omitempty"`
+	Apps         []string     `json:"apps,omitempty"`
+	Instructions string       `json:"instructions,omitempty"`
+	Session      string       `json:"session,omitempty"`
 }
 
 // ErrNoAgent is an agent id no file has. ErrLive is a delete of the session
@@ -80,8 +89,12 @@ var (
 const (
 	continued = "This session continues agent %s from session %s, which ended: %s. The whole of that session is in <scratch>/logs/%s.log on every worker: search it with rg for what you need, do not read it whole. The agent's sessions, oldest first: %s"
 	carry     = "Session %s hit its limit mid-task (%s). Retrieve what you were doing from <scratch>/logs/%s.log and continue."
-	appsHead  = "You are agent %s. Apps are services on the harness that this agent may call from any worker:\n  curl -H \"Authorization: Bearer $MAINPLANE_KEY\" $MAINPLANE_URL/apps/<app>/...\nRead an app's skill before its first use: GET $MAINPLANE_URL/skills/<app>, or mainplane skill <app>. The key works only while this is the agent's live session.\nApps:\n"
+	appsHead  = "You are agent %s. Apps are services on the harness that this agent may call from any worker:\n  curl -H \"Authorization: Bearer $MAINPLANE_KEY\" $MAINPLANE_URL/apps/<app>/...\nEvery app has a skill file meant to be read before its first use: GET $MAINPLANE_URL/skills/<app>, or mainplane skill <app>. The key works only while this is the agent's live session.\nApps:\n"
 )
+
+// instructionsHead begins the instructions record: the model reads a system
+// record's body and nothing of its header, so the body says what it is.
+const instructionsHead = "This agent's instructions:\n"
 
 func (a Agent) live() string { return a.Sessions[len(a.Sessions)-1] }
 
@@ -213,18 +226,44 @@ func (h *Harness) apps(a Agent) (string, error) {
 	return b.String(), nil
 }
 
+// opening is the system records every session of an agent starts with, and
+// one it adopts gets: its apps, then its instructions if it has any.
+func (h *Harness) opening(a Agent) ([]statefile.Record, error) {
+	apps, err := h.apps(a)
+	if err != nil {
+		return nil, err
+	}
+	recs := []statefile.Record{system("apps", apps)}
+	if a.Instructions != "" {
+		recs = append(recs, system("instructions", instructionsHead+a.Instructions))
+	}
+	return recs, nil
+}
+
+// checkInstructions refuses text an agent cannot hold. Nothing is cut to
+// fit: the writer is told, and shortens it knowing what it drops.
+func checkInstructions(text string) error {
+	if len(text) > MaxInstructions || !utf8.ValidString(text) {
+		return fmt.Errorf("instructions are at most %d bytes of UTF-8: these are %d", MaxInstructions, len(text))
+	}
+	return nil
+}
+
 // CreateAgent is POST /agents. The agent has a session from the start: one
 // made from its config, which calls no model until a message comes, or the
 // one it adopts. A session has one agent at most.
 func (h *Harness) CreateAgent(ctx context.Context, c AgentCreate, via string) (Agent, error) {
-	a := Agent{ID: statefile.NewID(), Name: c.Name, Via: via, Created: time.Now().UTC().Truncate(time.Millisecond), Apps: slices.Compact(slices.Sorted(slices.Values(c.Apps)))}
+	a := Agent{ID: statefile.NewID(), Name: c.Name, Via: via, Created: time.Now().UTC().Truncate(time.Millisecond), Apps: slices.Compact(slices.Sorted(slices.Values(c.Apps))), Instructions: c.Instructions}
 	if a.Apps == nil {
 		a.Apps = []string{}
 	}
 	if err := checkName(a.Name); err != nil {
 		return a, err
 	}
-	note, err := h.apps(a)
+	if err := checkInstructions(a.Instructions); err != nil {
+		return a, err
+	}
+	opening, err := h.opening(a)
 	if err != nil {
 		return a, err
 	}
@@ -276,7 +315,7 @@ func (h *Harness) CreateAgent(ctx context.Context, c AgentCreate, via string) (A
 	}
 	h.agents[a.ID], h.live[c.Session] = a, a.ID
 	h.amu.Unlock()
-	if err = h.note(s, c.Session, system("apps", note)); err == nil {
+	if err = h.note(s, c.Session, opening...); err == nil {
 		err = h.save(a)
 	}
 	if err != nil {
@@ -288,10 +327,10 @@ func (h *Harness) CreateAgent(ctx context.Context, c AgentCreate, via string) (A
 	return a, err
 }
 
-// next makes session id for the agent from its config, with the apps record
+// next makes session id for the agent from its config, with the records
 // every session of an agent starts with. It does not step.
 func (h *Harness) next(ctx context.Context, a Agent, id string) (string, error) {
-	note, err := h.apps(a)
+	opening, err := h.opening(a)
 	if err != nil {
 		return "", err
 	}
@@ -299,7 +338,7 @@ func (h *Harness) next(ctx context.Context, a Agent, id string) (string, error) 
 	if err := h.create(ctx, id, Create{Model: c.Model, ContextLimit: c.ContextLimit, Workers: c.Workers, Tools: c.Tools, Input: c.Input, Params: c.Params, Preset: c.Preset}, AgentVia+a.ID); err != nil {
 		return "", err
 	}
-	return id, h.note(h.session(id), id, system("apps", note))
+	return id, h.note(h.session(id), id, opening...)
 }
 
 // AgentInfo is GET /agents/{id}.
@@ -434,6 +473,28 @@ func (h *Harness) SetAgentApps(id, via string, apps []string) error {
 		return err
 	}
 	note := system("apps", text)
+	note.Via = via
+	return h.note(h.session(a.live()), a.live(), note)
+}
+
+// SetAgentInstructions is PUT /agents/{id}/instructions. Empty removes them.
+// Like the apps they are not config: a change makes no new session. The live
+// session reads the new text as a system record at its next step, unless the
+// agent made the change itself and so knows it.
+func (h *Harness) SetAgentInstructions(id, via, text string) error {
+	if err := checkInstructions(text); err != nil {
+		return err
+	}
+	a, unlock, err := h.holdAgent(id)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	a.Instructions = text
+	if err := h.save(a); err != nil || via == AgentVia+id {
+		return err
+	}
+	note := system("instructions", instructionsHead+cmp.Or(text, "none"))
 	note.Via = via
 	return h.note(h.session(a.live()), a.live(), note)
 }
@@ -630,4 +691,38 @@ func (h *Harness) handoff(ctx context.Context, s *session, why string) (statefil
 		return "", err
 	}
 	return statefile.StatusFailed, nil
+}
+
+// AllAgents is every agent as its file has it now. No session is read.
+func (h *Harness) AllAgents() []Agent {
+	h.lockAgents()
+	defer h.amu.Unlock()
+	return slices.Collect(maps.Values(h.agents))
+}
+
+// Working is whether the agent steps now: a runner holds its live session,
+// or the one before it hands its task over. A run of an earlier session for
+// a post of its own is not the agent's. No file is read.
+func (h *Harness) Working(a Agent) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, id := range a.Sessions[max(len(a.Sessions)-2, 0):] {
+		if s, ok := h.s[id]; ok && (s.handoff || s.running && id == a.live()) {
+			return true
+		}
+	}
+	return false
+}
+
+// NoteAgent appends a system record to the agent's live session, from via.
+// It wakes nobody: the model reads it at the session's next step.
+func (h *Harness) NoteAgent(id, via, source, text string) error {
+	a, unlock, err := h.holdAgent(id)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	note := system(source, text)
+	note.Via = via
+	return h.note(h.session(a.live()), a.live(), note)
 }

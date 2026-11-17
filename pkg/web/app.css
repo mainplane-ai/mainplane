@@ -1,0 +1,26 @@
+/* Layout only. The look comes later. */
+html, body { height: 100%; margin: 0 }
+body { display: flex; font: 15px/1.4 system-ui, sans-serif }
+nav { flex: none; width: 16rem; overflow: auto; border-right: 1px solid #ccc }
+main { flex: 1; min-width: 0; display: flex; flex-direction: column }
+nav, main { box-sizing: border-box; padding: .5rem }
+nav a { display: block }
+nav small { display: block; color: #666; margin-bottom: .5rem }
+.open::before, .waiting::before { content: "\25cf  "; color: #06c }
+.waiting::before { color: #c90 }
+.scroll { flex: 1; min-height: 0; overflow: auto }
+iframe { flex: 1; min-height: 0; border: 1px solid #ccc }
+.message, .text, .error, pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: .5rem 0 }
+.message { background: #eef; padding: .25rem }
+.message small { display: block; color: #666 }
+.error { color: #b00 }
+.composer { display: flex }
+.composer textarea { flex: 1 }
+label { display: block }
+label textarea { display: block; box-sizing: border-box; width: 100% }
+.back, body.out nav { display: none }
+@media (max-width: 700px) {
+  nav { width: 100% }
+  body.home main, body:not(.home) nav { display: none }
+  .back { display: block }
+}

@@ -1,6 +1,7 @@
 // Package orchestrate is the built-in app that gives an agent the /agents
 // routes for agents of its own: it creates them, reads them and stops them,
-// and none of them may reach a worker or an app that it cannot.
+// and none of them may reach a worker or an app that it cannot. Of itself
+// it may change one thing, its instructions.
 package orchestrate
 
 import (
@@ -27,6 +28,12 @@ import (
 
 //go:embed skill.md
 var Skill string
+
+// coldLimit is the cold_limit of an agent made with none. Such an agent
+// waits long between messages, past any prompt cache: beyond this much
+// context a new session, which reads the old one's log for what it needs,
+// costs less than the old one sent again in full.
+const coldLimit = 100_000
 
 // stopped is what a watching agent is told, once.
 const stopped = "Agent %s%s, which you created, stopped: its session %s is %s."
@@ -60,7 +67,8 @@ var errEscalate = errors.New("an agent you create may use only workers and apps 
 //
 //	POST   /agents                      AgentCreate body, no "session"; and        -> {"id","session"}
 //	                                    "message", "notify_on_stop". With no
-//	                                    "config" the agent gets the caller's
+//	                                    "config" the agent gets the caller's,
+//	                                    with no "cold_limit" 100000
 //	GET    /agents                      ?status= ?limit= ?after=<id>               -> [AgentInfo]
 //	GET    /agents/{id}                 -> AgentInfo
 //	GET    /agents/{id}/records         ?session=, else the live one; then as      -> records
@@ -68,6 +76,7 @@ var errEscalate = errors.New("an agent you create may use only workers and apps 
 //	PUT    /agents/{id}/name            the name as text                           -> 204
 //	PUT    /agents/{id}/config          AgentConfig                                -> 204
 //	PUT    /agents/{id}/apps            ["app"]                                    -> 204
+//	PUT    /agents/{id}/instructions    the text; {id} may be the caller itself    -> 204
 //	PUT    /agents/{id}/notify_on_stop  true or false                              -> 204
 //	POST   /agents/{id}/stop            -> 204
 //	DELETE /agents/{id}                 -> 204
@@ -152,6 +161,16 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 		}
 		return within(caller, nil, apps)
 	})
+	// What an agent is told at the start of each session is its own to keep
+	// right: it grants nothing, as a config or a list of apps would.
+	handle("PUT /agents/{id}/instructions", func(w http.ResponseWriter, r *http.Request, caller harness.Agent) error {
+		if r.PathValue("id") != caller.ID {
+			if _, err := o.own(r, caller); err != nil {
+				return err
+			}
+		}
+		return pass(w, r, caller)
+	})
 	handle("PUT /agents/{id}/notify_on_stop", o.notify)
 	owned("POST /agents/{id}/stop", nil)
 	handle("DELETE /agents/{id}", o.remove)
@@ -216,7 +235,8 @@ func peek(r *http.Request, v any) error {
 }
 
 // create makes an agent of the caller's: with no config it gets the
-// caller's. It adopts no session: the caller's key reaches none.
+// caller's, and with no cold limit coldLimit. It adopts no session: the
+// caller's key reaches none.
 func (o *App) create(w http.ResponseWriter, r *http.Request, caller harness.Agent) error {
 	var c create
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
@@ -227,6 +247,9 @@ func (o *App) create(w http.ResponseWriter, r *http.Request, caller harness.Agen
 	}
 	if c.Config == nil {
 		c.Config = &caller.Config
+	}
+	if c.Config.ColdLimit == 0 {
+		c.Config.ColdLimit = coldLimit
 	}
 	if err := within(caller, c.Config, c.Apps); err != nil {
 		return err

@@ -23,6 +23,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/version"
+	"rsc.io/qr"
 )
 
 // via is what this connector writes on every record it causes.
@@ -35,8 +36,8 @@ const resultLines = 20
 // number.
 var arity = map[string][2]int{
 	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {0, 1}, "retry": {1, 1}, "stop": {1, 1}, "delete": {1, 1},
-	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "worker remove": {1, 1}, "worker rename": {2, 2}, "providers": {0, 0}, "provider": {3, 4}, "key": {2, 2}, "signin": {1, 1},
-	"agents": {0, 1}, "agent new": {0, 0}, "agent info": {1, 1}, "agent message": {2, -1}, "agent retry": {1, 1}, "agent stop": {1, 1}, "agent delete": {1, 1}, "agent name": {1, -1}, "agent config": {1, 1}, "agent apps": {1, -1},
+	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "worker remove": {1, 1}, "worker rename": {2, 2}, "providers": {0, 0}, "provider": {3, 4}, "key": {2, 2}, "signin": {1, 1}, "web": {0, 0},
+	"agents": {0, 1}, "agent new": {0, 0}, "agent info": {1, 1}, "agent message": {2, -1}, "agent retry": {1, 1}, "agent stop": {1, 1}, "agent delete": {1, 1}, "agent name": {1, -1}, "agent config": {1, 1}, "agent apps": {1, -1}, "agent instructions": {1, 1},
 	"apps": {0, 0}, "app start": {1, 1}, "app stop": {1, 1}, "secrets": {0, 0}, "secret set": {1, 2}, "secret delete": {1, 1}, "skill": {0, 1}, "app": {3, 4},
 }
 
@@ -141,6 +142,8 @@ func cli(verb string, args []string) {
 		c.key(args[0], args[1])
 	case "signin":
 		c.signin(args[0])
+	case "web":
+		c.web()
 	default:
 		c.agent(verb, args)
 	}
@@ -198,6 +201,11 @@ func (c client) agent(verb string, args []string) {
 		}
 	case "agent apps":
 		err = c.SetAgentApps(ctx, args[0], via, args[1:])
+	case "agent instructions":
+		var text []byte
+		if text, err = io.ReadAll(os.Stdin); err == nil {
+			err = c.SetAgentInstructions(ctx, args[0], via, string(text))
+		}
 	case "apps":
 		infos, err := c.Apps(ctx)
 		if err != nil {
@@ -397,6 +405,40 @@ func (c client) raw(path string) {
 		die(err)
 	}
 	fmt.Println(b.String())
+}
+
+// web prints the link that logs a browser in, and to a terminal its QR code
+// too, for a phone: black on white whatever the terminal's colors, two rows
+// of the code to a line.
+func (c client) web() {
+	link, err := c.Web(context.Background())
+	if err != nil {
+		die(err)
+	}
+	fmt.Println(link)
+	if st, err := os.Stdout.Stat(); err != nil || st.Mode()&os.ModeCharDevice == 0 {
+		return
+	}
+	code, err := qr.Encode(link, qr.L)
+	if err != nil {
+		die(err)
+	}
+	const quiet = 4 // the white edge a reader needs
+	for y := -quiet; y < code.Size+quiet; y += 2 {
+		fmt.Print("\x1b[30;47m")
+		for x := -quiet; x < code.Size+quiet; x++ {
+			fmt.Print([]string{" ", "▄", "▀", "█"}[b2i(code.Black(x, y))<<1|b2i(code.Black(x, y+1))])
+		}
+		fmt.Println("\x1b[0m")
+	}
+	fmt.Println("The link holds the API key: whoever has it controls the harness.")
+}
+
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // version refuses a harness from another release, and returns the one it runs.

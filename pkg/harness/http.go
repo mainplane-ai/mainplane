@@ -63,6 +63,9 @@ const MaxPost = 8 << 20
 //	PUT  /agents/{id}/config          AgentConfig; ?via= required. no new session  -> 204
 //	                                  until a post finds the live one cannot go on
 //	PUT  /agents/{id}/apps            ["app"]; ?via= required                      -> 204
+//	PUT  /agents/{id}/instructions    the text, at most 4 KiB; ?via= required.     -> 204
+//	                                  every session of the agent starts with it;
+//	                                  empty removes it. no new session
 //	DELETE /agents/{id}               ?via= required. the live session is stopped; -> 204
 //	                                  the sessions' files stay
 //	GET  /workers                     -> connected workers' hellos, and refused
@@ -100,20 +103,21 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 	})
 	mux.HandleFunc("PUT /workers/{name}/name", h.serveRename)
 	mux.HandleFunc("GET /providers", func(w http.ResponseWriter, r *http.Request) {
-		ps := h.providers()
-		out := []ProviderInfo{}
-		for _, name := range slices.Sorted(maps.Keys(ps)) {
-			u, err := url.Parse(ps[name].URL)
-			if err != nil {
-				fail(w, err)
-				return
-			}
-			u.User, u.RawQuery = nil, "" // where a URL may carry a secret
-			out = append(out, ProviderInfo{name, ps[name].Envelope.Name(), u.String(), ps[name].ContextLimit})
+		out, err := h.ProviderInfos()
+		if err != nil {
+			fail(w, err)
+			return
 		}
 		reply(w, out)
 	})
-	mux.HandleFunc("GET /providers/{name}/models", h.serveModels)
+	mux.HandleFunc("GET /providers/{name}/models", func(w http.ResponseWriter, r *http.Request) {
+		ids, err := h.Models(r.Context(), r.PathValue("name"))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, ids)
+	})
 	mux.HandleFunc("GET /sessions", func(w http.ResponseWriter, r *http.Request) {
 		infos, err := h.List()
 		if err != nil {
@@ -190,7 +194,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 	return mux
 }
 
-// agentRoutes are the ten verbs on an agent.
+// agentRoutes are the eleven verbs on an agent.
 func (h *Harness) agentRoutes(ctx context.Context, mux *http.ServeMux, handle func(string, http.HandlerFunc)) {
 	mux.HandleFunc("GET /agents", h.serveAgents)
 	mux.HandleFunc("POST /agents", func(w http.ResponseWriter, r *http.Request) { h.serveAgentCreate(ctx, w, r) })
@@ -255,6 +259,13 @@ func (h *Harness) agentRoutes(ctx context.Context, mux *http.ServeMux, handle fu
 			return err
 		}
 		return h.SetAgentApps(id, via, apps)
+	})
+	act("PUT /agents/{id}/instructions", func(r *http.Request, id, via string) error {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			return err
+		}
+		return h.SetAgentInstructions(id, via, string(b))
 	})
 }
 
@@ -326,26 +337,38 @@ type ProviderInfo struct {
 	ContextLimit int    `json:"context_limit,omitempty"`
 }
 
-// serveModels is the model ids an openai-chat provider's server lists at
-// GET /models, such as a local server's: the catalog has none of them.
-func (h *Harness) serveModels(w http.ResponseWriter, r *http.Request) {
-	p, ok := h.providers()[r.PathValue("name")]
-	if !ok || p.Envelope.Name() != "openai-chat" {
-		fail(w, errors.New("only an openai-chat provider lists its models"))
-		return
+// ProviderInfos is every provider the harness serves now, by name.
+func (h *Harness) ProviderInfos() ([]ProviderInfo, error) {
+	ps := h.providers()
+	out := []ProviderInfo{}
+	for _, name := range slices.Sorted(maps.Keys(ps)) {
+		u, err := url.Parse(ps[name].URL)
+		if err != nil {
+			return nil, err
+		}
+		u.User, u.RawQuery = nil, "" // where a URL may carry a secret
+		out = append(out, ProviderInfo{name, ps[name].Envelope.Name(), u.String(), ps[name].ContextLimit})
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	return out, nil
+}
+
+// Models is the model ids an openai-chat provider's server lists at
+// GET /models, such as a local server's: the catalog has none of them.
+func (h *Harness) Models(ctx context.Context, name string) ([]string, error) {
+	p, ok := h.providers()[name]
+	if !ok || p.Envelope.Name() != "openai-chat" {
+		return nil, errors.New("only an openai-chat provider lists its models")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	u, err := url.Parse(p.URL)
 	if err != nil {
-		fail(w, err)
-		return
+		return nil, err
 	}
 	u.Path = strings.TrimSuffix(u.Path, "/chat/completions") + "/models"
 	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
 	if err != nil {
-		fail(w, err)
-		return
+		return nil, err
 	}
 	p.Headers(req, p.Key)
 	res, err := http.DefaultClient.Do(req)
@@ -354,13 +377,11 @@ func (h *Harness) serveModels(w http.ResponseWriter, r *http.Request) {
 		err = ue.Err // without the url, whose query may hold a key
 	}
 	if err != nil {
-		fail(w, fmt.Errorf("GET %s: %w", u.Path, err))
-		return
+		return nil, fmt.Errorf("GET %s: %w", u.Path, err)
 	}
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
-		fail(w, fmt.Errorf("GET %s: %s", u.Path, res.Status))
-		return
+		return nil, fmt.Errorf("GET %s: %s", u.Path, res.Status)
 	}
 	var list struct {
 		Data []struct {
@@ -368,14 +389,13 @@ func (h *Harness) serveModels(w http.ResponseWriter, r *http.Request) {
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(io.LimitReader(res.Body, 4<<20)).Decode(&list); err != nil {
-		fail(w, err)
-		return
+		return nil, err
 	}
 	ids := []string{}
 	for _, m := range list.Data {
 		ids = append(ids, m.ID)
 	}
-	reply(w, ids)
+	return ids, nil
 }
 
 func reply(w http.ResponseWriter, v any) {

@@ -35,6 +35,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/relay"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/tunnel"
+	"github.com/mainplane-ai/mainplane/pkg/web"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
@@ -304,7 +305,7 @@ func Harness(ctx context.Context, path string) error {
 	defer am.Close()
 	am.Routes(routes)
 	api := am.Handler(store.Bearer(limit, routes), routes)
-	mux.Handle("/", api)
+	mux.Handle("/", web.Handler(api))
 	srv := &http.Server{Addr: c.HTTP, Handler: mux}
 	if c.URL != "" {
 		srv.Handler = proxied(mux)

@@ -25,6 +25,15 @@ const (
 	maxSize   = 16 << 20         // a catalog of every model there is stays far below this
 )
 
+const (
+	// SelfHosted is the group of the presets a harness's own user picks from.
+	SelfHosted = "self-hosted-all"
+	// CustomLimit is the context limit of a session on a model no preset
+	// has, when its provider's config gives none: under the window a local
+	// server loads a model with by default.
+	CustomLimit = 30_000
+)
+
 type Catalog struct {
 	Version   string              `json:"version"`
 	Providers map[string]Provider `json:"providers"` // by id: the name a harness config gives it

@@ -267,6 +267,22 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 	return out.Version, err
 }
 
+// Web is the link that logs a browser in to the harness's web interface: the
+// harness's public URL as the harness has it now, or on its own machine,
+// while it has none, loopback, then the key after a #, which a browser sends
+// to no server. The mesh serves the API only.
+func (c *Client) Web(ctx context.Context) (string, error) {
+	var out struct{ URL string }
+	if err := c.Call(ctx, "GET", "/", "", nil, &out); err != nil {
+		return "", err
+	}
+	u := cmp.Or(out.URL, c.Local)
+	if u == "" {
+		return "", errors.New("the harness has no public URL now: try again when it has one, or open the link on the harness's own machine")
+	}
+	return u + "/#k=" + c.Key, nil
+}
+
 // Create makes a session and returns its id.
 func (c *Client) Create(ctx context.Context, cr harness.Create, via string) (string, error) {
 	b, err := json.Marshal(cr)
