@@ -1,6 +1,7 @@
 // Package orchestrate is the built-in app that gives an agent the /agents
 // routes for agents of its own: it creates them, reads them and stops them,
-// and none of them may reach a worker or an app that it cannot.
+// and none of them may reach a worker or an app that it cannot. Of itself
+// it may change one thing, its instructions.
 package orchestrate
 
 import (
@@ -68,6 +69,7 @@ var errEscalate = errors.New("an agent you create may use only workers and apps 
 //	PUT    /agents/{id}/name            the name as text                           -> 204
 //	PUT    /agents/{id}/config          AgentConfig                                -> 204
 //	PUT    /agents/{id}/apps            ["app"]                                    -> 204
+//	PUT    /agents/{id}/instructions    the text; {id} may be the caller itself    -> 204
 //	PUT    /agents/{id}/notify_on_stop  true or false                              -> 204
 //	POST   /agents/{id}/stop            -> 204
 //	DELETE /agents/{id}                 -> 204
@@ -151,6 +153,16 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 			return err
 		}
 		return within(caller, nil, apps)
+	})
+	// What an agent is told at the start of each session is its own to keep
+	// right: it grants nothing, as a config or a list of apps would.
+	handle("PUT /agents/{id}/instructions", func(w http.ResponseWriter, r *http.Request, caller harness.Agent) error {
+		if r.PathValue("id") != caller.ID {
+			if _, err := o.own(r, caller); err != nil {
+				return err
+			}
+		}
+		return pass(w, r, caller)
 	})
 	handle("PUT /agents/{id}/notify_on_stop", o.notify)
 	owned("POST /agents/{id}/stop", nil)

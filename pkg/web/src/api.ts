@@ -3,7 +3,7 @@
 
 export type Project = { id: string; name: string; orchestrator: string; status: string; line: string; updated: string; counter: number; working: boolean }
 export type Conf = { model: string; workers: { name: string }[]; preset?: string; [more: string]: unknown }
-export type Agent = { id: string; name?: string; config: Conf; apps: string[]; sessions: string[]; status: string }
+export type Agent = { id: string; name?: string; config: Conf; apps: string[]; instructions?: string; sessions: string[]; status: string }
 export type Model = { id: string; name: string; config: Conf }
 export type Rec = { n: number; kind: string; id: string; len: number; type?: string; via?: string; source?: string; for?: string; body: Uint8Array }
 

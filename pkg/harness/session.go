@@ -418,8 +418,8 @@ func (h *Harness) Stop(ctx context.Context, id, via string) error {
 	return nil
 }
 
-// note appends r whether or not a step holds the file, as a post does.
-func (h *Harness) note(s *session, id string, r statefile.Record) error {
+// note appends recs whether or not a step holds the file, as a post does.
+func (h *Harness) note(s *session, id string, recs ...statefile.Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f := s.f
@@ -430,8 +430,12 @@ func (h *Harness) note(s *session, id string, r statefile.Record) error {
 		}
 		defer func() { _ = f.Close() }()
 	}
-	_, err := h.write(s, f, r)
-	return err
+	for _, r := range recs {
+		if _, err := h.write(s, f, r); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // killAll ends the session's environments on every connected worker any of

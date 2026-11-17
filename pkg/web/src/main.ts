@@ -81,7 +81,7 @@ async function content(kind: string, id: string, sub: string, signal: AbortSigna
   if (!key()) return [loginForm()]
   if (!projects.length) await refresh()
   if (kind === "new") return [await createForm()]
-  if (kind === "agents" && id) return [...chat(id, signal), composer(id, "Message this agent")]
+  if (kind === "agents" && id) return [h("details", null, h("summary", null, "Instructions"), instructions(await get<Agent>(`/agents/${id}`, signal))), ...chat(id, signal), composer(id, "Message this agent")]
   if (kind !== "projects") return []
   const p = projects.find(p => p.id === id)
   if (!p) throw new Error(`No project ${id}`)
@@ -176,19 +176,33 @@ async function createForm(): Promise<HTMLElement> {
   return form
 }
 
-// settings is the orchestrator's own config and apps. Its agents keep
-// theirs: the orchestrator changes them when asked.
+// instructions is the text every session of the agent starts with. The
+// agent's live session is told of a change; no new session is made for it.
+function instructions(a: Agent): HTMLElement {
+  const box = h("textarea", { rows: 8, value: a.instructions ?? "" })
+  const save = h("button", null, "Save instructions")
+  const form = h("form", null, h("label", null, "Instructions: every session of this agent starts with them", box), save)
+  box.oninput = () => (save.textContent = "Save instructions")
+  form.onsubmit = attempt(async () => {
+    await api(`/agents/${a.id}/instructions?via=web`, { method: "PUT", text: box.value })
+    save.textContent = "Saved"
+  })
+  return form
+}
+
+// settings is the orchestrator's own config, apps and instructions. Its
+// agents keep theirs: the orchestrator changes them when asked.
 async function settings(p: Project, signal: AbortSignal): Promise<HTMLElement> {
-  const o = await options(await get<Agent>(`/agents/${p.orchestrator}`, signal))
-  const form = h("form", { className: "scroll" }, o.el, h("button", null, "Save"), h("hr"))
+  const orchestrator = await get<Agent>(`/agents/${p.orchestrator}`, signal)
+  const o = await options(orchestrator)
+  const form = h("form", null, o.el, h("button", null, "Save"))
   form.onsubmit = attempt(async () => {
     const v = o.value()
     await api(`/agents/${p.orchestrator}/config?via=web`, { method: "PUT", json: v.config })
     await api(`/agents/${p.orchestrator}/apps?via=web`, { method: "PUT", json: v.apps })
     go(`/projects/${p.id}`)
   })
-  form.append(h("button", {
-    type: "button",
+  const remove = h("button", {
     onclick: attempt(async () => {
       if (!confirm(`Delete the project "${p.name}" and its dashboard?`)) return
       const agents = confirm("Delete the project's agents too? Cancel keeps them.")
@@ -196,8 +210,8 @@ async function settings(p: Project, signal: AbortSignal): Promise<HTMLElement> {
       await refresh()
       go("/")
     }),
-  }, "Delete project"))
-  return form
+  }, "Delete project")
+  return h("div", { className: "scroll" }, form, h("hr"), instructions(orchestrator), h("hr"), remove)
 }
 
 void render()

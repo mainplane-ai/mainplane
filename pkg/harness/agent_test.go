@@ -307,6 +307,84 @@ func TestCreateAgent(t *testing.T) {
 	}
 }
 
+// Every session of an agent starts with its instructions: the one it is made
+// with, one it adopts, and each one after a rollover. A change is told to the
+// live session without a step, unless the agent made it, and makes no session.
+func TestInstructions(t *testing.T) {
+	r := newRig(t)
+	told := func(session string) []string { return r.bodies(session, statefile.System, "instructions") }
+	a := r.create(AgentCreate{Config: r.conf(1000, 0), Instructions: "You review PRs."}, "web")
+	s1 := a.Sessions[0]
+	if got := told(s1); !slices.Equal(got, []string{instructionsHead + "You review PRs."}) {
+		t.Fatalf("instructions of s1: %q", got)
+	}
+	built, _ := statefile.Build(r.chain(s1))
+	if system, _ := provider.Split(built); !strings.Contains(string(system[len(system)-1].Body), "You review PRs.") {
+		t.Fatal("the instructions are not in the system prompt")
+	}
+	plain := r.create(AgentCreate{Config: r.conf(1000, 0)}, "web")
+	if got := told(plain.Sessions[0]); len(got) != 0 {
+		t.Fatalf("an agent with no instructions was told %q", got)
+	}
+	big := strings.Repeat("x", MaxInstructions+1)
+	if _, err := r.h.CreateAgent(context.Background(), AgentCreate{Config: r.conf(1000, 0), Instructions: big}, "web"); err == nil {
+		t.Fatal("an agent was made with instructions over the limit")
+	}
+	s, err := r.h.Create(context.Background(), Create{Model: "fake/m1", ContextLimit: 777}, "tui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.create(AgentCreate{Session: s, Instructions: "adopted"}, "tui")
+	if got := told(s); !slices.Equal(got, []string{instructionsHead + "adopted"}) {
+		t.Fatalf("instructions of an adopted session: %q", got)
+	}
+
+	set := func(via, text string) {
+		t.Helper()
+		if err := r.h.SetAgentInstructions(a.ID, via, text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set("web", "You review PRs of repo X.")
+	set("web", "You review PRs of repo X.") // saved as it was: no second note
+	set("agent:"+a.ID, "I review PRs of repo X and Y.")
+	chain := r.chain(s1)
+	if got := told(s1); len(got) != 2 || got[1] != instructionsHead+"You review PRs of repo X." || chain[len(chain)-1].Via != "web" || r.steps != 0 {
+		t.Fatalf("instructions of s1 after the changes: %q, %d model calls", got, r.steps)
+	}
+	if err := r.h.SetAgentInstructions(a.ID, "web", big); err == nil {
+		t.Fatal("instructions over the limit were taken")
+	}
+	if err := r.h.SetAgentInstructions(a.ID, "web", "\xff"); err == nil {
+		t.Fatal("instructions that are not UTF-8 were taken")
+	}
+	if got := r.sessions(a.ID); len(got) != 1 {
+		t.Fatalf("a change of instructions made a session: %v", got)
+	}
+
+	// a rollover: the next session starts with what the agent holds now
+	c := r.conf(1000, 0)
+	c.Model = "fake/m2"
+	if err := r.h.SetAgentConfig(a.ID, "web", *c); err != nil {
+		t.Fatal(err)
+	}
+	s2 := r.post(a.ID, "go")
+	if got := told(s2); s2 == s1 || !slices.Equal(got, []string{instructionsHead + "I review PRs of repo X and Y."}) {
+		t.Fatalf("instructions of s2: %q", got)
+	}
+	set("web", "")
+	if got := told(s2); len(got) != 2 || got[1] != instructionsHead+"none" {
+		t.Fatalf("instructions of s2 once removed: %q", got)
+	}
+	c.Model = "fake/m1"
+	if err := r.h.SetAgentConfig(a.ID, "web", *c); err != nil {
+		t.Fatal(err)
+	}
+	if s3 := r.post(a.ID, "go on"); s3 == s2 || len(told(s3)) != 0 {
+		t.Fatalf("s3 %s was told instructions the agent no longer has: %q", s3, told(s3))
+	}
+}
+
 // lazy-config, warm-fastpath and warm-vs-cold: what an idle agent's next
 // post lands on.
 func TestWarmFastPath(t *testing.T) {
@@ -838,6 +916,12 @@ func TestAgentRoutes(t *testing.T) {
 	do(400, "PUT", "/agents/"+made.ID+"/apps?via=web", `["nope"]`)
 	do(204, "PUT", "/agents/"+made.ID+"/config?via=web", string(conf))
 	do(400, "PUT", "/agents/"+made.ID+"/config?via=web", `{"model":"none/x","context_limit":5}`)
+	do(204, "PUT", "/agents/"+made.ID+"/instructions?via=web", "Keep the\nbuild green.")
+	do(400, "PUT", "/agents/"+made.ID+"/instructions?via=web", strings.Repeat("x", MaxInstructions+1))
+	do(400, "PUT", "/agents/"+made.ID+"/instructions", "no via")
+	if got := do(200, "GET", "/agents/"+made.ID, ""); !strings.Contains(got, `"instructions":"Keep the\nbuild green."`) {
+		t.Fatalf("an agent with instructions: %s", got)
+	}
 	do(204, "POST", "/agents/"+made.ID+"/stop?via=web", "")
 	if got := do(200, "POST", "/agents/"+made.ID+"/retry", ""); !strings.Contains(got, `"status":"stepping"`) {
 		t.Fatalf("retry: %s", got)
@@ -845,7 +929,7 @@ func TestAgentRoutes(t *testing.T) {
 	if a, _ := r.h.Agent(made.ID); a.Name != "chief" || !slices.Equal(a.Apps, []string{"schedule"}) {
 		t.Fatalf("after the edits: %+v", a)
 	}
-	for _, c := range [][3]string{{"GET", "", ""}, {"POST", "/records?via=web", "x"}, {"POST", "/stop?via=web", ""}, {"POST", "/retry", ""}, {"PUT", "/name?via=web", "x"}, {"PUT", "/config?via=web", string(conf)}, {"PUT", "/apps?via=web", "[]"}} {
+	for _, c := range [][3]string{{"GET", "", ""}, {"POST", "/records?via=web", "x"}, {"POST", "/stop?via=web", ""}, {"POST", "/retry", ""}, {"PUT", "/name?via=web", "x"}, {"PUT", "/config?via=web", string(conf)}, {"PUT", "/apps?via=web", "[]"}, {"PUT", "/instructions?via=web", "x"}} {
 		do(404, c[0], "/agents/00000000"+c[1], c[2])
 	}
 	do(404, "DELETE", "/agents/00000000?via=web", "")

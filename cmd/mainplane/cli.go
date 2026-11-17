@@ -37,7 +37,7 @@ const resultLines = 20
 var arity = map[string][2]int{
 	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {0, 1}, "retry": {1, 1}, "stop": {1, 1}, "delete": {1, 1},
 	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "worker remove": {1, 1}, "worker rename": {2, 2}, "providers": {0, 0}, "provider": {3, 4}, "key": {2, 2}, "signin": {1, 1}, "web": {0, 0},
-	"agents": {0, 1}, "agent new": {0, 0}, "agent info": {1, 1}, "agent message": {2, -1}, "agent retry": {1, 1}, "agent stop": {1, 1}, "agent delete": {1, 1}, "agent name": {1, -1}, "agent config": {1, 1}, "agent apps": {1, -1},
+	"agents": {0, 1}, "agent new": {0, 0}, "agent info": {1, 1}, "agent message": {2, -1}, "agent retry": {1, 1}, "agent stop": {1, 1}, "agent delete": {1, 1}, "agent name": {1, -1}, "agent config": {1, 1}, "agent apps": {1, -1}, "agent instructions": {1, 1},
 	"apps": {0, 0}, "app start": {1, 1}, "app stop": {1, 1}, "secrets": {0, 0}, "secret set": {1, 2}, "secret delete": {1, 1}, "skill": {0, 1}, "app": {3, 4},
 }
 
@@ -201,6 +201,11 @@ func (c client) agent(verb string, args []string) {
 		}
 	case "agent apps":
 		err = c.SetAgentApps(ctx, args[0], via, args[1:])
+	case "agent instructions":
+		var text []byte
+		if text, err = io.ReadAll(os.Stdin); err == nil {
+			err = c.SetAgentInstructions(ctx, args[0], via, string(text))
+		}
 	case "apps":
 		infos, err := c.Apps(ctx)
 		if err != nil {

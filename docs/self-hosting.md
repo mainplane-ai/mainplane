@@ -448,13 +448,24 @@ mainplane agent message <id> "watch the deploy and tell me when it is done"
 mainplane agents
 ```
 
-`mainplane agent` has `info`, `retry`, `stop`, `delete`, `name`, `config` and
-`apps` too; each is one `/agents` route, listed in `pkg/harness/http.go`. A
-change of config makes no session: the next message does. A change of only
-the workers or the apps reaches the live session in place. An agent's
-`usage` is the token count of all its sessions together, less any session
-deleted since; `status`, `context_used` and `updated` are its live
-session's.
+`mainplane agent` has `info`, `retry`, `stop`, `delete`, `name`, `config`,
+`apps` and `instructions` too; each is one `/agents` route, listed in
+`pkg/harness/http.go`. A change of config makes no session: the next message
+does. A change of only the workers or the apps reaches the live session in
+place. An agent's `usage` is the token count of all its sessions together,
+less any session deleted since; `status`, `context_used` and `updated` are
+its live session's.
+
+An agent's `instructions` are text of at most 4 KiB that every session of the
+agent starts with: its role, and what it must know wherever it works. They
+are not config, so a change makes no session; the live session reads the new
+text at its next step and is not woken.
+
+```
+mainplane agent instructions <id> < instructions.txt
+```
+
+The agent can also write its own, with the `orchestrate` app.
 
 An app is something an agent can call. Every interpreter and job on a worker
 has `MAINPLANE_URL`, the harness on the mesh, and `MAINPLANE_KEY`, a key for
@@ -472,7 +483,7 @@ Four apps are built in:
 - `orchestrate`: an agent creates agents of its own, reads them and stops
   them, with the `/agents` routes under `/apps/orchestrate`, which show it
   only those agents. An agent it creates gets no worker and no app that it
-  lacks itself.
+  lacks itself. Of itself it can change only its instructions.
 - `project`: the project an agent is in: its status and line, and the files
   of its dashboard ([web interface and projects](#web-interface-and-projects)).
 

@@ -423,7 +423,7 @@ func usage() {
                                      terminal its QR code for a phone. The link holds the API key
 
   agents     [status]                GET  /agents
-  agent      new                     POST /agents, body from stdin: {"name","config","apps"}, config as a session's
+  agent      new                     POST /agents, body from stdin: {"name","config","apps","instructions"}, config as a session's
                                      with "cold_limit", or {"session"} to adopt one; prints the agent's id and session
   agent      info <id>               GET  /agents/{id}
   agent      message <id> <text> [file...]
@@ -435,6 +435,8 @@ func usage() {
   agent      name <id> [text]        PUT  /agents/{id}/name
   agent      config <id>             PUT  /agents/{id}/config, body from stdin: the config of the agent's next session
   agent      apps <id> [app...]      PUT  /agents/{id}/apps: the apps the agent may call are these
+  agent      instructions <id>       PUT  /agents/{id}/instructions, text from stdin: every session of the agent starts
+                                     with it; empty removes it
   apps                               GET  /apps: every app, its kind and status
   app        start <name>            POST /apps/{name}/start: run a daemon app
   app        stop <name>             POST /apps/{name}/stop: end it until a start

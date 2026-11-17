@@ -63,6 +63,9 @@ const MaxPost = 8 << 20
 //	PUT  /agents/{id}/config          AgentConfig; ?via= required. no new session  -> 204
 //	                                  until a post finds the live one cannot go on
 //	PUT  /agents/{id}/apps            ["app"]; ?via= required                      -> 204
+//	PUT  /agents/{id}/instructions    the text, at most 4 KiB; ?via= required.     -> 204
+//	                                  every session of the agent starts with it;
+//	                                  empty removes it. no new session
 //	DELETE /agents/{id}               ?via= required. the live session is stopped; -> 204
 //	                                  the sessions' files stay
 //	GET  /workers                     -> connected workers' hellos, and refused
@@ -191,7 +194,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 	return mux
 }
 
-// agentRoutes are the ten verbs on an agent.
+// agentRoutes are the eleven verbs on an agent.
 func (h *Harness) agentRoutes(ctx context.Context, mux *http.ServeMux, handle func(string, http.HandlerFunc)) {
 	mux.HandleFunc("GET /agents", h.serveAgents)
 	mux.HandleFunc("POST /agents", func(w http.ResponseWriter, r *http.Request) { h.serveAgentCreate(ctx, w, r) })
@@ -256,6 +259,13 @@ func (h *Harness) agentRoutes(ctx context.Context, mux *http.ServeMux, handle fu
 			return err
 		}
 		return h.SetAgentApps(id, via, apps)
+	})
+	act("PUT /agents/{id}/instructions", func(r *http.Request, id, via string) error {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			return err
+		}
+		return h.SetAgentInstructions(id, via, string(b))
 	})
 }
 

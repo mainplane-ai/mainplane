@@ -458,9 +458,9 @@ func TestOrchestrateAndMessage(t *testing.T) {
 		}
 		return v.ID
 	}
-	c := create(`{"name":"child","apps":["message"],"message":"the task"}`)
+	c := create(`{"name":"child","apps":["message"],"instructions":"You fix PR 88.","message":"the task"}`)
 	child, err := r.h.Agent(c)
-	if err != nil || child.Via != "agent:"+a.ID || !slices.Equal(child.Apps, []string{"message"}) || child.Config.Workers[0].Name != "w1" {
+	if err != nil || child.Via != "agent:"+a.ID || !slices.Equal(child.Apps, []string{"message"}) || child.Config.Workers[0].Name != "w1" || child.Instructions != "You fix PR 88." {
 		t.Fatalf("child: %+v %v", child, err)
 	}
 	r.settled(c)
@@ -547,9 +547,28 @@ func TestOrchestrateRoutes(t *testing.T) {
 	r.want(204, key, "PUT", c+"/apps", `[]`)
 	one, _ := json.Marshal(conf())
 	r.want(204, key, "PUT", c+"/config", string(one))
+	r.want(204, key, "PUT", c+"/instructions", "Review, do not merge.")
 	child, err := r.h.Agent(made.ID)
-	if err != nil || child.Name != "renamed" || len(child.Apps) != 0 || len(child.Config.Workers) != 0 {
+	if err != nil || child.Name != "renamed" || len(child.Apps) != 0 || len(child.Config.Workers) != 0 || child.Instructions != "Review, do not merge." {
 		t.Fatalf("after the changes: %+v %v", child, err)
+	}
+	if got := r.want(200, key, "GET", c+"/records", ""); !strings.Contains(got, `"via":"agent:`+a.ID+`","source":"instructions"`) {
+		t.Fatalf("the child was not told its new instructions: %s", got)
+	}
+
+	// of itself an agent changes its instructions and nothing else, and is
+	// not told what it wrote
+	self := u + "/" + a.ID
+	r.want(204, key, "PUT", self+"/instructions", "I run the release.")
+	if me, _ := r.h.Agent(a.ID); me.Instructions != "I run the release." {
+		t.Fatalf("own instructions: %+v", me)
+	}
+	if chain, _ := r.h.Sessions.Load(a.Sessions[0]); slices.ContainsFunc(chain, func(rec statefile.Record) bool { return rec.Source == "instructions" }) {
+		t.Fatal("an agent was told the instructions it wrote")
+	}
+	r.want(400, key, "PUT", self+"/instructions", strings.Repeat("x", harness.MaxInstructions+1))
+	for _, q := range [][3]string{{"GET", "", ""}, {"PUT", "/name", "x"}, {"PUT", "/config", string(one)}, {"PUT", "/apps", `[]`}, {"POST", "/stop", ""}, {"DELETE", "", ""}} {
+		r.want(404, key, q[0], self+q[1], q[2])
 	}
 	if got := r.want(200, key, "GET", c+"/records", ""); strings.Count(got, `"via":"agent:`+a.ID+`"`) < 3 { // the message, and a record for a change or more
 		t.Fatalf("the changes are not the caller's: %s", got)
@@ -575,7 +594,7 @@ func TestOrchestrateRoutes(t *testing.T) {
 	}
 
 	// an agent that is not the caller's is not there, on every route
-	routes := [][3]string{{"GET", "", ""}, {"GET", "/records", ""}, {"PUT", "/name", "x"}, {"PUT", "/config", string(one)}, {"PUT", "/apps", `[]`}, {"PUT", "/notify_on_stop", `true`}, {"POST", "/stop", ""}, {"DELETE", "", ""}}
+	routes := [][3]string{{"GET", "", ""}, {"GET", "/records", ""}, {"PUT", "/name", "x"}, {"PUT", "/config", string(one)}, {"PUT", "/apps", `[]`}, {"PUT", "/instructions", "x"}, {"PUT", "/notify_on_stop", `true`}, {"POST", "/stop", ""}, {"DELETE", "", ""}}
 	for _, q := range routes {
 		r.want(404, r.key(other), q[0], c+q[1], q[2])
 		r.want(404, key, q[0], u+"/"+other.ID+q[1], q[2])
