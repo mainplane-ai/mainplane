@@ -1,6 +1,6 @@
-# project: this agent's project: its status and line in the user's sidebar, and the files of its dashboard.
+# project: use to manage this project's status, status line, and dashboard.
 
-A project is one orchestrator agent, the agents made under it, a status, and a dashboard. The user sees a list of projects with each one's status and line, and opens a project to see its dashboard and to message its orchestrator. Every agent of the project that has this app may call it.
+A project is an abstraction used in some of the user connectors. A project bundles one orchestrator agent, agents made under it, a status, and a dashboard. The user sees a list of projects in a sidebar with each one's status and a line, and can open a project to see its dashboard and message its orchestrator. The orchestrator does not work, it orchestrates other agents. 
 
 ```
 A="Authorization: Bearer $MAINPLANE_KEY"; U=$MAINPLANE_URL/apps/project
@@ -16,13 +16,13 @@ curl -H "$A" -X DELETE $U/files/cards/0001.json
 ## Status
 
 - `open`: the user should look. `waiting`: the project waits on something outside, and there is nothing for the user to do. `closed`: nothing needs the user. Closed stops nothing: set it open again when there is something to see.
-- Every status has a `line`: one short line, at most 100 characters, shown under the project's name, such as "new kimi results" or "waiting on the EV cert".
-- When the user or another agent sets the status, the orchestrator reads a system note of it at its next step. The note wakes nobody.
+- Every status has a `line`: one short line, at most 100 characters, shown under the project's name, such as "new kimi eval results" or "waiting on the EV cert email".
+- When the user or another agent sets the status, the orchestrator gets a system note of it at its next step. The note does not wake an agent.
 
 ## Dashboard
 
-- The dashboard is the files of the store. `index.html` is the page; every other file is data the page reads. Names are path segments of letters, digits, dot, dash and underscore. A file is at most 8 MiB and the store 256 MiB. There are no old versions: keep sources and history in the project's folder on a worker and upload the result.
-- Write one small file per item (`cards/0001.json`, `cards/0001.png`), not one large file that every change uploads again. Many agents can then add items at once.
+- The dashboard is the files of the store. `index.html` is the page; every other file is data the page reads. Names are path segments of letters, digits, dot, dash and underscore. A file is at most 8 MiB and the store 256 MiB. There is no versioning: if you need to keep old results, save them in a worker or remote drive. The dashboard is meant to be a slim current overview of project work.
+- Many agents can add one small file per item (`cards/0001.json`, `cards/0001.png`) at once. One large file would require every change to upload again.
 - The page runs in a sandbox with no network: no fetch, no outside scripts, styles, fonts or images. Scripts and styles are inline. It talks only to the user's interface, by `postMessage`:
 
 ```

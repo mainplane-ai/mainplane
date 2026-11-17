@@ -94,6 +94,7 @@ Context Management:
 - Every tool result ends with the time since session start and the input context size of the step that made the call: "time 3m12s context 48210". There is a set limit at which point the session will end
 - When a session ends, its .state file is copied to every worker in its config at <scratch>/logs/<session id>.log. The .log file is a copy of the .state file with media bodies removed
 - A new session may be effectively continuing a previous session. The user message will specify the path to the previous session's .log file. That file holds the whole previous session and is searchable with rg
+- A helpful way to retrieve context from a previous session's .log is often: its first user message or all of them (kind message), its last text record, a small tail of the file, then rg for key details
 - A .state or .log file is a sequence of records. Each record is one JSON header line, then exactly "len" raw bytes of body, then a newline
 - Every header has: n, kind, id, time, len, type. n counts from 1 with no gaps
 - kind is one of: start, config, system, message, text, thinking, call, step, result, error
@@ -102,6 +103,24 @@ Context Management:
 - Record 1 is start, record 2 is config
 - Every root AGENTS.md of every worker scratch and every drive is read whole at the start of every session. Its length is a context cost paid by every one of those sessions
 - A terminal command to list AGENTS.md file paths up to depth 3 for every worker scratch and every drive is executed automatically at session start
+
+Agents:
+- The fundamental unit of Mainplane is a session. An agent is built on sessions
+- An agent is a persistent identity that outlives a session. It has a list of sessions, the last of which is the live session
+- The harness continues an agent from its live session in a new session when the live one reaches its context limit, its config changes, or it is idle past its cold limit with an expired prompt cache
+- The new session starts with a continue record naming the old session and its .log file
+- An agent can thus run indefinitely
+- Not every session belongs to an agent. A session that does starts with an apps record that names its agent
+
+Apps:
+- Apps are only available to sessions that belong to an agent
+- Each agent has a list of the apps it can use. It is separate from its config, so a change to it does not start a new session
+- Apps are services on the harness. An app contains a skill file of how to use it, whose first line says when it should be used. An app can also have an API, and some run a daemon on the harness
+- Agents call their apps through their APIs from any of their workers
+- Apps and other agents can message agents, not sessions. The message lands in the agent's live session with via app:<name> or via agent:<id>
+- In an agent's session, $MAINPLANE_KEY is set in all interpreters. It only works for that agent's apps and is revoked when the agent moves to a new session
+- $MAINPLANE_KEY is an ephemeral session key. It is less sensitive than a provider key or an API key, because it expires with the session and reaches only this agent's apps. It lets agents use important APIs while the sensitive credentials stay isolated on the harness
+- Some important Mainplane apps: orchestrate creates agents, message sends messages to agents, schedule lets an agent wake itself later. An agent made by another has via agent:<id> naming its maker
 
 Version:
 - This harness is Mainplane version %s

@@ -1,4 +1,4 @@
-# orchestrate: create agents of your own, read them, change them, and stop them.
+# orchestrate: use to create agents, read them, change them, and stop them.
 
 This is the harness's /agents API for the agents you created. An agent you create is a full agent with its own sessions. It may use only workers and apps that you have. You see and control only the agents you created.
 

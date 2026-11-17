@@ -81,7 +81,7 @@ var (
 const (
 	continued = "This session continues agent %s from session %s, which ended: %s. The whole of that session is in <scratch>/logs/%s.log on every worker: search it with rg for what you need, do not read it whole. The agent's sessions, oldest first: %s"
 	carry     = "Session %s hit its limit mid-task (%s). Retrieve what you were doing from <scratch>/logs/%s.log and continue."
-	appsHead  = "You are agent %s. Apps are services on the harness that this agent may call from any worker:\n  curl -H \"Authorization: Bearer $MAINPLANE_KEY\" $MAINPLANE_URL/apps/<app>/...\nRead an app's skill before its first use: GET $MAINPLANE_URL/skills/<app>, or mainplane skill <app>. The key works only while this is the agent's live session.\nApps:\n"
+	appsHead  = "You are agent %s. Apps are services on the harness that this agent may call from any worker:\n  curl -H \"Authorization: Bearer $MAINPLANE_KEY\" $MAINPLANE_URL/apps/<app>/...\nEvery app has a skill file meant to be read before its first use: GET $MAINPLANE_URL/skills/<app>, or mainplane skill <app>. The key works only while this is the agent's live session.\nApps:\n"
 )
 
 func (a Agent) live() string { return a.Sessions[len(a.Sessions)-1] }
