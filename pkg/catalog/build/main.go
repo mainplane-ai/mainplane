@@ -1,6 +1,6 @@
 // Build prints the catalog: source.json, our choices, filled in with each
 // model's name, limits, input and prices from models.dev. It fails on a
-// preset models.dev does not have, or an effort the model does not take. A
+// preset models.dev does not have or marks deprecated, or an effort the model does not take. A
 // variant, such as a fast mode, is the model's preset again with params of its
 // own and a price that is the model's models.dev price times the multiplier
 // source.json gives with its source, since models.dev lists none.
@@ -70,8 +70,9 @@ type devProvider struct {
 }
 
 type model struct {
-	Name  string `json:"name"`
-	Limit struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Limit  struct {
 		Context int `json:"context"`
 	} `json:"limit"`
 	Modalities struct {
@@ -146,6 +147,9 @@ func preset(src source, dev map[string]devProvider, s sourcePreset) (catalog.Pre
 	m, ok := dev[p.ModelsDev].Models[s.Model]
 	if !ok {
 		return catalog.Preset{}, fmt.Errorf("%s/%s: not in models.dev %s", s.Provider, s.Model, p.ModelsDev)
+	}
+	if m.Status == "deprecated" {
+		return catalog.Preset{}, fmt.Errorf("%s/%s: deprecated in models.dev %s", s.Provider, s.Model, p.ModelsDev)
 	}
 	envelope := provider.Shapes[p.Shape](provider.Config{}).Envelope
 	pr := catalog.Preset{Name: m.Name, Provider: s.Provider, Model: s.Model, Tools: s.Tools, ContextLimit: min(contextLimit, m.Limit.Context), Input: []string{}, Cost: m.Cost}
