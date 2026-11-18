@@ -3,7 +3,9 @@
 // preset models.dev does not have or marks deprecated, or an effort the model does not take. A
 // variant, such as a fast mode, is the model's preset again with params of its
 // own and a price that is the model's models.dev price times the multiplier
-// source.json gives with its source, since models.dev lists none.
+// source.json gives with its source, since models.dev lists none. An
+// OpenRouter model whose price changes by time of day costs its peak price,
+// from OpenRouter, since models.dev holds whichever price held when it looked.
 //
 //	go run ./pkg/catalog/build > catalog.json
 package main
@@ -23,7 +25,10 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/provider"
 )
 
-const modelsDev = "https://models.dev/api.json"
+const (
+	modelsDev       = "https://models.dev/api.json"
+	openRouterPrice = "https://openrouter.ai/api/v1/models"
+)
 
 // contextLimit caps every preset's context: past it a session costs more per
 // step than it gains, and /continue starts over with a summary.
@@ -97,14 +102,19 @@ func run() error {
 	if err := json.Unmarshal(sourceJSON, &src); err != nil {
 		return err
 	}
-	resp, err := http.Get(modelsDev)
+	var dev map[string]devProvider
+	if err := get(modelsDev, &dev); err != nil {
+		return err
+	}
+	peak, err := peakPrices()
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
-	var dev map[string]devProvider
-	if err := json.NewDecoder(resp.Body).Decode(&dev); err != nil {
-		return err
+	for id, c := range peak {
+		if m, ok := dev["openrouter"].Models[id]; ok {
+			m.Cost = c
+			dev["openrouter"].Models[id] = m
+		}
 	}
 	c := catalog.Catalog{Version: time.Now().UTC().Format(time.RFC3339), Providers: map[string]catalog.Provider{}, Presets: map[string]catalog.Preset{}, Groups: map[string][]string{}}
 	for id, p := range src.Providers {
@@ -136,6 +146,51 @@ func run() error {
 	out := json.NewEncoder(os.Stdout)
 	out.SetIndent("", "  ")
 	return out.Encode(c)
+}
+
+func get(url string, v any) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s: %s", url, resp.Status)
+	}
+	return json.NewDecoder(resp.Body).Decode(v)
+}
+
+// peakPrices are OpenRouter's models whose price changes by time of day, each
+// at its dearest window: a cheaper one is an off-peak discount.
+func peakPrices() (map[string]catalog.Cost, error) {
+	var or struct {
+		Data []struct {
+			ID      string `json:"id"`
+			Pricing struct {
+				Overrides []struct {
+					Start      *int     `json:"utc_start"`
+					Days       []string `json:"utc_days"`
+					Prompt     float64  `json:"prompt,string"`
+					Completion float64  `json:"completion,string"`
+					CacheRead  float64  `json:"input_cache_read,string"`
+					CacheWrite float64  `json:"input_cache_write,string"`
+				} `json:"overrides"`
+			} `json:"pricing"`
+		} `json:"data"`
+	}
+	if err := get(openRouterPrice, &or); err != nil {
+		return nil, err
+	}
+	perM := func(v float64) float64 { return math.Round(v*1e12) / 1e6 } // OpenRouter prices a token
+	peak := map[string]catalog.Cost{}
+	for _, m := range or.Data {
+		for _, o := range m.Pricing.Overrides {
+			if (o.Start != nil || o.Days != nil) && perM(o.Prompt) >= peak[m.ID].Input {
+				peak[m.ID] = catalog.Cost{Input: perM(o.Prompt), Output: perM(o.Completion), CacheRead: perM(o.CacheRead), CacheWrite: perM(o.CacheWrite)}
+			}
+		}
+	}
+	return peak, nil
 }
 
 // preset is the catalog's preset for one in source.json.
