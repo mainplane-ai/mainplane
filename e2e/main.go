@@ -375,9 +375,9 @@ mainplane tail $id`,
 	// docs/self-hosting.md's session, the same as prev takes it, which knows no tools,
 	// a line whose answer runs a command on admin, and one for the session
 	// again after an update.
-	prevSession = `{"model":"openai/gpt-6.1-sol","context_limit":200000,"workers":[{"name":"admin"}],"params":{"reasoning":{"effort":"medium","summary":"auto"}}}`
+	prevSession = `{"model":"openai/gpt-6.2-sol","context_limit":200000,"workers":[{"name":"admin"}],"params":{"reasoning":{"effort":"medium","summary":"auto"}}}`
 	again       = `Reply with only the word continued.`
-	session     = `{"model":"openai/gpt-6.1-sol","tools":"patch","context_limit":250000,"workers":[{"name":"admin"}],"params":{"reasoning":{"effort":"medium","summary":"auto"}}}`
+	session     = `{"model":"openai/gpt-6.2-sol","tools":"patch","context_limit":250000,"workers":[{"name":"admin"}],"params":{"reasoning":{"effort":"medium","summary":"auto"}}}`
 	ask         = `With the run tool on worker admin, print 6*7 using its shell. Then reply with only the number.`
 	// oneCLI prints every mainplane on a Windows machine: the PATH's and this
 	// user's own copy. oneWin is its line when the only one is the machine's.
