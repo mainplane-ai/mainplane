@@ -2,8 +2,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dashboard</title>
-<p>This project has no dashboard yet. Its orchestrator makes one.</p>
-<ul id="files"></ul>
+<link rel="stylesheet" href="/web/ds/1/mainplane.css">
+<script src="/web/ds/1/mainplane.js"></script>
+<style>
+/* Page layout only. Components come from the design system; copy one in here to change it. */
+body { margin: 0; background: var(--color-bg-grouped); }
+main { max-width: 760px; margin: 0 auto; padding: 24px 20px 48px; display: grid; gap: 16px; }
+</style>
+<body class="mp">
+<main>
+  <div class="panel" id="needs" hidden><h2>Needs you <small></small></h2><div class="list"></div></div>
+  <div class="panel" id="timeline" hidden><h2>Timeline <small class="end"></small></h2><div class="timeline"></div></div>
+  <div class="panel" id="done" hidden><h2>Done <small></small></h2><div class="work-grid"></div></div>
+  <div class="card" id="empty" hidden><div class="empty compact"><mp-icon name="check"></mp-icon><h3>No dashboard yet</h3><p>The orchestrator makes one as the work starts.</p></div></div>
+</main>
 <script>
 // call asks the interface that shows this page: list, read, send, status.
 let seq = 0; const waiting = new Map()
@@ -16,11 +28,77 @@ addEventListener("message", e => {
   if (w) { waiting.delete(e.data.id); "error" in e.data ? w.reject(new Error(e.data.error)) : w.resolve(e.data.result) }
   if (e.data.event === "changed") show()
 })
-function show() {
-  const list = document.getElementById("files")
-  call("list", { prefix: "" }).then(
-    files => list.replaceChildren(...files.map(f => Object.assign(document.createElement("li"), { textContent: f.name + " (" + f.size + " bytes)" }))),
-    err => { list.textContent = err.message })
+
+// Data, one small file per item:
+//   needs/<id>.json  {"title", "detail", "answers": ["Approve", "Not yet"]}  a question for the user
+//   timeline.json    {"updated", "lanes": [{"name", "steps": [{"label", "state": "done"|"next"|"wait", "value"}]}]}
+//   cards/<id>.json  {"title", "detail", "date", "value"} a metric, or {"title", "detail", "image": "cards/<id>.png"}
+const el = (tag, cls, text) => Object.assign(document.createElement(tag), cls ? { className: cls } : {}, text != null ? { textContent: text } : {})
+const json = async name => JSON.parse(new TextDecoder().decode(await call("read", { name })))
+const icon = name => Object.assign(document.createElement("mp-icon"), { name })
+const short = d => new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: d.length === 10 ? "UTC" : undefined }) // a bare date is that day anywhere
+
+function need(n) {
+  const div = el("div", "need")
+  div.append(el("h3", "", n.title), el("p", "", n.detail || ""))
+  const answers = el("div", "answers")
+  ;(n.answers || []).forEach((a, i) => {
+    const b = el("button", "btn sm" + (i === 0 ? " filled" : ""), a)
+    b.onclick = () => call("send", { text: `Answer to "${n.title}": ${a}` }).then(() => { div.classList.add("answered"); answers.replaceChildren("You answered: " + a) })
+    answers.append(b)
+  })
+  const reply = el("button", "btn sm reply"); reply.setAttribute("aria-expanded", "false"); reply.append(icon("reply"), "Reply")
+  answers.append(reply)
+  const field = el("div", "reply-field"), ta = el("textarea"), send = el("button", "btn icon filled send")
+  ta.rows = 1; ta.placeholder = "Reply"; ta.setAttribute("aria-label", "Reply to this question")
+  send.setAttribute("aria-label", "Send"); send.append(icon("arrow-up")); field.append(ta, send)
+  const wrap = el("div", "reply-wrap"), inner = el("div"); inner.append(field); wrap.append(inner)
+  const replied = el("p", "replied"); replied.hidden = true; replied.append(icon("reply"), el("b", "", "You replied"), el("span"))
+  div.append(answers, wrap, replied)
+  return div
 }
-show()
+addEventListener("mp-reply", e => call("send", { text: e.detail.text }))
+
+function lane(l) {
+  const s = el("section"), h = el("h3", "", l.name), ol = el("ol")
+  const done = l.steps.filter(x => x.state === "done").length
+  h.append(el("span", "", `${done}/${l.steps.length}`)); s.append(h, ol)
+  l.steps.forEach((x, i) => {
+    const li = el("li", x.state); li.append(el("i"), el("span", "l", x.label))
+    if (x.value) li.append(el("span", "v", x.value))
+    ol.append(li)
+    if (x.state === "done" && l.steps[i + 1]?.state !== "done" && i + 1 < l.steps.length) ol.append(el("li", "here", "← you are here"))
+  })
+  return s
+}
+
+async function card(c) {
+  const div = el("div", "card " + (c.image ? "image" : "metric"))
+  if (c.image) {
+    const img = el("img"); img.alt = ""; img.src = URL.createObjectURL(new Blob([await call("read", { name: c.image })]))
+    const body = el("div", "body"); body.append(el("h3", "", c.title), el("p", "", c.detail || ""))
+    div.append(img, body)
+  } else div.append(el("div", "date", c.date ? short(c.date) : ""), el("div", "value", c.value), el("h3", "", c.title), el("div", "label", c.detail || ""))
+  return div
+}
+
+function fill(id, items, count = items.length) {
+  const p = document.getElementById(id)
+  p.hidden = !items.length
+  p.querySelector("h2 small").textContent = count
+  p.querySelector("h2 + div").replaceChildren(...items)
+}
+
+async function show() {
+  const files = (await call("list", { prefix: "" })).map(f => f.name)
+  const of = (dir) => files.filter(f => f.startsWith(dir) && f.endsWith(".json")).sort()
+  const needs = await Promise.all(of("needs/").map(json))
+  fill("needs", needs.map(need))
+  const t = files.includes("timeline.json") ? await json("timeline.json") : { lanes: [] }
+  fill("timeline", t.lanes.map(lane), t.updated ? "updated " + short(t.updated) : "")
+  const cards = await Promise.all(of("cards/").reverse().map(async f => card(await json(f))))
+  fill("done", cards)
+  document.getElementById("empty").hidden = needs.length + t.lanes.length + cards.length > 0
+}
+show().catch(err => document.body.replaceChildren(el("p", "", err.message)))
 </script>

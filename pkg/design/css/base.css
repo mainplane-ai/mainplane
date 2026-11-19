@@ -21,3 +21,4 @@
 @keyframes mp-spin { to { transform: rotate(1turn); } }
 @keyframes mp-fade { from { opacity: 0; } }
 @keyframes mp-typing { 0%, 60%, 100% { opacity: .35; transform: none; } 30% { opacity: 1; transform: translateY(calc(var(--typing-lift, -2px) * var(--motion))); } }
+[hidden] { display: none !important; }
