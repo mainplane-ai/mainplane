@@ -6,6 +6,7 @@ import { chat } from "./chat"
 import { composer } from "./composer"
 import { dashboard } from "./dashboard"
 import { picker } from "./picker"
+declare const MPMenu: { open: (menu: HTMLElement, at: Element) => void }
 
 const statuses = ["open", "waiting", "closed"]
 // A project's status as a sidebar row shows it: open is the user's turn.
@@ -17,9 +18,14 @@ const lastModel = "mainplane-model"
 
 const search = h("input", { type: "search", placeholder: "Search" })
 const list = h("div", { className: "list side separated", role: "listbox", ariaLabel: "Projects" })
+// Pins are kept in this browser only. A phone shows them as circles above the list.
+const pins = h("div", { className: "pins" })
+const pinned = () => JSON.parse(localStorage.getItem("pins") ?? "[]") as string[]
+const pin = (id: string) => localStorage.setItem("pins", JSON.stringify(pinned().includes(id) ? pinned().filter(x => x !== id) : [...pinned(), id]))
 const side = h("nav", { className: "sidebar" },
   h("div", { className: "top" }, h("label", { className: "search lg" }, icon("search"), search), h("a", { href: "/new", className: "btn icon ghost", ariaLabel: "New project" }, icon("compose"))),
   h("h1", { className: "large-title" }, "Mainplane"),
+  pins,
   list,
   h("div", { className: "foot" }, h("button", { className: "btn plain sm", onclick: () => logout() }, "Log out")))
 const main = h("main")
@@ -49,11 +55,16 @@ function drawList() {
   const rows = statuses.flatMap(s => projects.filter(p => p.status === s && (!q || p.name.toLowerCase().includes(q)))).map(p => {
     const line = h("small", null, p.line)
     if (p.working) line.prepend(h("span", { className: "typing inline", role: "status", ariaLabel: "Working" }, h("i"), h("i"), h("i")))
-    return h("a", { href: `/projects/${p.id}`, className: `row ${p.working ? "working" : rowClass[p.status]}`, role: "option", ariaSelected: String(p.id === at), ariaDescription: p.working ? "Working" : said[p.status] },
+    return h("a", { href: `/projects/${p.id}`, className: `row ${p.working ? "working" : rowClass[p.status]}${pinned().includes(p.id) ? " pinned" : ""}`, role: "option", ariaSelected: String(p.id === at), ariaDescription: p.working ? "Working" : said[p.status] },
       h("span", { className: "u" }), h("span", { className: "avatar" }, initials(p.name)),
       h("span", { className: "row-main" }, h("span", { className: "h" }, h("b", null, p.name), h("span", { className: "row-trail" }, when(p.updated))), line))
   })
   list.replaceChildren(...rows)
+  // A pin whose project needs you shows its line in a bubble, as Messages shows an unread message.
+  pins.replaceChildren(...pinned().flatMap(id => projects.filter(p => p.id === id)).map(p =>
+    h("a", { href: `/projects/${p.id}`, className: `pin ${p.working ? "working" : rowClass[p.status]}` },
+      ...(p.status === "open" && p.line ? [h("span", { className: "peek" }, p.line)] : []),
+      h("span", { className: "avatar" }, initials(p.name)), h("small", null, h("span", { className: "u" }), p.name))))
 }
 search.oninput = drawList
 
@@ -103,16 +114,19 @@ async function render() {
     const nodes = await content(kind, id, sub, signal)
     if (!signal.aborted) main.replaceChildren(...nodes) // a slow one must not draw over the view that came after it
   } catch (err) {
-    if (!signal.aborted) main.replaceChildren(toolbar("Mainplane", ""), h("p", { className: "error-line" }, String(err)))
+    if (!signal.aborted) main.replaceChildren(toolbar("Mainplane", "", null), h("p", { className: "error-line" }, String(err)))
   }
 }
 
 // toolbar heads a view: back (on a phone), the name and its line, then its buttons.
-function toolbar(name: string, line: string, ...buttons: HTMLElement[]): HTMLElement {
+// With a menu, the name is a button that opens it: on a phone it is the title pill, the only way to the views.
+function toolbar(name: string, line: string, menu: HTMLElement | null, ...buttons: HTMLElement[]): HTMLElement {
+  const title = menu
+    ? h("button", { className: "title island", ariaHaspopup: "menu", onclick: () => MPMenu.open(menu, title) } as Partial<HTMLButtonElement>, h("b", null, name), h("small", null, line))
+    : h("span", { className: "title" }, h("b", null, name), h("small", null, line))
   return h("div", { className: "toolbar" },
     h("a", { href: "/", className: "btn icon ghost back", ariaLabel: "Projects" }, icon("chevron-left")),
-    h("span", { className: "avatar" }, initials(name)),
-    h("span", { className: "title" }, h("b", null, name), h("small", null, line)),
+    h("span", { className: "avatar" }, initials(name)), title, ...(menu ? [menu] : []),
     h("span", { className: "spacer" }), h("span", { className: "tb-group" }, ...buttons))
 }
 
@@ -125,7 +139,7 @@ async function content(kind: string, id: string, sub: string, signal: AbortSigna
     const a = await get<Agent>(`/agents/${id}`, signal)
     const name = a.name || a.id
     const at = `/agents/${a.id}`
-    const head = toolbar(name, `${a.status} · ${a.config.model}`, h("a", { href: at + "/settings", className: "btn icon ghost", ariaLabel: "Instructions" }, icon("more-vertical")))
+    const head = toolbar(name, `${a.status} · ${a.config.model}`, null, h("a", { href: at + "/settings", className: "btn icon ghost", ariaLabel: "Instructions" }, icon("more-vertical")))
     const view = [head, ...chat(id, signal), composer(id, `Message ${name}`)]
     if (sub === "settings") return [...view, sheet("Agent", name, at, [instructions(a)], [h("a", { href: at, className: "btn" }, "Done")])]
     return view
@@ -139,7 +153,12 @@ async function content(kind: string, id: string, sub: string, signal: AbortSigna
   const agents = h("a", { href: at + "/agents", className: "btn ghost agents", ariaLabel: "Agents" }, icon("people"), count)
   void get<Agent[]>(at + "/agents", signal).then(l => (count.textContent = String(l.length)), () => {})
   const more = h("a", { href: at + "/settings", className: "btn icon ghost", ariaLabel: "Settings" }, icon("more-vertical"))
-  const head = toolbar(p.name, line(p), agents, more)
+  const item = (name: string, label: string, act: (e: Event) => void, cls = "") => h("button", { role: "menuitem", className: cls, onclick: act } as Partial<HTMLButtonElement>, icon(name), h("span", null, label))
+  const menu = h("div", { className: "menu", role: "menu", hidden: true },
+    item("grid", "Dashboard", () => go(at)), item("message", "Chat", () => go(at + "/chat")), item("people", "Agents", () => go(at + "/agents")), item("settings", "Settings", () => go(at + "/settings")),
+    h("hr"), item("pin", pinned().includes(p.id) ? "Unpin" : "Pin", () => { pin(p.id); drawList(); menu.querySelector(".pin-item span")!.textContent = pinned().includes(p.id) ? "Unpin" : "Pin" }, "pin-item"),
+    item("trash", "Delete", attempt(() => removeProject(p)), "danger"))
+  const head = toolbar(p.name, line(p), menu, agents, more)
   addEventListener("projects", e => (e as CustomEvent<Project[]>).detail.filter(q => q.id === p.id).forEach(q => (head.querySelector(".title small")!.textContent = line(q))), { signal })
   const tab = (path: string, label: string, name: string) => h("button", { role: "tab", ariaSelected: String(sub === name), onclick: () => go(path) }, label)
   const tabs = h("div", { className: "tabs", role: "tablist" }, tab(at, "Dashboard", ""), tab(at + "/chat", "Chat", "chat"))
@@ -256,16 +275,19 @@ async function settings(p: Project, signal: AbortSignal): Promise<HTMLElement> {
   })
   const remove = h("button", {
     className: "btn danger",
-    onclick: attempt(async () => {
-      if (!confirm(`Delete the project "${p.name}" and its dashboard?`)) return
-      const agents = confirm("Delete the project's agents too? Cancel keeps them.")
-      await api(`/projects/${p.id}?via=web${agents ? "&agents=1" : ""}`, { method: "DELETE" })
-      await refresh()
-      go("/")
-    }),
+    onclick: attempt(() => removeProject(p)),
   }, "Delete")
   const body = [h("div", { className: "form" }, row("Status", "Open means it is your turn.", status), row("Line", "", text)), ...o.el, h("details", { className: "disclosure" }, h("summary", null, "Orchestrator instructions"), instructions(orchestrator))]
   return sheet("Project settings", p.name, at, body, [remove, h("a", { href: at, className: "btn" }, "Cancel"), save], ...o.over)
 }
 
 void render()
+
+// removeProject asks, then deletes the project and maybe its agents.
+async function removeProject(p: Project) {
+  if (!confirm(`Delete the project "${p.name}" and its dashboard?`)) return
+  const agents = confirm("Delete the project's agents too? Cancel keeps them.")
+  await api(`/projects/${p.id}?via=web${agents ? "&agents=1" : ""}`, { method: "DELETE" })
+  await refresh()
+  go("/")
+}
