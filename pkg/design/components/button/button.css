@@ -1,0 +1,51 @@
+.btn {
+  --h: var(--control-md); --px: 14px; --fs: 13px; --min: 64px;
+  --bg: var(--color-fill); --bg-h: var(--color-fill-hover); --bg-p: var(--color-fill-pressed); --fg: var(--color-text);
+  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  height: var(--h); min-width: var(--h); padding: 0 var(--px); border: 0; border-radius: var(--radius-full); corner-shape: round;
+  background: var(--bg); color: var(--fg); font: 500 var(--fs)/1 var(--font-text); letter-spacing: 0; white-space: nowrap;
+  text-decoration: none; user-select: none; cursor: default; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+.btn:not(.icon) { min-width: var(--min); }
+.btn mp-icon { --icon-size: calc(var(--fs) + 3px); margin: 0 -1px; }
+.btn > mp-icon:first-child { margin-left: -3px; }
+.btn > mp-icon:last-child:not(:first-child) { margin-right: -3px; }
+.btn:hover { background-color: var(--bg-h); }
+.btn:active { background-color: var(--bg-p); transition-duration: 0s; }
+.btn:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
+.btn:disabled, .btn[aria-disabled="true"] { background: color-mix(in srgb, var(--bg) 50%, transparent); color: color-mix(in srgb, var(--fg) 38%, transparent); pointer-events: none; }
+.btn.filled:disabled, .btn.filled[aria-disabled="true"] { background: color-mix(in srgb, var(--bg) 42%, transparent); color: color-mix(in srgb, var(--fg) 55%, transparent); }
+.btn.sm { --h: var(--control-sm); --px: 12px; --fs: 13px; --min: 56px; }
+/* 24 pt: rounded rect, as Apple (capsule from 28). Icon button shapes live in icon-button.css. */
+.btn.sm:not(.icon) { border-radius: calc(6px * var(--corner-k)); corner-shape: squircle; }
+.btn.lg { --h: var(--control-lg); --px: 18px; --fs: 14px; --min: 80px; }
+
+.btn.filled { --bg: var(--color-accent-fill); --bg-h: var(--color-accent-fill-hover); --bg-p: var(--color-accent-fill-pressed); --fg: var(--color-text-on-accent); }
+.btn.tinted { --bg: var(--color-accent-soft); --bg-h: color-mix(in srgb, var(--color-accent) 18%, transparent); --bg-p: color-mix(in srgb, var(--color-accent) 26%, transparent); --fg: var(--color-accent-ink); }
+.btn.plain { --bg: transparent; --bg-h: var(--color-fill); --bg-p: var(--color-fill-pressed); --fg: var(--color-accent-ink); }
+.btn.danger { --fg: var(--color-danger-ink); }
+.btn.tinted.danger { --bg: var(--color-danger-soft); --bg-h: color-mix(in srgb, var(--color-danger) 17%, transparent); --bg-p: color-mix(in srgb, var(--color-danger) 25%, transparent); }
+
+/* loading: the label keeps the width, hidden behind the Apple spoke spinner in the label color */
+.btn.is-loading { color: transparent; pointer-events: none; }
+.btn.is-loading::after { content: ""; position: absolute; inset: 0; margin: auto; --s: calc(var(--fs) + 3px); width: var(--s); height: var(--s); border-radius: 50%; corner-shape: round; color: var(--fg);
+  background: conic-gradient(from 0deg, transparent 0 8%, currentColor 8% 12%, transparent 12% 20.5%, currentColor 20.5% 24.5%, transparent 24.5% 33%, currentColor 33% 37%, transparent 37% 45.5%, currentColor 45.5% 49.5%, transparent 49.5% 58%, currentColor 58% 62%, transparent 62% 70.5%, currentColor 70.5% 74.5%, transparent 74.5% 83%, currentColor 83% 87%, transparent 87% 95.5%, currentColor 95.5% 99.5%, transparent 99.5%);
+  mask: radial-gradient(circle, transparent 38%, #000 40%) intersect, conic-gradient(rgba(0,0,0,.15), #000);
+  animation: mp-spin 1s steps(8) infinite; }
+
+.btn.icon { --ib-r: var(--radius-8); width: var(--h); padding: 0; border-radius: var(--ib-r); corner-shape: squircle; }
+.btn.icon.sm { --ib-r: var(--radius-6); }
+.btn.icon.lg { --ib-r: var(--radius-10); }
+.btn.icon:is(.filled, .round) { border-radius: var(--radius-full); corner-shape: round; }
+.btn.icon mp-icon { --icon-size: 17px; margin: 0; }
+.btn.icon.sm mp-icon { --icon-size: 15px; }
+.btn.icon.lg mp-icon { --icon-size: 22px; --icon-stroke: 1.25; }
+.btn.icon.filled mp-icon { --icon-stroke: 2; }
+.btn.icon.ghost { --bg: transparent; --bg-h: var(--color-fill); --bg-p: var(--color-fill-pressed); --fg: color-mix(in srgb, var(--color-text) 80%, transparent); }
+.btn.icon.ghost:is(:hover, :active) { --fg: var(--color-text); }
+.btn.icon:is([aria-pressed="true"], .is-selected) { --bg: var(--color-fill-hover); --bg-h: var(--color-fill-hover); --bg-p: var(--color-fill-pressed); --fg: var(--color-text); }
+/* disabled send */
+.btn.icon.filled:is(:disabled, [aria-disabled="true"]) { background: var(--color-fill); color: color-mix(in srgb, var(--color-text) 32%, transparent); }
+/* a run of related ghost buttons: 2 px apart, as the Finder toolbar (36 pt pitch) */
+.ib-run { display: inline-flex; gap: 2px; align-items: center; }

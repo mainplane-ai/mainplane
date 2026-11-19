@@ -1,0 +1,23 @@
+<div class="thread"><div class="msg sent first tail"><div class="bubble">What does a batch of croissants cost?</div></div><div class="msg first rt-msg"><div class="rt">
+<h2>Croissant batch</h2>
+<p>One batch makes <strong>48 croissants</strong> and costs <em>$34</em>. The shop lists each one with the code <code>CR-48</code>, so it shows on the menu page. The recipe is in <a href="#">the shared folder</a>.</p>
+<h3>What it needs</h3>
+<ul><li>Flour: a 25 kg bag lasts four batches</li><li>Butter and eggs: bought each Monday
+<ul><li>Kept cold for 3 days</li></ul></li></ul>
+<table><thead><tr><th>Item</th><th class="num">Batch</th><th class="num">Week</th></tr></thead><tbody><tr><td>Flour</td><td class="num">$12</td><td class="num">$72</td></tr><tr><td>Butter</td><td class="num">$18</td><td class="num">$108</td></tr><tr><td>Eggs</td><td class="num">$4</td><td class="num">$24</td></tr><tr class="total"><td>Total</td><td class="num">$34</td><td class="num">$204</td></tr></tbody></table>
+<p>With <math><msub><mi>c</mi><mi>i</mi></msub></math> the cost of item <math><mi>i</mi></math> in one batch, the week costs</p>
+<div class="math-block"><math display="block" class="tml-display" style="display:block math;"><mrow><mtext>week</mtext><mo>=</mo><mi>b</mi><mrow><munderover><mo movablelimits="false">∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>n</mi></munderover></mrow><msub><mi>c</mi><mi>i</mi></msub><mo separator="true">,</mo><mspace width="2em"></mspace><mi>b</mi><mo>=</mo><msub><mi>b</mi><mtext>Mon</mtext></msub><mo>+</mo><msub><mi>b</mi><mtext>Wed</mtext></msub><mo>+</mo><msub><mi>b</mi><mtext>Sat</mtext></msub></mrow></math></div>
+<p>which is about <strong>$204</strong> for <span class="nobr"><math><mrow><mi>b</mi><mo>=</mo></mrow><mrow><mn>6</mn></mrow></math>.</span></p>
+<h3>Next steps</h3>
+<ol><li>Order flour from the new supplier (2 minutes)</li><li>Upload last week's butter receipt</li><li>I check the first delivery on Nov 30</li></ol>
+<blockquote><p>Bake the first batch at six, so the window is full when the door opens.</p></blockquote>
+<div class="code-block "><div class="cb-head"><span>Python</span><button class="cb-copy" aria-label="Copy code"><mp-icon name="copy" ></mp-icon><span>Copy</span></button></div><pre><code><span class="c"># What one batch of croissants costs</span>
+batch = {<span class="s">"flour"</span>: <span class="n">12</span>, <span class="s">"butter"</span>: <span class="n">18</span>, <span class="s">"eggs"</span>: <span class="n">4</span>}
+total = <span class="f">sum</span>(batch.<span class="f">values</span>())  <span class="c"># 34</span>
+
+<span class="k">def</span> <span class="f">weekly</span>(cost, batches=<span class="n">6</span>):
+    <span class="k">return</span> cost * batches
+
+<span class="k">print</span>(<span class="s">f"${weekly(total):,.0f} a week"</span>)</code></pre></div>
+</div></div></div><div class="st"><span class="st-l">Short reply</span><div class="r"><div class="thread"><div class="msg first tail"><div class="bubble rt-inline">Done. <strong>Orders</strong> open <em>Nov 24</em>; the menu code is <code>CR-48</code> and <span class="nobr"><math><mrow><mn>34</mn><mo>×</mo></mrow><mrow><mn>6</mn><mo>=</mo></mrow><mrow><mn>204</mn></mrow></math>.</span> See <a href="#">the shop</a>.</div></div><div class="msg sent first tail"><div class="bubble rt-inline">Use <code>--day saturday</code> and keep it <strong>short</strong>.</div></div></div></div></div><div class="st"><span class="st-l">Code, hover</span><div class="r"><div class="rt"><div class="code-block"><div class="cb-head"><span>Shell</span><button class="cb-copy" aria-label="Copy code"><mp-icon name="copy" ></mp-icon><span>Copy</span></button></div><pre><code><span class="p">$</span> shop orders list <span class="k">--day</span> saturday
+<span class="o">3 kinds · next pickup Nov 30</span></code></pre></div></div></div></div><div class="st"><span class="st-l">Code, wide</span><div class="r"><div class="rt" style="max-width:360px"><div class="code-block "><div class="cb-head"><span>TypeScript</span><button class="cb-copy" aria-label="Copy code"><mp-icon name="copy" ></mp-icon><span>Copy</span></button></div><pre><code><span class="k">export</span> <span class="k">const</span> weekCost = (batch: <span class="t">Batch</span>) =&gt; batch.items.<span class="f">reduce</span>((sum, item) =&gt; sum + item.cost, <span class="n">0</span>) * <span class="n">6</span> <span class="c">// 204</span></code></pre></div></div></div></div>

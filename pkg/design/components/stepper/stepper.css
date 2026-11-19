@@ -1,0 +1,18 @@
+.stepper { --h: var(--control-md); --w: 80px; display: inline-flex; flex: none; height: var(--h); width: var(--w); border-radius: var(--radius-full); corner-shape: round; background: var(--color-fill); position: relative; --stepper-line: color-mix(in srgb, var(--color-text-3) 60%, transparent); outline: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+.stepper.lg { --h: 32px; --w: 94px; }
+/* the hairline: 1 px, 75% of the height (iOS: 24 of 32), centered */
+.stepper::after { content: ""; position: absolute; left: calc(50% - .5px); top: 12.5%; width: 1px; height: 75%; background: var(--stepper-line); pointer-events: none; }
+.stepper > button { flex: 1 1 0; height: 100%; border: 0; border-radius: 0; padding: 0; margin: 0; background: transparent; color: var(--color-text); display: grid; place-items: center; cursor: default; touch-action: manipulation; transition: background-color var(--duration-fast), color var(--duration-fast); }
+/* glyph: 0.41 x height wide, stroke 1/16 of the height (iOS 13.3 pt and 2 pt at 32) */
+.stepper > button mp-icon { --icon-size: calc(var(--h) * .57); --icon-stroke: 2.25; }
+.stepper > button:hover { background: var(--color-fill); }
+.stepper > button:active { background: var(--color-fill-pressed); transition: none; }
+.stepper > button:disabled { color: var(--color-text-3); background: transparent; }
+.stepper[aria-disabled="true"] > button { color: var(--color-text-3); background: transparent; pointer-events: none; }
+.stepper:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
+.stepper > button:first-child { corner-shape: round; border-radius: var(--radius-full) 0 0 var(--radius-full); }
+.stepper > button:last-child { corner-shape: round; border-radius: 0 var(--radius-full) var(--radius-full) 0; }
+.stepper-field { display: inline-flex; align-items: center; gap: var(--space-8); }
+.stepper-field > output { min-width: 2ch; text-align: right; font: var(--text-body); font-variant-numeric: tabular-nums; color: var(--color-text); }
+.stepper-field:has(.stepper[aria-disabled="true"]) > output { color: var(--color-text-3); }
+.stepper-field.lg > output { font: var(--text-body-large); }

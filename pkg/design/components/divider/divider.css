@@ -1,0 +1,5 @@
+.divider { border: 0; height: var(--hairline); margin: 8px 0; background: var(--color-separator); }
+.divider.inset { margin-left: 16px; }
+.divider.vertical { width: var(--hairline); height: auto; align-self: stretch; margin: 0 8px; }
+.divider.labeled { display: flex; align-items: center; gap: 10px; height: auto; background: none; font: var(--text-footnote); font-weight: 600; color: var(--color-text-3); }
+.divider.labeled::before, .divider.labeled::after { content: ""; flex: 1; height: var(--hairline); background: var(--color-separator); }

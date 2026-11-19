@@ -1,0 +1,7 @@
+.badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--radius-full); corner-shape: round; font: 600 11px/1 var(--font-text); font-variant-numeric: tabular-nums;
+  background: var(--color-fill-pressed); color: var(--color-text); }
+.badge.accent { background: var(--color-accent-fill); color: var(--color-text-on-accent); }
+.badge.danger { background: var(--color-danger); color: #fff; }
+.badge.dot { min-width: 0; width: 9px; height: 9px; padding: 0; }
+.badge.corner { position: absolute; top: -5px; right: -7px; box-shadow: 0 0 0 2px var(--color-bg); }
+.badge.dot.corner { top: -1px; right: -1px; }

@@ -1,0 +1,40 @@
+@property --sb-a { syntax: "<number>"; inherits: true; initial-value: 0; } /* thumb shown 0..1 (inherited: scrollbar parts only see inherited values) */
+@property --sb-x { syntax: "<number>"; inherits: true; initial-value: 0; } /* pointer on the bar 0..1: thumb darkens */
+
+.scroller {
+  --sb-a: 0; --sb-x: 0;
+  --sb-ink: 55%;   /* thumb: text color at 55% (light #7F8385 on white, Apple #808080; dark .55 white like Apple) */
+  --sb-hot: 65%;   /* thumb with the pointer on it */
+  --sb-track: 0%;  /* rail: only .always */
+  --sb-thumb: color-mix(in srgb, var(--color-text) calc((var(--sb-ink) + (var(--sb-hot) - var(--sb-ink)) * var(--sb-x)) * var(--sb-a)), transparent);
+  --sb-trackc: color-mix(in srgb, var(--color-text) var(--sb-track), transparent);
+  transition: --sb-a .3s var(--ease-standard), --sb-x .15s var(--ease-standard);
+}
+.scroller[data-sb] { --sb-a: 1; transition-duration: .1s, .15s; }
+.scroller[data-sb="bar"] { --sb-x: 1; }
+.scroller.always { --sb-a: 1; --sb-track: 6%; }
+@media (prefers-contrast: more) { .scroller { --sb-ink: 75%; --sb-hot: 85%; } .scroller.always { --sb-track: 12%; } }
+[data-contrast="more"] .scroller, .scroller[data-contrast="more"] { --sb-ink: 75%; --sb-hot: 85%; }
+[data-contrast="more"] .scroller.always, .scroller.always[data-contrast="more"] { --sb-track: 12%; }
+
+.scroller::-webkit-scrollbar { width: 17px; height: 17px; background: transparent; }
+.scroller::-webkit-scrollbar-corner { background: transparent; }
+.scroller::-webkit-scrollbar-track, .scroller::-webkit-scrollbar-thumb { border: 0 solid transparent; background-clip: padding-box; border-radius: 99px; }
+.scroller::-webkit-scrollbar-track:vertical, .scroller::-webkit-scrollbar-thumb:vertical { border-width: 3px 3px 3px 8px; min-height: 32px; }
+.scroller::-webkit-scrollbar-track:horizontal, .scroller::-webkit-scrollbar-thumb:horizontal { border-width: 8px 3px 3px; min-width: 32px; }
+.scroller::-webkit-scrollbar-track { background-color: var(--sb-trackc); }
+.scroller::-webkit-scrollbar-thumb { background-color: var(--sb-thumb); }
+
+@supports not selector(::-webkit-scrollbar) {
+  .scroller { scrollbar-width: thin; scrollbar-color: var(--sb-thumb) var(--sb-trackc); }
+}
+
+/* Drawn bars for the fixture (the check browser hides real scrollbars) */
+.sb-static { position: relative; overflow: hidden; }
+.sb-draw { position: absolute; top: 0; right: 0; bottom: 0; width: 17px; pointer-events: none; }
+.sb-draw::before, .sb-draw::after { content: ""; position: absolute; left: 8px; right: 3px; border-radius: 99px; }
+.sb-draw::before { top: 3px; bottom: 3px; background: var(--sb-trackc); }
+.sb-draw::after { top: calc(3px + var(--t) * (100% - 6px) / 100); height: calc(var(--h) * (100% - 6px) / 100); background: var(--sb-thumb); }
+.sb-draw.h { top: auto; left: 0; width: auto; height: 17px; }
+.sb-draw.h::before { inset: 8px 3px 3px 3px; }
+.sb-draw.h::after { inset: 8px auto 3px calc(3px + var(--t) * (100% - 6px) / 100); width: calc(var(--h) * (100% - 6px) / 100); height: auto; }

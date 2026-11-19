@@ -1,0 +1,40 @@
+.menu {
+  --menu-pad: 6px; --menu-row: 28px; --menu-x: 10px;
+  background: var(--color-floating); min-width: 220px; max-width: 320px; padding: var(--menu-pad); border-radius: var(--radius-12);
+  display: flex; flex-direction: column; font: var(--text-body); color: var(--color-text); z-index: var(--z-popover);
+  box-shadow: inset 0 0 0 var(--hairline) var(--color-floating-edge), var(--shadow-3);
+  user-select: none; -webkit-user-select: none;
+}
+.menu[hidden] { display: none; }
+.menu:focus { outline: none; }
+.menu.floating { position: fixed; }
+.menu.closing { opacity: 0; transition: opacity var(--duration-fast) var(--ease-out); pointer-events: none; }
+.menu > [role^="menuitem"] {
+  display: flex; align-items: center; gap: 8px; min-height: var(--menu-row); padding: 0 var(--menu-x); border: 0; border-radius: var(--radius-6);
+  background: transparent; color: inherit; font: inherit; text-align: left; cursor: default; white-space: nowrap; outline: none; flex-shrink: 0;
+}
+.menu > [role^="menuitem"] > mp-icon { --icon-size: 16px; width: 16px; height: 16px; flex: none; color: var(--color-text-2); }
+.menu > [role^="menuitem"] > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* one label column: when any row has a leading icon, rows without one keep its space (Slack shifts them left) */
+.menu:has(> [role^="menuitem"] > mp-icon:first-child) > [role^="menuitem"]:not(:has(> mp-icon:first-child)), .menu:has(> [role^="menuitem"] > mp-icon:first-child) > .menu-label { padding-left: calc(var(--menu-x) + 24px); }
+/* check column (Apple): checkable rows draw a check in a leading 16 px column; the whole menu keeps that column */
+.menu > [role="menuitemradio"], .menu > [role="menuitemcheckbox"] { padding-left: calc(var(--menu-x) + 24px); position: relative; }
+.menu:has(> [role="menuitemradio"], > [role="menuitemcheckbox"]) > :is([role="menuitem"], .menu-label) { padding-left: calc(var(--menu-x) + 24px); }
+.menu > [aria-checked="true"]::before {
+  content: ""; position: absolute; left: var(--menu-x); top: 50%; width: 16px; height: 16px; margin-top: -8px; background: currentColor;
+  -webkit-mask: var(--menu-check) center / 16px no-repeat; mask: var(--menu-check) center / 16px no-repeat;
+}
+.menu { --menu-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.4l3 3 6-6.8' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+.menu > [role^="menuitem"] > kbd { font: var(--text-body); font-family: var(--font-text); color: var(--color-text-3); margin-left: 24px; letter-spacing: .02em; }
+.menu > [role^="menuitem"] > .chev { --icon-size: 14px; width: 14px; height: 14px; margin: 0 -4px 0 16px; color: var(--color-text-2); }
+.menu > [role^="menuitem"]:focus, .menu > [aria-expanded="true"] { background: var(--color-fill); }
+.menu > [role^="menuitem"]:is(:focus, [aria-expanded="true"]) > kbd { color: var(--color-text-2); }
+.menu > [role^="menuitem"].is-blink { background: transparent; }
+.menu > .danger, .menu > .danger > mp-icon { color: var(--color-danger-ink); }
+.menu > .danger:is(:focus) { background: var(--color-danger-fill, var(--color-danger)); color: #fff; }
+.menu > .danger:is(:focus) > mp-icon { color: inherit; }
+.menu > [role^="menuitem"]:is(:disabled, [aria-disabled="true"]), .menu > [role^="menuitem"]:is(:disabled, [aria-disabled="true"]) > * { color: var(--color-text-3); background: transparent; }
+.menu > hr { border: 0; flex: none; height: var(--hairline); background: var(--color-separator); margin: 6px calc(-1 * var(--menu-pad)); }
+.menu > .menu-label { font: var(--text-callout); color: var(--color-text-2); padding: 4px var(--menu-x) 2px; white-space: nowrap; }
+.menu.compact { --menu-row: 24px; }
+.menu-target { outline: 2px solid var(--color-accent); outline-offset: -2px; }

@@ -1,0 +1,11 @@
+.status { display: inline-flex; align-items: center; gap: 6px; font: var(--text-subheadline); color: var(--color-text-2); white-space: nowrap; }
+.status > .status-dot:not(.working) { width: 8px; height: 8px; }
+.status-dot { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 50%; corner-shape: round; vertical-align: middle; background: var(--color-status-closed); }
+.status-dot.open { background: var(--color-status-open); }
+.status-dot.waiting { background: var(--color-status-waiting); }
+.status-dot.closed { background: transparent; box-shadow: inset 0 0 0 1.5px var(--color-status-closed); }
+.status-dot.working { width: auto; height: 14px; padding: 0 5px; border-radius: var(--radius-full); corner-shape: round; background: var(--color-fill-pressed); display: inline-flex; align-items: center; gap: 2.5px; box-shadow: none; }
+.status-dot.working::before, .status-dot.working::after, .status-dot.working > i { content: ""; width: 4px; height: 4px; border-radius: 50%; corner-shape: round; background: var(--color-text-2); animation: mp-typing 1.2s infinite ease-in-out; }
+.status-dot.working > i { animation-delay: .15s; }
+.status-dot.working::after { animation-delay: .3s; }
+.status-dot.working { --typing-lift: -1.5px; }

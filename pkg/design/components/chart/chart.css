@@ -1,0 +1,6 @@
+.chart { display: block; width: 100%; height: 120px; color: var(--color-text-3); font: var(--text-footnote); }
+.chart .bar { fill: var(--color-surface-3); }
+.chart .bar.hi { fill: var(--color-text); }
+.chart .line { fill: none; stroke: var(--color-text); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.chart .grid { stroke: var(--color-separator); }
+.chart text { fill: currentColor; }

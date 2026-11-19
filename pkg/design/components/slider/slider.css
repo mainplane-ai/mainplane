@@ -1,0 +1,39 @@
+.slider {
+  --v: .5; --kw: 20px; --kh: 16px; --th: 6px; --h: 20px;
+  --fill: light-dark(color-mix(in srgb, var(--color-text) 56%, transparent), color-mix(in srgb, var(--color-text) 62%, transparent));
+  --rest: color-mix(in srgb, var(--color-text) 10%, transparent);
+  --knob: var(--color-knob);
+  --knob-shadow: var(--shadow-knob);
+  --track: linear-gradient(90deg, var(--fill) calc(var(--kw) / 2 + (100% - var(--kw)) * var(--v)), var(--rest) 0);
+  appearance: none; -webkit-appearance: none; display: inline-block; margin: 0; width: 100%; min-width: 120px; height: var(--h); background: transparent; cursor: default; vertical-align: middle;
+}
+.slider::-webkit-slider-runnable-track { height: var(--th); border-radius: var(--radius-full); corner-shape: round; background: var(--track); }
+.slider::-moz-range-track { height: var(--th); border-radius: var(--radius-full); corner-shape: round; background: var(--track); }
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: var(--kw); height: var(--kh); margin-top: calc((var(--th) - var(--kh)) / 2); border-radius: var(--radius-full); corner-shape: round;
+  background: var(--knob); box-shadow: var(--knob-shadow); transition: transform var(--duration-fast) var(--ease-spring), background-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
+}
+.slider::-moz-range-thumb { width: var(--kw); height: var(--kh); border: 0; border-radius: var(--radius-full); background: var(--knob); box-shadow: var(--knob-shadow); transition: transform var(--duration-fast) var(--ease-spring); }
+/* Pressed (measured) */
+.slider:active:not(:disabled) { --fill: light-dark(color-mix(in srgb, var(--color-text) 68%, transparent), color-mix(in srgb, var(--color-text) 78%, transparent)); }
+.slider:active:not(:disabled)::-webkit-slider-thumb { transform: scale(1.25); background: color-mix(in srgb, var(--color-text) 6%, var(--color-surface)); box-shadow: 0 0 0 .5px color-mix(in srgb, var(--color-text) 14%, transparent); }
+.slider:active:not(:disabled)::-moz-range-thumb { transform: scale(1.25); background: color-mix(in srgb, var(--color-text) 6%, var(--color-surface)); box-shadow: 0 0 0 .5px color-mix(in srgb, var(--color-text) 14%, transparent); }
+.slider:focus-visible { outline: none; }
+.slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 var(--focus-width) var(--color-focus), var(--knob-shadow); }
+.slider:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 var(--focus-width) var(--color-focus), var(--knob-shadow); }
+/* Disabled as macOS: the fill turns gray, the knob stays. */
+.slider:disabled { --fill: color-mix(in srgb, var(--color-text) 16%, transparent); }
+.slider.sm { --kw: 18px; --kh: 14px; --th: 4px; --h: 16px; }
+/* Ticks: each tile carries half a dot at both edges, so whole dots land on the knob-centre positions. */
+.slider.ticks {
+  --steps: 5; --dot: radial-gradient(circle at 0 50%, var(--tick) 1px, transparent 1.3px), radial-gradient(circle at 100% 50%, var(--tick) 1px, transparent 1.3px);
+  --tick: color-mix(in srgb, var(--color-text) 30%, transparent);
+  height: calc(var(--h) + 10px); padding-bottom: 10px; box-sizing: border-box;
+  background: var(--dot); background-repeat: repeat-x; background-size: calc((100% - var(--kw)) / (var(--steps) - 1)) 2px;
+  background-position: calc(var(--kw) / 2) calc(var(--h) / 2 + var(--th) / 2 + 3px);
+}
+/* In a form (System Settings Dock size, Display text size) */
+.slider-form { display: grid; grid-template-columns: auto 1fr; gap: 12px 16px; align-items: start; width: 100%; font: var(--text-body); color: var(--color-text); }
+.slider-form > label { line-height: 20px; }
+.slider-ends { display: flex; justify-content: space-between; margin-top: -4px; font: var(--text-footnote); color: var(--color-text-2); }
+.slider-icons { display: flex; align-items: center; gap: 8px; color: var(--color-text-2); line-height: 20px; }

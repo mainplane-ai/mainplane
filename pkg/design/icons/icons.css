@@ -1,0 +1,8 @@
+/* Icon: <mp-icon name="..."> (icons.js). Sized in em to follow the text; --icon-size fixes it. */
+mp-icon { display: inline-block; flex: none; width: var(--icon-size, 1.25em); height: var(--icon-size, 1.25em); vertical-align: -.25em; color: inherit; }
+mp-icon > svg { display: block; width: 100%; height: 100%; overflow: visible; }
+mp-icon.sm { --icon-size: var(--icon-sm); }
+mp-icon.lg { --icon-size: var(--icon-lg); }
+mp-icon.xl { --icon-size: var(--icon-xl); }
+/* Icon: <mp-icon name="..."> (icons.js). Sized in em to follow the text; --icon-size fixes it. */
+mp-icon.xl, mp-icon.hairline { --icon-stroke: 1.3; }

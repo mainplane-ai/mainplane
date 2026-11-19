@@ -1,0 +1,23 @@
+.timeline { --tl-row: 24px; --tl-x: 4px; --tl-bg: var(--color-surface); display: grid; gap: 14px; }
+.timeline section { min-width: 0; }
+.timeline h3 { display: flex; justify-content: space-between; gap: 8px; margin: 0 0 2px; font: var(--text-caption); color: var(--color-text-2); }
+.timeline h3 span { font-weight: 400; color: var(--color-text-3); font-variant-numeric: tabular-nums; }
+.timeline ol { list-style: none; margin: 0; padding: 0; }
+.timeline li { position: relative; display: flex; align-items: center; gap: 12px; height: var(--tl-row); padding-left: 20px; font: var(--text-callout); white-space: nowrap; }
+/* rail */
+.timeline li::before { content: ""; position: absolute; left: var(--tl-x); top: 0; bottom: 0; width: 1px; background: var(--color-text); }
+.timeline li:first-child::before { top: 50%; }
+.timeline li:last-child::before { bottom: 50%; }
+.timeline li.here::before, .timeline li.here ~ li::before { background: repeating-linear-gradient(to bottom, var(--color-text-3) 0 3px, transparent 3px 6px); }
+.timeline li:only-child::before { display: none; }
+.timeline li > i { position: absolute; left: calc(var(--tl-x) - 3.5px); top: calc(50% - 4px); width: 8px; height: 8px; border-radius: 50%; corner-shape: round; box-sizing: border-box; background: var(--color-text); }
+.timeline li.now > i { box-shadow: 0 0 0 2px var(--tl-bg), 0 0 0 3px var(--color-text); }
+.timeline li.next > i { background: var(--tl-bg); border: 1.25px solid var(--color-text); }
+.timeline li.wait > i { background: var(--tl-bg); border: 1.25px solid var(--color-text-2); }
+.timeline .l { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.timeline li.next .l, .timeline li.wait .l { color: var(--color-text-2); }
+.timeline .on { font: var(--text-subheadline); color: var(--color-text-3); }
+.timeline .v { flex: none; font: var(--text-subheadline); color: var(--color-text-3); font-variant-numeric: tabular-nums; }
+/* the pointer: a short dotted leader across the rail, then the label */
+.timeline li.here { font: var(--text-caption); color: var(--color-text); }
+.timeline li.here::after { content: ""; position: absolute; left: calc(var(--tl-x) - 4px); width: 13px; top: 50%; border-top: 1px dotted var(--color-text); }

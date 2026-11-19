@@ -1,0 +1,9 @@
+.skeleton { display: block; height: 12px; border-radius: var(--radius-6); background: var(--color-fill);
+  background-image: linear-gradient(90deg, transparent 0, color-mix(in srgb, var(--color-surface) 55%, transparent) 50%, transparent 100%); background-size: 200% 100%; background-repeat: no-repeat;
+  animation: mp-shimmer 1.6s linear infinite; }
+.skeleton.title { height: 16px; }
+.skeleton.circle { border-radius: 50%; corner-shape: round; width: 32px; height: 32px; }
+.skeleton.block { height: 120px; border-radius: var(--radius-12); }
+@keyframes mp-shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+.skeleton-stack { display: grid; gap: 8px; }

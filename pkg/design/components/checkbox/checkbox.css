@@ -1,0 +1,62 @@
+.check-row { display: inline-flex; align-items: center; gap: 6px; font: var(--text-body); color: var(--color-text); }
+.check-row:has(:disabled) { color: var(--color-text-3); }
+.check-row small { display: block; margin-top: 2px; font: var(--text-subheadline); color: var(--color-text-2); }
+.check-row:has(small) { align-items: start; }
+.check-row:has(small) > :is(.checkbox, .radio) { margin-top: 2px; }
+.check-row:has(small) > .checkbox.sm { margin-top: 3px; }
+/* Checkbox */
+.checkbox {
+  appearance: none; -webkit-appearance: none; margin: 0; flex: none; width: 16px; height: 16px; border-radius: calc(5px * var(--corner-k));
+  background: color-mix(in srgb, var(--color-text) 10%, transparent);
+  display: inline-grid; place-content: center; vertical-align: -3px; cursor: default;
+  transition: background-color var(--duration-instant) linear;
+}
+.checkbox.sm { width: 14px; height: 14px; border-radius: calc(4.5px * var(--corner-k)); vertical-align: -2px; }
+.checkbox::before {
+  content: ""; width: 16px; height: 16px; background: var(--color-text-on-accent); opacity: 0; transform: scale(.6);
+  transition: transform 120ms var(--ease-out), opacity 80ms linear;
+  -webkit-mask: var(--mp-check) center/100% no-repeat; mask: var(--mp-check) center/100% no-repeat;
+}
+.checkbox.sm::before { width: 14px; height: 14px; }
+.checkbox, .radio { --mp-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.9 8.6 6.6 11.8 11.9 4.6' fill='none' stroke='%23000' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+.checkbox:indeterminate { --mp-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6 8h4' stroke='%23000' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E"); }
+.checkbox:is(:checked, :indeterminate) { background: var(--color-accent-fill); }
+.checkbox:is(:checked, :indeterminate)::before { opacity: 1; transform: none; }
+/* hover: macOS has none; the web gets one quiet step so the pointer target reads */
+.checkbox:hover { background: color-mix(in srgb, var(--color-text) 14%, transparent); }
+.checkbox:is(:checked, :indeterminate):is(:hover) { background: var(--color-accent-fill-hover); }
+.checkbox:active { background: color-mix(in srgb, var(--color-text) 19%, transparent); }
+.checkbox:is(:checked, :indeterminate):is(:active) { background: var(--color-accent-fill-pressed); }
+.checkbox:focus { outline: none; }
+.checkbox:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 0; }
+.checkbox:disabled { opacity: .45; background: color-mix(in srgb, var(--color-text) 10%, transparent); }
+.checkbox:disabled:is(:checked, :indeterminate) { background: var(--color-accent-fill); }
+.checkbox[aria-invalid="true"]:not(:checked) { box-shadow: inset 0 0 0 1.5px var(--color-danger); }
+/* increased contrast: macOS draws an edge on the off box */
+@media (prefers-contrast: more) { .checkbox:not(:checked):not(:indeterminate) { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text) 55%, transparent); } }
+[data-contrast="more"] .checkbox:not(:checked):not(:indeterminate) { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text) 55%, transparent); }
+@media (prefers-reduced-motion: reduce) { .checkbox, .checkbox::before { transition: none; } }
+
+/* Radio: one choice of a group; shares the check box rules above. */
+.radio {
+  --rf: color-mix(in srgb, var(--color-text) 10%, transparent);
+  appearance: none; -webkit-appearance: none; margin: 0; flex: none; width: 16px; height: 16px; border-radius: 50%; corner-shape: round;
+  background: var(--rf); display: inline-grid; place-content: center; vertical-align: middle; cursor: default;
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+.radio::before { content: ""; width: 5px; height: 5px; border-radius: 50%; corner-shape: round; background: var(--color-text-on-accent); transform: scale(0); transition: transform var(--duration-base) var(--ease-spring); }
+.radio.sm { width: 14px; height: 14px; }
+.radio:hover { --rf: color-mix(in srgb, var(--color-text) 14%, transparent); }
+.radio:active { --rf: color-mix(in srgb, var(--color-text) 20%, transparent); transition-duration: 0s; }
+.radio:checked { background: var(--color-accent-fill); }
+.radio:checked:hover { background: var(--color-accent-fill-hover); }
+.radio:checked:active { background: var(--color-accent-fill-pressed); }
+.radio:checked::before { transform: scale(1); }
+.radio:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
+.radio:disabled { opacity: .45; --rf: color-mix(in srgb, var(--color-text) 10%, transparent); }
+.radio:disabled:checked { background: var(--color-accent-fill); }
+.check-row:has(> .radio) { gap: 6px; }
+.radio-group { display: inline-flex; flex-wrap: wrap; gap: 6px 18px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.radio-group.v { flex-direction: column; gap: 6px; }
+.radio-group.v .check-row:has(small) { align-items: flex-start; }
+.radio-group.v .check-row:has(small) .radio { margin-top: 2px; }

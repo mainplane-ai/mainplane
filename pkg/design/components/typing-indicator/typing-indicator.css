@@ -1,0 +1,7 @@
+.typing { position: relative; display: inline-flex; align-items: center; gap: 4px; height: 34px; padding: 0 13px; border-radius: var(--radius-18); background: var(--color-bubble-received); }
+.typing::after { content: ""; position: absolute; left: -2px; bottom: -2px; width: 9px; height: 9px; border-radius: 50%; corner-shape: round; background: inherit; }
+.typing > i { width: 7px; height: 7px; border-radius: 50%; corner-shape: round; background: var(--color-text-2); animation: mp-typing 1.2s infinite ease-in-out; }
+.typing > i:nth-child(2) { animation-delay: .15s; } .typing > i:nth-child(3) { animation-delay: .3s; }
+.typing.inline { height: auto; padding: 0; background: none; gap: 3px; }
+.typing.inline::after { display: none; }
+.typing.inline > i { width: 5px; height: 5px; }

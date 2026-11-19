@@ -1,0 +1,21 @@
+.toolbar { display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 10px 0 8px; position: relative; z-index: 1; background: var(--color-bg); color: var(--color-text); }
+.toolbar .avatar { width: 28px; height: 28px; font-size: 12px; margin-left: -2px; }
+.toolbar .title { display: grid; min-width: 0; }
+.toolbar .title :is(b, small) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.toolbar .title b { font: var(--text-headline); line-height: 18px; }
+.toolbar .title small { font: var(--text-footnote); color: var(--color-text-2); }
+.toolbar .spacer { flex: 1; min-width: 4px; }
+.tb-group { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.toolbar .btn { --h: var(--control-md); }
+/* agents: people glyph + count, a ghost rect button like Slack's member count */
+.toolbar .btn.agents { --bg: transparent; --bg-h: var(--color-fill); --bg-p: var(--color-fill-pressed); --fg: color-mix(in srgb, var(--color-text) 80%, transparent); --min: 0; --px: 7px; gap: 4px; border-radius: var(--radius-8); corner-shape: squircle; }
+.toolbar .btn.agents:is(:hover, :active) { --fg: var(--color-text); }
+.toolbar .btn.agents mp-icon { --icon-size: 17px; margin: 0; }
+.toolbar .count { font: 500 13px/1 var(--font-text); font-variant-numeric: tabular-nums; }
+/* star */
+.toolbar .btn.star { --icon-stroke: 1.45; }
+.toolbar .btn.star[aria-pressed="true"] { --bg: transparent; --bg-h: var(--color-fill); --fg: var(--color-text); }
+.toolbar .btn.star[aria-pressed="true"] mp-icon path { fill: currentColor; }
+.toolbar .btn.star mp-icon path { transition: fill var(--duration-fast) var(--ease-standard); }
+/* soft scroll edge: only while content is under the band */
+.toolbar.scrolled::after { content: ""; position: absolute; inset: 100% 0 auto; height: 16px; pointer-events: none; background: linear-gradient(var(--color-bg), color-mix(in srgb, var(--color-bg) 0%, transparent)); }
