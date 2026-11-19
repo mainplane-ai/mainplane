@@ -102,6 +102,7 @@
     {"provider": "openrouter", "model": "openai/gpt-6.2-sol", "effort": "medium", "tools": "patch"},
     {"provider": "openrouter", "model": "openai/gpt-6.1-terra", "effort": "medium", "tools": "patch"},
     {"provider": "openrouter", "model": "openai/gpt-6-luna", "effort": "medium", "tools": "patch"},
+    {"provider": "openrouter", "model": "google/gemini-4-neon", "effort": "high"},
     {"provider": "openrouter", "model": "google/gemini-4-carbon", "effort": "medium"},
     {"provider": "openrouter", "model": "google/gemini-4-hydrogen", "effort": "high"},
     {"provider": "openrouter", "model": "google/gemini-3.5-flash-lite", "effort": "minimal"},
