@@ -24,9 +24,10 @@ const (
 	keepAlive   = 5 * time.Second
 )
 
-// Default is the interpreters of each OS: the shell it ships with, the
-// default, then js, which every worker has.
-var Default = map[string][]string{"windows": {"pwsh", "js"}, "linux": {"bash", "js"}, "darwin": {"bash", "js"}}
+// Default is the interpreters of each OS: its shell, the default, then js,
+// which every worker has. Windows lists pwsh, then powershell (Windows
+// PowerShell 5.1), which every Windows has.
+var Default = map[string][]string{"windows": {"pwsh", "powershell", "js"}, "linux": {"bash", "js"}, "darwin": {"bash", "js"}}
 
 // Dial makes this machine a worker of the harness on m: dial the harness's
 // node at the address the last map gives it, serve until the connection

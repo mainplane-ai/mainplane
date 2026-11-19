@@ -33,8 +33,9 @@ type interp struct {
 }
 
 var interps = map[string]interp{
-	"bash": {[]string{"bash", "-l"}, nil, `echo "%s $?"`},
-	"pwsh": {[]string{"pwsh", "-NoProfile", "-NonInteractive", "-Command", "-"}, pwshWrap, `"%s $(if($? -and $mainplaneOk){0}else{1})"`},
+	"bash":       {[]string{"bash", "-l"}, nil, `echo "%s $?"`},
+	"pwsh":       {[]string{"pwsh", "-NoProfile", "-NonInteractive", "-Command", "-"}, pwshWrap, `"%s $(if($? -and $mainplaneOk){0}else{1})"`},
+	"powershell": {[]string{"powershell", "-NoProfile", "-NonInteractive", "-Command", "-"}, pwshWrap, `"%s $(if($? -and $mainplaneOk){0}else{1})"`},
 }
 
 // pwshWrap sends the code as one line of base64 that pwsh decodes as UTF-8
