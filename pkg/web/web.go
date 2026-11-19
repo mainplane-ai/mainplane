@@ -77,7 +77,7 @@ func Handler(api http.Handler) http.Handler {
 	root, assets := build()
 	etag := `"` + strings.TrimSuffix(strings.TrimPrefix(root, "/web/"), "/") + `"`
 	shell := `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mainplane</title><link rel="icon" href="data:,">` +
-		`<link rel="stylesheet" href="` + root + `app.css"><script type="module" src="` + root + `app.js"></script>`
+		`<link rel="stylesheet" href="` + ds + `mainplane.css"><script src="` + ds + `mainplane.js" defer></script><link rel="stylesheet" href="` + root + `app.css"><script type="module" src="` + root + `app.js"></script>`
 	if assets[path.Base(script)] == nil {
 		shell = unbuilt
 	}

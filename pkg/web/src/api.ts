@@ -87,3 +87,13 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, props?: Partial
 // acted tells the page that the user did something an answer may follow:
 // the list of projects is read again, and a chat looks for its next records.
 export const acted = () => dispatchEvent(new Event("acted"))
+
+// icon is a design-system icon by name.
+export function icon(name: string) {
+  const i = document.createElement("mp-icon")
+  i.setAttribute("name", name)
+  return i
+}
+
+// initials stand for a name in an avatar.
+export const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("") || "?"
