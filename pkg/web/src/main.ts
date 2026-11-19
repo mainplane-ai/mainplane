@@ -2,7 +2,8 @@
 // its dashboard, with the place to write to its orchestrator always there.
 
 import { type Agent, type Conf, type Model, type Project, acted, api, get, h, icon, initials, key, login, logout } from "./api"
-import { chat, composer } from "./chat"
+import { chat } from "./chat"
+import { composer } from "./composer"
 import { dashboard } from "./dashboard"
 import { picker } from "./picker"
 

@@ -5,7 +5,7 @@ export type Project = { id: string; name: string; orchestrator: string; status: 
 export type Conf = { model: string; workers: { name: string }[]; preset?: string; [more: string]: unknown }
 export type Agent = { id: string; name?: string; config: Conf; apps: string[]; instructions?: string; sessions: string[]; status: string }
 export type Model = { id: string; name: string; provider: string; config: Conf; settings?: { name: string; values: { name: string; params: Record<string, unknown> }[] }[] }
-export type Rec = { n: number; kind: string; id: string; len: number; type?: string; via?: string; source?: string; for?: string; body: Uint8Array }
+export type Rec = { n: number; kind: string; id: string; len: number; type?: string; via?: string; source?: string; for?: string; time: string; body: Uint8Array }
 
 const saved = "mainplane-key"
 
@@ -23,15 +23,15 @@ export function logout(refused = false) {
   location.reload()
 }
 
-type Options = { method?: string; json?: unknown; text?: string; signal?: AbortSignal }
+type Options = { method?: string; json?: unknown; text?: string; form?: FormData; signal?: AbortSignal }
 
 // api is one call. An answer that is not a success is thrown as its text,
 // and a refused key ends the login.
 export async function api(path: string, o: Options = {}): Promise<Response> {
   const r = await fetch(path, {
-    method: o.method ?? (o.json !== undefined || o.text !== undefined ? "POST" : "GET"),
+    method: o.method ?? (o.json !== undefined || o.text !== undefined || o.form ? "POST" : "GET"),
     headers: { Authorization: "Bearer " + key(), ...(o.text !== undefined && { "Content-Type": "text/plain" }) },
-    body: o.json !== undefined ? JSON.stringify(o.json) : o.text,
+    body: o.json !== undefined ? JSON.stringify(o.json) : (o.form ?? o.text),
     signal: o.signal,
     cache: "no-cache", // a file of a store is asked for again and answered 304 while it is the same
   })

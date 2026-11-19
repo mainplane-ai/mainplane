@@ -16,7 +16,7 @@ main > .composer { flex: none; margin: 4px 16px 12px }
 .sidebar .foot { margin: auto 12px 0; padding-top: 8px }
 .sidebar a.row { color: inherit; text-decoration: none }
 .thread { padding: 16px }
-.thread .bubble { white-space: pre-wrap }
+.thread .bubble:not(.rt-inline) { white-space: pre-wrap }
 .thread .msg > .note:first-child { margin: 0 12px 3px }
 .thread .tool pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere }
 .thread .error { color: var(--color-danger) }
