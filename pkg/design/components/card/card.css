@@ -15,3 +15,8 @@ a.card:active, button.card:active { transform: scale(calc(1 - .02 * var(--motion
 .card.image > .body p { margin: 0; font: var(--text-subheadline); color: var(--color-text-2); }
 .card.metric > .value { font: 600 24px/30px var(--font-text); letter-spacing: -.02em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .card.metric > .label { font: var(--text-subheadline); color: var(--color-text-2); }
+/* A dashboard section: a title with a count or a note, then its content. */
+.panel { display: grid; gap: 12px; }
+.panel > h2 { display: flex; align-items: baseline; gap: 6px; margin: 0; font: var(--text-title-2); letter-spacing: var(--tracking-title-2); }
+.panel > h2 small { font: var(--text-subheadline); color: var(--color-text-3); }
+.panel > h2 small.end { margin-left: auto; }

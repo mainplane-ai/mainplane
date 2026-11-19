@@ -7,3 +7,5 @@ Matched Settings grouped cards: fill contrast only, 12 pt continuous corners. Re
 Card: one cue only (Apple grouped style): a surface fill on the grouped background. No border, no shadow.
 On a surface background use .card.on-surface (fill surface-2). Floating things (menus, popovers, sheets) are not cards.
 Interactive: hover darkens the fill, pressed scales 98%, .selected = a darker gray fill (no ring: Apple selects with a fill), focus = the focus ring.
+
+- .panel: a dashboard section. h2 is Title 2 with a gray count in small; small.end puts a note (updated ...) at the right.

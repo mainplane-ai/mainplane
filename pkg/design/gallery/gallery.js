@@ -6,3 +6,8 @@ document.addEventListener("click", async (e) => {
   b.textContent = "Copied";
   setTimeout(() => (b.textContent = "Copy"), 1500);
 });
+// The needs card demo prints what a dashboard would send.
+document.addEventListener("mp-reply", (e) => {
+  const w = e.target.closest(".pn")?.querySelector(".nc-wire");
+  if (w) w.textContent = "send(text):\n" + e.detail.text;
+});

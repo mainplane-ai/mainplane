@@ -31,7 +31,6 @@
 #text-area .st:has(.field) > .st-l { padding-top: 1px; }
 #text-area .field { width: 100%; }
 /* timeline */
-.panel > h2:has(+ .timeline) small { margin-left: auto; font: var(--text-subheadline); }
 .st:has(> .r > .tl-demo) { align-items: start; }
 .st:has(> .r > .tl-demo) > .st-l { padding-top: 1px; }
 .tl-demo { min-width: 0; flex: 1; }
