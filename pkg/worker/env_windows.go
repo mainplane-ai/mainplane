@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -70,7 +71,8 @@ func token(op *user.User) (windows.Token, error) {
 }
 
 // look finds name on the PATH in env, the operator's, since exec looked on
-// the service's.
+// the service's. Windows ships powershell, not pwsh, so a missing pwsh says
+// what there is instead.
 func look(name string, env []string) (string, error) {
 	for _, e := range env {
 		if k, v, _ := strings.Cut(e, "="); strings.EqualFold(k, "Path") {
@@ -81,6 +83,9 @@ func look(name string, env []string) (string, error) {
 				}
 			}
 		}
+	}
+	if name == "pwsh" {
+		return "", errors.New("pwsh is not installed: it is not on the operator's PATH. The powershell interpreter (Windows PowerShell 5.1) is available")
 	}
 	return "", fmt.Errorf("%s is not on the operator's PATH", name)
 }
