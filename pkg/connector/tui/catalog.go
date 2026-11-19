@@ -23,7 +23,7 @@ const (
 	group = catalog.SelfHosted
 	// defaults is the catalog's list of the model a new session takes when none
 	// is chosen and no session names one this harness serves: one per provider,
-	// its middle one, so the first answer comes quickly.
+	// its smallest one that every plan of it can use.
 	defaults = "self-hosted-default"
 	// catalogGet bounds the fetch at start; the kept copy shows meanwhile.
 	catalogGet = 30 * time.Second
