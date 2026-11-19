@@ -1,0 +1,6 @@
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+.gallery button { all: unset; aspect-ratio: 1; border-radius: var(--radius-8); background: var(--color-surface-2) center/cover; cursor: zoom-in; }
+.gallery button:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 2px; }
+.lightbox { position: fixed; inset: 0; z-index: var(--z-overlay); display: grid; place-items: center; background: rgba(0,0,0,.82); padding: 32px; }
+.lightbox img { max-width: 100%; max-height: 100%; border-radius: var(--radius-8); }
+.lightbox .btn { position: absolute; top: 16px; right: 16px; }

@@ -1,0 +1,11 @@
+.code { position: relative; margin: 0; padding: 10px 12px; border-radius: var(--radius-card); background: var(--color-surface-2); font: var(--text-mono); font-size: 12px; line-height: 18px; overflow: auto; white-space: pre; color: var(--color-text); }
+.code .btn { position: absolute; top: 6px; right: 6px; }
+/* tool call: one quiet line, expands to its output (native details) */
+.tool { font: var(--text-callout); color: var(--color-text-2); }
+.tool > summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; cursor: default; padding: 2px 0; }
+.tool > summary::-webkit-details-marker { display: none; }
+.tool > summary:hover { color: var(--color-text); }
+.tool > summary .chev { transition: rotate var(--duration-fast) var(--ease-standard); --icon-size: 12px; }
+.tool[open] > summary .chev { rotate: 90deg; }
+.tool > summary code { font: var(--text-mono); font-size: 12px; }
+.tool > .code { margin: 4px 0 6px 18px; }

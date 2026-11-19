@@ -1,0 +1,35 @@
+.need { padding: 12px 0; box-shadow: inset 0 calc(-1 * var(--hairline)) 0 var(--color-separator); }
+.need:last-child { box-shadow: none; padding-bottom: 0; }
+.need:first-of-type { padding-top: 0; }
+.need h3 { display: flex; gap: 8px; align-items: baseline; margin: 0; font: var(--text-headline); }
+.need h3::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; corner-shape: round; background: var(--color-accent); translate: 0 -1px; }
+.need p { margin: 2px 0 8px 16px; font: var(--text-callout); color: var(--color-text-2); }
+.need .answers { display: flex; flex-wrap: wrap; gap: 6px; margin-left: 16px; }
+.need.answered h3::before { background: none; box-shadow: inset 0 0 0 1.5px var(--color-text-3); }
+.need.answered .answers { font: var(--text-callout); color: var(--color-text-2); }
+
+/* Reply: trailing, gray label + glyph, fill only on hover; open = the selected fill (Finder view switcher) */
+.need .btn.reply { --bg: transparent; --bg-h: var(--color-fill); --bg-p: var(--color-fill-pressed); --fg: var(--color-text-2); --min: 0; --px: 8px; margin-left: auto; }
+.need .btn.reply mp-icon { --icon-size: 15px; }
+.need .btn.reply:is(:hover, :active) { --fg: var(--color-text); }
+.need .btn.reply[aria-expanded="true"] { --bg: var(--color-fill-hover); --bg-h: var(--color-fill-hover); --fg: var(--color-text); }
+
+/* inline reply field */
+.need .reply-wrap { display: grid; grid-template-rows: 0fr; margin-left: 16px; opacity: 0; transition: grid-template-rows var(--duration-base) var(--ease-out), opacity var(--duration-fast) var(--ease-standard), margin-top var(--duration-base) var(--ease-out); }
+.need .reply-wrap > * { min-height: 0; }
+.need.replying .reply-wrap { grid-template-rows: 1fr; opacity: 1; margin-top: 8px; }
+.need .reply-field { display: flex; align-items: flex-end; min-height: 32px; margin: 3px; border-radius: 16px; background: var(--color-fill); }
+.need .reply-field textarea { all: unset; flex: 1; min-width: 0; padding: 6px 4px 6px 12px; font: var(--text-body); max-height: 120px; overflow: auto; field-sizing: content; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-text); }
+.need .reply-field textarea::placeholder { color: var(--color-text-3); }
+.need .reply-field .send { --h: 24px; margin: 4px; flex: none; scale: .5; opacity: 0; pointer-events: none; transition: scale var(--duration-fast) var(--ease-spring), opacity var(--duration-fast) var(--ease-standard); }
+.need .reply-field .send mp-icon { --icon-size: 14px; }
+.need .reply-field.has-text .send { scale: 1; opacity: 1; pointer-events: auto; }
+
+/* after a send: one quiet line, the last reply only */
+.need .replied { display: flex; align-items: center; gap: 6px; margin: 8px 0 0 16px; font: var(--text-callout); color: var(--color-text-2); min-width: 0; }
+.need .replied mp-icon { --icon-size: 14px; color: var(--color-text-3); }
+.need .replied b { font-weight: 500; color: var(--color-text); flex: none; }
+.need .replied span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.need .replied[hidden] { display: none; }
+
+/* composer quote chip (Reply on a chat message */

@@ -1,0 +1,62 @@
+.model-picker {
+  --pk-pad: 6px; --pk-x: 10px; --pk-row: 28px; --pk-col: 24px;
+  --pk-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.4l3 3 6-6.8' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  box-sizing: border-box; width: 300px; display: flex; flex-direction: column; background: var(--color-floating); color: var(--color-text);
+  border-radius: var(--radius-12); box-shadow: inset 0 0 0 var(--hairline) var(--color-floating-edge), var(--shadow-3);
+  font: var(--text-body); user-select: none; -webkit-user-select: none; z-index: var(--z-popover); overflow: hidden;
+}
+.model-picker[hidden] { display: none; }
+.model-picker.pk-anchored { position: absolute; z-index: calc(var(--z-sheet) + 1); animation: pk-in var(--duration-fast) var(--ease-out); }
+@keyframes pk-in { from { opacity: 0; transform: translateY(calc(-4px * var(--motion))); } }
+
+/* Search */
+.pk-search { display: flex; align-items: center; gap: 8px; height: 40px; flex: none; padding: 0 calc(var(--pk-pad) + var(--pk-x)); border-bottom: var(--hairline) solid var(--color-separator); color: var(--color-text-2); cursor: text; }
+.pk-search > mp-icon { --icon-size: 16px; width: 16px; height: 16px; flex: none; }
+.pk-search > input { flex: 1; min-width: 0; height: 100%; border: 0; padding: 0; background: transparent; color: var(--color-text); font: var(--text-body); outline: none; caret-color: var(--color-accent); appearance: none; }
+.pk-search > input::placeholder { color: var(--color-text-3); opacity: 1; }
+
+/* List */
+.pk-list { flex: 0 1 auto; max-height: 372px; overflow-y: auto; overscroll-behavior: contain; padding: 4px var(--pk-pad) var(--pk-pad); scrollbar-width: thin; scroll-padding: 32px 0 6px; }
+.pk-list > [role="group"] + [role="group"] { margin-top: 8px; }
+.pk-label { font: var(--text-callout); color: var(--color-text-2); padding: 5px var(--pk-x) 3px calc(var(--pk-x) + var(--pk-col)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: sticky; top: -4px; background: var(--color-floating); z-index: 1; }
+
+/* Row: 28 px, 6 px radius inset; 16 px check column (Apple), name, hint right in text-3 tabular figures. */
+.pk-row { position: relative; display: flex; align-items: center; gap: 12px; min-height: var(--pk-row); padding: 0 var(--pk-x) 0 calc(var(--pk-x) + var(--pk-col)); border-radius: var(--radius-6); cursor: default; white-space: nowrap; }
+.pk-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pk-name b { font-weight: 600; }
+.pk-hint { flex: none; color: var(--color-text-3); font-variant-numeric: tabular-nums; }
+.pk-row[aria-selected="true"]::before {
+  content: ""; position: absolute; left: var(--pk-x); top: 50%; width: 16px; height: 16px; margin-top: -8px; background: currentColor;
+  -webkit-mask: var(--pk-check) center / 16px no-repeat; mask: var(--pk-check) center / 16px no-repeat;
+}
+.pk-row.is-active { background: var(--color-fill); }
+.pk-row.is-active > .pk-hint { color: var(--color-text-2); }
+.pk-row[aria-disabled="true"] { color: var(--color-text-3); background: transparent; }
+.pk-row[aria-disabled="true"] > .pk-hint { color: var(--color-text-3); }
+.pk-row.is-blink { background: transparent; }
+
+/* Footer: rows that open something (Effort submenu, providers). Hairline above, full width. */
+.pk-foot { flex: none; padding: var(--pk-pad); border-top: var(--hairline) solid var(--color-separator); display: grid; }
+.pk-foot:empty { display: none; }
+.pk-more > .pk-hint { color: var(--color-text-2); }
+.pk-chev { --icon-size: 14px; width: 14px; height: 14px; flex: none; margin: 0 -4px 0 -6px; color: var(--color-text-2); }
+.pk-more.is-open { background: var(--color-fill); }
+
+/* Empty: no match, or nothing connected. */
+.pk-empty { padding: 22px 16px 24px; text-align: center; font: var(--text-callout); color: var(--color-text-2); display: grid; justify-items: center; gap: 10px; }
+.pk-empty p { margin: 0; }
+
+/* Effort submenu: same panel, no search, narrow; first row level with the Effort row. */
+.model-picker.pk-sub { width: 132px; padding: var(--pk-pad); }
+
+/* Trigger */
+.model-trigger .pk-effort { margin-left: 6px; color: var(--color-text-2); }
+.model-trigger:disabled .pk-effort { color: inherit; }
+
+/* Fixture layout. */
+.pk-stage { overflow: hidden; width: 100%; }
+.pk-grid { display: flex; flex-wrap: wrap; gap: 20px 24px; align-items: flex-start; }
+.pk-pair { display: flex; align-items: flex-start; }
+.pk-pair > .pk-sub { margin-left: -3px; }
+.pk-short .pk-list { max-height: 252px; }
+@media (pointer: coarse) { .model-picker { --pk-row: 40px; } .pk-search > input { font-size: 16px; } }

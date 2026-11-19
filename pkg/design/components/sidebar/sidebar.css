@@ -1,0 +1,4 @@
+/* Sidebar: the project panel (Messages for Mac insets, in spec.md). Its rows are .list.side (list.css). */
+.sidebar { width: 320px; display: flex; flex-direction: column; padding: 10px 0 8px; border-radius: var(--radius-panel); background: var(--color-surface-2); }
+.sidebar > .top { display: flex; gap: 8px; align-items: center; padding: 0 10px 8px; }
+.sidebar > .top > .search { flex: 1; }

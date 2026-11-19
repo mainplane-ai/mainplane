@@ -1,0 +1,17 @@
+.card { display: block; position: relative; padding: 14px 16px; border-radius: var(--radius-card); background: var(--color-surface); color: var(--color-text); text-decoration: none; text-align: left; border: 0; font: var(--text-body); transition: background var(--duration-fast) var(--ease-standard), transform var(--duration-base) var(--ease-spring); }
+.card.on-surface { background: var(--color-surface-2); }
+.card > h3 { margin: 0 0 2px; font: var(--text-headline); }
+.card > p { margin: 0; font: var(--text-callout); color: var(--color-text-2); }
+.card .date { font: var(--text-footnote); color: var(--color-text-3); }
+.card > .meta { display: block; margin-top: 8px; font: var(--text-footnote); color: var(--color-text-3); }
+a.card:hover, button.card:hover { background: color-mix(in srgb, var(--color-surface) 92%, var(--color-text)); }
+a.card:active, button.card:active { transform: scale(calc(1 - .02 * var(--motion))); }
+.card:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
+.card.selected { background: color-mix(in srgb, var(--color-text) 8%, var(--color-surface)); }
+.card.image { padding: 0; overflow: hidden; }
+.card.image > img, .card.image > .media { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top; background: var(--color-surface-2); }
+.card.image > .body { padding: 10px 14px 12px; }
+.card.image > .body h3 { margin: 0 0 2px; font: var(--text-headline); }
+.card.image > .body p { margin: 0; font: var(--text-subheadline); color: var(--color-text-2); }
+.card.metric > .value { font: 600 24px/30px var(--font-text); letter-spacing: -.02em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.card.metric > .label { font: var(--text-subheadline); color: var(--color-text-2); }

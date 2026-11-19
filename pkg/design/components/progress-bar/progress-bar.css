@@ -1,0 +1,5 @@
+.progress { height: 6px; border-radius: var(--radius-full); corner-shape: round; background: var(--color-fill-pressed); overflow: hidden; }
+.progress.sm { height: 4px; }
+.progress > i { display: block; height: 100%; width: var(--p, 0%); border-radius: inherit; background: var(--color-accent-fill); transition: width var(--duration-slow) var(--ease-out); }
+.progress.error > i { background: var(--color-danger); }
+@keyframes mp-indet { from { transform: translateX(-100%); } to { transform: translateX(290%); } }

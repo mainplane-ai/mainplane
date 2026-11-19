@@ -1,0 +1,18 @@
+# Rich text
+Agent replies render markdown, code and math. Inline formatting stays in the bubble; a reply with blocks leaves the bubble and reads as a column.
+
+Matched Claude: quiet headings (16 and 15 semibold), 2-3 px quote bar, gray inline-code chip, language label with Copy on hover. ChatGPT and Claude: block replies without a bubble, about 640 px measure, a gap of 20 px under the question, right-aligned table numbers, centered display math that scrolls when wide. Slack: 15/22 body, 28 px list indent, code block as a rounded fill. Changed links and inline code stay ink (Slack uses blue links and red code text); math is native MathML, not KaTeX.
+
+## CSS notes
+Rich text in agent messages. .rt = block prose (a reply with headings, lists, tables, code blocks or display math leaves the
+bubble and reads as a column, like ChatGPT and Claude). .rt-inline = inline formatting inside a .bubble (message-bubble).
+Syntax tone: item-local --syn-* vars, low chroma, never the accent blue. Math is MathML Core (Temml output).
+
+## Choices
+- Chosen: A reply with any block (heading, list, table, code block, display math, quote) renders as an unbubbled column aligned with the bubble text; a reply with only inline formatting (bold, italic, code, inline math, link) stays a gray bubble. Other option: Everything in bubbles (iMessage), widening the bubble for blocks. (ChatGPT and Claude both drop the bubble for the assistant: tables and code blocks inside a 72% gray bubble get cramped and a code fill on a gray bubble has no contrast. Short replies keep the iMessage feel.)
+- Chosen: Math: LaTeX converted to MathML Core by Temml (about 150 KB min, no fonts), typeset by the browser with the system math font (STIX Two Math on macOS and iOS, Cambria Math on Windows). Other option: KaTeX (about 280 KB JS + CSS + 20 font files, HTML spans). (Light, nothing to load in the sandboxed dashboards when converted on the server, selectable and read by VoiceOver, scales with the text. Cost: the glyphs differ a little between OSes; ChatGPT and Claude use KaTeX's Computer Modern look.)
+- Chosen: Syntax tone: four low-chroma hues (plum keywords, green strings, amber numbers, violet types), comments text-3 italic, everything else ink; one theme per light and dark. Product highlighter: Shiki with these two themes. Other option: Monochrome code (Slack), or the full Xcode or GitHub palettes. (Enough color to scan code, quiet next to the brand: never the accent blue (needs you) and never red (destructive).)
+- Chosen: Code block: surface-2 card, radius 12, language label always shown, Copy appears on hover or focus (always on touch); long lines scroll inside the block. Other option: ChatGPT's always-visible row of icons (wrap, copy, run). (Claude's quieter header reads cleaner in a chat; Copy is the only action an agent's code needs.)
+- Chosen: Links are ink with a 40% underline that turns solid on hover; inline code is a neutral fill chip in ink. Other option: Blue links (Slack, Notes) and Slack's red inline code. (Blue stays for needs you and red for destructive. ChatGPT and Claude also keep links close to the text color.)
+- Chosen: Tables: horizontal hairlines only, header semibold, content width, numbers right-aligned with tabular figures; a wide table scrolls by itself. Other option: Full-width tables (ChatGPT, Claude) or a full grid (Apple Notes). (Content width keeps numbers next to their labels in a 640 px column; hairlines match our lists and dividers.)
+- Chosen: Headings stay quiet: # is 18, ## is 16, ### is 15 semibold, 20 px above and 6 px below. Other option: ChatGPT's larger headings (about 20 to 24). (A chat reply is not a document; Claude's small headings keep the reply calm next to 15 px body text.)

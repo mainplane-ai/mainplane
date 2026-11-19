@@ -1,0 +1,21 @@
+.composer { display: flex; align-items: flex-end; gap: 10px; flex: 1; min-width: 0; }
+.composer .btn.icon { border-radius: var(--radius-full); corner-shape: round; }
+.composer > .btn.icon { --h: 30px; flex: none; }
+.composer .field { flex: 1; min-width: 0; display: flex; flex-direction: column; border-radius: 15.5px; corner-shape: round; background: var(--color-fill); }
+.composer .field.tall { border-radius: calc(15.5px * var(--corner-k)); corner-shape: squircle; }
+.composer .field .line { display: flex; align-items: flex-end; min-height: 31px; }
+.composer textarea { all: unset; flex: 1; min-width: 0; padding: 6px 4px 5px 12px; font: var(--text-body-large); line-height: 20px; max-height: 140px; overflow: auto; field-sizing: content; white-space: pre-wrap; caret-color: var(--color-accent); }
+.composer textarea::placeholder { color: var(--color-text-3); }
+.composer .field .line .btn.icon { --h: 25px; margin: 3px; flex: none; }
+.composer .send { background: var(--color-accent-fill); color: #fff; }
+
+/* Attachments */
+.composer .attachments { display: flex; gap: 8px; flex-wrap: wrap; padding: 6px 6px 0; }
+
+/* .reply-chip: the quoted question or message a reply answers. */
+.composer .reply-chip { display: flex; align-items: center; gap: 6px; height: 28px; margin: 6px 6px 0; padding: 0 2px 0 10px; border-radius: 12px; background: var(--color-surface-2); font: var(--text-callout); min-width: 0; }
+.composer .reply-chip > mp-icon { --icon-size: 14px; color: var(--color-text-3); flex: none; }
+.composer .reply-chip span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--color-text); }
+.composer .reply-chip small { font: inherit; color: var(--color-text-2); }
+.composer .field .reply-chip .btn.icon { --h: 22px; --ib-r: 10px; margin: 0; }
+.composer .field .reply-chip .btn.icon mp-icon { --icon-size: 13px; }

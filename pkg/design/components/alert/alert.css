@@ -1,0 +1,12 @@
+.scrim { position: absolute; inset: 0; display: grid; place-items: center; background: var(--color-scrim); z-index: var(--z-overlay); animation: mp-fade var(--duration-base) var(--ease-standard); }
+.alert { width: 280px; max-width: calc(100% - 32px); padding: 20px 16px 16px; border-radius: var(--radius-18); text-align: center; background: var(--color-floating);
+  box-shadow: var(--shadow-4), inset 0 0 0 1px var(--color-floating-edge); animation: mp-pop var(--duration-slow) var(--ease-spring); }
+.alert > mp-icon { --icon-size: 40px; --icon-stroke: 1.25; color: var(--color-accent); margin-bottom: 8px; }
+.alert > mp-icon.danger { color: var(--color-danger); }
+.alert > h2 { margin: 0 0 6px; font: var(--text-headline); }
+.alert > p { margin: 0 0 14px; font: var(--text-callout); color: var(--color-text-2); }
+.alert > .check-row { margin: 0 0 14px; font: var(--text-callout); }
+.alert-actions { display: flex; gap: 8px; }
+.alert-actions > .btn { flex: 1; min-width: 0; }
+.alert-actions.stack { flex-direction: column; }
+@keyframes mp-pop { from { opacity: 0; transform: scale(calc(1 + .08 * var(--motion))); } }

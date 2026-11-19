@@ -1,0 +1,34 @@
+.switch {
+  --sw-w: 44px; --sw-h: 20px; --sw-kw: 25px; --sw-i: 2px;
+  --k-w: var(--sw-kw); --k-h: calc(var(--sw-h) - 2 * var(--sw-i)); /* knob box; pressed sets 1.28 x 1.5 */
+  appearance: none; -webkit-appearance: none; margin: 0; flex: none; position: relative; box-sizing: border-box;
+  width: var(--sw-w); height: var(--sw-h); border-radius: var(--radius-full); corner-shape: round;
+  background: color-mix(in srgb, var(--color-text) 10%, transparent);
+  transition: background-color var(--duration-base) var(--ease-standard);
+  cursor: default; vertical-align: middle; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+.switch.sm { --sw-w: 36px; --sw-h: 16px; --sw-kw: 20px; --sw-i: 1.5px; }
+.switch.lg { --sw-w: 64px; --sw-h: 28px; --sw-kw: 38px; }
+.switch::before {
+  content: ""; position: absolute; top: calc((var(--sw-h) - var(--k-h)) / 2); left: var(--sw-i);
+  width: var(--k-w); height: var(--k-h); border-radius: var(--radius-full); corner-shape: round;
+  background: var(--color-knob);
+  box-shadow: 0 0 0 .5px rgb(0 0 0 / .06), 0 1px 1.5px rgb(0 0 0 / .12), 0 1.5px 5px rgb(0 0 0 / .08);
+  transition: translate var(--duration-slow) var(--ease-spring), width var(--duration-base) var(--ease-spring), height var(--duration-base) var(--ease-spring), top var(--duration-base) var(--ease-spring),
+    background-color var(--duration-base) var(--ease-standard), box-shadow var(--duration-base) var(--ease-standard);
+}
+.switch:checked { background: var(--color-accent-fill); }
+.switch:checked::before {
+  translate: calc(var(--sw-w) - var(--k-w) - 2 * var(--sw-i)) 0;
+  background: color-mix(in srgb, #fff 95%, var(--color-surface));
+}
+.switch:active:not(:disabled) { --k-w: calc(var(--sw-kw) * 1.28); --k-h: calc((var(--sw-h) - 2 * var(--sw-i)) * 1.5); }
+.switch:active:not(:disabled)::before {
+  box-shadow: 0 0 0 .5px rgb(0 0 0 / .06), 0 1px 2px rgb(0 0 0 / .12), 0 3px 9px rgb(0 0 0 / .14);
+}
+.switch:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
+.switch:disabled { background: color-mix(in srgb, var(--color-text) 5%, transparent); }
+.switch:disabled:checked { background: color-mix(in srgb, var(--color-accent-fill) 50%, transparent); }
+.switch:disabled::before { box-shadow: 0 0 0 .5px rgb(0 0 0 / .05), 0 1px 2px rgb(0 0 0 / .06); }
+[data-contrast="more"] .switch:not(:checked) { box-shadow: inset 0 0 0 1px var(--color-line); }
+@media (prefers-contrast: more) { .switch:not(:checked) { box-shadow: inset 0 0 0 1px var(--color-line); } }

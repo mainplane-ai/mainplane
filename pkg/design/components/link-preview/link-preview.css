@@ -1,0 +1,5 @@
+.link-preview { width: min(300px, 72%); border-radius: 18px; overflow: hidden; background: var(--color-surface-2); }
+.link-preview .media { aspect-ratio: 1.91; background: var(--color-surface-3) center/cover; }
+.link-preview .t { padding: 8px 12px 10px; }
+.link-preview b { display: block; font: var(--text-headline); }
+.link-preview small { font: var(--text-footnote); color: var(--color-text-2); }
