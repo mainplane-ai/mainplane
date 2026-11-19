@@ -23,7 +23,7 @@ curl -H "$A" -X DELETE $U/files/cards/0001.json
 
 - The dashboard is the files of the store. `index.html` is the page; every other file is data the page reads. Names are path segments of letters, digits, dot, dash and underscore. A file is at most 8 MiB and the store 256 MiB. There is no versioning: if you need to keep old results, save them in a worker or remote drive. The dashboard is meant to be a slim current overview of project work.
 - Many agents can add one small file per item (`cards/0001.json`, `cards/0001.png`) at once. One large file would require every change to upload again.
-- The page runs in a sandbox with no network: no fetch, no outside scripts, styles, fonts or images. Scripts and styles are inline. It talks only to the user's interface, by `postMessage`:
+- The page runs in a sandbox with no network: no fetch and no outside images. The one exception is the Mainplane design system at `/web/ds/1/` (styles, scripts, fonts only). Your own scripts and styles are inline. The page talks only to the user's interface, by `postMessage`:
 
 ```
 parent.postMessage({id: 1, call: "list", prefix: "cards/"}, "*")    // -> {id: 1, result: [{name, size, modified}]}
@@ -34,5 +34,12 @@ parent.postMessage({id: 4, call: "status", status: "closed", line: "acknowledged
 ```
 
 - The starter `index.html` has a small `call()` helper for this. Start from it.
+
+### Look and components
+
+- The starter `index.html` links `/web/ds/1/mainplane.css` and `/web/ds/1/mainplane.js` and renders three sections from small files: `needs/<id>.json` (questions with answer buttons and Reply), `timeline.json` (lanes of steps) and `cards/<id>.json` (done work: a metric or an image). The file formats are in a comment in it. Keep its layout and fill the files first; change the page only when the project needs more.
+- Light and dark mode follow the user's system. Use the tokens (`var(--color-bg)`, `var(--color-text-secondary)`, `var(--space-4)`) and never fixed colors.
+- The gallery at `/web/ds/1/` on the harness shows every component. To use one, copy its markup from `/web/ds/1/components/<name>.html`. To change one, copy only the rules you change into your inline style. Do not copy the whole package.
+- A Reply on a needs card fires an `mp-reply` event; the starter sends its `detail.text` as a message.
 - A button sends a message by default. Use `status` only for a plain acknowledgement that needs no answer.
 - Anything that needs a server (a live app, a database, large files) stays on a worker. Link to it from the dashboard.
