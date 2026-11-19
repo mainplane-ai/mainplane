@@ -6,13 +6,26 @@ const shown = (r: Rec) => (r.type?.startsWith("text/") ? text(r.body) : `[${r.ty
 
 // fold is a line with more behind it.
 const fold = (label: string, ...more: string[]) => h("details", { className: "tool" }, h("summary", null, icon("chevron-right"), label), ...more.map(m => h("pre", { className: "code" }, m)))
-// say is one chat item: a bubble, sent by the user or received.
-const say = (sent: boolean, body: string, note = "") => h("div", { className: `msg first tail${sent ? " sent" : ""}` }, h("div", { className: "bubble" }, body), ...(note ? [h("span", { className: "note" }, note)] : []))
+// from is who sent a message the user did not: an agent, an app or a job. A person writes from any connector.
+const from = (via = "") => (via.startsWith("agent:") ? `Agent ${via.slice(6)}` : via.startsWith("app:") ? via.slice(4) : via === "job" ? "A job" : "")
+// say adds a bubble. Bubbles in a row from the same side and sender are one
+// group, as in Messages: the sender above the first, the tail on the last.
+const say = (into: HTMLElement, sent: boolean, body: string, who = "") => {
+  const last = into.lastElementChild
+  const joins = last?.matches(".msg:not(.system)") && last.classList.contains("sent") === sent && (last as HTMLElement).dataset.who === who
+  if (joins) last!.classList.replace("tail", "mid") // a first that is no longer the last is first alone
+  if (joins && last!.classList.contains("first")) last!.classList.remove("mid")
+  const m = h("div", { className: `msg tail${joins ? "" : " first"}${sent ? " sent" : ""}` }, ...(who && !joins ? [h("span", { className: "note" }, who)] : []), h("div", { className: "bubble" }, body))
+  m.dataset.who = who
+  into.append(m)
+}
 
 // chat follows the agent's live session with one long poll, which stops
 // while the page is hidden and ends with signal. Earlier sessions load on request.
 export function chat(id: string, signal: AbortSignal): HTMLElement[] {
-  const state = h("span")
+  // While the agent works the thread ends in a typing bubble, and it can be stopped.
+  const typing = h("div", { className: "msg first tail", hidden: true }, h("div", { className: "bubble" }, h("span", { className: "typing", role: "status", ariaLabel: "Working" }, h("i"), h("i"), h("i"))))
+  const stop = h("button", { className: "btn plain sm", hidden: true, onclick: () => post("stop?via=web")() }, "Stop")
   const post = (what: string) => () => api(`/agents/${id}/${what}`, { method: "POST" }).then(acted, alert)
   const log = h("div", { className: "view" })
   const thread = h("div", { className: "thread" })
@@ -24,8 +37,8 @@ export function chat(id: string, signal: AbortSignal): HTMLElement[] {
     for (const r of recs) {
       if (r.kind === "message" && r.via === "app:project") into.append(fold("Project created", shown(r)))
       else if (r.kind === "message" && r.via === "rollover") into.append(fold("The task, carried from the session before", shown(r)))
-      else if (r.kind === "message") into.append(say(r.via === "web", shown(r), r.via === "web" ? "" : (r.via ?? "")))
-      else if (r.kind === "text") into.append(say(false, shown(r)))
+      else if (r.kind === "message") say(into, !from(r.via), shown(r), from(r.via))
+      else if (r.kind === "text") say(into, false, shown(r))
       else if (r.kind === "error") into.append(h("div", { className: "msg system error" }, shown(r)))
       else if (r.kind === "system" && r.source === "continue" && r.n > 1 && !/^[0-9a-f]{8}\s*$/.test(shown(r))) into.append(h("div", { className: "msg system" }, "New session"), fold("Carried over", shown(r)))
       else if (r.kind === "call") {
@@ -68,7 +81,8 @@ export function chat(id: string, signal: AbortSignal): HTMLElement[] {
       }
       // A post or a handoff may have moved the agent to a new session.
       agent = await get<Agent>(`/agents/${id}`, signal)
-      state.textContent = `${agent.name || agent.id}: ${agent.status} `
+      typing.hidden = stop.hidden = agent.status !== "working"
+      thread.append(typing) // the last item while the agent works
       if (agent.sessions.at(-1) !== session) {
         draw(await records(session, n, "", signal), live)
         session = agent.sessions.at(-1)!
@@ -77,7 +91,7 @@ export function chat(id: string, signal: AbortSignal): HTMLElement[] {
     }
   }
   follow().catch(err => signal.aborted || thread.append(h("div", { className: "error" }, String(err), " ", h("a", { href: location.pathname }, "Try again"))))
-  return [log, h("div", { className: "agent-bar" }, state, h("button", { className: "btn plain sm", onclick: post("stop?via=web") }, "Stop"), h("button", { className: "btn plain sm", onclick: post("retry") }, "Retry"))]
+  return [log, h("div", { className: "agent-bar" }, h("span"), stop, h("button", { className: "btn plain sm", onclick: post("retry") }, "Retry"))]
 }
 
 // composer is where the user writes to the agent. Enter sends, Shift+Enter is a new line.

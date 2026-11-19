@@ -11,19 +11,25 @@ main > .tabs { margin: 0 16px }
 .page { max-width: 640px; margin: 0 auto; padding: 24px 20px 48px; display: grid; gap: 16px; align-content: start }
 .page h2 { margin: 0; font: var(--text-title-2); letter-spacing: var(--tracking-title-2) }
 .page p { margin: 0; color: var(--color-text-2) }
-.page .actions { display: flex; gap: 8px; justify-content: flex-end }
+.actions { display: flex; gap: 8px; justify-content: flex-end }
 main > .composer { flex: none; margin: 4px 16px 12px }
 .sidebar .foot { margin: auto 12px 0; padding-top: 8px }
 .sidebar a.row { color: inherit; text-decoration: none }
 .thread { padding: 16px }
 .thread .bubble { white-space: pre-wrap }
+.thread .msg > .note:first-child { margin: 0 12px 3px }
 .thread .tool pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere }
 .thread .error { color: var(--color-danger) }
 .agent-bar { display: flex; align-items: center; gap: 8px; margin: 0 16px; font: var(--text-footnote); color: var(--color-text-2) }
 .agent-bar span { flex: 1 }
 .scrim { position: fixed; inset: 0; z-index: var(--z-sheet); display: grid; place-items: center; background: var(--color-scrim) }
-.sheet .body { overflow: auto }
-.sheet .form-row input[type=checkbox] { order: 1 }
+.sheet .form-row > .input { flex: 0 1 240px; min-width: 0 }
+.sheet .form-row > .textarea { flex: 1 }
+.sheet .section-l { margin: 18px 10px 6px; font: var(--text-subheadline); color: var(--color-text-2) }
+.sheet .disclosure { margin-top: 18px }
+.sheet > footer > .danger { margin-right: auto }
+.stack { display: grid; gap: 8px; margin-top: 8px }
+.toolbar .agents .count:empty { display: none }
 .error-line { color: var(--color-danger); padding: 16px }
 @media (max-width: 700px) {
   body { display: block; padding: 0 }

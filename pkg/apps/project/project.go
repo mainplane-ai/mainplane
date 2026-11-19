@@ -110,9 +110,11 @@ type Project struct {
 // Model is a preset of the catalog whose provider the harness serves: a full
 // config for an agent but its workers.
 type Model struct {
-	ID     string         `json:"id"`
-	Name   string         `json:"name"`
-	Config statefile.Conf `json:"config"`
+	ID       string            `json:"id"`
+	Name     string            `json:"name"`
+	Provider string            `json:"provider"` // the provider's name, a section of the picker; Custom for one the catalog lacks
+	Config   statefile.Conf    `json:"config"`
+	Settings []catalog.Setting `json:"settings,omitempty"` // such as effort, as the TUI's /config offers them
 }
 
 // File is one file of a store as a list shows it.
@@ -617,7 +619,7 @@ func (a *App) presets(ctx context.Context) ([]Model, error) {
 	out := []Model{}
 	for _, id := range a.cat.Groups[catalog.SelfHosted] {
 		if p := a.cat.Presets[id]; slices.ContainsFunc(served, func(s harness.ProviderInfo) bool { return s.Name == p.Provider }) {
-			out = append(out, Model{id, p.Name, statefile.Conf{Model: p.Provider + "/" + p.Model, Tools: p.Tools, ContextLimit: p.ContextLimit, Input: p.Input, Params: p.Params, Preset: id}})
+			out = append(out, Model{id, p.Name, a.cat.Providers[p.Provider].Name, statefile.Conf{Model: p.Provider + "/" + p.Model, Tools: p.Tools, ContextLimit: p.ContextLimit, Input: p.Input, Params: p.Params, Preset: id}, p.Settings})
 		}
 	}
 	for _, s := range served {
@@ -630,7 +632,7 @@ func (a *App) presets(ctx context.Context) ([]Model, error) {
 		}
 		for _, id := range ids {
 			model := s.Name + "/" + id
-			out = append(out, Model{model, id, statefile.Conf{Model: model, Tools: "default", ContextLimit: cmp.Or(s.ContextLimit, catalog.CustomLimit), Input: []string{}}})
+			out = append(out, Model{model, id, "Custom", statefile.Conf{Model: model, Tools: "default", ContextLimit: cmp.Or(s.ContextLimit, catalog.CustomLimit), Input: []string{}}, nil})
 		}
 	}
 	return out, nil
