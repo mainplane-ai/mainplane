@@ -68,13 +68,19 @@ const (
 	depth = 64
 	// catalogAge is how long a fetched catalog is used before it is fetched again.
 	catalogAge = time.Hour
-	// Sandbox is the policy a dashboard is shown under, and each file of a
-	// store served with: an origin of its own, and no network.
+	// Sandbox is the policy each file of a store is served with: an origin
+	// of its own, and no network.
 	Sandbox = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:"
 	// changed is the note an orchestrator reads when someone else set its
 	// project's status. It is a system record: it wakes nobody.
 	changed = "%s set the status of project %q to %s, with the line %q. This is a note, not a message: nobody waits for an answer to it."
 )
+
+// Dashboard is the policy a dashboard is shown under: Sandbox, and the
+// design system's files at ds, sources such as "https://example.com/web/ds/".
+func Dashboard(ds string) string {
+	return "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' " + ds + "; style-src 'unsafe-inline' " + ds + "; font-src " + ds + "; img-src data: blob:"
+}
 
 // maxStore bounds a project's whole store: a page and a thousand cards with
 // a screenshot each, and no more, so the stores cannot fill the harness's

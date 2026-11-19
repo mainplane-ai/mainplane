@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"net/http"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/mainplane-ai/mainplane/pkg/apps/project"
@@ -44,6 +45,9 @@ const (
 	// builds, so the URL has no hash: a breaking change is a new number.
 	ds = "/web/ds/1/"
 )
+
+// host is a Host header that is safe in a policy.
+var host = regexp.MustCompile(`^[A-Za-z0-9.:\[\]-]+$`)
 
 var types = map[string]string{".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".html": "text/html; charset=utf-8", ".woff2": "font/woff2"}
 
@@ -113,7 +117,7 @@ func Handler(api http.Handler) http.Handler {
 			h.Set("Cache-Control", forever)
 			h.Set("X-Content-Type-Options", "nosniff")
 			if path.Base(name) == "frame.html" {
-				h.Set("Content-Security-Policy", project.Sandbox) // of whatever the frame is told to show
+				h.Set("Content-Security-Policy", project.Dashboard(dsSource(r))) // of whatever the frame is told to show
 			}
 			_, _ = w.Write(b)
 			return
@@ -130,6 +134,17 @@ func Handler(api http.Handler) http.Handler {
 		h.Set("Referrer-Policy", "no-referrer")
 		_, _ = w.Write([]byte(shell))
 	})
+}
+
+// dsSource is the design system's files as sources of a policy, on the
+// host the browser asked. Both schemes: a proxy may have ended TLS, and
+// Safari matches no scheme-less source in a frame with an opaque origin.
+func dsSource(r *http.Request) string {
+	if !host.MatchString(r.Host) {
+		return "" // no design system
+	}
+	p := r.Host + strings.TrimSuffix(ds, "1/")
+	return "https://" + p + " http://" + p
 }
 
 // navigation is whether a browser asks for a page to show: it says so, or,
