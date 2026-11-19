@@ -1,26 +1,34 @@
-/* Layout only. The look comes later. */
+/* The app's layout. Components and colors come from the design system at /web/ds/1/. */
 html, body { height: 100%; margin: 0 }
-body { display: flex; font: 15px/1.4 system-ui, sans-serif }
-nav { flex: none; width: 16rem; overflow: auto; border-right: 1px solid #ccc }
-main { flex: 1; min-width: 0; display: flex; flex-direction: column }
-nav, main { box-sizing: border-box; padding: .5rem }
-nav a { display: block }
-nav small { display: block; color: #666; margin-bottom: .5rem }
-.open::before, .waiting::before { content: "\25cf  "; color: #06c }
-.waiting::before { color: #c90 }
-.scroll { flex: 1; min-height: 0; overflow: auto }
-iframe { flex: 1; min-height: 0; border: 1px solid #ccc }
-.message, .text, .error, pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: .5rem 0 }
-.message { background: #eef; padding: .25rem }
-.message small { display: block; color: #666 }
-.error { color: #b00 }
-.composer { display: flex }
-.composer textarea { flex: 1 }
-label { display: block }
-label textarea { display: block; box-sizing: border-box; width: 100% }
-.back, body.out nav { display: none }
+body { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; padding: 8px; box-sizing: border-box; background: var(--color-bg) }
+body.out { display: block }
+body > .sidebar { width: 300px; min-height: 0; overflow: auto }
+body.out > .sidebar, .back { display: none }
+main { display: flex; flex-direction: column; min-height: 0; min-width: 0 }
+main > .tabs { margin: 0 16px }
+.view { flex: 1 1 0; min-height: 0; overflow: auto }
+.dash { flex: 1; min-height: 0; border: 0; width: 100%; background: var(--color-bg) }
+.page { max-width: 640px; margin: 0 auto; padding: 24px 20px 48px; display: grid; gap: 16px; align-content: start }
+.page h2 { margin: 0; font: var(--text-title-2); letter-spacing: var(--tracking-title-2) }
+.page p { margin: 0; color: var(--color-text-2) }
+.page .actions { display: flex; gap: 8px; justify-content: flex-end }
+main > .composer { flex: none; margin: 4px 16px 12px }
+.sidebar .foot { margin: auto 12px 0; padding-top: 8px }
+.sidebar a.row { color: inherit; text-decoration: none }
+.thread { padding: 16px }
+.thread .bubble { white-space: pre-wrap }
+.thread .tool pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere }
+.thread .error { color: var(--color-danger) }
+.agent-bar { display: flex; align-items: center; gap: 8px; margin: 0 16px; font: var(--text-footnote); color: var(--color-text-2) }
+.agent-bar span { flex: 1 }
+.scrim { position: fixed; inset: 0; z-index: var(--z-sheet); display: grid; place-items: center; background: var(--color-scrim) }
+.sheet .body { overflow: auto }
+.sheet .form-row input[type=checkbox] { order: 1 }
+.error-line { color: var(--color-danger); padding: 16px }
 @media (max-width: 700px) {
-  nav { width: 100% }
-  body.home main, body:not(.home) nav { display: none }
-  .back { display: block }
+  body { display: block; padding: 0 }
+  body > .sidebar { width: auto; height: 100%; border-radius: 0 }
+  body:not(.home) > .sidebar, body.home > main { display: none }
+  main { height: 100% }
+  .back { display: inline-flex }
 }

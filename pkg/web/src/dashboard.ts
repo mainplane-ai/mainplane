@@ -9,7 +9,7 @@ const frameURL = new URL("frame.html", import.meta.url).href
 // its calls until signal ends. When the store changes, a changed page is
 // loaded again and an unchanged one is told, so it lists its files again.
 export function dashboard(p: Project, signal: AbortSignal): HTMLIFrameElement {
-  const frame = h("iframe", { src: frameURL })
+  const frame = h("iframe", { src: frameURL, className: "dash" })
   frame.setAttribute("sandbox", "allow-scripts")
   const files = `/projects/${p.id}/files/`
   const tell = (m: unknown, transfer: Transferable[] = []) => frame.contentWindow?.postMessage(m, "*", transfer) // "*": the frame's origin has no name
@@ -25,7 +25,7 @@ export function dashboard(p: Project, signal: AbortSignal): HTMLIFrameElement {
     ready = false
     frame.src = frameURL // the frame starts over and says it is ready
   }
-  const show = (err: unknown) => signal.aborted || frame.replaceWith(h("p", { className: "error" }, String(err)))
+  const show = (err: unknown) => signal.aborted || frame.replaceWith(h("p", { className: "error-line" }, String(err)))
   load().catch(show)
 
   addEventListener("projects", e => {

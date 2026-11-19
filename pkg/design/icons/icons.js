@@ -101,7 +101,7 @@
     if (!d) throw new Error("no icon " + name);
     const rot = typeof d[d.length - 1] === "number" ? d[d.length - 1] : 0;
     const body = d.filter((s) => typeof s === "string").map(el).join("");
-    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:var(--icon-stroke, 1.55)" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><g transform="translate(12 12) scale(1.15) translate(-12 -12)${rot ? ` rotate(${rot} 12 12)` : ""}">${body}</g></svg>`;
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><g transform="translate(12 12) scale(1.15) translate(-12 -12)${rot ? ` rotate(${rot} 12 12)` : ""}">${body}</g></svg>`;
   };
   window.MPIcon = { svg, names: Object.keys(I) };
   if (!customElements.get("mp-icon"))
