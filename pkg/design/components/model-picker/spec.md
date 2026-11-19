@@ -60,3 +60,4 @@ Listed in tools/items.mjs under Controls after popup-button.
 - Search: Cursor's row. Icon on the label column, no field box, no ring (the open picker is the focus context); hairline under.
 - List: scrolls past 12 rows. Sections: a gray label on the label column, 8 px above each one after the first; no lines.
 - Trigger: the plain pop-up with the effort in gray after the name (Claude's composer shows "Sonnet 5.5 Medium").
+- Script: a picker made after load is set up with MPPicker.init(picker, trigger, effortList). A pick fires mp-pick on the picker (detail: the row). An Effort row with aria-controls opens that .pk-sub list beside the picker (left of it where there is no room); a press outside closes the picker.

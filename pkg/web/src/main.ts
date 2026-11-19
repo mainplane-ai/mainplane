@@ -4,6 +4,7 @@
 import { type Agent, type Conf, type Model, type Project, acted, api, get, h, icon, initials, key, login, logout } from "./api"
 import { chat, composer } from "./chat"
 import { dashboard } from "./dashboard"
+import { picker } from "./picker"
 
 const statuses = ["open", "waiting", "closed"]
 // A project's status as a sidebar row shows it: open is the user's turn.
@@ -116,16 +117,25 @@ function toolbar(name: string, line: string, ...buttons: HTMLElement[]): HTMLEle
 async function content(kind: string, id: string, sub: string, signal: AbortSignal): Promise<Node[]> {
   if (!key()) return [loginForm()]
   if (!projects.length) await refresh()
-  if (kind === "new") return [toolbar("New project", ""), h("div", { className: "view" }, await createForm())]
+  const none = h("div", { className: "view" }, h("div", { className: "empty" }, icon("grid"), h("h3", null, "No project open"), h("p", null, "Pick one from the list, or make a new one.")))
+  if (kind === "new") return [none, await createForm()]
   if (kind === "agents" && id) {
     const a = await get<Agent>(`/agents/${id}`, signal)
-    return [toolbar(a.name || a.id, a.config.model), h("details", { className: "disclosure page" }, h("summary", null, "Instructions"), instructions(a)), ...chat(id, signal), composer(id, `Message ${a.name || "this agent"}`)]
+    const name = a.name || a.id
+    const at = `/agents/${a.id}`
+    const head = toolbar(name, `${a.status} · ${a.config.model}`, h("a", { href: at + "/settings", className: "btn icon ghost", ariaLabel: "Instructions" }, icon("more-vertical")))
+    const view = [head, ...chat(id, signal), composer(id, `Message ${name}`)]
+    if (sub === "settings") return [...view, sheet("Agent", name, at, [instructions(a)], [h("a", { href: at, className: "btn" }, "Done")])]
+    return view
   }
-  if (kind !== "projects") return [h("div", { className: "view" }, h("div", { className: "empty" }, icon("grid"), h("h3", null, "No project open"), h("p", null, "Pick one from the list, or make a new one.")))]
+  if (kind !== "projects") return [none]
   const p = projects.find(p => p.id === id)
   if (!p) throw new Error(`No project ${id}`)
   const at = `/projects/${p.id}`
-  const agents = h("a", { href: at + "/agents", className: "btn ghost agents", ariaLabel: "Agents" }, icon("people"))
+  // The agents button counts the project's agents; the count comes when the list does.
+  const count = h("span", { className: "count" })
+  const agents = h("a", { href: at + "/agents", className: "btn ghost agents", ariaLabel: "Agents" }, icon("people"), count)
+  void get<Agent[]>(at + "/agents", signal).then(l => (count.textContent = String(l.length)), () => {})
   const more = h("a", { href: at + "/settings", className: "btn icon ghost", ariaLabel: "Settings" }, icon("more-vertical"))
   const head = toolbar(p.name, line(p), agents, more)
   addEventListener("projects", e => (e as CustomEvent<Project[]>).detail.filter(q => q.id === p.id).forEach(q => (head.querySelector(".title small")!.textContent = line(q))), { signal })
@@ -157,71 +167,57 @@ function loginForm(): HTMLElement {
   return form
 }
 
-// sheet is a dialog over the view. Close goes back to where it was opened.
-function sheet(title: string, sub: string, close: string, ...body: Node[]): HTMLElement {
+// sheet is a dialog over the view, its buttons in its foot. Close goes back
+// to where it was opened. What floats over it (a picker) goes in the scrim.
+function sheet(title: string, sub: string, close: string, body: Node[], foot: Node[], ...over: Node[]): HTMLElement {
   const s = h("div", { className: "scrim", onclick: e => e.target === s && go(close) },
     h("div", { className: "sheet", role: "dialog", ariaModal: "true", ariaLabel: title },
       h("header", null, h("hgroup", null, h("h2", null, title), h("p", null, sub)), h("a", { href: close, className: "btn icon ghost", ariaLabel: "Close" }, icon("close"))),
-      h("div", { className: "body" }, ...body)))
+      h("div", { className: "body" }, ...body), h("footer", null, ...foot)), ...over)
   addEventListener("keydown", e => e.key === "Escape" && s.isConnected && go(close))
   return s
 }
 
-const row = (label: string, help: string, control: HTMLElement) => h("label", { className: "form-row" }, h("span", { className: "row-main" }, h("b", null, label), h("small", null, help)), control)
-
-// statusForm is the user's own say on the project's status.
-function statusForm(p: Project): HTMLElement {
-  const status = h("select", { className: "select plain" }, ...statuses.map(s => h("option", { value: s }, said[s])))
-  const text = h("input", { className: "input", placeholder: "Line", maxLength: 100, value: p.line })
-  status.value = p.status
-  const form = h("form", { className: "form" }, row("Status", "Open means it is your turn.", status), row("Line", "One line under the name.", text), h("div", { className: "actions" }, h("button", { className: "btn" }, "Set status")))
-  form.onsubmit = attempt(async () => {
-    await api(`/projects/${p.id}/status?via=web`, { method: "PUT", json: { status: status.value, line: text.value } })
-    acted()
-  })
-  return form
-}
+const row = (label: string, help: string, control: HTMLElement, tag: "label" | "div" = "label") =>
+  h(tag, { className: "form-row" }, h("span", { className: "row-main" }, h("b", null, label), help ? h("small", null, help) : ""), control)
+const section = (label: string, ...rows: HTMLElement[]) => [h("p", { className: "section-l", hidden: !rows.length }, label), h("div", { className: "form", hidden: !rows.length }, ...rows)]
 
 // options is the choice of an orchestrator's model, workers and apps: for a
 // new project everything connected, for one there is what its orchestrator has.
-async function options(cur?: Agent): Promise<{ el: HTMLElement; value: () => { config: Conf; apps: string[] } }> {
+async function options(cur?: Agent): Promise<{ el: HTMLElement[]; over: HTMLElement[]; value: () => { config: Conf; apps: string[] } }> {
   const [models, workers, apps] = await Promise.all([get<Model[]>("/models").catch(() => []), get<{ name: string; refused?: string }[]>("/workers"), get<{ name: string }[]>("/apps")])
-  const model = h("select", { className: "select plain" }, ...models.map(m => h("option", { value: m.id }, m.name)))
-  // A model the catalog does not list stays as it is until another is picked.
-  const has = cur && (cur.config.preset ?? cur.config.model)
-  const kept = cur && !models.some(m => m.id === has)
-  if (kept) model.prepend(h("option", { value: "" }, cur.config.model))
-  model.value = cur ? (kept ? "" : has!) : (localStorage.getItem(lastModel) ?? "")
-  if (model.selectedIndex < 0) model.selectedIndex = 0
-  const box = (value: string, checked: boolean, disabled = false) => row(value, disabled ? "Every orchestrator has it." : "", h("input", { type: "checkbox", value, checked, disabled }))
+  const pk = picker(models, cur?.config, localStorage.getItem(lastModel))
+  const box = (value: string, checked: boolean, disabled = false) => row(value, disabled ? "Every orchestrator has it." : "", h("input", { type: "checkbox", className: "switch", role: "switch", value, checked, disabled }))
   const ticked = (set: HTMLElement) => [...set.querySelectorAll<HTMLInputElement>("input:checked")].map(i => i.value)
   const names = new Set([...workers.filter(w => !w.refused).map(w => w.name), ...(cur?.config.workers.map(w => w.name) ?? [])])
-  const ws = h("div", { className: "form" }, ...[...names].map(n => box(n, !cur || cur.config.workers.some(w => w.name === n))))
-  const as = h("div", { className: "form" }, ...apps.map(a => (required.includes(a.name) ? box(a.name, true, true) : box(a.name, !cur || cur.apps.includes(a.name)))))
+  const ws = section("Workers", ...[...names].map(n => box(n, !cur || cur.config.workers.some(w => w.name === n))))
+  const as = section("Apps", ...apps.map(a => (required.includes(a.name) ? box(a.name, true, true) : box(a.name, !cur || cur.apps.includes(a.name)))))
   return {
-    el: h("div", { className: "form-rows" }, h("div", { className: "form" }, row("Model", "The orchestrator's model.", model)), h("small", { className: "field-l" }, "Workers"), ws, h("small", { className: "field-l" }, "Apps"), as),
+    el: [h("div", { className: "form" }, row("Model", "Plans the work and talks with you.", pk.trigger, "div")), ...ws, ...as],
+    over: pk.pops,
     value: () => {
-      const picked = models.find(m => m.id === model.value)
-      if (!picked && !cur) throw new Error("No model is connected: add a provider to the harness first.")
-      const base = picked && picked.id !== has ? picked.config : cur!.config
-      if (picked) localStorage.setItem(lastModel, picked.id)
-      return { config: { ...base, workers: ticked(ws).map(name => ({ name })) }, apps: ticked(as) }
+      const config = pk.value()
+      if (!config) throw new Error("No model is connected: add a provider to the harness first.")
+      if (config.preset) localStorage.setItem(lastModel, config.preset)
+      return { config: { ...config, workers: ticked(ws[1]).map(name => ({ name })) }, apps: ticked(as[1]) }
     },
   }
 }
 
 async function createForm(): Promise<HTMLElement> {
   const o = await options()
-  const name = h("input", { className: "input lg", required: true, placeholder: "Name" })
-  const note = h("textarea", { className: "input textarea", rows: 3, placeholder: "What is it for? (optional)" })
-  const form = h("form", { className: "page" }, h("h2", null, "New project"), name, note, h("details", { className: "disclosure" }, h("summary", null, "Options"), o.el), h("div", { className: "actions" }, h("button", { className: "btn filled" }, "Create")))
-  form.onsubmit = attempt(async () => {
+  const name = h("input", { className: "input", required: true, placeholder: "Harbor Bakery", ariaLabel: "Name" })
+  const note = h("textarea", { className: "input textarea", rows: 3, placeholder: "What is it for? (optional)", ariaLabel: "What it is for" })
+  const create = h("button", { className: "btn filled" }, "Create")
+  create.onclick = attempt(async () => {
+    if (!name.reportValidity()) return
     const v = o.value()
     const p: Project = await (await api("/projects?via=web", { json: { name: name.value, note: note.value, ...v } })).json()
     await refresh()
     go(`/projects/${p.id}/chat`) // where the orchestrator's first reply arrives
   })
-  return form
+  const body = [h("div", { className: "form" }, row("Name", "", name), h("div", { className: "form-row" }, note)), h("details", { className: "disclosure" }, h("summary", null, "Options"), ...o.el)]
+  return sheet("New project", "An orchestrator plans it with you.", "/", body, [h("a", { href: "/", className: "btn" }, "Cancel"), create], ...o.over)
 }
 
 // instructions is the text every session of the agent starts with. The
@@ -229,7 +225,7 @@ async function createForm(): Promise<HTMLElement> {
 function instructions(a: Agent): HTMLElement {
   const box = h("textarea", { className: "input textarea", rows: 8, value: a.instructions ?? "", ariaLabel: "Instructions" })
   const save = h("button", { className: "btn" }, "Save instructions")
-  const form = h("form", { className: "form-rows" }, h("small", { className: "field-help" }, "Every session of this agent starts with them."), box, h("div", { className: "actions" }, save))
+  const form = h("form", { className: "stack" }, h("small", { className: "field-help" }, "Every session of this agent starts with them."), box, h("div", { className: "actions" }, save))
   box.oninput = () => (save.textContent = "Save instructions")
   form.onsubmit = attempt(async () => {
     await api(`/agents/${a.id}/instructions?via=web`, { method: "PUT", text: box.value })
@@ -238,17 +234,22 @@ function instructions(a: Agent): HTMLElement {
   return form
 }
 
-// settings is the orchestrator's own config, apps and instructions. Its
-// agents keep theirs: the orchestrator changes them when asked.
+// settings is the project's status and its orchestrator's own config, apps
+// and instructions. Its agents keep theirs: the orchestrator changes them when asked.
 async function settings(p: Project, signal: AbortSignal): Promise<HTMLElement> {
   const orchestrator = await get<Agent>(`/agents/${p.orchestrator}`, signal)
   const o = await options(orchestrator)
   const at = `/projects/${p.id}`
-  const form = h("form", { className: "form-rows" }, o.el, h("div", { className: "actions" }, h("button", { className: "btn filled" }, "Save")))
-  form.onsubmit = attempt(async () => {
+  const status = h("select", { className: "select plain" }, ...statuses.map(s => h("option", { value: s }, said[s])))
+  status.value = p.status
+  const text = h("input", { className: "input", placeholder: "One line under the name", maxLength: 100, value: p.line, ariaLabel: "Line" })
+  const save = h("button", { className: "btn filled" }, "Save")
+  save.onclick = attempt(async () => {
     const v = o.value()
+    if (status.value !== p.status || text.value !== p.line) await api(`/projects/${p.id}/status?via=web`, { method: "PUT", json: { status: status.value, line: text.value } })
     await api(`/agents/${p.orchestrator}/config?via=web`, { method: "PUT", json: v.config })
     await api(`/agents/${p.orchestrator}/apps?via=web`, { method: "PUT", json: v.apps })
+    acted()
     go(at)
   })
   const remove = h("button", {
@@ -260,8 +261,9 @@ async function settings(p: Project, signal: AbortSignal): Promise<HTMLElement> {
       await refresh()
       go("/")
     }),
-  }, "Delete project")
-  return sheet("Project settings", p.name, at, statusForm(p), form, h("details", { className: "disclosure" }, h("summary", null, "Orchestrator instructions"), instructions(orchestrator)), h("div", { className: "actions" }, remove))
+  }, "Delete")
+  const body = [h("div", { className: "form" }, row("Status", "Open means it is your turn.", status), row("Line", "", text)), ...o.el, h("details", { className: "disclosure" }, h("summary", null, "Orchestrator instructions"), instructions(orchestrator))]
+  return sheet("Project settings", p.name, at, body, [remove, h("a", { href: at, className: "btn" }, "Cancel"), save], ...o.over)
 }
 
 void render()
