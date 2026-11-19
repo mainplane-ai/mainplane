@@ -19,6 +19,7 @@ const search = h("input", { type: "search", placeholder: "Search" })
 const list = h("div", { className: "list side separated", role: "listbox", ariaLabel: "Projects" })
 const side = h("nav", { className: "sidebar" },
   h("div", { className: "top" }, h("label", { className: "search lg" }, icon("search"), search), h("a", { href: "/new", className: "btn icon ghost", ariaLabel: "New project" }, icon("compose"))),
+  h("h1", { className: "large-title" }, "Mainplane"),
   list,
   h("div", { className: "foot" }, h("button", { className: "btn plain sm", onclick: () => logout() }, "Log out")))
 const main = h("main")
@@ -96,7 +97,7 @@ async function render() {
   const signal = (view = new AbortController()).signal
   const [kind, id, sub] = location.pathname.split("/").slice(1)
   document.body.classList.toggle("out", !key())
-  document.body.classList.toggle("home", location.pathname === "/")
+  document.body.classList.toggle("home", location.pathname === "/" || location.pathname === "/new") // a phone shows the list under the new project sheet
   drawList()
   try {
     const nodes = await content(kind, id, sub, signal)
