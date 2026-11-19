@@ -1,6 +1,7 @@
 // The chat of one agent: every session it has had reads as one conversation.
 
 import { type Agent, type Rec, acted, api, get, h, icon, records, text } from "./api"
+import { rich, typeset } from "./rich"
 
 const shown = (r: Rec) => (r.type?.startsWith("text/") ? text(r.body) : `[${r.type}, ${r.len} bytes]`)
 
@@ -8,16 +9,33 @@ const shown = (r: Rec) => (r.type?.startsWith("text/") ? text(r.body) : `[${r.ty
 const fold = (label: string, ...more: string[]) => h("details", { className: "tool" }, h("summary", null, icon("chevron-right"), label), ...more.map(m => h("pre", { className: "code" }, m)))
 // from is who sent a message the user did not: an agent, an app or a job. A person writes from any connector.
 const from = (via = "") => (via.startsWith("agent:") ? `Agent ${via.slice(6)}` : via.startsWith("app:") ? via.slice(4) : via === "job" ? "A job" : "")
-// say adds a bubble. Bubbles in a row from the same side and sender are one
-// group, as in Messages: the sender above the first, the tail on the last.
+// say adds a message. Bubbles in a row from the same side and sender are one
+// group, as in Messages: the sender above the first, the tail on the last. An
+// agent's reply with blocks (headings, lists, code) is a column, no bubble.
 const say = (into: HTMLElement, sent: boolean, body: string, who = "") => {
+  const { html, blocks } = rich(body)
+  const column = blocks && !sent
   const last = into.lastElementChild
-  const joins = last?.matches(".msg:not(.system)") && last.classList.contains("sent") === sent && (last as HTMLElement).dataset.who === who
+  const joins = !column && last?.matches(".msg:not(.system, .rt-msg)") && last.classList.contains("sent") === sent && (last as HTMLElement).dataset.who === who
   if (joins) last!.classList.replace("tail", "mid") // a first that is no longer the last is first alone
   if (joins && last!.classList.contains("first")) last!.classList.remove("mid")
-  const m = h("div", { className: `msg tail${joins ? "" : " first"}${sent ? " sent" : ""}` }, ...(who && !joins ? [h("span", { className: "note" }, who)] : []), h("div", { className: "bubble" }, body))
+  const content = h("div", { className: column ? "rt" : blocks ? "bubble" : "bubble rt-inline" })
+  if (blocks && sent) content.textContent = body // what the user wrote reads as they wrote it
+  else content.innerHTML = html // markdown-it escapes any HTML in the text
+  const m = h("div", { className: `msg tail${joins ? "" : " first"}${sent ? " sent" : ""}${column ? " rt-msg" : ""}` }, ...(who && !joins ? [h("span", { className: "note" }, who)] : []), content)
   m.dataset.who = who
   into.append(m)
+  typeset(content).catch(console.error)
+}
+
+// day is the line above a message after a new day or a pause of an hour, as in Messages: "Today 9:41 AM".
+const day = (into: HTMLElement, time: string) => {
+  const t = new Date(time), prev = new Date(into.dataset.time ?? 0)
+  into.dataset.time = time
+  if (t.toDateString() === prev.toDateString() && +t - +prev < 3600e3) return
+  const days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(time).setHours(0, 0, 0, 0)) / 864e5)
+  const name = days === 0 ? "Today" : days === 1 ? "Yesterday" : days < 7 ? t.toLocaleDateString(undefined, { weekday: "long" }) : t.toLocaleDateString(undefined, { month: "short", day: "numeric", ...(t.getFullYear() !== new Date().getFullYear() && { year: "numeric" }) })
+  into.append(h("div", { className: "day" }, h("b", null, name), " ", t.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })))
 }
 
 // chat follows the agent's live session with one long poll, which stops
@@ -35,6 +53,7 @@ export function chat(id: string, signal: AbortSignal): HTMLElement[] {
   const draw = (recs: Rec[], into: HTMLElement) => {
     const bottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40
     for (const r of recs) {
+      if (r.kind === "message" || r.kind === "text") day(into, r.time)
       if (r.kind === "message" && r.via === "app:project") into.append(fold("Project created", shown(r)))
       else if (r.kind === "message" && r.via === "rollover") into.append(fold("The task, carried from the session before", shown(r)))
       else if (r.kind === "message") say(into, !from(r.via), shown(r), from(r.via))
@@ -92,29 +111,4 @@ export function chat(id: string, signal: AbortSignal): HTMLElement[] {
   }
   follow().catch(err => signal.aborted || thread.append(h("div", { className: "error" }, String(err), " ", h("a", { href: location.pathname }, "Try again"))))
   return [log, h("div", { className: "agent-bar" }, h("span"), stop, h("button", { className: "btn plain sm", onclick: post("retry") }, "Retry"))]
-}
-
-// composer is where the user writes to the agent. Enter sends, Shift+Enter is a new line.
-export function composer(agent: string, placeholder: string): HTMLElement {
-  const box = h("textarea", { rows: 1, required: true, placeholder })
-  const send = h("button", { className: "btn icon send", ariaLabel: "Send" }, icon("arrow-up"))
-  const form = h("form", { className: "composer" }, h("div", { className: "field" }, h("div", { className: "line" }, box, send)))
-  form.onsubmit = async e => {
-    e.preventDefault()
-    send.disabled = true
-    try {
-      await api(`/agents/${agent}/records?via=web`, { text: box.value })
-      box.value = ""
-      acted()
-    } catch (err) {
-      alert(err)
-    }
-    send.disabled = false
-  }
-  box.onkeydown = e => {
-    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return
-    e.preventDefault()
-    form.requestSubmit()
-  }
-  return form
 }

@@ -51,3 +51,5 @@
 .nobr { white-space: nowrap; }
 .msg.rt-msg { display: block; align-self: stretch; min-width: 0; padding: 0 12px; }
 .rt pre .o { color: var(--color-text-2); }
+.rt-inline p { margin: 0; }
+.rt-inline p + p { margin-top: 8px; }

@@ -22,6 +22,7 @@ import (
 //go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 ../design/css/mainplane.css --bundle --minify --loader:.woff2=file --asset-names=fonts/[name] --outdir=dist/ds --log-level=warning
 //go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 ../design/js/mainplane.js --bundle --minify --format=iife --target=es2022 --outfile=dist/ds/mainplane.js --log-level=warning
 //go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 src/main.ts --bundle --minify --format=esm --target=es2022 --log-level=warning --outfile=dist/app.js
+//go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 vendor/temml.mjs --minify --format=esm --target=es2022 --log-level=warning --outfile=dist/math.js
 
 //go:embed all:dist app.css frame.html
 var files embed.FS
@@ -55,7 +56,7 @@ var types = map[string]string{".js": "text/javascript; charset=utf-8", ".css": "
 // which has their hash in it.
 func build() (root string, assets map[string][]byte) {
 	assets, sum := map[string][]byte{}, sha256.New()
-	for _, name := range []string{script, "app.css", "frame.html"} {
+	for _, name := range []string{script, "dist/math.js", "app.css", "frame.html"} {
 		if b, err := files.ReadFile(name); err == nil {
 			assets[path.Base(name)] = b
 			sum.Write(b)
