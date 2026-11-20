@@ -21,7 +21,7 @@ const say = (into: HTMLElement, sent: boolean, body: string, who = "") => {
   if (joins && last!.classList.contains("first")) last!.classList.remove("mid")
   const content = h("div", { className: column ? "rt" : blocks ? "bubble" : "bubble rt-inline" })
   if (blocks && sent) content.textContent = body // what the user wrote reads as they wrote it
-  else content.innerHTML = html // markdown-it escapes any HTML in the text
+  else content.innerHTML = html // markdown escapes any HTML in the text
   const m = h("div", { className: `msg tail${joins ? "" : " first"}${sent ? " sent" : ""}${column ? " rt-msg" : ""}` }, ...(who && !joins ? [h("span", { className: "note" }, who)] : []), content)
   m.dataset.who = who
   into.append(m)
