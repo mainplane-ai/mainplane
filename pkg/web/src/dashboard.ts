@@ -22,9 +22,13 @@ async function system(html: string): Promise<string> {
 // dashboard shows the store's index.html in a sandboxed frame and answers
 // its calls until signal ends. When the store changes, a changed page is
 // loaded again and an unchanged one is told, so it lists its files again.
-export function dashboard(p: Project, signal: AbortSignal): HTMLIFrameElement {
+// What is returned holds the frame and has no box of its own: hidden, it
+// keeps the frame loaded.
+export function dashboard(p: Project, signal: AbortSignal): HTMLElement {
   const frame = h("iframe", { src: frameURL, className: "dash" })
   frame.setAttribute("sandbox", "allow-scripts")
+  const holder = h("div", null, frame)
+  holder.style.display = "contents"
   const files = `/projects/${p.id}/files/`
   const tell = (m: unknown, transfer: Transferable[] = []) => frame.contentWindow?.postMessage(m, "*", transfer) // "*": the frame's origin has no name
   let page: string | undefined, ready = false, counter = p.counter
@@ -86,5 +90,5 @@ export function dashboard(p: Project, signal: AbortSignal): HTMLIFrameElement {
       }
     }
   }, { signal })
-  return frame
+  return holder
 }

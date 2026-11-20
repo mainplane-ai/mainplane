@@ -13,7 +13,9 @@ const kind = (f: File) => (f.name.match(/\.(\w+)$/)?.[1] ?? f.type.split("/")[1]
 
 export function composer(agent: string, placeholder: string): HTMLElement {
   const files: File[] = []
-  const box = h("textarea", { rows: 1, placeholder, ariaLabel: placeholder })
+  // What is written and not sent is kept for its chat: it is there after a visit elsewhere and after a reload.
+  const draft = "draft:" + agent
+  const box = h("textarea", { rows: 1, placeholder, ariaLabel: placeholder, value: sessionStorage.getItem(draft) ?? "" })
   const act = h("button", { className: "btn icon" })
   const chips = h("div", { className: "attachments", hidden: true })
   const field = h("div", { className: "field" }, chips, h("div", { className: "line" }, box, act))
@@ -32,6 +34,8 @@ export function composer(agent: string, placeholder: string): HTMLElement {
   let listening: Recognition | null = null
   // The one button at the end of the line is send when there is something to send, else the mic.
   const update = () => {
+    if (box.value) sessionStorage.setItem(draft, box.value)
+    else sessionStorage.removeItem(draft)
     const ready = !!box.value.trim() || files.length > 0
     if (!ready && !Speech) {
       act.hidden = true
@@ -128,6 +132,11 @@ export function composer(agent: string, placeholder: string): HTMLElement {
       add(pasted)
     }
   }
+  // A composer kept in the page while another one of its chat was written in shows what that one left.
+  form.addEventListener("show", () => {
+    box.value = sessionStorage.getItem(draft) ?? ""
+    update()
+  })
   update()
   return form
 }

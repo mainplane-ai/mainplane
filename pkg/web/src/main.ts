@@ -41,6 +41,23 @@ if (linked) {
 }
 
 let projects: Project[] = []
+// A project visited keeps its views in the page, hidden while another view
+// shows: the way back to one draws nothing and waits for nothing. show takes
+// the view of it to show, null for none.
+type Kept = { nodes: HTMLElement[]; show: (sub: string | null) => void; end: AbortController }
+const kept = new Map<string, Kept>()
+// most is how many projects are kept: each holds a loaded dashboard and a chat.
+const most = 8
+// skip is the style of a chat out of view: it has no place and its rendering
+// is skipped but kept. Hidden, a long chat would be laid out again each time it shows.
+const skip = "content-visibility: hidden; flex: none; height: 0"
+const drop = (id: string) => {
+  kept.get(id)!.end.abort()
+  kept.get(id)!.nodes.forEach(n => n.remove())
+  kept.delete(id)
+}
+// rest is what is in view that is not kept.
+let rest: HTMLElement[] = []
 
 // when is a time today, else a day.
 const when = (t: string) => {
@@ -72,6 +89,7 @@ search.oninput = drawList
 async function refresh() {
   if (!key()) return
   projects = await get<Project[]>("/projects") // the API lists the last updated first
+  for (const id of kept.keys()) if (!projects.some(p => p.id === id)) drop(id)
   drawList()
   dispatchEvent(new CustomEvent("projects", { detail: projects }))
 }
@@ -112,10 +130,18 @@ async function render() {
   drawList()
   try {
     const nodes = await content(kind, id, sub, signal)
-    if (!signal.aborted) main.replaceChildren(...nodes) // a slow one must not draw over the view that came after it
+    if (!signal.aborted) draw(nodes, kind === "projects" ? id : "", sub) // a slow one must not draw over the view that came after it
   } catch (err) {
-    if (!signal.aborted) main.replaceChildren(toolbar("Mainplane", "", null), h("p", { className: "error-line" }, String(err)))
+    if (!signal.aborted) draw([toolbar("Mainplane", "", null), h("p", { className: "error-line" }, String(err))])
   }
+}
+
+// draw puts nodes in view beside the kept project at, if any, and hides the other kept ones.
+function draw(nodes: HTMLElement[], at = "", sub = "") {
+  rest.forEach(n => n.remove())
+  main.append(...(rest = nodes))
+  for (const [id, k] of kept) k.show(id === at ? sub : null)
+  dispatchEvent(new Event("view"))
 }
 
 // toolbar heads a view: back (on a phone), the name and its line, then its buttons.
@@ -130,7 +156,7 @@ function toolbar(name: string, line: string, menu: HTMLElement | null, ...button
     h("span", { className: "spacer" }), h("span", { className: "tb-group" }, ...buttons))
 }
 
-async function content(kind: string, id: string, sub: string, signal: AbortSignal): Promise<Node[]> {
+async function content(kind: string, id: string, sub: string, signal: AbortSignal): Promise<HTMLElement[]> {
   if (!key()) return [loginForm()]
   if (!projects.length) await refresh()
   const none = h("div", { className: "view" }, h("div", { className: "empty" }, icon("grid"), h("h3", null, "No project open"), h("p", null, "Pick one from the list, or make a new one.")))
@@ -147,11 +173,20 @@ async function content(kind: string, id: string, sub: string, signal: AbortSigna
   if (kind !== "projects") return [none]
   const p = projects.find(p => p.id === id)
   if (!p) throw new Error(`No project ${id}`)
+  // A kept view that failed says so in its place: the next visit makes the project's views again.
+  if (kept.get(p.id)?.nodes.some(n => n.querySelector(".error-line, .thread > .error"))) drop(p.id)
+  if (!kept.has(p.id)) keep(p)
+  return sub === "settings" ? [await settings(p, signal)] : []
+}
+
+// keep makes the views of a project and puts them in the page, hidden. They
+// follow the project until it is dropped.
+function keep(p: Project) {
+  const end = new AbortController(), signal = end.signal
   const at = `/projects/${p.id}`
   // The agents button counts the project's agents; the count comes when the list does.
   const count = h("span", { className: "count" })
   const agents = h("a", { href: at + "/agents", className: "btn ghost agents", ariaLabel: "Agents" }, icon("people"), count)
-  void get<Agent[]>(at + "/agents", signal).then(l => (count.textContent = String(l.length)), () => {})
   const more = h("a", { href: at + "/settings", className: "btn icon ghost", ariaLabel: "Settings" }, icon("more-vertical"))
   const item = (name: string, label: string, act: (e: Event) => void, cls = "") => h("button", { role: "menuitem", className: cls, onclick: act } as Partial<HTMLButtonElement>, icon(name), h("span", null, label))
   const menu = h("div", { className: "menu", role: "menu", hidden: true },
@@ -160,18 +195,35 @@ async function content(kind: string, id: string, sub: string, signal: AbortSigna
     item("trash", "Delete", attempt(() => removeProject(p)), "danger"))
   const head = toolbar(p.name, line(p), menu, agents, more)
   addEventListener("projects", e => (e as CustomEvent<Project[]>).detail.filter(q => q.id === p.id).forEach(q => (head.querySelector(".title small")!.textContent = line(q))), { signal })
-  const tab = (path: string, label: string, name: string) => h("button", { role: "tab", ariaSelected: String(sub === name), onclick: () => go(path) }, label)
-  const tabs = h("div", { className: "tabs", role: "tablist" }, tab(at, "Dashboard", ""), tab(at + "/chat", "Chat", "chat"))
+  const tab = (path: string, label: string) => h("button", { role: "tab", onclick: () => go(path) }, label)
+  const tabs = h("div", { className: "tabs", role: "tablist" }, tab(at, "Dashboard"), tab(at + "/chat", "Chat"))
   const write = composer(p.orchestrator, `Message ${p.name}`)
-  if (sub === "chat") return [head, tabs, ...chat(p.orchestrator, signal), write]
-  if (sub === "agents") {
-    const list = await get<Agent[]>(at + "/agents", signal)
-    return [head, tabs, h("div", { className: "view" }, h("div", { className: "page" }, h("h2", null, "Agents"), h("div", { className: "list grouped" }, ...list.map(a =>
-      h("a", { href: `/agents/${a.id}`, className: `row ${a.status}` }, h("span", { className: "avatar" }, initials(a.name || a.id)), h("span", { className: "row-main" }, h("b", null, a.name || a.id), h("small", null, `${a.status} · ${a.config.model}`)), icon("chevron-right")))))), write]
+  let on = false
+  const dash = dashboard(p, signal), [log, bar] = chat(p.orchestrator, signal, () => on), people = h("div", { className: "view" })
+  const nodes = [head, tabs, dash, log, bar, people, write]
+  let top = 1e9 // where the chat is scrolled to, which one out of view forgets: past its end is its end
+  const show = (sub: string | null) => {
+    if (!log.style.cssText) top = log.scrollHeight - log.scrollTop - log.clientHeight < 40 ? 1e9 : log.scrollTop
+    if (!on && sub !== null) write.dispatchEvent(new Event("show"))
+    on = sub !== null
+    head.hidden = tabs.hidden = write.hidden = !on
+    dash.hidden = !on || sub === "chat" || sub === "agents"
+    log.style.cssText = sub === "chat" ? "" : skip
+    bar.hidden = sub !== "chat"
+    people.hidden = sub !== "agents"
+    ;["", "chat"].forEach((name, i) => (tabs.children[i].ariaSelected = String(sub === name)))
+    log.scrollTop = top
+    // The agents are read again behind each view shown: the last list is there meanwhile.
+    if (on) void get<Agent[]>(at + "/agents", signal).then(list => {
+      count.textContent = String(list.length)
+      people.replaceChildren(h("div", { className: "page" }, h("h2", null, "Agents"), h("div", { className: "list grouped" }, ...list.map(a =>
+        h("a", { href: `/agents/${a.id}`, className: `row ${a.status}` }, h("span", { className: "avatar" }, initials(a.name || a.id)), h("span", { className: "row-main" }, h("b", null, a.name || a.id), h("small", null, `${a.status} · ${a.config.model}`)), icon("chevron-right"))))))
+    }, () => {})
   }
-  const dash = [head, tabs, dashboard(p, signal), write]
-  if (sub === "settings") return [...dash, await settings(p, signal)]
-  return dash
+  main.append(...nodes)
+  show(null)
+  kept.set(p.id, { nodes, show, end })
+  if (kept.size > most) drop(kept.keys().next().value!) // the first kept goes
 }
 
 const line = (p: Project) => [p.working ? "Working" : said[p.status], p.line].filter(Boolean).join(" · ")

@@ -40,8 +40,9 @@ const day = (into: HTMLElement, time: string) => {
 }
 
 // chat follows the agent with one long poll, which stops while the page is
-// hidden and ends with signal. Earlier sessions load on request.
-export function chat(id: string, signal: AbortSignal): HTMLElement[] {
+// hidden or on says the chat is not in view, and ends with signal. Earlier
+// sessions load on request.
+export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElement[] {
   // While the agent works the thread ends in a typing bubble, and it can be stopped.
   const typing = h("div", { className: "msg first tail", hidden: true }, h("div", { className: "bubble" }, h("span", { className: "typing", role: "status", ariaLabel: "Working" }, h("i"), h("i"), h("i"))))
   const stop = h("button", { className: "btn plain sm", hidden: true, onclick: () => post("stop?via=web")() }, "Stop")
@@ -87,8 +88,12 @@ export function chat(id: string, signal: AbortSignal): HTMLElement[] {
   let poll = new AbortController()
   const wake = () => poll.abort()
   addEventListener("acted", wake, { signal })
+  addEventListener("view", wake, { signal })
   document.addEventListener("visibilitychange", wake, { signal })
-  const visible = () => new Promise<void>(go => (document.visibilityState === "visible" ? go() : document.addEventListener("visibilitychange", () => go(), { once: true, signal })))
+  // The poll waits while the chat is not seen; what wakes it has it look again.
+  const visible = async () => {
+    while (document.visibilityState !== "visible" || !on()) await new Promise(go => (poll = new AbortController()).signal.addEventListener("abort", go))
+  }
 
   const follow = async () => {
     const more = h("button", { className: "btn plain sm", hidden: true }, "Load the session before")
