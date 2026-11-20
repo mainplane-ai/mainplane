@@ -1,7 +1,7 @@
 // The page: a list of projects beside the one in view. A project is seen as
 // its dashboard, with the place to write to its orchestrator always there.
 
-import { type Agent, type Conf, type Model, type Project, acted, api, get, h, icon, initials, key, login, logout } from "./api"
+import { type Agent, type Conf, type Model, type Project, acted, api, file, get, h, icon, initials, key, login, logout, text } from "./api"
 import { chat } from "./chat"
 import { composer } from "./composer"
 import { dashboard } from "./dashboard"
@@ -107,6 +107,7 @@ function go(path: string) {
   void render()
 }
 addEventListener("popstate", () => void render())
+addEventListener("go", e => go((e as CustomEvent<string>).detail)) // a dashboard opens a chat or a file
 // A click on a link of the page's own changes the view. Nothing is loaded.
 document.addEventListener("click", e => {
   const a = e.target instanceof Element && e.target.closest("a")
@@ -176,7 +177,16 @@ async function content(kind: string, id: string, sub: string, signal: AbortSigna
   // A kept view that failed says so in its place: the next visit makes the project's views again.
   if (kept.get(p.id)?.nodes.some(n => n.querySelector(".error-line, .thread > .error"))) drop(p.id)
   if (!kept.has(p.id)) keep(p)
+  if (sub === "files") return [await stored(p, location.pathname.split("/").slice(4).join("/"), signal)]
   return sub === "settings" ? [await settings(p, signal)] : []
+}
+
+// stored shows one file of a project's store, an image or its text: what is in it is never run.
+async function stored(p: Project, name: string, signal: AbortSignal) {
+  const b = await file(p.id, name, signal)
+  const img = h("img", { alt: name, src: URL.createObjectURL(new Blob([b])) })
+  img.style.maxWidth = "100%"
+  return h("div", { className: "view" }, h("div", { className: "page" }, h("h2", null, name), /\.(png|jpe?g|gif|webp)$/i.test(name) ? img : h("pre", { className: "code" }, text(new Uint8Array(b)))))
 }
 
 // keep makes the views of a project and puts them in the page, hidden. They
@@ -206,8 +216,9 @@ function keep(p: Project) {
     if (!log.style.cssText) top = log.scrollHeight - log.scrollTop - log.clientHeight < 40 ? 1e9 : log.scrollTop
     if (!on && sub !== null) write.dispatchEvent(new Event("show"))
     on = sub !== null
-    head.hidden = tabs.hidden = write.hidden = !on
-    dash.hidden = !on || sub === "chat" || sub === "agents"
+    head.hidden = tabs.hidden = !on
+    dash.hidden = !on || sub === "chat" || sub === "agents" || sub === "files"
+    write.hidden = !on || sub === "files"
     log.style.cssText = sub === "chat" ? "" : skip
     bar.hidden = sub !== "chat"
     people.hidden = sub !== "agents"

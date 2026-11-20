@@ -3,7 +3,7 @@
 
 export type Project = { id: string; name: string; orchestrator: string; status: string; line: string; updated: string; counter: number; working: boolean }
 export type Conf = { model: string; workers: { name: string }[] | null; preset?: string; [more: string]: unknown }
-export type Agent = { id: string; name?: string; config: Conf; apps: string[]; instructions?: string; sessions: string[]; status: string }
+export type Agent = { id: string; name?: string; config: Conf; apps: string[]; instructions?: string; sessions: string[]; status: string; updated: string }
 export type Model = { id: string; name: string; provider: string; config: Conf; settings?: { name: string; values: { name: string; params: Record<string, unknown> }[] }[] }
 export type Rec = { n: number; kind: string; id: string; len: number; type?: string; via?: string; source?: string; for?: string; time: string; body: Uint8Array }
 
@@ -23,7 +23,7 @@ export function logout(refused = false) {
   location.reload()
 }
 
-type Options = { method?: string; json?: unknown; text?: string; form?: FormData; signal?: AbortSignal }
+type Options = { method?: string; json?: unknown; text?: string; form?: FormData; body?: BodyInit; signal?: AbortSignal }
 
 // api is one call. An answer that is not a success is thrown as its text,
 // and a refused key ends the login.
@@ -31,7 +31,7 @@ export async function api(path: string, o: Options = {}): Promise<Response> {
   const r = await fetch(path, {
     method: o.method ?? (o.json !== undefined || o.text !== undefined || o.form ? "POST" : "GET"),
     headers: { Authorization: "Bearer " + key(), ...(o.text !== undefined && { "Content-Type": "text/plain" }) },
-    body: o.json !== undefined ? JSON.stringify(o.json) : (o.form ?? o.text),
+    body: o.json !== undefined ? JSON.stringify(o.json) : (o.form ?? o.text ?? o.body),
     signal: o.signal,
     cache: "no-cache", // a file of a store is asked for again and answered 304 while it is the same
   })
@@ -59,13 +59,18 @@ export async function decode(r: Response): Promise<Rec[]> {
 
 export const text = (b: Uint8Array) => new TextDecoder().decode(b)
 
+// named is a file's name that a dashboard gave: it must not walk out of the store.
+export function named(name: unknown): string {
+  if (typeof name !== "string" || !/^[\w.-]+(\/[\w.-]+)*$/.test(name) || name.split("/").some(s => s === "." || s === "..")) throw new Error(`file name "${name}"`)
+  return name
+}
+
 // file is one file of a project's store. Four are read at once at most: a
 // dashboard of a thousand cards asks for all of them together.
 let free = 4
 const queue: (() => void)[] = []
 export async function file(project: string, name: string, signal?: AbortSignal): Promise<ArrayBuffer> {
-  // The name comes from a dashboard: it must not walk out of the store.
-  if (!/^[\w.-]+(\/[\w.-]+)*$/.test(name) || name.split("/").some(s => s === "." || s === "..")) throw new Error(`file name "${name}"`)
+  named(name)
   if (free > 0) free--
   else await new Promise<void>(go => queue.push(go))
   try {

@@ -60,7 +60,7 @@ const MaxPost = 8 << 20
 //	GET  /agents/{id}/records         as a session's, of the live session or of    -> records; the live
 //	                                  ?session=. ?wait= also ends when the status     session and the status
 //	                                  is not ?status=: a chat follows with this one   in Mainplane-Session
-//	                                  call                                            and Mainplane-Status
+//	                                  call. ?tail=n is the last n of them             and Mainplane-Status
 //	POST /agents/{id}/records         as a session's; lands on the live session,   -> {"session","n"}
 //	                                  or on a new one when that one should not go on
 //	POST /agents/{id}/retry           retry the live session                       -> {"status"}
@@ -609,6 +609,9 @@ func (h *Harness) serveAgentRecords(w http.ResponseWriter, r *http.Request) {
 			case <-until:
 			case <-r.Context().Done():
 			}
+		}
+		if tail, _ := strconv.Atoi(q.Get("tail")); tail > 0 && len(recs) > tail {
+			recs = recs[len(recs)-tail:]
 		}
 		w.Header().Set("Mainplane-Session", info.CurrentSession)
 		w.Header().Set("Mainplane-Status", string(info.Status))

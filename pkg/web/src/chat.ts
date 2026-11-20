@@ -81,6 +81,8 @@ export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElem
         calls.set(r.id, d)
         into.append(d)
       } else if (r.kind === "result") calls.get(r.for ?? "")?.append(h("pre", { className: "code" }, shown(r)))
+      const last = into.lastElementChild as HTMLElement | null
+      if (last) last.dataset.n ??= String(r.n) // what a record drew is found by its number
     }
     if (bottom) log.scrollTop = log.scrollHeight
   }
@@ -113,15 +115,25 @@ export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElem
     }
     // The sessions before the live one are asked for beside its records, not before them.
     const [agent, first] = await Promise.all([get<Agent>(`/agents/${id}`, signal), turn("", signal)])
-    session = first
+    live.dataset.session = session = first
     const earlier = agent.sessions.slice(0, agent.sessions.indexOf(session))
     more.hidden = !earlier.length
-    more.onclick = async () => {
+    const before = async () => {
       const part = h("div")
-      draw(await records(earlier.pop()!, 0, signal), part)
+      draw(await records((part.dataset.session = earlier.pop()!), 0, signal), part)
       more.after(part) // the session after it starts with a rule of its own
       more.hidden = !earlier.length
     }
+    more.onclick = before
+    // seek shows the record the address names, as #<session>.<n>, under the sessions back to its own.
+    const seek = async () => {
+      const [, s, n] = location.hash.match(/^#(\w+)\.(\d+)$/) ?? []
+      if (!s || !on()) return
+      while (earlier.includes(s)) await before()
+      ;[...thread.querySelectorAll<HTMLElement>(`[data-session="${s}"] > [data-n]`)].find(e => +e.dataset.n! >= +n)?.scrollIntoView({ block: "center" }) // a record that drew nothing: the next that did
+    }
+    addEventListener("view", () => void seek(), { signal })
+    await seek()
     while (!signal.aborted) {
       await visible()
       poll = new AbortController()

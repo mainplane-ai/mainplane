@@ -87,10 +87,13 @@ const (
 	changed = "%s set the status of project %q to %s, with the line %q. This is a note, not a message: nobody waits for an answer to it."
 )
 
-// Dashboard is the policy a dashboard is shown under: Sandbox, and the
-// design system's files at ds, sources such as "https://example.com/web/ds/".
+// Dashboard is the policy a dashboard is shown under. Its origin is its own,
+// so it reads no key of the interface, and it cannot move the page around
+// it. The rest is a web page's: code of its own, what https serves, links
+// that open beside it, and the design system's files at ds, sources such as
+// "https://example.com/web/ds/".
 func Dashboard(ds string) string {
-	return "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' " + ds + "; style-src 'unsafe-inline' " + ds + "; font-src " + ds + "; img-src data: blob:"
+	return "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; default-src 'none'; script-src 'unsafe-inline' https: " + ds + "; style-src 'unsafe-inline' https: " + ds + "; font-src https: data: " + ds + "; img-src https: data: blob:; media-src https: data: blob:; connect-src https: wss:"
 }
 
 // maxStore bounds a project's whole store: a page and a thousand cards with
@@ -232,6 +235,8 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 //	DELETE /projects/{id}             ?via= required. ?agents=1 deletes its agents too       -> 204
 //	GET    /projects/{id}/files/      ?prefix= ?bodies=1 for those of the small files too    -> [File]
 //	GET    /projects/{id}/files/{name} -> the file
+//	PUT    /projects/{id}/files/{name} the file, whole                                       -> 204
+//	DELETE /projects/{id}/files/{name}                                                       -> 204
 //	GET    /models                    -> [Model]
 func (a *App) Routes(mux *http.ServeMux) {
 	handle := func(pattern string, fn func(w http.ResponseWriter, r *http.Request) error) {
@@ -264,6 +269,10 @@ func (a *App) Routes(mux *http.ServeMux) {
 	})
 	one("DELETE /projects/{id}", a.remove)
 	one("GET /projects/{id}/files/{name...}", func(w http.ResponseWriter, r *http.Request, p Project) error { return a.get(w, r, p.ID) })
+	one("PUT /projects/{id}/files/{name...}", func(w http.ResponseWriter, r *http.Request, p Project) error { return a.put(w, r, p.ID) })
+	one("DELETE /projects/{id}/files/{name...}", func(w http.ResponseWriter, r *http.Request, p Project) error {
+		return a.write(w, p.ID, r.PathValue("name"), nil)
+	})
 }
 
 // answer is a route's error in the harness's words: 404 for what is not

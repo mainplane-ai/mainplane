@@ -38,7 +38,7 @@ func TestHandler(t *testing.T) {
 		}
 	}
 	root, _ := build()
-	if w := get("GET", root+"frame.html", "Sec-Fetch-Mode", "navigate"); w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Security-Policy"), "sandbox allow-scripts;") || w.Header().Get("Cache-Control") != forever {
+	if w := get("GET", root+"frame.html", "Sec-Fetch-Mode", "navigate"); w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Security-Policy"), "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox;") || w.Header().Get("Cache-Control") != forever {
 		t.Errorf("frame: %d %v", w.Code, w.Header())
 	}
 	if w := get("GET", "/web/0000000000000000/frame.html"); w.Code != 404 {
