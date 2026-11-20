@@ -547,7 +547,7 @@ const paragraph: Rule = (s, start, end) => {
 }
 
 const rules = [table, indented, fence, math, quote, hr, list, heading, paragraph]
-const terms = { paragraph: [table, fence, quote, hr, list, heading], blockquote: [fence, quote, hr, list, heading], list: [fence, quote, hr] }
+const terms = { paragraph: [table, fence, math, quote, hr, list, heading], blockquote: [fence, math, quote, hr, list, heading], list: [fence, math, quote, hr] }
 
 // markdown is text as HTML, and whether it has blocks: a heading, list,
 // table, code block, quote, rule or display math.
