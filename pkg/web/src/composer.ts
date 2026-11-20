@@ -92,25 +92,28 @@ export function composer(agent: string, placeholder: string): HTMLElement {
 
   form.onsubmit = async e => {
     e.preventDefault()
-    if (!box.value.trim() && !files.length) return
+    const text = box.value, sending = files.splice(0)
+    if (!text.trim() && !sending.length) return
     listening?.stop()
-    act.disabled = true
+    // Each part is one message record: the text, then each file with its type.
+    const body = new FormData()
+    if (text.trim()) body.append("text", new Blob([text], { type: "text/plain" }))
+    for (const f of sending) body.append("file", f, f.name)
+    const sent = api(`/agents/${agent}/records?via=web`, sending.length ? { form: body } : { text })
+    // The box is free for the next message at once, and a chat shows this one while it is on its way.
+    dispatchEvent(new CustomEvent("sending", { detail: { agent, text, files: sending, sent } }))
+    box.value = ""
+    chips.replaceChildren()
+    chips.hidden = true
+    update()
     try {
-      // Each part is one message record: the text, then each file with its type.
-      const body = new FormData()
-      if (box.value.trim()) body.append("text", new Blob([box.value], { type: "text/plain" }))
-      for (const f of files) body.append("file", f, f.name)
-      await api(`/agents/${agent}/records?via=web`, files.length ? { form: body } : { text: box.value })
-      box.value = ""
-      files.length = 0
-      chips.replaceChildren()
-      chips.hidden = true
+      await sent
       acted()
     } catch (err) {
+      box.value ||= text // back in the box, unless the next message is there
+      add(sending)
       alert(err)
     }
-    act.disabled = false
-    update()
   }
   box.oninput = update
   box.onkeydown = e => {

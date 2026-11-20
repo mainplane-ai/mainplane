@@ -1,6 +1,6 @@
 // The chat of one agent: every session it has had reads as one conversation.
 
-import { type Agent, type Rec, acted, api, get, h, icon, records, text } from "./api"
+import { type Agent, type Rec, acted, api, decode, get, h, icon, records, text } from "./api"
 import { rich, typeset } from "./rich"
 
 const shown = (r: Rec) => (r.type?.startsWith("text/") ? text(r.body) : `[${r.type}, ${r.len} bytes]`)
@@ -26,6 +26,7 @@ const say = (into: HTMLElement, sent: boolean, body: string, who = "") => {
   m.dataset.who = who
   into.append(m)
   typeset(content).catch(console.error)
+  return m
 }
 
 // day is the line above a message after a new day or a pause of an hour, as in Messages: "Today 9:41 AM".
@@ -38,8 +39,8 @@ const day = (into: HTMLElement, time: string) => {
   into.append(h("div", { className: "day" }, h("b", null, name), " ", t.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })))
 }
 
-// chat follows the agent's live session with one long poll, which stops
-// while the page is hidden and ends with signal. Earlier sessions load on request.
+// chat follows the agent with one long poll, which stops while the page is
+// hidden and ends with signal. Earlier sessions load on request.
 export function chat(id: string, signal: AbortSignal): HTMLElement[] {
   // While the agent works the thread ends in a typing bubble, and it can be stopped.
   const typing = h("div", { className: "msg first tail", hidden: true }, h("div", { className: "bubble" }, h("span", { className: "typing", role: "status", ariaLabel: "Working" }, h("i"), h("i"), h("i"))))
@@ -50,6 +51,15 @@ export function chat(id: string, signal: AbortSignal): HTMLElement[] {
   const thread = h("div", { className: "thread" })
   log.append(thread)
   const calls = new Map<string, HTMLElement>()
+  // A message shows as it is sent, before the harness has it. Its record takes its place; one that fails is taken back.
+  const pending = h("div")
+  addEventListener("sending", e => {
+    const d = (e as CustomEvent<{ agent: string; text: string; files: File[]; sent: Promise<unknown> }>).detail
+    if (d.agent !== id) return
+    const mine = [...(d.text.trim() ? [d.text] : []), ...d.files.map(f => `[${f.type}, ${f.size} bytes]`)].map(part => say(pending, true, part))
+    log.scrollTop = log.scrollHeight
+    d.sent.catch(() => mine.forEach(m => m.remove()))
+  }, { signal })
 
   const draw = (recs: Rec[], into: HTMLElement) => {
     const bottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40
@@ -57,7 +67,10 @@ export function chat(id: string, signal: AbortSignal): HTMLElement[] {
       if (r.kind === "message" || r.kind === "text") day(into, r.time)
       if (r.kind === "message" && r.via === "app:project") into.append(fold("Project created", shown(r)))
       else if (r.kind === "message" && r.via === "rollover") into.append(fold("The task, carried from the session before", shown(r)))
-      else if (r.kind === "message") say(into, !from(r.via), shown(r), from(r.via))
+      else if (r.kind === "message") {
+        if (!from(r.via)) pending.firstElementChild?.remove()
+        say(into, !from(r.via), shown(r), from(r.via))
+      }
       else if (r.kind === "text") say(into, false, shown(r))
       else if (r.kind === "error") into.append(h("div", { className: "msg system error" }, shown(r)))
       else if (r.kind === "system" && r.source === "continue" && r.n > 1 && !/^[0-9a-f]{8}\s*$/.test(shown(r))) into.append(h("div", { className: "msg system" }, "New session"), fold("Carried over", shown(r)))
@@ -78,36 +91,45 @@ export function chat(id: string, signal: AbortSignal): HTMLElement[] {
   const visible = () => new Promise<void>(go => (document.visibilityState === "visible" ? go() : document.addEventListener("visibilitychange", () => go(), { once: true, signal })))
 
   const follow = async () => {
-    let agent = await get<Agent>(`/agents/${id}`, signal)
-    const earlier = agent.sessions.slice(0, -1)
-    const more = h("button", { className: "btn plain sm", hidden: !earlier.length }, "Load the session before")
+    const more = h("button", { className: "btn plain sm", hidden: true }, "Load the session before")
+    const live = h("div")
+    thread.append(more, live, pending, typing) // the typing bubble is the last item while the agent works
+    // A turn is one call: the next records of the session followed, which session is the live one, and whether the agent works.
+    let session = "", n = 0, status = ""
+    const turn = async (wait: string, signal: AbortSignal) => {
+      const r = await api(`/agents/${id}/records?session=${session}&after=${n}&status=${status}${wait && "&wait=" + wait}`, { signal })
+      const recs = await decode(r)
+      draw(recs, live)
+      n = recs.at(-1)?.n ?? n
+      status = r.headers.get("Mainplane-Status")!
+      typing.hidden = stop.hidden = status !== "stepping"
+      retry.hidden = !stop.hidden
+      return r.headers.get("Mainplane-Session")!
+    }
+    // The sessions before the live one are asked for beside its records, not before them.
+    const [agent, first] = await Promise.all([get<Agent>(`/agents/${id}`, signal), turn("", signal)])
+    session = first
+    const earlier = agent.sessions.slice(0, agent.sessions.indexOf(session))
+    more.hidden = !earlier.length
     more.onclick = async () => {
       const part = h("div")
-      draw(await records(earlier.pop()!, 0, "", signal), part)
+      draw(await records(earlier.pop()!, 0, signal), part)
       more.after(part) // the session after it starts with a rule of its own
       more.hidden = !earlier.length
     }
-    const live = h("div")
-    thread.append(more, live)
-    for (let session = agent.sessions.at(-1)!, n = 0; !signal.aborted; ) {
+    while (!signal.aborted) {
       await visible()
       poll = new AbortController()
       try {
-        const recs = await records(session, n, n ? "30s" : "", AbortSignal.any([signal, poll.signal]))
-        draw(recs, live)
-        n = recs.at(-1)?.n ?? n
+        const now = await turn("30s", AbortSignal.any([signal, poll.signal]))
+        // A post or a handoff may have moved the agent to a new session: what is left of this one is read first.
+        if (now !== session) {
+          await turn("", signal)
+          session = now
+          n = 0
+        }
       } catch (err) {
         if (!poll.signal.aborted) throw err
-      }
-      // A post or a handoff may have moved the agent to a new session.
-      agent = await get<Agent>(`/agents/${id}`, signal)
-      typing.hidden = stop.hidden = agent.status !== "working"
-      retry.hidden = !stop.hidden
-      thread.append(typing) // the last item while the agent works
-      if (agent.sessions.at(-1) !== session) {
-        draw(await records(session, n, "", signal), live)
-        session = agent.sessions.at(-1)!
-        n = 0
       }
     }
   }

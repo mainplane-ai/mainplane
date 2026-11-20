@@ -205,18 +205,27 @@ const section = (label: string, ...rows: HTMLElement[]) => [h("p", { className: 
 
 // options is the choice of an orchestrator's model, workers and apps: for a
 // new project everything connected, for one there is what its orchestrator has.
-async function options(cur?: Agent): Promise<{ el: HTMLElement[]; over: HTMLElement[]; value: () => { config: Conf; apps: string[] } }> {
-  const [models, workers, apps] = await Promise.all([get<Model[]>("/models").catch(() => []), get<{ name: string; refused?: string }[]>("/workers"), get<{ name: string }[]>("/apps")])
-  const pk = picker(models, cur?.config, localStorage.getItem(lastModel))
+async function options(cur?: Agent): Promise<{ el: HTMLElement[]; over: HTMLElement[]; value: () => Promise<{ config: Conf; apps: string[] }> }> {
+  const [workers, apps] = await Promise.all([get<{ name: string; refused?: string }[]>("/workers"), get<{ name: string }[]>("/apps")])
+  // The sheet does not wait for the models, which a provider may be slow to list: the picker is made again when they come.
+  let pk = picker([], cur?.config, null)
+  const listed = get<Model[]>("/models").then(models => {
+    const now = picker(models, cur?.config, localStorage.getItem(lastModel))
+    pk.trigger.replaceWith(now.trigger)
+    pk.pops.forEach((p, i) => p.replaceWith(now.pops[i]))
+    pk = now
+  }, () => {})
   const box = (value: string, checked: boolean, disabled = false) => row(value, disabled ? "Every orchestrator has it." : "", h("input", { type: "checkbox", className: "switch", role: "switch", value, checked, disabled }))
   const ticked = (set: HTMLElement) => [...set.querySelectorAll<HTMLInputElement>("input:checked")].map(i => i.value)
-  const names = new Set([...workers.filter(w => !w.refused).map(w => w.name), ...(cur?.config.workers.map(w => w.name) ?? [])])
-  const ws = section("Workers", ...[...names].map(n => box(n, !cur || cur.config.workers.some(w => w.name === n))))
+  const has = cur?.config.workers ?? [] // an agent with no worker has null
+  const names = new Set([...workers.filter(w => !w.refused).map(w => w.name), ...has.map(w => w.name)])
+  const ws = section("Workers", ...[...names].map(n => box(n, !cur || has.some(w => w.name === n))))
   const as = section("Apps", ...apps.map(a => (required.includes(a.name) ? box(a.name, true, true) : box(a.name, !cur || cur.apps.includes(a.name)))))
   return {
     el: [h("div", { className: "form" }, row("Model", "Plans the work and talks with you.", pk.trigger, "div")), ...ws, ...as],
     over: pk.pops,
-    value: () => {
+    value: async () => {
+      await listed
       const config = pk.value()
       if (!config) throw new Error("No model is connected: add a provider to the harness first.")
       if (config.preset) localStorage.setItem(lastModel, config.preset)
@@ -232,7 +241,7 @@ async function createForm(): Promise<HTMLElement> {
   const create = h("button", { className: "btn filled" }, "Create")
   create.onclick = attempt(async () => {
     if (!name.reportValidity()) return
-    const v = o.value()
+    const v = await o.value()
     const p: Project = await (await api("/projects?via=web", { json: { name: name.value, note: note.value, ...v } })).json()
     await refresh()
     go(`/projects/${p.id}/chat`) // where the orchestrator's first reply arrives
@@ -266,7 +275,7 @@ async function settings(p: Project, signal: AbortSignal): Promise<HTMLElement> {
   const text = h("input", { className: "input", placeholder: "One line under the name", maxLength: 100, value: p.line, ariaLabel: "Line" })
   const save = h("button", { className: "btn filled" }, "Save")
   save.onclick = attempt(async () => {
-    const v = o.value()
+    const v = await o.value()
     if (status.value !== p.status || text.value !== p.line) await api(`/projects/${p.id}/status?via=web`, { method: "PUT", json: { status: status.value, line: text.value } })
     await api(`/agents/${p.orchestrator}/config?via=web`, { method: "PUT", json: v.config })
     await api(`/agents/${p.orchestrator}/apps?via=web`, { method: "PUT", json: v.apps })
