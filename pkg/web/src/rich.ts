@@ -34,7 +34,7 @@ md.block.ruler.after("fence", "math_block", (s, start, end, silent) => {
   s.line = n + 1
   s.push("math_block", "", 0).content = body.trimEnd().slice(0, -2)
   return true
-})
+}, { alt: ["paragraph", "reference", "blockquote", "list"] })
 const r = md.renderer.rules
 r.math_inline = (t, i) => `<span class="tex">${esc(t[i].content)}</span>`
 r.math_block = (t, i) => `<div class="math-block tex d">${esc(t[i].content)}</div>\n`
