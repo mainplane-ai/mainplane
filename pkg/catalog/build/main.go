@@ -67,7 +67,7 @@ type sourcePreset struct {
 	Params   map[string]any `json:"params"`       // this preset's own, merged over the provider's and the effort's
 	Price    float64        `json:"price"`        // a variant's price as a multiple of the model's
 	Source   string         `json:"price_source"` // where a variant's price is published
-	Default  bool           `json:"default"`      // the provider's model for a new session when none is chosen: its middle one, quick to answer
+	Default  bool           `json:"default"`      // the provider's model for a new session when none is chosen: its smallest one that every plan of it can use: most people never change it
 }
 
 type devProvider struct {
