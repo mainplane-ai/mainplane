@@ -53,3 +53,5 @@
 .rt pre .o { color: var(--color-text-2); }
 .rt-inline p { margin: 0; }
 .rt-inline p + p { margin-top: 8px; }
+/* task list item: the checkbox sits where the bullet was */
+.rt li.task, .rt-inline li.task { list-style: none; } .rt li.task > input:first-child { margin: 0 6px 0 -20px; vertical-align: -1px; }
