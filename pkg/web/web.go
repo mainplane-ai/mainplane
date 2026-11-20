@@ -6,6 +6,7 @@
 package web
 
 import (
+	"compress/gzip"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -105,7 +106,7 @@ func Handler(api http.Handler) http.Handler {
 				w.WriteHeader(http.StatusNotModified)
 				return
 			}
-			_, _ = w.Write(b)
+			send(w, r, b)
 			return
 		}
 		if name, ok := strings.CutPrefix(r.URL.Path, "/web/"); ok {
@@ -120,7 +121,7 @@ func Handler(api http.Handler) http.Handler {
 			if path.Base(name) == "frame.html" {
 				h.Set("Content-Security-Policy", project.Dashboard(dsSource(r))) // of whatever the frame is told to show
 			}
-			_, _ = w.Write(b)
+			send(w, r, b)
 			return
 		}
 		h.Add("Vary", "Accept, Sec-Fetch-Mode")
@@ -135,6 +136,21 @@ func Handler(api http.Handler) http.Handler {
 		h.Set("Referrer-Policy", "no-referrer")
 		_, _ = w.Write([]byte(shell))
 	})
+}
+
+// send writes a file, compressed for a browser that takes it unless it is a
+// font, which is compressed already: the page's files are text, and a
+// smaller body is fewer round trips on a new connection.
+func send(w http.ResponseWriter, r *http.Request, b []byte) {
+	w.Header().Add("Vary", "Accept-Encoding")
+	if path.Ext(r.URL.Path) == ".woff2" || !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		_, _ = w.Write(b)
+		return
+	}
+	w.Header().Set("Content-Encoding", "gzip")
+	z := gzip.NewWriter(w)
+	_, _ = z.Write(b)
+	_ = z.Close()
 }
 
 // dsSource is the design system's files as sources of a policy, on the

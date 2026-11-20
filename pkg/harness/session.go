@@ -27,7 +27,7 @@ type session struct {
 	id      string
 	mu      sync.Mutex
 	f       *statefile.File // the file, while a step holds it
-	changed chan struct{}   // closed and replaced on every append
+	changed chan struct{}   // closed and replaced on every append, and when a runner ends
 	retry   bool            // a run asked to step past a failed tip
 	stopped string          // who asked for the stop, while one is in flight
 	logs    sync.Mutex      // held by copyLogs from Load to the last Write, so an older copy never lands last
@@ -346,6 +346,10 @@ func (h *Harness) Kick(ctx context.Context, id string) {
 				s.running, s.cancel, s.kicked = false, nil, false
 				h.mu.Unlock()
 				h.touch(id)
+				s.mu.Lock()
+				close(s.changed) // a long poll that waits for the agent to stop ends
+				s.changed = make(chan struct{})
+				s.mu.Unlock()
 				if st == statefile.StatusClosed || st == statefile.StatusFailed {
 					h.copyLogs(ctx, s)
 					if a, ok := h.Holder(id); ok && h.Stopped != nil {
@@ -546,7 +550,8 @@ func (h *Harness) handing(id string) bool {
 	return ok && s.handoff
 }
 
-// Changed is a channel closed at the session's next append.
+// Changed is a channel closed at the session's next append, or when its
+// runner ends.
 func (h *Harness) Changed(id string) <-chan struct{} {
 	s := h.session(id)
 	s.mu.Lock()

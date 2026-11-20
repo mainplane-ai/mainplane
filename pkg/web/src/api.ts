@@ -2,7 +2,7 @@
 // call and is kept in this origin's storage: no cookie holds it.
 
 export type Project = { id: string; name: string; orchestrator: string; status: string; line: string; updated: string; counter: number; working: boolean }
-export type Conf = { model: string; workers: { name: string }[]; preset?: string; [more: string]: unknown }
+export type Conf = { model: string; workers: { name: string }[] | null; preset?: string; [more: string]: unknown }
 export type Agent = { id: string; name?: string; config: Conf; apps: string[]; instructions?: string; sessions: string[]; status: string }
 export type Model = { id: string; name: string; provider: string; config: Conf; settings?: { name: string; values: { name: string; params: Record<string, unknown> }[] }[] }
 export type Rec = { n: number; kind: string; id: string; len: number; type?: string; via?: string; source?: string; for?: string; time: string; body: Uint8Array }
@@ -42,10 +42,11 @@ export async function api(path: string, o: Options = {}): Promise<Response> {
 
 export const get = async <T>(path: string, signal?: AbortSignal) => (await api(path, { signal })).json() as Promise<T>
 
-// records is a session's records after record n: with wait, held open until
-// there is one. Each is a line of JSON, then len bytes of body, then a newline.
-export async function records(session: string, after: number, wait: string, signal?: AbortSignal): Promise<Rec[]> {
-  const r = await api(`/sessions/${session}/records?after=${after}${wait && "&wait=" + wait}`, { signal })
+// records is a session's records after record n.
+export const records = async (session: string, after: number, signal?: AbortSignal) => decode(await api(`/sessions/${session}/records?after=${after}`, { signal }))
+
+// decode is the records of an answer. Each is a line of JSON, then len bytes of body, then a newline.
+export async function decode(r: Response): Promise<Rec[]> {
   const buf = new Uint8Array(await r.arrayBuffer()), out: Rec[] = []
   for (let i = 0; i < buf.length; ) {
     const end = buf.indexOf(10, i)
