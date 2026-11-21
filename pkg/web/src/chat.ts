@@ -77,9 +77,9 @@ const day = (into: HTMLElement, time: string) => {
 // hidden or on says the chat is not in view, and ends with signal. Earlier
 // sessions load on request.
 export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElement {
-  // While the agent works the thread ends in a typing bubble with Stop under it.
-  const stop = h("button", { className: "btn plain sm stop", onclick: () => post("stop?via=web")() }, "Stop")
-  const typing = h("div", { className: "msg first tail", hidden: true }, h("div", { className: "bubble" }, h("span", { className: "typing", role: "status", ariaLabel: "Working" }, h("i"), h("i"), h("i"))), stop)
+  // While the agent works the thread ends in a typing bubble, with a round Stop at the right of its row.
+  const stop = h("button", { className: "btn icon stop", ariaLabel: "Stop", onclick: () => post("stop?via=web")() }, icon("stop"))
+  const typing = h("div", { className: "msg first tail typing-row", hidden: true }, h("div", { className: "bubble" }, h("span", { className: "typing", role: "status", ariaLabel: "Working" }, h("i"), h("i"), h("i"))), stop)
   const post = (what: string) => () => api(`/agents/${id}/${what}`, { method: "POST" }).then(acted, alert)
   const log = h("div", { className: "view" })
   const thread = h("div", { className: "thread" })
