@@ -204,3 +204,8 @@ main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--compose
 :root:not(.pop)::view-transition-new(root), .pop::view-transition-old(root) { box-shadow: -4px 0 12px rgb(0 0 0 / .06) }
 .tab main > .toolbar:not([hidden]) { view-transition-name: head }
 .tab::view-transition-group(head) { animation: none }
+/* A dashboard's picture opened large (Photos): dark behind it, the whole picture, a glass close at the top. */
+.lightbox { position: fixed; inset: 0; z-index: var(--z-sheet); display: grid; place-items: center; padding: 56px 24px 24px; box-sizing: border-box; background: rgb(0 0 0 / .86); animation: mp-fade var(--duration-fast) var(--ease-standard) }
+.lightbox > img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 12px; corner-shape: round }
+.lightbox > .btn { position: absolute; top: 12px; right: 12px; --h: 40px; width: 40px; justify-content: center; border-radius: 50%; corner-shape: round; background: rgb(255 255 255 / .16); color: #fff; backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6) }
+@media (max-width: 700px) { .lightbox { padding: 72px 0 24px } .lightbox > img { border-radius: 0 } .lightbox > .btn { top: 16px; right: auto; left: 16px; --h: 44px; width: 44px } }

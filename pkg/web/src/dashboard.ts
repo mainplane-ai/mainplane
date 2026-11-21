@@ -1,7 +1,7 @@
 // A project's dashboard: a page its agents made, shown where it cannot reach
 // the key. It asks this page for what it needs of its project.
 
-import { type Agent, type Project, acted, api, decode, file, get, h, named, text } from "./api"
+import { type Agent, type Project, acted, api, decode, file, get, h, icon, named, text } from "./api"
 
 const frameURL = new URL("frame.html", import.meta.url).href
 type Stored = { name: string; size: number; modified: string; body?: string }
@@ -109,7 +109,8 @@ export function dashboard(p: Project, signal: AbortSignal): HTMLElement {
   addEventListener("message", async e => {
     const d = e.data
     if (e.source !== frame.contentWindow || typeof d !== "object" || d === null) return
-    if (Array.isArray(d.swipe)) dispatchEvent(new CustomEvent("swipe", { detail: d.swipe.map(Number) }))
+    if (d.image instanceof Blob) lightbox(d.image, String(d.alt ?? ""))
+    else if (Array.isArray(d.swipe)) dispatchEvent(new CustomEvent("swipe", { detail: d.swipe.map(Number) }))
     else if (d.ready === true) {
       ready = true
       write()
@@ -125,4 +126,16 @@ export function dashboard(p: Project, signal: AbortSignal): HTMLElement {
     }
   }, { signal })
   return holder
+}
+
+// lightbox shows a dashboard's picture large over everything. Escape, the X or a click anywhere closes it.
+function lightbox(b: Blob, alt: string) {
+  const url = URL.createObjectURL(b)
+  const close = () => { box.remove(); URL.revokeObjectURL(url); removeEventListener("keydown", esc) }
+  const esc = (e: KeyboardEvent) => { if (e.key === "Escape") close() }
+  const x = h("button", { className: "btn icon", ariaLabel: "Close", onclick: close }, icon("close"))
+  const box = h("div", { className: "lightbox", role: "dialog", ariaModal: "true", ariaLabel: alt || "Picture", onclick: close }, h("img", { src: url, alt }), x)
+  addEventListener("keydown", esc)
+  document.body.append(box)
+  x.focus() // the click left the focus in the dashboard's frame, where Escape does not reach this page
 }
