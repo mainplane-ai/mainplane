@@ -266,10 +266,13 @@ async function content(kind: string, id: string, sub: string, signal: AbortSigna
   return sub === "settings" ? [await settings(p, signal)] : []
 }
 
+// raster is a picture's type, so Open image in new tab shows it. Not SVG: opened in a tab
+// it would run its scripts as this page, which holds the key.
+const raster = (name: string) => ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" })[name.split(".").pop()!.toLowerCase()] ?? ""
 // stored shows one file of a project's store, an image or its text: what is in it is never run.
 async function stored(p: Project, name: string, signal: AbortSignal) {
   const b = await file(p.id, name, signal)
-  const img = h("img", { alt: name, src: URL.createObjectURL(new Blob([b])) })
+  const img = h("img", { alt: name, src: URL.createObjectURL(new Blob([b], { type: raster(name) })) })
   img.style.maxWidth = "100%"
   return h("div", { className: "view" }, h("div", { className: "page" }, h("h2", null, name), /\.(png|jpe?g|gif|webp)$/i.test(name) ? img : h("pre", { className: "code" }, text(new Uint8Array(b)))))
 }
