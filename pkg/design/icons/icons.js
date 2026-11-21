@@ -107,6 +107,8 @@
   if (!customElements.get("mp-icon"))
     customElements.define("mp-icon", class extends HTMLElement {
       static observedAttributes = ["name"];
+      get name() { return this.getAttribute("name"); }
+      set name(v) { this.setAttribute("name", v); }
       connectedCallback() { this.render(); }
       attributeChangedCallback() { if (this.isConnected) this.render(); }
       render() { this.innerHTML = svg(this.getAttribute("name")); }

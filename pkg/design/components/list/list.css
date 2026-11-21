@@ -48,7 +48,7 @@
 .list.side > .row { align-items: center; gap: 6px; min-height: 0; padding: 12px 11px 12px 2px; border-radius: var(--radius-10); }
 .list.side > .row > .u { flex: none; width: 10px; height: 10px; border-radius: 50%; corner-shape: round; }
 .list.side > .row.needs > .u { background: var(--color-status-open); }
-.list.side > .row.waiting > .u { width: 8px; height: 8px; margin: 0 1px; background: var(--color-status-waiting); }
+.list.side > .row.waiting > .u { background: var(--color-status-waiting); }
 .list.side > .row > .avatar { width: 40px; height: 40px; font-size: 14px; }
 .list.side .row-main { align-self: flex-start; }
 .list.side .row-main > .h { display: flex; align-items: baseline; gap: 8px; min-width: 0; }

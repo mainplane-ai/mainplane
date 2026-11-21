@@ -1,10 +1,9 @@
-.disclosure > summary { display: flex; align-items: center; gap: 6px; padding: 6px 4px; list-style: none; font: var(--text-headline); cursor: default; border-radius: var(--radius-6); }
+.disclosure > summary { display: flex; align-items: center; gap: 6px; padding: 6px 4px; list-style: none; user-select: none; font: var(--text-headline); cursor: default; border-radius: var(--radius-6); }
 .disclosure > summary::-webkit-details-marker { display: none; }
 .disclosure > summary::before { content: ""; width: 12px; height: 12px; flex: none; background: var(--color-text-2); transition: transform var(--duration-base) var(--ease-spring);
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M9 5l7 7-7 7' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M9 5l7 7-7 7' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat; }
 .disclosure[open] > summary::before { transform: rotate(90deg); }
-.disclosure > summary:hover { background: var(--color-fill); }
 .disclosure > summary:focus-visible { outline: var(--focus-width) solid var(--color-focus); }
 .disclosure > summary > small { margin-left: auto; font: var(--text-subheadline); color: var(--color-text-3); }
 .disclosure > .content { padding: 4px 4px 8px 22px; font: var(--text-callout); color: var(--color-text-2); }

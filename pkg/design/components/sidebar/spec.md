@@ -37,3 +37,5 @@ Rows build on .list: no hover fill, touching fills merge. Selection is gray, nev
 
 ## Open
 - project-view can drop its .app > nav overrides (width, padding, .top, list padding, sep-inset, row padding/gap); it keeps only margin 8 and flex/overflow for the window layout.
+
+- New project button (polish 2026-11-20): a circle as tall as the search field, on the same fill. Ref: Messages macOS 26 compose button.

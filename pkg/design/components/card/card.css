@@ -20,3 +20,16 @@ a.card:active, button.card:active { transform: scale(calc(1 - .02 * var(--motion
 .panel > h2 { display: flex; align-items: baseline; gap: 6px; margin: 0; font: var(--text-title-2); letter-spacing: var(--tracking-title-2); }
 .panel > h2 small { font: var(--text-subheadline); color: var(--color-text-3); }
 .panel > h2 small.end { margin-left: auto; }
+/* Board: a project dashboard as full-bleed sections split by hairlines, no card per section (Alexander's Admin Work dashboard, items/project-view).
+   Wide: Timeline over Needs you on the left (3fr / 2fr), Done on the right. Narrow: one column, Needs you first. */
+.board { height: 100%; display: grid; grid-template-columns: minmax(280px, 38%) minmax(0, 1fr); grid-template-rows: minmax(0, 3fr) minmax(0, 2fr); grid-template-areas: "tl done" "needs done"; gap: var(--hairline); background: var(--color-separator); }
+.board > section { min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 16px 3px 20px 20px; background: var(--color-bg); }
+.board > .b-needs { grid-area: needs; } .board > .b-tl { grid-area: tl; } .board > .b-done { grid-area: done; }
+.board h2 { display: flex; align-items: baseline; gap: 6px; margin: 0 0 12px; font: var(--text-caption); letter-spacing: .06em; text-transform: uppercase; color: var(--color-text-2); }
+.board h2 small { font: inherit; letter-spacing: 0; color: var(--color-text-3); font-variant-numeric: tabular-nums; }
+.board h2 .end { margin-left: auto; font-weight: 400; text-transform: none; }
+.board .none { margin: 0; font: var(--text-callout); color: var(--color-text-2); }
+@media (max-width: 720px) {
+  .board { height: auto; min-height: 100%; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "needs" "tl" "done"; align-content: start; }
+  .board > section { overflow: visible; padding-right: 20px; }
+}

@@ -5,8 +5,42 @@ import { rich, typeset } from "./rich"
 
 const shown = (r: Rec) => (r.type?.startsWith("text/") ? text(r.body) : `[${r.type}, ${r.len} bytes]`)
 
-// fold is a line with more behind it.
-const fold = (label: string, ...more: string[]) => h("details", { className: "tool" }, h("summary", null, icon("chevron-right"), label), ...more.map(m => h("pre", { className: "code" }, m)))
+// Calls and the messages the user did not write read as quiet lines in the past tense, as in Codex:
+// calls in a row are one "Ran 3 commands, read 2 files", such messages in a row one "Received 2 events".
+// A line opens to its items, and an item to what it holds.
+const chev = () => Object.assign(icon("chevron-right"), { className: "chev" })
+const tools: Record<string, string[]> = { // icon, verb, one, many
+  run: ["terminal", "Ran", "command", "commands"],
+  read: ["file", "Read", "file", "files"],
+  write: ["compose", "Wrote", "file", "files"],
+  edit: ["pencil", "Edited", "file", "files"],
+  apply_patch: ["code", "Patched", "file", "files"],
+}
+const other = ["wrench", "Called", "tool", "tools"]
+const tool = (name: string) => tools[name.split("__").pop()!] ?? other
+// item is one call or one message: its line, then what it holds.
+const item = (label: Node[], ...more: string[]) => h("details", { className: "tool" }, h("summary", null, ...label, chev()), ...more.map(m => h("pre", { className: "code" }, m)))
+// group adds an item to the line of its kind that ends the thread, or to a new one, and says again what the line holds.
+const group = (into: HTMLElement, kind: "calls" | "events", it: HTMLElement) => {
+  let g = into.lastElementChild as HTMLElement | null
+  if (!g?.classList.contains(kind)) into.append(g = h("details", { className: `activity ${kind}` }, h("summary", null, h("span"), chev()), h("div", { className: "items" })))
+  const items = g.querySelector(".items")!
+  items.append(it)
+  const all = [...items.children] as HTMLElement[]
+  const counts = new Map<string[], number>()
+  for (const i of all) counts.set(tool(i.dataset.tool ?? ""), (counts.get(tool(i.dataset.tool ?? "")) ?? 0) + 1)
+  const said = kind === "events"
+    ? (all.length === 1 ? "Received event" : `Received ${all.length} events`)
+    : [...counts].map(([[, verb, one, many], n], i) => `${i ? verb.toLowerCase() : verb} ${n === 1 ? one : n + " " + many}`).join(", ")
+  g.querySelector("summary > span")!.textContent = said
+  return it
+}
+// divider is the quiet rule where a session goes on in a new one; what it carried is behind it.
+const divider = (into: HTMLElement, carried: string) => {
+  const last = into.lastElementChild
+  if (last?.classList.contains("continued")) return void last.append(h("pre", { className: "code" }, carried))
+  into.append(h("details", { className: "continued" }, h("summary", null, h("span", null, "Session continued")), h("pre", { className: "code" }, carried)))
+}
 // from is who sent a message the user did not: an agent, an app or a job. A person writes from any connector.
 const from = (via = "") => (via.startsWith("agent:") ? `Agent ${via.slice(6)}` : via.startsWith("app:") ? via.slice(4) : via === "job" ? "A job" : "")
 // say adds a message. Bubbles in a row from the same side and sender are one
@@ -46,11 +80,16 @@ export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElem
   // While the agent works the thread ends in a typing bubble, and it can be stopped.
   const typing = h("div", { className: "msg first tail", hidden: true }, h("div", { className: "bubble" }, h("span", { className: "typing", role: "status", ariaLabel: "Working" }, h("i"), h("i"), h("i"))))
   const stop = h("button", { className: "btn plain sm", hidden: true, onclick: () => post("stop?via=web")() }, "Stop")
-  const retry = h("button", { className: "btn plain sm", onclick: () => post("retry")() }, "Retry")
   const post = (what: string) => () => api(`/agents/${id}/${what}`, { method: "POST" }).then(acted, alert)
   const log = h("div", { className: "view" })
   const thread = h("div", { className: "thread" })
   log.append(thread)
+  // The chat stays at its end, as in Messages: what is sent, what comes, the typing bubble, a picture that loads.
+  // It stays where it is while the user has scrolled up to read.
+  let end = true
+  const toEnd = () => (log.scrollTop = log.scrollHeight)
+  log.addEventListener("scroll", () => (end = log.scrollHeight - log.scrollTop - log.clientHeight < 40), { passive: true })
+  new ResizeObserver(() => end && toEnd()).observe(thread)
   const calls = new Map<string, HTMLElement>()
   // A message shows as it is sent, before the harness has it. Its record takes its place; one that fails is taken back.
   const pending = h("div")
@@ -58,33 +97,31 @@ export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElem
     const d = (e as CustomEvent<{ agent: string; text: string; files: File[]; sent: Promise<unknown> }>).detail
     if (d.agent !== id) return
     const mine = [...(d.text.trim() ? [d.text] : []), ...d.files.map(f => `[${f.type}, ${f.size} bytes]`)].map(part => say(pending, true, part))
-    log.scrollTop = log.scrollHeight
+    end = true // what you send takes you to the end
+    toEnd()
     d.sent.catch(() => mine.forEach(m => m.remove()))
   }, { signal })
 
   const draw = (recs: Rec[], into: HTMLElement) => {
-    const bottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40
     for (const r of recs) {
-      if (r.kind === "message" || r.kind === "text") day(into, r.time)
-      if (r.kind === "message" && r.via === "app:project") into.append(fold("Project created", shown(r)))
-      else if (r.kind === "message" && r.via === "rollover") into.append(fold("The task, carried from the session before", shown(r)))
-      else if (r.kind === "message") {
-        if (!from(r.via)) pending.firstElementChild?.remove()
-        say(into, !from(r.via), shown(r), from(r.via))
-      }
+      const user = r.kind === "message" && !from(r.via) && r.via !== "rollover"
+      if (user || r.kind === "text") day(into, r.time)
+      if (user) {
+        pending.firstElementChild?.remove()
+        say(into, true, shown(r))
+      } else if (r.kind === "message" && r.via === "rollover") divider(into, shown(r))
+      else if (r.kind === "message") group(into, "events", item([h("span", null, r.via === "app:project" ? "Project created" : from(r.via))], shown(r)))
       else if (r.kind === "text") say(into, false, shown(r))
       else if (r.kind === "error") into.append(h("div", { className: "msg system error" }, shown(r)))
-      else if (r.kind === "system" && r.source === "continue" && r.n > 1 && !/^[0-9a-f]{8}\s*$/.test(shown(r))) into.append(h("div", { className: "msg system" }, "New session"), fold("Carried over", shown(r)))
+      else if (r.kind === "system" && r.source === "continue" && r.n > 1 && !/^[0-9a-f]{8}\s*$/.test(shown(r))) divider(into, shown(r))
       else if (r.kind === "call") {
-        const c = JSON.parse(text(r.body))
-        const d = fold(c.name, typeof c.arguments === "string" ? c.arguments : JSON.stringify(c.arguments, null, 1))
-        calls.set(r.id, d)
-        into.append(d)
+        const c = JSON.parse(text(r.body)), a = typeof c.arguments === "string" ? JSON.parse(c.arguments || "{}") : c.arguments ?? {}
+        const name = String(c.name).split("__").pop()!
+        const it = item([icon(tool(name)[0]), h("span", null, name)], JSON.stringify(a, null, 1))
+        it.dataset.tool = name
+        calls.set(r.id, group(into, "calls", it))
       } else if (r.kind === "result") calls.get(r.for ?? "")?.append(h("pre", { className: "code" }, shown(r)))
-      const last = into.lastElementChild as HTMLElement | null
-      if (last) last.dataset.n ??= String(r.n) // what a record drew is found by its number
     }
-    if (bottom) log.scrollTop = log.scrollHeight
   }
 
   let poll = new AbortController()
@@ -110,7 +147,6 @@ export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElem
       n = recs.at(-1)?.n ?? n
       status = r.headers.get("Mainplane-Status")!
       typing.hidden = stop.hidden = status !== "stepping"
-      retry.hidden = !stop.hidden
       return r.headers.get("Mainplane-Session")!
     }
     // The sessions before the live one are asked for beside its records, not before them.
@@ -151,5 +187,5 @@ export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElem
     }
   }
   follow().catch(err => signal.aborted || thread.append(h("div", { className: "error" }, String(err), " ", h("a", { href: location.pathname }, "Try again"))))
-  return [log, h("div", { className: "agent-bar" }, h("span"), stop, retry)]
+  return [log, h("div", { className: "agent-bar" }, h("span"), stop)]
 }

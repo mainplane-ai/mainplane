@@ -2,3 +2,5 @@
 .sidebar { width: 320px; display: flex; flex-direction: column; padding: 10px 0 8px; border-radius: var(--radius-panel); background: var(--color-surface-2); }
 .sidebar > .top { display: flex; gap: 8px; align-items: center; padding: 0 10px 8px; }
 .sidebar > .top > .search { flex: 1; }
+/* New: a circle as tall as the search field, on the same fill (Messages macOS 26). */
+.sidebar > .top > .btn.icon { --bg: var(--color-fill); --bg-h: var(--color-fill-hover); --h: var(--control-lg); width: var(--h); border-radius: 50%; corner-shape: round; }

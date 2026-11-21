@@ -19,5 +19,5 @@
 .timeline .on { font: var(--text-subheadline); color: var(--color-text-3); }
 .timeline .v { flex: none; font: var(--text-subheadline); color: var(--color-text-3); font-variant-numeric: tabular-nums; }
 /* the pointer: a short dotted leader across the rail, then the label */
-.timeline li.here { font: var(--text-caption); color: var(--color-text); }
+.timeline li.here { font: var(--text-caption); color: var(--color-accent); } /* blue, as in his Admin Work dashboard */
 .timeline li.here::after { content: ""; position: absolute; left: calc(var(--tl-x) - 4px); width: 13px; top: 50%; border-top: 1px dotted var(--color-text); }

@@ -34,6 +34,7 @@ mainplane.call("delete", {name: "state/seen.json"})
 mainplane.call("send", {text: "approve card 7"})            // a message to the orchestrator, from the user
 mainplane.call("send", {data: {card: 7, action: "approve"}})  // the same, with the value as JSON for the text
 mainplane.call("status", {status: "closed", line: "acknowledged"})  // set the status; the orchestrator is not woken
+mainplane.call("reply", {title: "Approve the new logo?"})  // put "Replying to <title>" over the chat box under the dashboard and the cursor in it; the user's message goes with the title
 mainplane.call("agents")                                    // -> [{id, name, model, status, updated, session, recent: [{n, kind, time, via, text}]}]: the project's agents and their last records
 mainplane.call("open", {agent: id})                         // show that agent's chat; with {agent, session, n} at that record
 mainplane.call("open", {file: "cards/0001.png"})            // show a file of the store

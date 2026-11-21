@@ -18,14 +18,27 @@ export function composer(agent: string, placeholder: string): HTMLElement {
   const box = h("textarea", { rows: 1, placeholder, ariaLabel: placeholder, value: sessionStorage.getItem(draft) ?? "" })
   const act = h("button", { className: "btn icon" })
   const chips = h("div", { className: "attachments", hidden: true })
-  const field = h("div", { className: "field" }, chips, h("div", { className: "line" }, box, act))
+  // A reply to a dashboard's question shows what it replies to over the box, and goes with the message.
+  let to = ""
+  const quote = h("div", { className: "quote", hidden: true }, icon("reply"), h("span"), h("button", { type: "button", className: "btn icon ghost sm", ariaLabel: "Cancel reply", onclick: () => replying("") } as Partial<HTMLButtonElement>, icon("close")))
+  const replying = (title: string) => {
+    to = title
+    quote.hidden = !title
+    quote.querySelector("span")!.textContent = `Replying to "${title}"`
+    box.focus()
+  }
+  addEventListener("reply", e => {
+    const d = (e as CustomEvent<{ agent: string; title: string }>).detail
+    if (d.agent === agent) replying(d.title)
+  })
+  const field = h("div", { className: "field" }, quote, chips, h("div", { className: "line" }, box, act))
   const pick = (accept: string, capture = false) => () => {
     const i = h("input", { type: "file", multiple: !capture, accept })
     if (capture) i.setAttribute("capture", "environment")
     i.onchange = () => add([...(i.files ?? [])])
     i.click()
   }
-  const row = (name: string, label: string, go: () => void) => h("button", { role: "menuitem", onclick: go } as Partial<HTMLButtonElement>, icon(name), h("span", null, label))
+  const row = (name: string, label: string, go: () => void) => h("button", { type: "button", role: "menuitem", onclick: go } as Partial<HTMLButtonElement>, icon(name), h("span", null, label))
   const menu = h("div", { className: "menu", role: "menu", hidden: true }, ...(matchMedia("(pointer: coarse)").matches ? [row("camera", "Camera", pick("image/*", true))] : []), row("image", "Photos", pick("image/*")), row("folder", "Files", pick("")))
   const plus = h("button", { type: "button", className: "btn icon", ariaLabel: "Add" }, icon("plus"))
   plus.onclick = () => MPMenu.open(menu, plus)
@@ -96,8 +109,9 @@ export function composer(agent: string, placeholder: string): HTMLElement {
 
   form.onsubmit = async e => {
     e.preventDefault()
-    const text = box.value, sending = files.splice(0)
-    if (!text.trim() && !sending.length) return
+    if (!box.value.trim() && !files.length) return
+    const typed = box.value, was = to, sending = files.splice(0)
+    const text = was && typed.trim() ? `Replying to: "${was}"\n\n${typed}` : typed
     listening?.stop()
     // Each part is one message record: the text, then each file with its type.
     const body = new FormData()
@@ -107,6 +121,7 @@ export function composer(agent: string, placeholder: string): HTMLElement {
     // The box is free for the next message at once, and a chat shows this one while it is on its way.
     dispatchEvent(new CustomEvent("sending", { detail: { agent, text, files: sending, sent } }))
     box.value = ""
+    replying("")
     chips.replaceChildren()
     chips.hidden = true
     update()
@@ -114,7 +129,10 @@ export function composer(agent: string, placeholder: string): HTMLElement {
       await sent
       acted()
     } catch (err) {
-      box.value ||= text // back in the box, unless the next message is there
+      if (!box.value) {
+        box.value = typed // back in the box, unless the next message is there
+        replying(was)
+      }
       add(sending)
       alert(err)
     }
@@ -138,5 +156,7 @@ export function composer(agent: string, placeholder: string): HTMLElement {
     update()
   })
   update()
+  // The composer floats (iOS glass): what is above goes on under it, padded by its height.
+  new ResizeObserver(() => form.parentElement?.style.setProperty("--composer-h", form.offsetHeight + "px")).observe(form)
   return form
 }

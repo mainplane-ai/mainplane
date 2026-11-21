@@ -16,5 +16,9 @@
 .sheet .form-row b { font: 400 13px/18px var(--font-text); }
 .sheet .form-row small { font: var(--text-subheadline); color: var(--color-text-2); }
 .sheet .form + .form { margin-top: 10px; }
+/* A text field in a grouped form is the row itself (System Settings > About > Name): no box and no ring, the value right aligned in ink; a long text is the whole row, left aligned. Focus shows only the caret. */
+.sheet .form-row > :is(input.input, textarea.input) { flex: 1; min-width: 0; height: auto; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; outline: none; font: var(--text-body); color: var(--color-text); }
+.sheet .form-row > input.input { text-align: right; }
+.sheet .form-row > textarea.input { padding: 2px 0; resize: none; }
 .sheet .note { margin: 6px 10px 0; font: var(--text-subheadline); color: var(--color-text-2); }
 @keyframes mp-sheet { from { opacity: 0; transform: translateY(calc(8px * var(--motion))) scale(calc(1 - .02 * var(--motion))); } }

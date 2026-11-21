@@ -6,18 +6,18 @@
 <script src="/web/ds/1/mainplane.js"></script>
 <style>
 /* Page layout only. Components come from the design system; copy one in here to change it. */
-body { margin: 0; background: var(--color-bg); }
-main { max-width: 760px; margin: 0 auto; padding: 24px 20px 48px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+html, body { height: 100%; margin: 0; background: var(--color-bg); }
+#empty { height: 100%; box-sizing: border-box; align-content: center; }
 </style>
 <body class="mp">
-<main>
-  <div class="panel" id="needs" hidden><h2>Needs you <small></small></h2><div class="list"></div></div>
-  <div class="panel" id="timeline" hidden><h2>Timeline <small class="end"></small></h2><div class="timeline"></div></div>
-  <div class="panel" id="done" hidden><h2>Done <small></small></h2><div class="work-grid"></div></div>
-  <div class="card" id="empty" hidden><div class="empty compact"><mp-icon name="check"></mp-icon><h3>No dashboard yet</h3><p>The orchestrator makes one as the work starts.</p></div></div>
+<main class="board" hidden>
+  <section class="b-tl" id="timeline"><h2>Timeline <small class="end"></small></h2><div class="timeline"></div><p class="none">No timeline yet.</p></section>
+  <section class="b-needs" id="needs"><h2>Needs you <small></small></h2><div class="list"></div><p class="none">Nothing needs you.</p></section>
+  <section class="b-done" id="done"><h2>Done <small></small></h2><div class="work-grid"></div><p class="none">Nothing done yet.</p></section>
 </main>
+<div class="empty" id="empty" hidden><mp-icon name="check"></mp-icon><h3>No dashboard yet</h3><p>The orchestrator makes one as the work starts.</p></div>
 <script>
-// call asks the interface that shows this page: list, read, send, status.
+// call asks the interface that shows this page: list, read, send, status, reply.
 let seq = 0; const waiting = new Map()
 function call(name, args) {
   return new Promise((resolve, reject) => { waiting.set(++seq, { resolve, reject }); parent.postMessage({ id: seq, call: name, ...args }, "*") })
@@ -47,17 +47,13 @@ function need(n) {
     b.onclick = () => call("send", { text: `Answer to "${n.title}": ${a}` }).then(() => { div.classList.add("answered"); answers.replaceChildren("You answered: " + a) })
     answers.append(b)
   })
-  const reply = el("button", "btn sm reply"); reply.setAttribute("aria-expanded", "false"); reply.append(icon("reply"), "Reply")
+  // Reply goes to the chat box under the dashboard, which shows what it replies to.
+  const reply = el("button", "btn sm reply"); reply.append(icon("reply"), "Reply")
+  reply.onclick = () => call("reply", { title: n.title })
   answers.append(reply)
-  const field = el("div", "reply-field"), ta = el("textarea"), send = el("button", "btn icon filled send")
-  ta.rows = 1; ta.placeholder = "Reply"; ta.setAttribute("aria-label", "Reply to this question")
-  send.setAttribute("aria-label", "Send"); send.append(icon("arrow-up")); field.append(ta, send)
-  const wrap = el("div", "reply-wrap"), inner = el("div"); inner.append(field); wrap.append(inner)
-  const replied = el("p", "replied"); replied.hidden = true; replied.append(icon("reply"), el("b", "", "You replied"), el("span"))
-  div.append(answers, wrap, replied)
+  div.append(answers)
   return div
 }
-addEventListener("mp-reply", e => call("send", { text: e.detail.text }))
 
 function lane(l) {
   const s = el("section"), h = el("h3", "", l.name), ol = el("ol")
@@ -84,8 +80,8 @@ async function card(c) {
 
 function fill(id, items, count = items.length) {
   const p = document.getElementById(id)
-  p.hidden = !items.length
-  p.querySelector("h2 small").textContent = count
+  p.querySelector(".none").hidden = items.length > 0
+  p.querySelector("h2 small").textContent = items.length ? count : ""
   p.querySelector("h2 + div").replaceChildren(...items)
 }
 
@@ -98,7 +94,9 @@ async function show() {
   fill("timeline", t.lanes.map(lane), t.updated ? "updated " + short(t.updated) : "")
   const cards = await Promise.all(of("cards/").reverse().map(async f => card(await json(f))))
   fill("done", cards)
-  document.getElementById("empty").hidden = needs.length + t.lanes.length + cards.length > 0
+  const any = needs.length + t.lanes.length + cards.length > 0
+  document.getElementById("empty").hidden = any
+  document.querySelector("main").hidden = !any
 }
 show().catch(err => document.body.replaceChildren(el("p", "", err.message)))
 </script>

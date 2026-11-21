@@ -34,7 +34,7 @@
   mask: radial-gradient(circle, transparent 38%, #000 40%) intersect, conic-gradient(rgba(0,0,0,.15), #000);
   animation: mp-spin 1s steps(8) infinite; }
 
-.btn.icon { --ib-r: var(--radius-8); width: var(--h); padding: 0; border-radius: var(--ib-r); corner-shape: squircle; }
+.btn.icon { --ib-r: var(--radius-8); flex: none; width: var(--h); padding: 0; border-radius: var(--ib-r); corner-shape: squircle; }
 .btn.icon.sm { --ib-r: var(--radius-6); }
 .btn.icon.lg { --ib-r: var(--radius-10); }
 .btn.icon:is(.filled, .round) { border-radius: var(--radius-full); corner-shape: round; }

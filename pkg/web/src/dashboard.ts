@@ -54,7 +54,7 @@ export function dashboard(p: Project, signal: AbortSignal): HTMLElement {
     return f?.body === undefined ? file(p.id, name, signal) : Uint8Array.from(atob(f.body), c => c.charCodeAt(0)).buffer
   }
 
-  const write = () => ready && page !== undefined && tell({ html: page })
+  const write = () => ready && page !== undefined && tell({ html: page, inset: [matchMedia("(max-width: 700px)").matches ? 60 : 0, 80] })
   const load = async () => {
     store = get<Stored[]>(files + "?bodies=1", signal)
     const next = await system(text(new Uint8Array(await read("index.html"))))
@@ -103,11 +103,14 @@ export function dashboard(p: Project, signal: AbortSignal): HTMLElement {
       // With n, the chat opens at that record of the session, as agents tells them.
       return go((a.id === p.orchestrator ? at + "/chat" : "/agents/" + a.id) + (d.n === undefined ? "" : `#${a.sessions.includes(String(d.session)) ? d.session : a.sessions.at(-1)}.${Number(d.n)}`))
     },
+    // reply puts a question's title over the chat box under the dashboard, and the cursor in the box.
+    reply: d => void dispatchEvent(new CustomEvent("reply", { detail: { agent: p.orchestrator, title: String(d.title) } })),
   }
   addEventListener("message", async e => {
     const d = e.data
     if (e.source !== frame.contentWindow || typeof d !== "object" || d === null) return
-    if (d.ready === true) {
+    if (Array.isArray(d.swipe)) dispatchEvent(new CustomEvent("swipe", { detail: d.swipe.map(Number) }))
+    else if (d.ready === true) {
       ready = true
       write()
     } else if (typeof d.call === "string") {

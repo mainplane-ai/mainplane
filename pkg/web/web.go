@@ -9,9 +9,11 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"io/fs"
 	"net/http"
+	"os"
 	"path"
 	"regexp"
 	"strings"
@@ -22,11 +24,16 @@ import (
 //go:generate go run ../design/gen ../design dist/ds
 //go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 ../design/css/mainplane.css --bundle --minify --loader:.woff2=file --asset-names=fonts/[name] --outdir=dist/ds --log-level=warning
 //go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 ../design/js/mainplane.js --bundle --minify --format=iife --target=es2022 --outfile=dist/ds/mainplane.js --log-level=warning
-//go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 src/main.ts --bundle --minify --format=esm --target=es2022 --log-level=warning --outfile=dist/app.js
+//go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 src/main.ts --bundle --minify --loader:.svg=text --format=esm --target=es2022 --log-level=warning --outfile=dist/app.js
 //go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 vendor/temml.mjs --minify --format=esm --target=es2022 --log-level=warning --outfile=dist/math.js
 
-//go:embed all:dist app.css frame.html
-var files embed.FS
+//go:embed all:dist app.css frame.html favicon.svg
+var embedded embed.FS
+
+// files is the page's files: the embedded build, or, for development, the
+// pkg/web directory MAINPLANE_WEB_DEV names, read again at every request so
+// that a rebuild shows on a reload.
+var files fs.FS = embedded
 
 const (
 	// script is the built page. A binary built before go generate ran has none.
@@ -58,14 +65,14 @@ var types = map[string]string{".js": "text/javascript; charset=utf-8", ".css": "
 func build() (root string, assets map[string][]byte) {
 	assets, sum := map[string][]byte{}, sha256.New()
 	for _, name := range []string{script, "dist/math.js", "app.css", "frame.html"} {
-		if b, err := files.ReadFile(name); err == nil {
+		if b, err := fs.ReadFile(files, name); err == nil {
 			assets[path.Base(name)] = b
 			sum.Write(b)
 		}
 	}
 	_ = fs.WalkDir(files, "dist/ds", func(name string, d fs.DirEntry, err error) error {
 		if err == nil && !d.IsDir() {
-			b, _ := files.ReadFile(name)
+			b, _ := fs.ReadFile(files, name)
 			sum.Write(b)
 		}
 		return nil
@@ -76,9 +83,18 @@ func build() (root string, assets map[string][]byte) {
 // Handler serves the page to a browser's navigations, the page's files
 // under /web/<hash of the build>/, and hands everything else to api.
 func Handler(api http.Handler) http.Handler {
+	if dir := os.Getenv("MAINPLANE_WEB_DEV"); dir != "" {
+		files = os.DirFS(dir)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { handler(api).ServeHTTP(w, r) })
+	}
+	return handler(api)
+}
+
+func handler(api http.Handler) http.Handler {
 	root, assets := build()
+	icon, _ := fs.ReadFile(files, "favicon.svg") // the Mainplane mark, inline: the policy allows data: images
 	etag := `"` + strings.TrimSuffix(strings.TrimPrefix(root, "/web/"), "/") + `"`
-	shell := `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mainplane</title><link rel="icon" href="data:,">` +
+	shell := `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mainplane</title><link rel="icon" href="data:image/svg+xml;base64,` + base64.StdEncoding.EncodeToString(icon) + `">` +
 		`<link rel="stylesheet" href="` + ds + `mainplane.css"><script src="` + ds + `mainplane.js" defer></script><link rel="stylesheet" href="` + root + `app.css"><script type="module" src="` + root + `app.js"></script>`
 	if assets[path.Base(script)] == nil {
 		shell = unbuilt
@@ -89,7 +105,7 @@ func Handler(api http.Handler) http.Handler {
 			if name == "" || strings.HasSuffix(name, "/") {
 				name += "index.html"
 			}
-			b, err := files.ReadFile("dist/ds/" + name)
+			b, err := fs.ReadFile(files, "dist/ds/"+name)
 			if err != nil {
 				http.NotFound(w, r)
 				return
