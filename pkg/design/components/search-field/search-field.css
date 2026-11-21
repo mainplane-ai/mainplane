@@ -1,0 +1,26 @@
+.search {
+  --h: var(--control-md); --ring: var(--color-focus-soft);
+  position: relative; display: flex; align-items: center; gap: 5px; height: var(--h); padding: 0 6px 0 8px;
+  border-radius: var(--radius-full); corner-shape: round; background: var(--color-fill); color: var(--color-text-2);
+  box-shadow: 0 0 0 7px transparent; transition: box-shadow 200ms var(--ease-standard);
+}
+.search.lg { --h: var(--control-lg); gap: 7px; padding: 0 9px 0 12px; }
+.search > mp-icon { --icon-size: 14px; flex: none; }
+.search.lg > mp-icon { --icon-size: 16px; }
+.search > input { flex: 1; min-width: 0; height: 100%; border: 0; padding: 0; background: transparent; color: var(--color-text); font: var(--text-body); outline: none; caret-color: var(--color-accent); -webkit-appearance: none; appearance: none; }
+.search > input::placeholder { color: var(--color-text-2); opacity: 1; }
+.search > input::-webkit-search-cancel-button { display: none; }
+/* Focus */
+.search:has(:focus-visible) { box-shadow: inset 0 0 0 1px var(--ring), 0 0 0 var(--focus-soft-width) var(--ring); }
+/* Clear: filled circle with the x cut out. Shown only while the field has text. */
+.search > .clear {
+  flex: none; width: 14px; height: 14px; padding: 0; border: 0; margin: 0 1px 0 0; background: var(--color-text-3); cursor: default;
+  -webkit-mask: var(--clear-mask) center / contain no-repeat; mask: var(--clear-mask) center / contain no-repeat;
+  --clear-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cmask id='m'%3E%3Ccircle cx='7' cy='7' r='7' fill='white'/%3E%3Cpath d='M4.7 4.7l4.6 4.6M9.3 4.7l-4.6 4.6' stroke='black' stroke-width='1.6' stroke-linecap='round'/%3E%3C/mask%3E%3Crect width='14' height='14' mask='url(%23m)'/%3E%3C/svg%3E");
+}
+.search.lg > .clear { width: 16px; height: 16px; }
+.search > .clear:hover { background: var(--color-text-2); }
+.search > .clear:active { background: var(--color-text); }
+.search:has(> input:placeholder-shown) > .clear { display: none; }
+.search:has(> input:disabled) { opacity: .45; }
+.search:has(> input:disabled) > .clear { display: none; }

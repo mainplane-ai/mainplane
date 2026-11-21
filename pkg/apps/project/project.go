@@ -68,13 +68,33 @@ const (
 	depth = 64
 	// catalogAge is how long a fetched catalog is used before it is fetched again.
 	catalogAge = time.Hour
-	// Sandbox is the policy a dashboard is shown under, and each file of a
-	// store served with: an origin of its own, and no network.
+	// modelsAge is how long the models are used before the providers are
+	// asked again: a sheet of the interface opens on them, and a provider
+	// added to the harness should show within the minute.
+	modelsAge = time.Minute
+	// modelsWait is how long one provider has to list its models: a local
+	// server answers in less, and one that is down must not hold the others.
+	modelsWait = 2 * time.Second
+	// inline is the size up to which a file comes with the list that asks
+	// for bodies: a dashboard's data is many small files, and each read
+	// apart is a round trip.
+	inline = 16 << 10
+	// Sandbox is the policy each file of a store is served with: an origin
+	// of its own, and no network.
 	Sandbox = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:"
 	// changed is the note an orchestrator reads when someone else set its
 	// project's status. It is a system record: it wakes nobody.
 	changed = "%s set the status of project %q to %s, with the line %q. This is a note, not a message: nobody waits for an answer to it."
 )
+
+// Dashboard is the policy a dashboard is shown under. Its origin is its own,
+// so it reads no key of the interface, and it cannot move the page around
+// it. The rest is a web page's: code of its own, what https serves, links
+// that open beside it, and the design system's files at ds, sources such as
+// "https://example.com/web/ds/".
+func Dashboard(ds string) string {
+	return "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; default-src 'none'; script-src 'unsafe-inline' https: " + ds + "; style-src 'unsafe-inline' https: " + ds + "; font-src https: data: " + ds + "; img-src https: data: blob:; media-src https: data: blob:; connect-src https: wss:"
+}
 
 // maxStore bounds a project's whole store: a page and a thousand cards with
 // a screenshot each, and no more, so the stores cannot fill the harness's
@@ -104,9 +124,11 @@ type Project struct {
 // Model is a preset of the catalog whose provider the harness serves: a full
 // config for an agent but its workers.
 type Model struct {
-	ID     string         `json:"id"`
-	Name   string         `json:"name"`
-	Config statefile.Conf `json:"config"`
+	ID       string            `json:"id"`
+	Name     string            `json:"name"`
+	Provider string            `json:"provider"` // the provider's name, a section of the picker; Custom for one the catalog lacks
+	Config   statefile.Conf    `json:"config"`
+	Settings []catalog.Setting `json:"settings,omitempty"` // such as effort, as the TUI's /config offers them
 }
 
 // File is one file of a store as a list shows it.
@@ -114,6 +136,7 @@ type File struct {
 	Name     string    `json:"name"`
 	Size     int64     `json:"size"`
 	Modified time.Time `json:"modified"`
+	Body     []byte    `json:"body,omitempty"` // base64, of a small file when the list is asked for bodies
 }
 
 // App is the handler of the routes a session's key reaches, and the projects.
@@ -128,9 +151,11 @@ type App struct {
 	mu       sync.Mutex // the projects and every write to a store
 	projects map[string]Project
 
-	cmu   sync.Mutex
-	cat   catalog.Catalog
-	catAt time.Time
+	cmu      sync.Mutex
+	cat      catalog.Catalog
+	catAt    time.Time
+	listed   []Model
+	listedAt time.Time
 }
 
 // New loads the projects in dir and is the app. An agent of a project
@@ -208,8 +233,10 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 //	PUT    /projects/{id}/status      {"status","line"}; ?via= required. the orchestrator    -> Project
 //	                                  reads a note of it at its next step, and is not woken
 //	DELETE /projects/{id}             ?via= required. ?agents=1 deletes its agents too       -> 204
-//	GET    /projects/{id}/files/      ?prefix=                                               -> [File]
+//	GET    /projects/{id}/files/      ?prefix= ?bodies=1 for those of the small files too    -> [File]
 //	GET    /projects/{id}/files/{name} -> the file
+//	PUT    /projects/{id}/files/{name} the file, whole                                       -> 204
+//	DELETE /projects/{id}/files/{name}                                                       -> 204
 //	GET    /models                    -> [Model]
 func (a *App) Routes(mux *http.ServeMux) {
 	handle := func(pattern string, fn func(w http.ResponseWriter, r *http.Request) error) {
@@ -242,6 +269,10 @@ func (a *App) Routes(mux *http.ServeMux) {
 	})
 	one("DELETE /projects/{id}", a.remove)
 	one("GET /projects/{id}/files/{name...}", func(w http.ResponseWriter, r *http.Request, p Project) error { return a.get(w, r, p.ID) })
+	one("PUT /projects/{id}/files/{name...}", func(w http.ResponseWriter, r *http.Request, p Project) error { return a.put(w, r, p.ID) })
+	one("DELETE /projects/{id}/files/{name...}", func(w http.ResponseWriter, r *http.Request, p Project) error {
+		return a.write(w, p.ID, r.PathValue("name"), nil)
+	})
 }
 
 // answer is a route's error in the harness's words: 404 for what is not
@@ -469,7 +500,7 @@ func (a *App) status(w http.ResponseWriter, r *http.Request, id, who, by, agent 
 func (a *App) get(w http.ResponseWriter, r *http.Request, id string) error {
 	name, root := r.PathValue("name"), filepath.Join(a.dir, id)
 	if name == "" {
-		files, err := list(root, r.URL.Query().Get("prefix"))
+		files, err := list(root, r.URL.Query().Get("prefix"), r.URL.Query().Has("bodies"))
 		if err != nil {
 			return err
 		}
@@ -494,8 +525,9 @@ func (a *App) get(w http.ResponseWriter, r *http.Request, id string) error {
 	return nil
 }
 
-// list is the files under root whose names start with prefix, by name.
-func list(root, prefix string) ([]File, error) {
+// list is the files under root whose names start with prefix, by name, and
+// with bodies what is in the small ones.
+func list(root, prefix string, bodies bool) ([]File, error) {
 	out := []File{}
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -510,7 +542,13 @@ func list(root, prefix string) ([]File, error) {
 			if err != nil {
 				return err
 			}
-			out = append(out, File{name, i.Size(), i.ModTime().UTC()})
+			f := File{Name: name, Size: i.Size(), Modified: i.ModTime().UTC()}
+			if bodies && f.Size <= inline {
+				if f.Body, err = os.ReadFile(p); err != nil {
+					return err
+				}
+			}
+			out = append(out, f)
 		}
 		return nil
 	})
@@ -548,7 +586,7 @@ func (a *App) write(w http.ResponseWriter, id, name string, body []byte) error {
 			return fmt.Errorf("%w: no file %q", fs.ErrNotExist, name)
 		}
 	} else {
-		files, err := list(root, "")
+		files, err := list(root, "", false)
 		if err != nil {
 			return err
 		}
@@ -590,11 +628,15 @@ func (a *App) write(w http.ResponseWriter, id, name string, body []byte) error {
 // presets whose provider the harness serves, in the catalog's order, then
 // what the server of each provider the catalog does not have lists itself,
 // such as a local one. The catalog is fetched at most once in catalogAge;
-// when a fetch fails the one before it is used. A server that does not
-// answer adds nothing.
+// when a fetch fails the one before it is used. The servers are asked at
+// once, and one that does not answer in modelsWait adds nothing. The answer
+// is used for modelsAge.
 func (a *App) presets(ctx context.Context) ([]Model, error) {
 	a.cmu.Lock()
 	defer a.cmu.Unlock()
+	if a.listed != nil && time.Since(a.listedAt) < modelsAge {
+		return a.listed, nil
+	}
 	if time.Since(a.catAt) > catalogAge {
 		c, err := a.Catalog(ctx)
 		if err != nil && a.catAt.IsZero() {
@@ -611,22 +653,33 @@ func (a *App) presets(ctx context.Context) ([]Model, error) {
 	out := []Model{}
 	for _, id := range a.cat.Groups[catalog.SelfHosted] {
 		if p := a.cat.Presets[id]; slices.ContainsFunc(served, func(s harness.ProviderInfo) bool { return s.Name == p.Provider }) {
-			out = append(out, Model{id, p.Name, statefile.Conf{Model: p.Provider + "/" + p.Model, Tools: p.Tools, ContextLimit: p.ContextLimit, Input: p.Input, Params: p.Params, Preset: id}})
+			out = append(out, Model{id, p.Name, a.cat.Providers[p.Provider].Name, statefile.Conf{Model: p.Provider + "/" + p.Model, Tools: p.Tools, ContextLimit: p.ContextLimit, Input: p.Input, Params: p.Params, Preset: id}, p.Settings})
 		}
 	}
-	for _, s := range served {
+	ctx, cancel := context.WithTimeout(ctx, modelsWait)
+	defer cancel()
+	lists := make([][]string, len(served))
+	var wg sync.WaitGroup
+	for i, s := range served {
 		if _, known := a.cat.Providers[s.Name]; known || s.Shape != "openai-chat" {
 			continue
 		}
-		ids, err := a.h.Models(ctx, s.Name)
-		if err != nil {
-			log.Printf("project: the models of %s: %v", s.Name, err)
-		}
-		for _, id := range ids {
+		wg.Go(func() {
+			ids, err := a.h.Models(ctx, s.Name)
+			if err != nil {
+				log.Printf("project: the models of %s: %v", s.Name, err)
+			}
+			lists[i] = ids
+		})
+	}
+	wg.Wait()
+	for i, s := range served {
+		for _, id := range lists[i] {
 			model := s.Name + "/" + id
-			out = append(out, Model{model, id, statefile.Conf{Model: model, Tools: "default", ContextLimit: cmp.Or(s.ContextLimit, catalog.CustomLimit), Input: []string{}}})
+			out = append(out, Model{model, id, "Custom", statefile.Conf{Model: model, Tools: "default", ContextLimit: cmp.Or(s.ContextLimit, catalog.CustomLimit), Input: []string{}}, nil})
 		}
 	}
+	a.listed, a.listedAt = out, time.Now()
 	return out, nil
 }
 

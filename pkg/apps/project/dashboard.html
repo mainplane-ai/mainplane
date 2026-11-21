@@ -2,10 +2,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dashboard</title>
-<p>This project has no dashboard yet. Its orchestrator makes one.</p>
-<ul id="files"></ul>
+<link rel="stylesheet" href="/web/ds/1/mainplane.css">
+<script src="/web/ds/1/mainplane.js"></script>
+<style>
+/* Page layout only. Components come from the design system; copy one in here to change it. */
+html, body { height: 100%; margin: 0; background: var(--color-bg); }
+#empty { height: 100%; box-sizing: border-box; align-content: center; }
+</style>
+<body class="mp">
+<main class="board" hidden>
+  <section class="b-tl" id="timeline"><h2>Timeline <small class="end"></small></h2><div class="timeline"></div><p class="none">No timeline yet.</p></section>
+  <section class="b-needs" id="needs"><h2>Needs you <small></small></h2><div class="list"></div><p class="none">Nothing needs you.</p></section>
+  <section class="b-done" id="done"><h2>Done <small></small></h2><div class="work-grid"></div><p class="none">Nothing done yet.</p></section>
+</main>
+<div class="empty" id="empty" hidden><mp-icon name="check"></mp-icon><h3>No dashboard yet</h3><p>The orchestrator makes one as the work starts.</p></div>
 <script>
-// call asks the interface that shows this page: list, read, send, status.
+// call asks the interface that shows this page: list, read, send, status, reply.
 let seq = 0; const waiting = new Map()
 function call(name, args) {
   return new Promise((resolve, reject) => { waiting.set(++seq, { resolve, reject }); parent.postMessage({ id: seq, call: name, ...args }, "*") })
@@ -16,11 +28,75 @@ addEventListener("message", e => {
   if (w) { waiting.delete(e.data.id); "error" in e.data ? w.reject(new Error(e.data.error)) : w.resolve(e.data.result) }
   if (e.data.event === "changed") show()
 })
-function show() {
-  const list = document.getElementById("files")
-  call("list", { prefix: "" }).then(
-    files => list.replaceChildren(...files.map(f => Object.assign(document.createElement("li"), { textContent: f.name + " (" + f.size + " bytes)" }))),
-    err => { list.textContent = err.message })
+
+// Data, one small file per item:
+//   needs/<id>.json  {"title", "detail", "answers": ["Approve", "Not yet"]}  a question for the user
+//   timeline.json    {"updated", "lanes": [{"name", "steps": [{"label", "state": "done"|"next"|"wait", "value"}]}]}
+//   cards/<id>.json  {"title", "detail", "date", "value"} a metric, or {"title", "detail", "image": "cards/<id>.png"}
+const el = (tag, cls, text) => Object.assign(document.createElement(tag), cls ? { className: cls } : {}, text != null ? { textContent: text } : {})
+const json = async name => JSON.parse(new TextDecoder().decode(await call("read", { name })))
+const icon = name => Object.assign(document.createElement("mp-icon"), { name })
+const short = d => new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: d.length === 10 ? "UTC" : undefined }) // a bare date is that day anywhere
+
+function need(n) {
+  const div = el("div", "need")
+  div.append(el("h3", "", n.title), el("p", "", n.detail || ""))
+  const answers = el("div", "answers")
+  ;(n.answers || []).forEach((a, i) => {
+    const b = el("button", "btn sm" + (i === 0 ? " filled" : ""), a)
+    b.onclick = () => call("send", { text: `Answer to "${n.title}": ${a}` }).then(() => { div.classList.add("answered"); answers.replaceChildren("You answered: " + a) })
+    answers.append(b)
+  })
+  // Reply goes to the chat box under the dashboard, which shows what it replies to.
+  const reply = el("button", "btn sm reply"); reply.append(icon("reply"), "Reply")
+  reply.onclick = () => call("reply", { title: n.title })
+  answers.append(reply)
+  div.append(answers)
+  return div
 }
-show()
+
+function lane(l) {
+  const s = el("section"), h = el("h3", "", l.name), ol = el("ol")
+  const done = l.steps.filter(x => x.state === "done").length
+  h.append(el("span", "", `${done}/${l.steps.length}`)); s.append(h, ol)
+  l.steps.forEach((x, i) => {
+    const li = el("li", x.state); li.append(el("i"), el("span", "l", x.label))
+    if (x.value) li.append(el("span", "v", x.value))
+    ol.append(li)
+    if (x.state === "done" && l.steps[i + 1]?.state !== "done" && i + 1 < l.steps.length) ol.append(el("li", "here", "← you are here"))
+  })
+  return s
+}
+
+async function card(c) {
+  const div = el("div", "card " + (c.image ? "image" : "metric"))
+  if (c.image) {
+    const img = el("img"); img.alt = ""; img.src = URL.createObjectURL(new Blob([await call("read", { name: c.image })]))
+    const body = el("div", "body"); body.append(el("h3", "", c.title), el("p", "", c.detail || ""))
+    div.append(img, body)
+  } else div.append(el("div", "date", c.date ? short(c.date) : ""), el("div", "value", c.value), el("h3", "", c.title), el("div", "label", c.detail || ""))
+  return div
+}
+
+function fill(id, items, count = items.length) {
+  const p = document.getElementById(id)
+  p.querySelector(".none").hidden = items.length > 0
+  p.querySelector("h2 small").textContent = items.length ? count : ""
+  p.querySelector("h2 + div").replaceChildren(...items)
+}
+
+async function show() {
+  const files = (await call("list", { prefix: "" })).map(f => f.name)
+  const of = (dir) => files.filter(f => f.startsWith(dir) && f.endsWith(".json")).sort()
+  const needs = await Promise.all(of("needs/").map(json))
+  fill("needs", needs.map(need))
+  const t = files.includes("timeline.json") ? await json("timeline.json") : { lanes: [] }
+  fill("timeline", t.lanes.map(lane), t.updated ? "updated " + short(t.updated) : "")
+  const cards = await Promise.all(of("cards/").reverse().map(async f => card(await json(f))))
+  fill("done", cards)
+  const any = needs.length + t.lanes.length + cards.length > 0
+  document.getElementById("empty").hidden = any
+  document.querySelector("main").hidden = !any
+}
+show().catch(err => document.body.replaceChildren(el("p", "", err.message)))
 </script>

@@ -1,0 +1,5 @@
+.spinner { --s: 16px; display: inline-block; flex: none; width: var(--s); height: var(--s); vertical-align: middle; color: var(--color-text-2);
+  background: conic-gradient(from 0deg, transparent 0 8%, currentColor 8% 12%, transparent 12% 20.5%, currentColor 20.5% 24.5%, transparent 24.5% 33%, currentColor 33% 37%, transparent 37% 45.5%, currentColor 45.5% 49.5%, transparent 49.5% 58%, currentColor 58% 62%, transparent 62% 70.5%, currentColor 70.5% 74.5%, transparent 74.5% 83%, currentColor 83% 87%, transparent 87% 95.5%, currentColor 95.5% 99.5%, transparent 99.5%);
+  -webkit-mask: radial-gradient(circle, transparent 38%, #000 40%), conic-gradient(#0000 0, #000); mask: radial-gradient(circle, transparent 38%, #000 40%) intersect, conic-gradient(rgba(0,0,0,.15), #000);
+  -webkit-mask-composite: source-in; border-radius: 50%; corner-shape: round; animation: mp-spin 1s steps(8) infinite; }
+.spinner.sm { --s: 12px; } .spinner.lg { --s: 24px; }

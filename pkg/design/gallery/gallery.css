@@ -1,0 +1,21 @@
+/* The gallery page around the snippets. Not part of any component. */
+body.ds-page { margin: 0; background: var(--color-bg); display: grid; grid-template-columns: 200px minmax(0, 1fr); }
+.ds-page > header { grid-column: 1 / -1; padding: 24px 24px 8px; }
+.ds-page > header h1 { font: var(--text-large-title); letter-spacing: var(--tracking-large-title); margin: 0 0 6px; }
+.ds-page > header p { font: var(--text-callout); color: var(--color-text-2); margin: 0; }
+.ds-page > nav { position: sticky; top: 0; align-self: start; max-height: 100vh; overflow: auto; padding: 16px 12px 16px 24px; }
+.ds-page > nav a { display: block; padding: 3px 0; font: var(--text-callout); color: var(--color-text-2); text-decoration: none; }
+.ds-page > main { padding: 0 24px 48px 0; min-width: 0; }
+.ds-page section { margin-top: 32px; }
+.ds-page section > h2 { display: flex; align-items: center; gap: 12px; font: var(--text-title-3); margin: 0 0 4px; }
+.ds-page section > p { font: var(--text-callout); color: var(--color-text-2); margin: 0 0 12px; max-width: 720px; }
+.pns { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.pn { background: var(--color-bg); color: var(--color-text); border-radius: var(--radius-panel); padding: 24px; min-width: 0; display: grid; gap: 10px; align-content: start; box-shadow: inset 0 0 0 1px var(--color-separator); }
+.r { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.st { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; align-items: center; }
+.st > .st-l { font: var(--text-footnote); color: var(--color-text-3); }
+@media (max-width: 1100px) { .pns { grid-template-columns: 1fr; } body.ds-page { grid-template-columns: 1fr; } .ds-page > nav { display: none; } .ds-page > main { padding-left: 24px; } }
+/* Overlays (sheet, alert, menus) stay inside their panel. */
+.pn { position: relative; isolation: isolate; overflow: hidden; transform: translateZ(0); }
+.stage { position: relative; height: 270px; border-radius: var(--radius-card); overflow: hidden; background: var(--color-surface); }
+.stage > p { margin: 0; padding: 14px; color: var(--color-text-3); }

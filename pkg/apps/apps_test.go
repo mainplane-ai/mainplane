@@ -921,9 +921,11 @@ func TestProjectStore(t *testing.T) {
 	r.want(204, ckey, "DELETE", "/apps/project/files/cards/0001.json", "")
 	r.want(404, ckey, "DELETE", "/apps/project/files/cards/0001.json", "")
 	r.want(404, "full", "GET", files+"cards/0001.json", "")
+	r.want(204, "full", "PUT", files+"state/seen.json", `{"n":3}`) // the interface writes what a dashboard asks
+	r.want(204, "full", "DELETE", files+"state/seen.json", "")
 	_ = json.Unmarshal([]byte(r.want(200, okey, "GET", "/apps/project/", "")), &p)
-	if p.Counter != 4 {
-		t.Fatalf("counter: %d, want 4 writes", p.Counter)
+	if p.Counter != 6 {
+		t.Fatalf("counter: %d, want 6 writes", p.Counter)
 	}
 
 	// delete: without ?agents=1 the agents stay and are in no project; with it they go

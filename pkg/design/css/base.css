@@ -1,0 +1,24 @@
+/* Mainplane base: fonts, accessibility switches, the .mp text default and shared motion. Tokens are in tokens.css. */
+@font-face { font-family: "Red Hat Text"; src: url("../fonts/redhattext-0.woff2") format("woff2"); font-weight: 300 700; font-display: swap; }
+@font-face { font-family: Geist; src: url("../fonts/geist-0.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+
+/* Half-pixel hairlines on 2x screens (Increase Contrast sets 1px again). */
+@media (min-resolution: 2dppx) { :root { --hairline: .5px; } }
+
+/* Apple continuous corners: squircle at 1.78 x r matches SwiftUI .continuous; elsewhere a plain radius r. */
+@supports (corner-shape: squircle) { :root { --corner-k: 1.78; } * { corner-shape: squircle; } }
+
+/* Reduce Transparency: the frosted material becomes the solid floating fill. */
+@media (prefers-reduced-transparency: reduce) { :root, [data-theme] { --color-frosted: var(--color-floating); --frosted-blur: 0px; --frosted-saturate: 100%; } }
+[data-transparency="reduced"], [data-transparency="reduced"] [data-theme] { --color-frosted: var(--color-floating); --frosted-blur: 0px; --frosted-saturate: 100%; }
+
+/* Reduce Motion keeps fades and drops movement: components multiply distances by --motion. */
+:root { --motion: 1; }
+@media (prefers-reduced-motion: reduce) { :root { --motion: 0; --ease-spring: var(--ease-standard); --ease-spring-bouncy: var(--ease-standard); } }
+
+.mp { font: var(--text-body); letter-spacing: var(--tracking-body); color: var(--color-text); -webkit-font-smoothing: antialiased; font-synthesis-weight: none; }
+
+@keyframes mp-spin { to { transform: rotate(1turn); } }
+@keyframes mp-fade { from { opacity: 0; } }
+@keyframes mp-typing { 0%, 60%, 100% { opacity: .35; transform: none; } 30% { opacity: 1; transform: translateY(calc(var(--typing-lift, -2px) * var(--motion))); } }
+[hidden] { display: none !important; }

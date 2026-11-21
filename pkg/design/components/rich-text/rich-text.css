@@ -1,0 +1,57 @@
+.rt { --syn-c: var(--color-text-3);
+  max-width: 640px; min-width: 0; font: var(--text-body-large); color: var(--color-text); overflow-wrap: break-word; }
+.rt > :first-child { margin-top: 0; } .rt > :last-child { margin-bottom: 0; }
+.rt p { margin: 0 0 12px; }
+.rt h1, .rt h2, .rt h3 { margin: 20px 0 6px; color: var(--color-text); }
+.rt h1 { font: var(--text-title-2); letter-spacing: var(--tracking-title-2); }
+.rt h2 { font: var(--text-title-3); letter-spacing: var(--tracking-title-3); }
+.rt h3 { font: 600 15px/22px var(--font-text); }
+.rt strong { font-weight: 600; }
+.rt a, .rt-inline a { color: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); }
+.rt a:hover, .rt-inline a:hover { text-decoration-color: currentColor; }
+.rt ul, .rt ol { margin: 0 0 12px; padding-left: 24px; }
+.rt li { margin: 4px 0; padding-left: 2px; }
+.rt li::marker { color: var(--color-text-2); }
+.rt ol > li::marker { font-variant-numeric: tabular-nums; }
+.rt li > ul, .rt li > ol { margin: 4px 0 0; }
+.rt ul ul { list-style-type: circle; }
+.rt blockquote { margin: 0 0 12px; padding: 0 0 0 14px; border-left: 3px solid var(--color-line); color: var(--color-text-2); }
+.rt blockquote p { margin: 0; }
+.rt hr { border: 0; border-top: 1px solid var(--color-separator); margin: 20px 0; }
+/* inline code */
+.rt code, .rt-inline code { font: 400 0.87em/1 var(--font-mono); padding: 2px 5px; border-radius: var(--radius-4); background: var(--color-fill); white-space: nowrap; }
+.msg.sent .rt-inline code { background: color-mix(in srgb, var(--color-bubble-sent-ink) 20%, transparent); }
+.rt-inline strong { font-weight: 600; }
+/* code block: quiet header with the language and a copy button that shows on hover or focus */
+.rt .code-block { margin: 0 0 12px; border-radius: var(--radius-card); background: var(--color-surface-2); overflow: hidden; }
+.cb-head { display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 0 6px 0 12px; font: var(--text-subheadline); color: var(--color-text-2); }
+.cb-copy { all: unset; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: var(--radius-6); font: var(--text-subheadline); color: var(--color-text-2); --icon-size: 14px; opacity: 0; transition: opacity var(--duration-fast) var(--ease-standard); }
+.code-block:hover .cb-copy, .cb-copy:focus-visible { opacity: 1; }
+.cb-copy:hover { background: var(--color-fill); color: var(--color-text); }
+.cb-copy:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
+@media (hover: none) { .cb-copy { opacity: 1; } }
+.rt pre { margin: 0; padding: 0 14px 12px; overflow-x: auto; }
+.rt pre code { display: block; padding: 0; border-radius: 0; background: none; font: var(--text-mono); white-space: pre; width: max-content; min-width: 100%; }
+.rt pre .k { color: var(--color-code-keyword); } .rt pre .s { color: var(--color-code-string); } .rt pre .n { color: var(--color-code-number); }
+.rt pre .t { color: var(--color-code-type); } .rt pre .c { color: var(--syn-c); font-style: italic; } .rt pre .p { color: var(--syn-c); }
+/* tables: horizontal hairlines only, numbers right and tabular; a wide table scrolls by itself */
+.rt table { display: block; max-width: 100%; overflow-x: auto; margin: 0 0 12px; border-collapse: collapse; font: var(--text-body); }
+.rt th, .rt td { padding: 7px 16px 7px 0; text-align: left; border-bottom: 1px solid var(--color-separator); white-space: nowrap; }
+.rt th:last-child, .rt td:last-child { padding-right: 0; }
+.rt th { font-weight: 600; color: var(--color-text); border-bottom-color: var(--color-line); }
+.rt table { width: max-content; }
+.rt .num { text-align: right; font-variant-numeric: tabular-nums; }
+.rt tr.total td { font-weight: 600; border-bottom: 0; }
+/* math: native MathML, system math font, display math centered and scrolls when wide */
+.rt math, .rt-inline math { font-family: "STIX Two Math", "Cambria Math", "Latin Modern Math", math; font-size: 1.06em; }
+.rt .math-block { margin: 4px 0 14px; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+.rt .math-block math { display: block math; font-size: 1.12em; }
+.thread:has(> .rt-msg) { min-width: 0; }
+.msg + .msg.rt-msg { margin-top: 20px; }
+.nobr { white-space: nowrap; }
+.msg.rt-msg { display: block; align-self: stretch; min-width: 0; padding: 0 12px; }
+.rt pre .o { color: var(--color-text-2); }
+.rt-inline p { margin: 0; }
+.rt-inline p + p { margin-top: 8px; }
+/* task list item: the checkbox sits where the bullet was */
+.rt li.task, .rt-inline li.task { list-style: none; } .rt li.task > input:first-child { margin: 0 6px 0 -20px; vertical-align: -1px; }

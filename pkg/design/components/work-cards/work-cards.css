@@ -1,0 +1,3 @@
+.work-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.work-grid .card { background: var(--color-bg); }
+.work-grid .card .date { font: var(--text-footnote); color: var(--color-text-3); }

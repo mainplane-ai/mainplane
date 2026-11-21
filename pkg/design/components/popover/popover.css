@@ -1,0 +1,11 @@
+.popover { position: relative; z-index: var(--z-popover); width: max-content; max-width: 320px; font: var(--text-callout); --pop-fill: var(--color-floating); }
+.popover > .body { padding: 12px 14px; border-radius: var(--radius-16); background: var(--pop-fill); box-shadow: var(--shadow-3), inset 0 0 0 1px var(--color-floating-edge); }
+.popover::before { content: ""; position: absolute; z-index: 1; left: var(--arrow-x, 50%); top: -7px; width: 18px; height: 7.5px; translate: -50% 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); background: var(--pop-fill); }
+.popover.frosted { --pop-fill: var(--color-frosted); }
+.popover.frosted > .body, .popover.frosted::before { -webkit-backdrop-filter: blur(var(--frosted-blur)) saturate(var(--frosted-saturate)); backdrop-filter: blur(var(--frosted-blur)) saturate(var(--frosted-saturate)); }
+/* ::after is the arrow's hairline edge: a ring (evenodd), above the body so its blur does not smear it. */
+.popover::after { content: ""; position: absolute; z-index: 2; left: var(--arrow-x, 50%); top: -8px; width: 20px; height: 8px; translate: -50% 0; clip-path: polygon(evenodd, 50% 0, 100% 100%, 0 100%, 50% 1.2px, calc(100% - 2.6px) 100%, 2.6px 100%); background: color-mix(in srgb, var(--color-text) 14%, transparent); }
+.popover.down::after { top: auto; bottom: -8px; clip-path: polygon(evenodd, 0 0, 100% 0, 50% 100%, 2.6px 0, calc(100% - 2.6px) 0, 50% calc(100% - 1.2px)); }
+.popover.down::before { top: auto; bottom: -7px; clip-path: polygon(0 0, 100% 0, 50% 100%); }
+.popover h4 { margin: 0 0 4px; font: var(--text-headline); }
+.popover p { margin: 0; color: var(--color-text-2); }

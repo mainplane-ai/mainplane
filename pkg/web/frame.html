@@ -1,11 +1,35 @@
 <!doctype html>
 <meta charset="utf-8">
 <script>
-// A dashboard is shown here: this frame has an origin of its own and no
-// network, and holds no key. The page around it sends the dashboard's HTML.
+// A dashboard is shown here: this frame has an origin of its own and holds
+// no key. The page around it sends the dashboard's HTML and answers what the
+// dashboard asks with mainplane.call; mainplane.watch hears the store change.
 addEventListener("message", e => {
   if (e.source !== parent || typeof e.data?.html !== "string") return
-  document.open(); document.write(e.data.html); document.close()
+  document.open() // the listeners end here: the dashboard starts with these alone
+  const waiting = new Map(), watchers = []
+  let seq = 0
+  window.mainplane = {
+    call: (name, args) => new Promise((resolve, reject) => { waiting.set("mp" + ++seq, { resolve, reject }); parent.postMessage({ ...args, id: "mp" + seq, call: name }, "*") }),
+    watch: fn => watchers.push(fn),
+  }
+  addEventListener("message", e => {
+    if (e.source !== parent) return
+    const w = waiting.get(e.data.id)
+    if (w) { waiting.delete(e.data.id); "error" in e.data ? w.reject(new Error(e.data.error)) : w.resolve(e.data.result) }
+    if (e.data.event === "changed") watchers.forEach(fn => fn(e.data))
+  })
+  // A link opens beside the interface: this frame goes nowhere.
+  addEventListener("click", e => { const a = e.target.closest?.("a[href]:not([href^='#'], [target])"); if (a) a.target = "_blank" }, true)
+  // A swipe on the page goes to the interface: on a phone it moves between the project's views.
+  let t0 = null
+  const slides = el => !!el && el.nodeType === 1 && ((el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflowX !== "visible") || slides(el.parentElement))
+  addEventListener("touchstart", e => { const t = e.touches[0]; t0 = e.touches.length === 1 && t.clientX > 24 && !e.target.closest?.("textarea, input") && !slides(e.target) ? [t.clientX, t.clientY, Date.now()] : null }, { passive: true })
+  addEventListener("touchend", e => { const t = e.changedTouches[0]; if (t0) parent.postMessage({ swipe: [t.clientX - t0[0], t.clientY - t0[1], Date.now() - t0[2]] }, "*"); t0 = null }, { passive: true })
+  document.write(e.data.html); document.close()
+  // The interface's glass header and composer float over the page: it starts under the one and ends above the other.
+  const [top, bottom] = e.data.inset
+  document.head.append(Object.assign(document.createElement("style"), { textContent: `body { height: auto !important; min-height: 100%; box-sizing: border-box; padding-top: ${top}px; padding-bottom: ${bottom}px }` }))
 })
 parent.postMessage({ ready: true }, "*")
 </script>

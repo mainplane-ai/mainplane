@@ -1,6 +1,8 @@
 package harness
 
 import (
+	"cmp"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -55,6 +57,10 @@ const MaxPost = 8 << 20
 //	POST /agents                      AgentCreate body; ?via= who makes it         -> {"id","session"}
 //	GET  /agents/{id}                 -> AgentInfo. usage is the sum over the agent's
 //	                                  sessions; the rest is its live session's
+//	GET  /agents/{id}/records         as a session's, of the live session or of    -> records; the live
+//	                                  ?session=. ?wait= also ends when the status     session and the status
+//	                                  is not ?status=: a chat follows with this one   in Mainplane-Session
+//	                                  call. ?tail=n is the last n of them             and Mainplane-Status
 //	POST /agents/{id}/records         as a session's; lands on the live session,   -> {"session","n"}
 //	                                  or on a new one when that one should not go on
 //	POST /agents/{id}/retry           retry the live session                       -> {"status"}
@@ -194,10 +200,11 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 	return mux
 }
 
-// agentRoutes are the eleven verbs on an agent.
+// agentRoutes are the twelve verbs on an agent.
 func (h *Harness) agentRoutes(ctx context.Context, mux *http.ServeMux, handle func(string, http.HandlerFunc)) {
 	mux.HandleFunc("GET /agents", h.serveAgents)
 	mux.HandleFunc("POST /agents", func(w http.ResponseWriter, r *http.Request) { h.serveAgentCreate(ctx, w, r) })
+	handle("GET /agents/{id}/records", h.serveAgentRecords)
 	handle("POST /agents/{id}/records", func(w http.ResponseWriter, r *http.Request) { h.serveAgentPost(ctx, w, r) })
 	handle("GET /agents/{id}", func(w http.ResponseWriter, r *http.Request) {
 		info, err := h.AgentInfo(r.PathValue("id"))
@@ -562,13 +569,76 @@ func (h *Harness) serveRecords(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	writeRecords(w, r, recs)
+}
+
+// serveAgentRecords is serveRecords for an agent's live session, or for
+// ?session= of its sessions, with the live session and the agent's status in
+// headers: a caller follows an agent with this one call. A wait also ends
+// when the status is not ?status=, the one the caller has.
+func (h *Harness) serveAgentRecords(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	a, err := h.Agent(r.PathValue("id"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	session := cmp.Or(q.Get("session"), a.live())
+	if !slices.Contains(a.Sessions, session) {
+		fail(w, fmt.Errorf("agent %s has no session %q", a.ID, session))
+		return
+	}
+	after, _ := strconv.Atoi(q.Get("after"))
+	wait, _ := time.ParseDuration(q.Get("wait"))
+	for until := time.After(wait); ; {
+		changed := h.Changed(session)
+		recs, err := h.records(session, after)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		info, err := h.AgentInfo(a.ID)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		if len(recs) == 0 && info.CurrentSession == session && string(info.Status) == q.Get("status") {
+			select {
+			case <-changed:
+				continue
+			case <-until:
+			case <-r.Context().Done():
+			}
+		}
+		if tail, _ := strconv.Atoi(q.Get("tail")); tail > 0 && len(recs) > tail {
+			recs = recs[len(recs)-tail:]
+		}
+		w.Header().Set("Mainplane-Session", info.CurrentSession)
+		w.Header().Set("Mainplane-Status", string(info.Status))
+		writeRecords(w, r, recs)
+		return
+	}
+}
+
+// writeRecords is the body of an answer of records, compressed for a caller
+// that takes it: a session is mostly text, and a smaller body is fewer
+// round trips on a slow start.
+func writeRecords(w http.ResponseWriter, r *http.Request, recs []statefile.Record) {
 	w.Header().Set("Content-Type", "application/x-mainplane-records")
+	w.Header().Add("Vary", "Accept-Encoding")
+	var out io.Writer = w
+	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		w.Header().Set("Content-Encoding", "gzip")
+		z := gzip.NewWriter(w)
+		defer func() { _ = z.Close() }()
+		out = z
+	}
 	for _, rec := range recs {
 		b, err := statefile.Encode(rec)
 		if err != nil {
 			return
 		}
-		_, _ = w.Write(b)
+		_, _ = out.Write(b)
 	}
 }
 

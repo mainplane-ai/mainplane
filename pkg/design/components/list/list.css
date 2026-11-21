@@ -1,0 +1,65 @@
+.list { display: grid; padding: 4px 0; }
+.list > .row { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 10px; margin: 0 8px; border-radius: var(--radius-row); position: relative; color: var(--color-text); cursor: default; -webkit-user-select: none; user-select: none; }
+.list > .row > mp-icon { --icon-size: 18px; color: var(--color-text-2); flex: none; }
+.row-main { flex: 1; min-width: 0; display: grid; }
+.row-main > b { font: var(--text-headline); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-main > small { font: var(--text-subheadline); color: var(--color-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-trail { flex: none; align-self: flex-start; margin-top: 2px; font: var(--text-subheadline); color: var(--color-text-2); font-variant-numeric: tabular-nums; }
+.row > .chev { --icon-size: 14px; color: var(--color-text-3); }
+
+/* Separators: hairline inset to the text; hidden on both edges of a filled row. */
+.list.separated > .row + .row::before { content: ""; position: absolute; top: -.5px; left: var(--sep-inset, 38px); right: 10px; height: var(--hairline); background: var(--color-separator); }
+.list.separated > .row:is([aria-selected="true"], :active)::before, .list.separated > .row:is([aria-selected="true"], :active) + .row::before { opacity: 0; }
+
+/* States. No hover fill (Apple). Press: gray at once, no transition. */
+.list > .row:active { background: var(--color-fill-pressed); }
+.list > .row:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: calc(-1 * var(--focus-width)); }
+.list > .row[aria-selected="true"] { background: var(--color-accent-fill); color: var(--color-text-on-accent); }
+.list > .row[aria-selected="true"] :is(small, mp-icon, .row-trail, .chev) { color: inherit; opacity: .85; }
+.list:not(.side) > .row[aria-selected="true"] .status-dot:not(.closed):not(.working) { background: #fff; }
+.list.inactive > .row[aria-selected="true"] { background: var(--color-fill-pressed); color: var(--color-text); }
+.list.inactive > .row[aria-selected="true"] :is(small, mp-icon, .row-trail, .chev) { color: var(--color-text-2); opacity: 1; }
+.list.inactive:not(.side) > .row[aria-selected="true"] .status-dot:not(.closed):not(.working) { background: var(--color-status-open); }
+.list > .row[aria-disabled="true"] { color: var(--color-text-3); pointer-events: none; }
+.list > .row[aria-disabled="true"] :is(small, mp-icon, .row-trail) { color: var(--color-text-3); }
+.list > .row[aria-disabled="true"] .status-dot { opacity: .5; }
+
+/* Merge */
+.list > .row:is([aria-selected="true"], :active):has(+ .row:is([aria-selected="true"], :active)) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.list > .row:is([aria-selected="true"], :active) + .row:is([aria-selected="true"], :active) { border-top-left-radius: 0; border-top-right-radius: 0; }
+.list > .row[aria-selected="true"] + .row[aria-selected="true"]::after { content: ""; position: absolute; top: 0; left: 10px; right: 10px; height: var(--hairline); background: color-mix(in srgb, var(--color-text-on-accent) 22%, transparent); }
+.list.inactive > .row[aria-selected="true"] + .row[aria-selected="true"]::after { background: var(--color-separator); }
+
+.list.compact > .row { min-height: 28px; padding: 3px 8px; gap: 8px; border-radius: var(--radius-6); }
+.list.compact .row-main > b { font: var(--text-body); }
+.list.compact > .row > mp-icon { --icon-size: 16px; }
+
+.list.grouped { background: var(--color-surface-2); border-radius: var(--radius-12); padding: 0; }
+.list.grouped > .row { margin: 0; border-radius: 0; min-height: 40px; padding: 6px 12px; }
+.list.grouped > .row:first-child { border-radius: var(--radius-12) var(--radius-12) 0 0; }
+.list.grouped > .row:last-child { border-radius: 0 0 var(--radius-12) var(--radius-12); }
+.list.grouped .row-main > b { font: var(--text-body); }
+.list.grouped > .row > .row-trail { align-self: center; margin: 0; font: var(--text-body); }
+
+.avatar { flex: none; width: 32px; height: 32px; border-radius: 50%; corner-shape: round; display: grid; place-items: center; background: var(--color-surface-3); color: var(--color-text-2); font: 600 13px/1 var(--font-text); }
+
+/* .side: the sidebar rows (avatar, name, time, two-line preview). */
+.list.side { padding: 0 2px; --sep-inset: 64px; } /* + the row margin 8 of .list = 10 */
+.list.side > .row { align-items: center; gap: 6px; min-height: 0; padding: 12px 11px 12px 2px; border-radius: var(--radius-10); }
+.list.side > .row > .u { flex: none; width: 10px; height: 10px; border-radius: 50%; corner-shape: round; }
+.list.side > .row.needs > .u { background: var(--color-status-open); }
+.list.side > .row.waiting > .u { background: var(--color-status-waiting); }
+.list.side > .row > .avatar { width: 40px; height: 40px; font-size: 14px; }
+.list.side .row-main { align-self: flex-start; }
+.list.side .row-main > .h { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.list.side .row-main > .h > b { flex: 1; min-width: 0; font: var(--text-headline); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list.side .row-main > .h > .row-trail { margin: 0; align-self: baseline; font: var(--text-subheadline); }
+.list.side .row-main > small { min-height: 36px; font: var(--text-callout); white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+/* Working: the typing dots lead the status line, inline like a glyph, so the row keeps its two-line preview. */
+.list.side .row-main > small > .typing { margin: 0 6px 0 1px; vertical-align: 1px; }
+.list.side > .row.closed :is(b, .avatar) { color: var(--color-text-2); }
+.list.side > .row.closed .avatar { opacity: .7; }
+/* Selection gray (Messages when focus is in the composer) */
+.list.side > .row:is(:active) { background: var(--color-fill-hover); }
+.list.side > .row[aria-selected="true"] { background: var(--color-fill-pressed); color: var(--color-text); }
+.list.side > .row[aria-selected="true"] :is(small, .row-trail) { color: var(--color-text-2); opacity: 1; }

@@ -1,0 +1,43 @@
+/* Gallery frames for the snippets: not part of any component. */
+/* button */
+/* demo only: a rounded group (radius 10, inset 3), its buttons concentric at 10 - 3 */
+.ib-group { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius-10); corner-shape: squircle; background: var(--color-floating); box-shadow: inset 0 0 0 1px var(--color-floating-edge), var(--shadow-1); }
+.ib-group .btn.icon { --ib-r: calc(var(--radius-10) - 3px); }
+/* demo only: a sheet corner to show the round close button in place */
+.ib-sheet { position: relative; width: 220px; padding: 13px 16px 27px; border-radius: var(--radius-16); background: var(--color-floating); box-shadow: inset 0 0 0 1px var(--color-floating-edge), var(--shadow-2); font: 600 13px/18px var(--font-text); color: var(--color-text); }
+.ib-sheet .btn { position: absolute; top: 10px; right: 10px; }
+/* model-picker */
+.pk-col { display: grid; gap: 6px; justify-items: start; }
+.pk-col > .st-l { font: var(--text-footnote); color: var(--color-text-3); }
+/* needs-card */
+/* demo only */
+.nc-states .btn.reply { margin-left: 0; }
+.nc-l { font: var(--text-footnote); color: var(--color-text-3); margin: 6px 0 -8px; }
+.nc-wire { margin: 0; padding: 10px 12px; border-radius: var(--radius-8); background: var(--color-fill); font: 400 12px/18px var(--font-mono); color: var(--color-text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* radio */
+.st:has(.radio-group.v) { align-items: start; }
+/* rich-text */
+.st > .r:has(> .rt-msg, > .rt, > .thread) { min-width: 0; }
+.st > .r > .rt-msg, .st > .r > .thread { flex: 1 1 100%; min-width: 0; }
+/* stepper */
+/* demo only: a settings form (label left, value + stepper right, hairlines between rows) */
+.stepper-form { width: 340px; }
+.stepper-form > div { display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); min-height: 44px; font: var(--text-body); color: var(--color-text); }
+.stepper-form > div + div { border-top: 1px solid var(--color-separator); }
+/* text-area */
+/* Fixture only: in this section, state labels sit on the first text line (like Settings form rows), not the middle of the box. */
+#text-area .st { align-items: start; }
+#text-area .st > .st-l { padding-top: 7px; }
+#text-area .st:has(.field) > .st-l { padding-top: 1px; }
+#text-area .field { width: 100%; }
+/* timeline */
+.st:has(> .r > .tl-demo) { align-items: start; }
+.st:has(> .r > .tl-demo) > .st-l { padding-top: 1px; }
+.tl-demo { min-width: 0; flex: 1; }
+.tl-demo .timeline { --tl-bg: var(--color-bg); }
+/* toolbar */
+/* demo: a page with the band on top; .tb-content is the scrolling content (top = scroll offset) */
+.tb-stage { position: relative; overflow: hidden; border-radius: var(--radius-card); background: var(--color-bg); box-shadow: inset 0 0 0 1px var(--color-line); }
+.tb-stage > .toolbar { position: absolute; inset: 1px 1px auto; border-radius: var(--radius-card) var(--radius-card) 0 0; }
+.tb-content { position: absolute; left: 14px; right: 14px; }
+.st > .r > :is(.toolbar, .tb-stage) { flex: 1; min-width: 0; }

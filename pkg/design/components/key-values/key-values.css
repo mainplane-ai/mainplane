@@ -1,0 +1,3 @@
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font: var(--text-callout); }
+.kv dt { color: var(--color-text-2); }
+.kv dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }

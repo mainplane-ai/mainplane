@@ -1,26 +1,205 @@
-/* Layout only. The look comes later. */
+/* The app's layout. Components and colors come from the design system at /web/ds/1/. */
 html, body { height: 100%; margin: 0 }
-body { display: flex; font: 15px/1.4 system-ui, sans-serif }
-nav { flex: none; width: 16rem; overflow: auto; border-right: 1px solid #ccc }
-main { flex: 1; min-width: 0; display: flex; flex-direction: column }
-nav, main { box-sizing: border-box; padding: .5rem }
-nav a { display: block }
-nav small { display: block; color: #666; margin-bottom: .5rem }
-.open::before, .waiting::before { content: "\25cf  "; color: #06c }
-.waiting::before { color: #c90 }
-.scroll { flex: 1; min-height: 0; overflow: auto }
-iframe { flex: 1; min-height: 0; border: 1px solid #ccc }
-.message, .text, .error, pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: .5rem 0 }
-.message { background: #eef; padding: .25rem }
-.message small { display: block; color: #666 }
-.error { color: #b00 }
-.composer { display: flex }
-.composer textarea { flex: 1 }
-label { display: block }
-label textarea { display: block; box-sizing: border-box; width: 100% }
-.back, body.out nav { display: none }
+body { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; padding: 8px; box-sizing: border-box; background: var(--color-bg) }
+body.out { display: block }
+body > .sidebar { width: 300px; min-height: 0; overflow: auto }
+body.out > .sidebar, .back { display: none }
+/* A desktop project title is the name alone and does nothing (Slack): its menu is the row's right click. A phone makes it the title pill. */
+.toolbar button.title { all: unset; display: grid; min-width: 0; pointer-events: none }
+.toolbar button.title small { display: none }
+.toolbar.up > .back { display: inline-flex }
+main { display: flex; flex-direction: column; min-height: 0; min-width: 0 }
+main > .tabs { margin: 0 16px }
+.view { flex: 1 1 0; min-height: 0; overflow: auto }
+.dash { flex: 1; min-height: 0; border: 0; width: 100%; background: var(--color-bg) }
+.page { max-width: 640px; margin: 0 auto; padding: 24px 20px 48px; display: grid; gap: 16px; align-content: start }
+.page h2 { margin: 0; font: var(--text-title-2); letter-spacing: var(--tracking-title-2) }
+.page p { margin: 0; color: var(--color-text-2) }
+.actions { display: flex; gap: 8px; justify-content: flex-end }
+main > .composer { flex: none; margin: 4px 16px 12px }
+/* It floats with nothing behind it (iOS glass): the chat and the dashboard scroll under it. */
+:root { --glass: color-mix(in srgb, var(--color-floating) 78%, transparent); --glass-blur: blur(20px) saturate(1.6) }
+main { position: relative }
+main > .composer { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1 }
+main > .composer :is(.field, > .btn.icon) { background: var(--glass); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--shadow-1), inset 0 0 0 .5px var(--color-floating-edge) }
+main:has(> .composer:not([hidden])) > .view { padding-bottom: calc(var(--composer-h, 0px) + 16px) }
+.composer .quote { display: flex; align-items: center; gap: 6px; padding: 6px 4px 0 14px; color: var(--color-text-2); font-size: 13px }
+.composer .quote > span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis }
+.composer .quote mp-icon { --icon-size: 14px }
+/* The list's bar (Messages): Edit at the left, the filter at the right. A filter in use is tinted. */
+.sidebar > .bar { display: flex; align-items: center; gap: 8px; padding: 0 10px 18px } /* Messages macOS: a wide gap between the top row and search */
+/* Rounded like the compose circle under them (Messages macOS 26 toolbar): Edit a capsule, the filter a circle, ink. */
+.sidebar > .bar > .btn { --bg: var(--color-fill); --bg-h: var(--color-fill-hover); --fg: var(--color-text); --h: var(--control-lg); border-radius: calc(var(--h) / 2); corner-shape: round }
+.sidebar > .bar > .edit { padding-inline: 14px; font: var(--text-body) }
+.sidebar > .bar > .btn.icon { width: var(--h); padding: 0; justify-content: center }
+.sidebar > .bar > .mark { flex: 1; min-width: 0; display: flex; justify-content: center; height: var(--control-lg); color: var(--color-text) }
+.sidebar > .bar > .mark > svg { height: 100%; width: auto; max-width: 100% }
+.sidebar > .bar > .filter.on { color: var(--color-accent) }
+.sidebar a.row { color: inherit; text-decoration: none }
+.thread { padding: 16px; min-height: 100%; box-sizing: border-box; justify-content: flex-end } /* a short chat sits on the composer, as in Messages */
+.thread .bubble:not(.rt-inline) { white-space: pre-wrap }
+.thread .msg > .note:first-child { margin: 0 12px 3px }
+.thread .rt-msg > .note:first-child { margin-inline: 0 }
+.thread .tool pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere }
+/* Calls, events and a new session are quiet gray lines (Codex): the user's words and the agent's replies are what you read. */
+.thread :is(.activity, .continued) { margin: 6px 0; font: var(--text-callout); color: var(--color-text-3) }
+.thread :is(.activity, .continued, .tool) > summary { list-style: none; cursor: default; user-select: none; -webkit-user-select: none }
+.thread :is(.activity, .continued, .tool) > summary::-webkit-details-marker { display: none }
+.thread .activity > summary { display: inline-flex; align-items: center; gap: 4px; padding: 2px 0 }
+.thread :is(.activity, .tool) > summary:hover { color: var(--color-text-2) }
+.thread :is(.activity, .tool) > summary .chev { --icon-size: 12px; transition: rotate var(--duration-fast) var(--ease-standard) }
+.thread :is(.activity, .tool)[open] > summary > .chev { rotate: 90deg }
+.thread .activity > .items { display: grid; gap: 2px; margin: 2px 0 4px; padding-left: 12px; border-left: 1px solid var(--color-separator) }
+.thread .activity .tool { color: var(--color-text-3) }
+.thread .activity .tool > summary { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 0 }
+.thread .activity .tool > summary > mp-icon:first-child { --icon-size: 14px; flex: none }
+.thread .msg.sent + :not(.msg) { margin-top: 14px } /* what follows your message starts after a gap */
+.form-row > .none > b { color: var(--color-text-3) }
+.thread .activity .tool > .code { margin: 4px 0 6px 20px }
+.thread .continued > summary { display: flex; align-items: center; gap: 10px; padding: 8px 0; font: var(--text-footnote) }
+.thread .continued > summary::before, .thread .continued > summary::after { content: ""; flex: 1; height: 1px; background: var(--color-separator) }
+.thread .continued > summary:hover { color: var(--color-text-2) }
+.thread .error { color: var(--color-danger) }
+.agent-bar { display: flex; align-items: center; gap: 8px; margin: 0 16px; font: var(--text-footnote); color: var(--color-text-2) }
+.agent-bar span { flex: 1 }
+.scrim { position: fixed; inset: 0; z-index: var(--z-sheet); display: grid; place-items: center; background: var(--color-scrim) }
+.sheet .form-row > .input { flex: 1; min-width: 0 } /* a field takes the row's room left of its name */
+/* Project settings: larger than the other sheets; Delete Project ends the page, full width, red on the form's gray (Apple). */
+.sheet.large { width: min(540px, 100% - 32px); max-height: calc(100% - 64px) }
+.sheet .body > .delete { width: 100%; margin-top: 24px; background: color-mix(in srgb, var(--color-text) 4%, transparent); color: var(--color-danger) }
+.sheet .section-l + .form > .form-row > .textarea { padding-block: 4px }
+.sheet .form-row > .textarea { flex: 1 }
+.sheet .section-l { margin: 18px 10px 6px; font: var(--text-subheadline); color: var(--color-text-2) }
+.sheet > footer > .danger { margin-right: auto }
+.stack { display: grid; gap: 8px; margin-top: 8px }
+.toolbar .agents .count:empty { display: none }
+.error-line { color: var(--color-danger); padding: 16px }
+/* Pins: circles above the list, the pinned rows leave it (Messages, Mac and iPhone). A pin that needs you shows its line in a bubble. */
+.sidebar > .pins { order: -1; display: flex; flex-wrap: wrap; justify-content: space-around; gap: 16px 8px; padding: 22px 16px 8px }
+.sidebar > .pins:empty { display: none }
+.pin { position: relative; display: grid; justify-items: center; gap: 6px; width: 96px; color: inherit; text-decoration: none }
+.pin > .avatar { width: 72px; height: 72px; font-size: 24px }
+.pin > small { display: flex; align-items: center; gap: 4px; max-width: 100%; font: var(--text-footnote); color: var(--color-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.pin.needs .u { flex: none; width: 10px; height: 10px; border-radius: 50%; corner-shape: round; background: var(--color-status-open) }
+.pin > .peek { position: absolute; top: -18px; left: calc(50% - 50px); z-index: 1; max-width: 100px; padding: 4px 9px; border-radius: 14px; corner-shape: round; background: var(--color-floating); box-shadow: var(--shadow-1); font: var(--text-caption-1, var(--text-footnote)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.list.side > .row.pinned { display: none }
+.list.side > .row:not(.row:not(.pinned) ~ .row)::before { display: none } /* no hairline over the first row shown: the hidden pinned rows are not rows before it */
+.sidebar > .pins { order: 0; padding: 22px 10px 8px }
+.pin { width: 88px }
+.pin > .avatar { width: 56px; height: 56px; font-size: 20px }
 @media (max-width: 700px) {
-  nav { width: 100% }
-  body.home main, body:not(.home) nav { display: none }
-  .back { display: block }
+  body { display: block; padding: 0 }
+  /* A phone's project list: Edit and the filter, then a large title on top; search and New float at the bottom (items/project-view-mobile). */
+  body > .sidebar { width: auto; height: 100%; box-sizing: border-box; border-radius: 0; padding: 0; background: var(--color-bg) }
+  .sidebar > .bar { order: -2; padding: 8px 16px 0 }
+  .sidebar > .bar > .btn { height: 44px; min-width: 44px; padding-inline: 16px; border-radius: 22px; corner-shape: round; background: var(--color-floating); box-shadow: var(--shadow-1); color: var(--color-text); font: var(--text-body) }
+  .sidebar > .bar > .btn.icon { padding: 0; justify-content: center }
+  .sidebar > .bar mp-icon { --icon-size: 22px }
+  .sidebar > .bar > .edit { font-size: 17px }
+  .sidebar > .bar > .mark { height: 44px; padding-inline: 8px } /* as on a desktop: the lockup between Edit and the filter, as tall as they are */
+  .list.side > .row, .pin { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none } /* a long press opens the project's menu, not the link's */
+  /* A project's title opened (Slack iPhone, his sketch): a larger glass island over the toolbar, its views as rows (the one shown filled), then Pin and Delete. */
+  .island-scrim { position: fixed; inset: 0; z-index: var(--z-sheet) }
+  .island-panel { position: absolute; top: 8px; left: 16px; right: 16px; display: grid; padding: 6px; border-radius: 32px; corner-shape: round; background: color-mix(in srgb, var(--color-floating) 80%, transparent); backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6); box-shadow: var(--shadow-4), inset 0 0 0 .5px var(--color-floating-edge) }
+  .island-head { all: unset; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px 4px 6px }
+  .island-head > .avatar { width: 32px; height: 32px; margin: 0; font-size: 13px }
+  .island-head > .title { flex: 1; min-width: 0; display: grid }
+  .island-head b { font-size: 16px; line-height: 21px }
+  .island-head small { font-size: 12px; color: var(--color-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+  .island-head > mp-icon { --icon-size: 20px }
+  .island-panel > .row { all: unset; display: flex; align-items: center; gap: 14px; height: 46px; padding: 0 14px; border-radius: 23px; corner-shape: round; font-size: 17px; color: var(--color-text) }
+  .island-panel > .row mp-icon { --icon-size: 22px }
+  .island-panel > .row.on { background: color-mix(in srgb, var(--color-text) 7%, transparent); font-weight: 600 }
+  .island-panel > .row:active { background: color-mix(in srgb, var(--color-text) 10%, transparent) }
+  .island-panel > .row.danger { color: var(--color-danger) }
+  .island-panel > hr { border: 0; height: var(--hairline); margin: 6px 14px; background: var(--color-separator) }
+  .sidebar > .list { flex: 1 0 auto; align-content: start }
+  .sidebar > .top { order: 1; position: sticky; bottom: 0; padding: 8px 16px 28px }
+  .sidebar > .top > .search { height: 48px; border-radius: 24px; background: var(--color-floating); box-shadow: var(--shadow-1) }
+  .sidebar > .top mp-icon { --icon-size: 22px; color: var(--color-text) } /* Messages iPhone: ink glyphs, larger */
+  .sidebar > .top > .btn.icon { --h: 48px; border-radius: 50%; corner-shape: round; background: var(--color-floating); box-shadow: var(--shadow-1) }
+  .list.side > .row { padding-block: 14px }
+  .sidebar > .pins { order: -1; padding: 22px 16px 8px }
+  .pin { width: 96px }
+  .pin > .avatar { width: 72px; height: 72px; font-size: 24px }
+  /* A project on a phone (Slack iPhone channel header): back, the title pill filling the middle with the avatar in it (its menu has the views), agents and more in one capsule. 16 px insets, 12 px gaps. No tabs row. */
+  main > .tabs, .toolbar > .star { display: none }
+  .toolbar > button.title { pointer-events: auto }
+  .toolbar > button.title small { display: block }
+  .toolbar { height: 60px; padding: 0 16px; gap: 12px }
+  /* Phone headers float with nothing behind them (iOS glass): what is below scrolls under the glass buttons. */
+  main > .toolbar, .scrim.push .toolbar { position: absolute; top: 0; left: 0; right: 0; z-index: 2; background: none }
+  .toolbar.scrolled::after { display: none }
+  main > .view { padding-top: 60px }
+  .sheet { position: relative }
+  .sheet > header { position: absolute; top: 0; left: 0; right: 0; z-index: 2; padding-bottom: 8px }
+  .sheet > .body { padding-top: 76px !important }
+  :is(.toolbar > .back, .toolbar .tb-group, .toolbar > button.title, .sidebar > .bar > .btn, .sidebar > .top > .search, .sidebar > .top > .btn.icon, .sheet > header > .btn.icon) { background: var(--glass) !important; backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur) }
+  .toolbar > .avatar { display: none }
+  .toolbar:has(> button.title) > .avatar { display: grid; position: absolute; left: 78px; z-index: 2; width: 32px; height: 32px; margin: 0; font-size: 13px; pointer-events: none }
+  .toolbar:has(> button.title) > .spacer { display: none }
+  .toolbar > .back, .toolbar .tb-group { height: 44px; border-radius: 22px; corner-shape: round; background: var(--color-floating); box-shadow: var(--shadow-1) }
+  .toolbar > .back { width: 44px; justify-content: center }
+  .toolbar .tb-group { display: flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; padding: 0 4px }
+  .toolbar > span.title b { font-size: 16px }
+  .toolbar > span.title small { font-size: 12px }
+  /* The composer on a phone (iMessage iOS 26): + a 42 px floating circle, the field a 40 px floating capsule with a 32 px send in it, 17 px text (less makes iOS zoom in on focus). */
+  main > .composer { margin: 4px 16px 10px }
+  .composer > .btn.icon { --h: 42px; background: var(--color-floating); box-shadow: var(--shadow-1); color: var(--color-text) }
+  .composer > .btn.icon mp-icon { --icon-size: 20px }
+  .composer .field { border-radius: 20px; background: var(--color-floating); box-shadow: var(--shadow-1), inset 0 0 0 .5px var(--color-floating-edge) }
+  .composer .field.tall { border-radius: calc(20px * var(--corner-k)) }
+  /* A sheet on a phone (iOS 26 New Message): from the bottom, full width, 38 px top corners, the title centered with the close X a 44 px floating circle at the right; 17 px rows and fields (less makes iOS zoom in on focus); the actions two wide 44 px buttons. */
+  .scrim { place-items: end stretch }
+  .sheet { --pad: 16px; width: 100%; height: calc(100% - 8px - env(safe-area-inset-top)); max-height: none; align-self: end; border-radius: 38px 38px 0 0; corner-shape: round; background: var(--color-bg); animation: mp-sheet-up .25s cubic-bezier(.2,.8,.2,1) }
+  .sheet > header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; padding: 16px 16px 0 }
+  .sheet > header hgroup { grid-column: 2; grid-row: 1; padding: 0; text-align: center }
+  .sheet > header > :not(hgroup, .btn.icon) { grid-column: 3; grid-row: 1; justify-self: end; --h: 44px; padding-inline: 18px; border-radius: 22px; corner-shape: round; font-size: 17px }
+  .sheet > footer:not(:has(> :not([hidden]))) { display: none }
+  .sheet > header h2 { font-size: 17px; line-height: 22px }
+  .sheet > header > .btn.icon { grid-column: 1; grid-row: 1; justify-self: start; --h: 44px; --ib-r: 22px; border-radius: 50%; corner-shape: round; background: var(--color-floating); box-shadow: var(--shadow-1) } /* the same circle as the back button on a page */
+  .sheet > header > .btn.icon mp-icon { --icon-size: 20px }
+  .sheet .form-row { min-height: 48px; padding-inline: 16px }
+  .sheet .form-row + .form-row::before { left: 16px; right: 0 }
+  .sheet .form-row b, .sheet .form-row > :is(input.input, textarea.input) { font-size: 17px; line-height: 22px }
+  .sheet .form { border-radius: 24px; corner-shape: round }
+  .sheet .section-l { margin-inline: 16px; font-size: 13px }
+  .sheet > footer { padding-bottom: max(var(--pad), env(safe-area-inset-bottom)) }
+  .sheet > footer > .btn { flex: 1; --h: 44px; font-size: 17px }
+  /* Project settings on a phone: a page pushed from the side over the project (Slack iPhone), not a sheet. Back stays where it is; the name is plain text. */
+  .scrim.push { place-items: stretch; background: var(--color-bg); }
+  .scrim.push > .sheet { width: 100%; height: 100%; max-height: none; border-radius: 0; background: var(--color-bg); box-shadow: none; animation: none }
+  .scrim.push > .sheet > .body { flex: 1 1 auto; padding-top: 8px }
+  .toolbar .tb-group:empty { display: none }
+  .scrim.push .toolbar > .btn.filled { --h: 44px; padding-inline: 18px; border-radius: 22px; corner-shape: round; font-size: 17px }
+  .sheet .body > .delete { --h: 48px; font-size: 17px; border-radius: 24px; corner-shape: round }
+  .composer .field .line { min-height: 42px }
+  .composer textarea { font-size: 17px; line-height: 22px; padding: 10px 4px 10px 16px }
+  .composer .field .line .btn.icon { --h: 34px; margin: 4px }
+  .composer .field .line .btn.icon mp-icon { --icon-size: 18px }
+  .toolbar > span.title { position: absolute; left: 50%; transform: translateX(-50%); max-width: calc(100% - 200px); justify-items: center; text-align: center }
+  .toolbar > button.title { flex: 1; box-sizing: border-box; height: 44px; align-content: center; margin: 0; padding: 0 16px 0 46px; border-radius: 22px; corner-shape: round; background: var(--color-floating); box-shadow: var(--shadow-1) }
+  .toolbar > button.title b { font-size: 15px }
+  .toolbar > button.title small { font-size: 12px }
+  .list.side > .row > .avatar { width: 45px; height: 45px; font-size: 16px }
+  .list.side .row-main > .h > b { font-size: 17px; line-height: 22px }
+  .list.side .row-main > small { font-size: 15px; line-height: 20px }
+  body:not(.home) > .sidebar, body.home > main > :not(.scrim) { display: none }
+  body.home > main { height: 0 }
+  main { height: 100% }
+  .back { display: inline-flex }
 }
+@keyframes mp-sheet-up { from { transform: translateY(calc(100% * var(--motion))) } }
+/* A phone's push and pop (iOS): the new view slides in over the old, which moves a third aside and dims; a pop reverses it. */
+::view-transition-new(root) { animation: mp-push-in .35s cubic-bezier(.2,.8,.2,1) both }
+::view-transition-old(root) { animation: mp-push-under .35s cubic-bezier(.2,.8,.2,1) both }
+.pop::view-transition-new(root) { animation: mp-pop-under .35s cubic-bezier(.2,.8,.2,1) both }
+.pop::view-transition-old(root) { animation: mp-pop-out .35s cubic-bezier(.2,.8,.2,1) both; z-index: 1 }
+/* Both ways start fast and slow down (iOS); a light shadow on the edge of the page on top. */
+@keyframes mp-push-in { from { transform: translateX(100%) } to { transform: none } }
+@keyframes mp-push-under { to { transform: translateX(-30%); filter: brightness(.96) } }
+@keyframes mp-pop-out { from { transform: none } to { transform: translateX(100%) } }
+@keyframes mp-pop-under { from { transform: translateX(-30%); filter: brightness(.96) } to { transform: none } }
+:root:not(.pop)::view-transition-new(root), .pop::view-transition-old(root) { box-shadow: -4px 0 12px rgb(0 0 0 / .06) }
+.tab main > .toolbar:not([hidden]) { view-transition-name: head }
+.tab::view-transition-group(head) { animation: none }

@@ -1,0 +1,35 @@
+.card { display: block; position: relative; padding: 14px 16px; border-radius: var(--radius-card); background: var(--color-surface); color: var(--color-text); text-decoration: none; text-align: left; border: 0; font: var(--text-body); transition: background var(--duration-fast) var(--ease-standard), transform var(--duration-base) var(--ease-spring); }
+.card.on-surface { background: var(--color-surface-2); }
+.card > h3 { margin: 0 0 2px; font: var(--text-headline); }
+.card > p { margin: 0; font: var(--text-callout); color: var(--color-text-2); }
+.card .date { font: var(--text-footnote); color: var(--color-text-3); }
+.card > .meta { display: block; margin-top: 8px; font: var(--text-footnote); color: var(--color-text-3); }
+a.card:hover, button.card:hover { background: color-mix(in srgb, var(--color-surface) 92%, var(--color-text)); }
+a.card:active, button.card:active { transform: scale(calc(1 - .02 * var(--motion))); }
+.card:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
+.card.selected { background: color-mix(in srgb, var(--color-text) 8%, var(--color-surface)); }
+.card.image { padding: 0; overflow: hidden; }
+.card.image > img, .card.image > .media { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top; background: var(--color-surface-2); }
+.card.image > .body { padding: 10px 14px 12px; }
+.card.image > .body h3 { margin: 0 0 2px; font: var(--text-headline); }
+.card.image > .body p { margin: 0; font: var(--text-subheadline); color: var(--color-text-2); }
+.card.metric > .value { font: 600 24px/30px var(--font-text); letter-spacing: -.02em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.card.metric > .label { font: var(--text-subheadline); color: var(--color-text-2); }
+/* A dashboard section: a title with a count or a note, then its content. */
+.panel { display: grid; gap: 12px; }
+.panel > h2 { display: flex; align-items: baseline; gap: 6px; margin: 0; font: var(--text-title-2); letter-spacing: var(--tracking-title-2); }
+.panel > h2 small { font: var(--text-subheadline); color: var(--color-text-3); }
+.panel > h2 small.end { margin-left: auto; }
+/* Board: a project dashboard as full-bleed sections split by hairlines, no card per section (Alexander's Admin Work dashboard, items/project-view).
+   Wide: Timeline over Needs you on the left (3fr / 2fr), Done on the right. Narrow: one column, Needs you first. */
+.board { height: 100%; display: grid; grid-template-columns: minmax(280px, 38%) minmax(0, 1fr); grid-template-rows: minmax(0, 3fr) minmax(0, 2fr); grid-template-areas: "tl done" "needs done"; gap: var(--hairline); background: var(--color-separator); }
+.board > section { min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 16px 3px 20px 20px; background: var(--color-bg); }
+.board > .b-needs { grid-area: needs; } .board > .b-tl { grid-area: tl; } .board > .b-done { grid-area: done; }
+.board h2 { display: flex; align-items: baseline; gap: 6px; margin: 0 0 12px; font: var(--text-caption); letter-spacing: .06em; text-transform: uppercase; color: var(--color-text-2); }
+.board h2 small { font: inherit; letter-spacing: 0; color: var(--color-text-3); font-variant-numeric: tabular-nums; }
+.board h2 .end { margin-left: auto; font-weight: 400; text-transform: none; }
+.board .none { margin: 0; font: var(--text-callout); color: var(--color-text-2); }
+@media (max-width: 720px) {
+  .board { height: auto; min-height: 100%; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "needs" "tl" "done"; align-content: start; }
+  .board > section { overflow: visible; padding-right: 20px; }
+}

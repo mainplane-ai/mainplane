@@ -1,0 +1,41 @@
+.segmented {
+  --h: 24px; --r: var(--radius-6); --in: 0px; --px: 10px; --fs: 13px;
+  --thumb: var(--color-text); --thumb-ink: var(--color-surface);
+  position: relative; display: inline-flex; height: var(--h); padding: var(--in); box-sizing: border-box; vertical-align: middle;
+  border-radius: var(--r); background: var(--color-fill);
+}
+.segmented > button {
+  position: relative; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  min-width: calc(var(--h) - 2 * var(--in) + 4px); height: 100%; margin: 0; padding: 0 var(--px); border: 0;
+  border-radius: calc(var(--r) - var(--in)); background: transparent; color: var(--color-text);
+  font: 400 var(--fs)/1 var(--font-text); letter-spacing: 0; white-space: nowrap; cursor: default; -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+.segmented > button:has(> mp-icon:only-child) { padding: 0 6px; }
+.segmented > button mp-icon { --icon-size: 16px; }
+/* Divider: 1px, 5px short of each edge, hidden next to the selected or pressed segment. */
+.segmented > button + button::before { content: ""; position: absolute; left: -.5px; top: 5px; bottom: 5px; width: 1px; background: var(--color-separator); transition: opacity var(--duration-fast); }
+.segmented > button:is([aria-checked="true"], :active)::before, .segmented > button:is([aria-checked="true"], :active) + button::before { opacity: 0; }
+/* No hover change (as AppKit). Press darkens an unselected segment. */
+.segmented > button:active:not([aria-checked="true"]) { background: var(--color-fill-pressed); }
+.segmented > button[aria-checked="true"] { background: var(--thumb); color: var(--thumb-ink); }
+.segmented > button:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); z-index: 1; }
+.segmented > button:disabled { color: var(--color-text-3); pointer-events: none; }
+.segmented > button:disabled[aria-checked="true"] { background: var(--color-fill-pressed); color: var(--color-text-3); }
+
+.segmented.sm { --h: 20px; --r: calc(5px * var(--corner-k)); --px: 8px; --fs: 12px; }
+.segmented.sm > button mp-icon { --icon-size: 14px; }
+.segmented.lg, .segmented.in-toolbar { --r: var(--radius-full); corner-shape: round; }
+.segmented.lg > button, .segmented.in-toolbar > button { border-radius: var(--radius-full); corner-shape: round; }
+.segmented.lg { --h: 28px; --in: 2px; --px: 12px; }
+.segmented.lg > button + button::before { top: 4px; bottom: 4px; left: -.5px; }
+.segmented.in-toolbar {
+  --h: 36px; --in: 4px; --px: 12px; --thumb: var(--color-fill-pressed); --thumb-ink: var(--color-text);
+  gap: 0; background: var(--color-floating); box-shadow: inset 0 0 0 1px var(--color-floating-edge), var(--shadow-1);
+}
+.segmented.in-toolbar > button { min-width: 36px; }
+.segmented.in-toolbar > button:has(> mp-icon:only-child) { padding: 0 8px; }
+.segmented.in-toolbar > button mp-icon { --icon-size: 18px; }
+.segmented.in-toolbar > button + button::before { top: 6px; bottom: 6px; }
+.segmented.fill { display: flex; }
+.segmented.fill > button { flex: 1 1 0; }
