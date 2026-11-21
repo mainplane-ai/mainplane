@@ -22,7 +22,9 @@ main > .composer { flex: none; margin: 4px 16px 12px }
 main { position: relative }
 main > .composer { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1 }
 main > .composer :is(.field, > .btn.icon) { background: var(--glass); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--shadow-1), inset 0 0 0 .5px var(--color-floating-edge) }
-main:has(> .composer:not([hidden])) > .view { padding-bottom: calc(var(--composer-h, 0px) + 16px) }
+/* The chat pads its thread, not its scroller: the thread grows with the composer and the chat at its end stays there. */
+main:has(> .composer:not([hidden])) > .view:not(:has(> .thread)) { padding-bottom: calc(var(--composer-h, 0px) + 16px) }
+main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--composer-h, 0px) + 32px) }
 .composer .quote { display: flex; align-items: center; gap: 6px; padding: 6px 4px 0 14px; color: var(--color-text-2); font-size: 13px }
 .composer .quote > span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis }
 .composer .quote mp-icon { --icon-size: 14px }
@@ -60,8 +62,7 @@ main:has(> .composer:not([hidden])) > .view { padding-bottom: calc(var(--compose
 .thread .continued > summary::before, .thread .continued > summary::after { content: ""; flex: 1; height: 1px; background: var(--color-separator) }
 .thread .continued > summary:hover { color: var(--color-text-2) }
 .thread .error { color: var(--color-danger) }
-.agent-bar { display: flex; align-items: center; gap: 8px; margin: 0 16px; font: var(--text-footnote); color: var(--color-text-2) }
-.agent-bar span { flex: 1 }
+.thread .stop { margin: 4px 2px 0 }
 .scrim { position: fixed; inset: 0; z-index: var(--z-sheet); display: grid; place-items: center; background: var(--color-scrim) }
 .sheet .form-row > .input { flex: 1; min-width: 0 } /* a field takes the row's room left of its name */
 /* Project settings: larger than the other sheets; Delete Project ends the page, full width, red on the form's gray (Apple). */
