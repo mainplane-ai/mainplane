@@ -414,7 +414,10 @@ server. Nothing is shared until the harness config names a drive:
 - Lock files on a drive with fcntl locks (`lockf(3)`, Python's `fcntl.lockf`),
   not `flock`: on a drive's server, `flock` does not see other workers' locks.
 - Windows gets no oplocks on a drive, so it sees a change from another worker
-  at its next read, and each open of a file is a round trip to the server.
+  at its next read. The cost is that each open, unbuffered read or small write
+  is a round trip to the server, while bulk copies run at link speed. Tools
+  that do many small reads or writes, such as ffmpeg or Blender, should work in
+  local scratch or temp and copy whole files to or from the drive.
 - A Windows deny-write open stops only other Windows workers. Office's `~$`
   owner files are a convention: a macOS or Linux worker can still write the
   file. Byte-range locks do reach every worker.
