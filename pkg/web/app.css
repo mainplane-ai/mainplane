@@ -62,7 +62,10 @@ main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--compose
 .thread .continued > summary::before, .thread .continued > summary::after { content: ""; flex: 1; height: 1px; background: var(--color-separator) }
 .thread .continued > summary:hover { color: var(--color-text-2) }
 .thread .error { color: var(--color-danger) }
-.thread .stop { margin: 4px 2px 0 }
+.thread .typing-row:not([hidden]) { flex-direction: row; align-items: center; justify-content: space-between }
+.thread .stop { --h: 32px; width: 32px; padding: 0; justify-content: center; border-radius: 50%; corner-shape: round; background: var(--glass); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--shadow-1), inset 0 0 0 .5px var(--color-floating-edge); color: var(--color-text) }
+.thread .stop mp-icon { --icon-size: 14px }
+.thread .stop mp-icon :is(path, rect) { fill: currentColor } /* a solid square, as in ChatGPT and Codex */
 .scrim { position: fixed; inset: 0; z-index: var(--z-sheet); display: grid; place-items: center; background: var(--color-scrim) }
 .sheet .form-row > .input { flex: 1; min-width: 0 } /* a field takes the row's room left of its name */
 /* Project settings: larger than the other sheets; Delete Project ends the page, full width, red on the form's gray (Apple). */
