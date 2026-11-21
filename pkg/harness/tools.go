@@ -73,6 +73,7 @@ Drives:
 - SQLite on a drive must not use WAL. Use journal_mode=DELETE, keep the database in scratch, or run a database server
 - Use names Windows can open: none of : * ? " < > | \, no trailing dot or space, no CON, PRN, AUX, NUL, COM1-9, LPT1-9, no two names that differ only in case
 - Build outputs, node_modules, venvs, caches, and the like should go in scratch. Thousands of small files are slow on a drive
+- On Windows, drives do not cache reads or writes: each small read or write is a network round trip. Have tools like ffmpeg or Blender read and write in scratch, then copy whole files to or from the drive
 - git works on a drive
 - While a drive's server is unreachable, operations on the drive wait for it
 - The sessions drive holds every session's .state file, read-only
