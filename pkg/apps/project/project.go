@@ -89,11 +89,13 @@ const (
 
 // Dashboard is the policy a dashboard is shown under. Its origin is its own,
 // so it reads no key of the interface, and it cannot move the page around
-// it. The rest is a web page's: code of its own, what https serves, links
-// that open beside it, and the design system's files at ds, sources such as
-// "https://example.com/web/ds/".
+// it. The rest is a web page's: code of its own, eval for the libraries that
+// build their code, what https serves, links that open beside it, and the
+// design system's files at ds, sources such as "https://example.com/web/ds/".
+// A frame inside it is under the same sandbox: its origin is its own again,
+// and it reaches the interface no more than the dashboard does.
 func Dashboard(ds string) string {
-	return "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; default-src 'none'; script-src 'unsafe-inline' https: " + ds + "; style-src 'unsafe-inline' https: " + ds + "; font-src https: data: " + ds + "; img-src https: data: blob:; media-src https: data: blob:; connect-src https: wss:"
+	return "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https: " + ds + "; style-src 'unsafe-inline' https: " + ds + "; font-src https: data: " + ds + "; img-src https: data: blob:; media-src https: data: blob:; connect-src https: wss:; frame-src https: data: blob:; child-src https: data: blob:"
 }
 
 // maxStore bounds a project's whole store: a page and a thousand cards with

@@ -23,12 +23,13 @@ curl -H "$A" -X DELETE $U/files/cards/0001.json
 
 - The dashboard is the files of the store. `index.html` is the page; every other file is data the page reads. Names are path segments of letters, digits, dot, dash and underscore. A file is at most 8 MiB and the store 256 MiB. There is no versioning: if you need to keep old results, save them in a worker or remote drive. The dashboard is meant to be a slim current overview of project work.
 - Many agents can add one small file per item (`cards/0001.json`, `cards/0001.png`) at once. One large file would require every change to upload again.
-- The page runs in a frame with an origin of its own: no key, no cookies, no `localStorage`, and it cannot navigate the interface. Its policy allows inline scripts and styles; scripts, styles, fonts, images and media from any `https:` URL; `fetch` and WebSocket to `https:` and `wss:`; the design system at `/web/ds/1/`. Not allowed: plain `http:`, `eval`, frames, and calls to the harness API (use the calls below). A link opens in a new tab.
+- The page runs in a frame with an origin of its own: no key, no cookies, no `localStorage`, and it cannot navigate the interface. Its policy allows inline scripts and styles, and `eval`; scripts, styles, fonts, images and media from any `https:` URL; `fetch` and WebSocket to `https:` and `wss:`; frames of `https:`, `blob:` and `data:` URLs and of `srcdoc`; workers from `blob:` URLs; the design system at `/web/ds/1/`. Not allowed: plain `http:`, and calls to the harness API (use the calls below). A link opens in a new tab.
 - The page reaches its own project, and nothing else, through `mainplane.call(name, args)`, which every dashboard has. It returns a promise:
 
 ```
 mainplane.call("list", {prefix: "cards/"})                  // -> [{name, size, modified}]
-mainplane.call("read", {name: "cards/0001.png"})            // -> ArrayBuffer; make a blob: URL for an image
+mainplane.call("read", {name: "cards/0001.png"})            // -> ArrayBuffer
+mainplane.preview("cuts/0001.mp4")                          // -> a blob: URL of the file, typed by its name: the src of an <img>, <video>, <audio>, or of an <iframe> for HTML
 mainplane.call("write", {name: "state/seen.json", body})    // body: a string, ArrayBuffer or Blob. Also the page's key-value storage
 mainplane.call("delete", {name: "state/seen.json"})
 mainplane.call("send", {text: "approve card 7"})            // a message to the orchestrator, from the user
@@ -42,6 +43,7 @@ mainplane.watch(e => {})                                    // at each change of
 ```
 
 - Under the helper it is `parent.postMessage({id, call, ...args}, "*")`, answered by a message `{id, result}` or `{id, error}`; a change of the store arrives as `{event: "changed", changed, deleted}`. When `index.html` itself changes, the page is loaded again.
+- Show a rich file (an article, a report, a mockup) in a frame of its own: `frame.src = await mainplane.preview("articles/draft.html")`. When the file links the design system, set `frame.srcdoc` to its text instead: only there does `/web/ds/1/` resolve. A page in a frame is alone, as a page of another site is: it has no `mainplane`, no cookies and no storage, it reads no file of the store, and a `blob:` URL the dashboard made does not load in it. Write it whole in one file, with its images and media as `data:` or `https:` URLs, or send it bytes with `postMessage`. Video and audio of the store play in the dashboard itself, with `preview` as the `src`. A PDF does not show in a frame, and neither does a site that needs its login.
 
 ### Look and components
 

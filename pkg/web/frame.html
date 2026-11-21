@@ -3,15 +3,19 @@
 <script>
 // A dashboard is shown here: this frame has an origin of its own and holds
 // no key. The page around it sends the dashboard's HTML and answers what the
-// dashboard asks with mainplane.call; mainplane.watch hears the store change.
+// dashboard asks with mainplane.call; mainplane.watch hears the store change,
+// and mainplane.preview makes a file of the store a blob: URL to show.
 addEventListener("message", e => {
   if (e.source !== parent || typeof e.data?.html !== "string") return
   document.open() // the listeners end here: the dashboard starts with these alone
   const waiting = new Map(), watchers = []
+  // types is what a browser must be told to show a file in a frame or play it; an image it knows by its bytes.
+  const types = { html: "text/html;charset=utf-8", svg: "image/svg+xml", mp4: "video/mp4", webm: "video/webm", mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav" }
   let seq = 0
   window.mainplane = {
     call: (name, args) => new Promise((resolve, reject) => { waiting.set("mp" + ++seq, { resolve, reject }); parent.postMessage({ ...args, id: "mp" + seq, call: name }, "*") }),
     watch: fn => watchers.push(fn),
+    preview: async name => URL.createObjectURL(new Blob([await mainplane.call("read", { name })], { type: types[name.split(".").pop().toLowerCase()] ?? "" })),
   }
   addEventListener("message", e => {
     if (e.source !== parent) return
