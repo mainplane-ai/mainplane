@@ -76,10 +76,10 @@ const day = (into: HTMLElement, time: string) => {
 // chat follows the agent with one long poll, which stops while the page is
 // hidden or on says the chat is not in view, and ends with signal. Earlier
 // sessions load on request.
-export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElement[] {
-  // While the agent works the thread ends in a typing bubble, and it can be stopped.
-  const typing = h("div", { className: "msg first tail", hidden: true }, h("div", { className: "bubble" }, h("span", { className: "typing", role: "status", ariaLabel: "Working" }, h("i"), h("i"), h("i"))))
-  const stop = h("button", { className: "btn plain sm", hidden: true, onclick: () => post("stop?via=web")() }, "Stop")
+export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElement {
+  // While the agent works the thread ends in a typing bubble with Stop under it.
+  const stop = h("button", { className: "btn plain sm stop", onclick: () => post("stop?via=web")() }, "Stop")
+  const typing = h("div", { className: "msg first tail", hidden: true }, h("div", { className: "bubble" }, h("span", { className: "typing", role: "status", ariaLabel: "Working" }, h("i"), h("i"), h("i"))), stop)
   const post = (what: string) => () => api(`/agents/${id}/${what}`, { method: "POST" }).then(acted, alert)
   const log = h("div", { className: "view" })
   const thread = h("div", { className: "thread" })
@@ -89,7 +89,7 @@ export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElem
   let end = true
   const toEnd = () => (log.scrollTop = log.scrollHeight)
   log.addEventListener("scroll", () => (end = log.scrollHeight - log.scrollTop - log.clientHeight < 40), { passive: true })
-  new ResizeObserver(() => end && toEnd()).observe(thread)
+  new ResizeObserver(() => end && toEnd()).observe(thread, { box: "border-box" }) // border-box: the composer growing pads the thread
   const calls = new Map<string, HTMLElement>()
   // A message shows as it is sent, before the harness has it. Its record takes its place; one that fails is taken back.
   const pending = h("div")
@@ -146,7 +146,7 @@ export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElem
       draw(recs, live)
       n = recs.at(-1)?.n ?? n
       status = r.headers.get("Mainplane-Status")!
-      typing.hidden = stop.hidden = status !== "stepping"
+      typing.hidden = status !== "stepping"
       return r.headers.get("Mainplane-Session")!
     }
     // The sessions before the live one are asked for beside its records, not before them.
@@ -187,5 +187,5 @@ export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElem
     }
   }
   follow().catch(err => signal.aborted || thread.append(h("div", { className: "error" }, String(err), " ", h("a", { href: location.pathname }, "Try again"))))
-  return [log, h("div", { className: "agent-bar" }, h("span"), stop)]
+  return log
 }
