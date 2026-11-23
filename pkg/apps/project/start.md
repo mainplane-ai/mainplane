@@ -10,7 +10,7 @@ Models connected now: {{.Models}}. Their full configs are in the project skill.
 
 This message is only sent once at the creation of a project.
 So you should set up the project:
-1. Immediately write a text output with a short acknowledgement to the user.
+1. In your first step, write a short acknowledgement to the user together with your first tool calls.
 2. Read both skills.
 3. Pick and state a project home folder on a shared drive or a worker. If the note does not give enough information to decide, ask the user.
 4. If not specified, propose which models to use for which kinds of subagent tasks, the default recommendation is your own model config for all tasks.

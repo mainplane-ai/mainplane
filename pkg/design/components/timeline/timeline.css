@@ -8,7 +8,7 @@
 .timeline li::before { content: ""; position: absolute; left: var(--tl-x); top: 0; bottom: 0; width: 1px; background: var(--color-text); }
 .timeline li:first-child::before { top: 50%; }
 .timeline li:last-child::before { bottom: 50%; }
-.timeline li.here::before, .timeline li.here ~ li::before { background: repeating-linear-gradient(to bottom, var(--color-text-3) 0 3px, transparent 3px 6px); }
+.timeline li.at ~ li::before { background: repeating-linear-gradient(to bottom, var(--color-text-3) 0 3px, transparent 3px 6px); }
 .timeline li:only-child::before { display: none; }
 .timeline li > i { position: absolute; left: calc(var(--tl-x) - 3.5px); top: calc(50% - 4px); width: 8px; height: 8px; border-radius: 50%; corner-shape: round; box-sizing: border-box; background: var(--color-text); }
 .timeline li.now > i { box-shadow: 0 0 0 2px var(--tl-bg), 0 0 0 3px var(--color-text); }
@@ -18,6 +18,8 @@
 .timeline li.next .l, .timeline li.wait .l { color: var(--color-text-2); }
 .timeline .on { font: var(--text-subheadline); color: var(--color-text-3); }
 .timeline .v { flex: none; font: var(--text-subheadline); color: var(--color-text-3); font-variant-numeric: tabular-nums; }
-/* the pointer: a short dotted leader across the rail, then the label */
-.timeline li.here { font: var(--text-caption); color: var(--color-accent); } /* blue, as in his Admin Work dashboard */
-.timeline li.here::after { content: ""; position: absolute; left: calc(var(--tl-x) - 4px); width: 13px; top: 50%; border-top: 1px dotted var(--color-text); }
+/* the first step not done is where the lane is: its label in ink, the pointer after it, and a fill when it waits */
+.timeline li.at .l { color: var(--color-text); font-weight: 600; }
+.timeline li.at .here { flex: none; font: var(--text-caption); color: var(--color-text-2); }
+.timeline li.at.wait { background: var(--color-fill); border-radius: 6px; }
+.timeline li.at.wait > i { border-color: var(--color-status-waiting); }
