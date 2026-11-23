@@ -607,6 +607,73 @@ func TestWorkersMidStep(t *testing.T) {
 	}
 }
 
+// A prompt that shrinks across an update is the new harness's own build of
+// the context, not a cut: the calls run and the session goes on.
+func TestShrinkAcrossUpdate(t *testing.T) {
+	r := newRig(t)
+	old := version.V
+	t.Cleanup(func() { version.V = old })
+	version.V = "v-old"
+	r.step = func(body string) turn {
+		if !strings.Contains(body, "tool_result") {
+			return turn{code: "wait", input: 1000}
+		}
+		return turn{input: 900}
+	}
+	a := r.create(AgentCreate{Config: r.conf(100000, 0, "w1")}, "web")
+	if _, _, err := r.h.PostAgent(context.Background(), a.ID, "web", "", []Part{{Type: "text/plain", Body: []byte("start")}}); err != nil {
+		t.Fatal(err)
+	}
+	<-r.started
+	version.V = "v-new"
+	close(r.release)
+	r.settled(a.ID)
+}
+
+// A session that needs a step when the harness starts is told of the restart
+// and the update, and steps once its workers are back.
+func TestResumeAfterUpdate(t *testing.T) {
+	r := newRig(t)
+	old := version.V
+	t.Cleanup(func() { version.V = old })
+	version.V = "v-old"
+	a := r.create(AgentCreate{Config: r.conf(100000, 0, "w1", "late")}, "web")
+	s := r.post(a.ID, "hi")
+	version.V = "v-new"
+	var body string
+	r.step = func(b string) turn {
+		body = b
+		return turn{input: 10}
+	}
+	if err := r.h.note(r.h.session(s), s, statefile.Record{Header: statefile.Header{Kind: statefile.Message, Type: "text/plain", Via: "test"}, Body: []byte("again")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.h.Resume(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	r.mu.Lock()
+	steps := r.steps
+	r.mu.Unlock()
+	if steps != 1 {
+		t.Fatalf("stepped %d times before worker late was back", steps)
+	}
+	near, far := net.Pipe()
+	t.Cleanup(func() { _ = near.Close() })
+	r.writes.Go(func() { r.serve(far) })
+	rem, err := Connect(near, func() (string, error) { return "late", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.h.Workers.Add(rem)
+	r.settled(a.ID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.steps != 2 || !strings.Contains(body, "for the update v-old -> v-new") || !strings.Contains(body, "worker late: linux") {
+		t.Fatalf("steps %d, body %s", r.steps, body)
+	}
+}
+
 // An agent is stepping all through a handoff: the next session is live
 // before it is kicked, while the one before is still in the step that hands
 // the task off.
