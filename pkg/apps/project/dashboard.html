@@ -17,7 +17,7 @@ html, body { height: 100%; margin: 0; background: var(--color-bg); }
 </main>
 <div class="empty" id="empty" hidden><mp-icon name="check"></mp-icon><h3>No dashboard yet</h3><p>The orchestrator makes one as the work starts.</p></div>
 <script>
-// call asks the interface that shows this page: list, read, send, status, reply.
+// call asks the interface that shows this page. The calls are in the project skill (mainplane skill project).
 let seq = 0; const waiting = new Map()
 function call(name, args) {
   return new Promise((resolve, reject) => { waiting.set(++seq, { resolve, reject }); parent.postMessage({ id: seq, call: name, ...args }, "*") })
@@ -31,7 +31,7 @@ addEventListener("message", e => {
 
 // Data, one small file per item:
 //   needs/<id>.json  {"title", "detail", "answers": ["Approve", "Not yet"]}  a question for the user
-//   timeline.json    {"updated", "lanes": [{"name", "steps": [{"label", "state": "done"|"next"|"wait", "value"}]}]}
+//   timeline.json    {"updated", "lanes": [{"name", "steps": [{"label", "state": "done"|"next"|"wait", "value"}]}]}  a "wait" step names what it waits on
 //   cards/<id>.json  {"title", "detail", "date", "value"} a metric, or {"title", "detail", "image": "cards/<id>.png"}
 const el = (tag, cls, text) => Object.assign(document.createElement(tag), cls ? { className: cls } : {}, text != null ? { textContent: text } : {})
 const json = async name => JSON.parse(new TextDecoder().decode(await call("read", { name })))
@@ -47,9 +47,8 @@ function need(n) {
     b.onclick = () => call("send", { text: `Answer to "${n.title}": ${a}` }).then(() => { div.classList.add("answered"); answers.replaceChildren("You answered: " + a) })
     answers.append(b)
   })
-  // Reply goes to the chat box under the dashboard, which shows what it replies to.
+  // Reply: the design system's needs card puts the title over the chat box under the dashboard.
   const reply = el("button", "btn sm reply"); reply.append(icon("reply"), "Reply")
-  reply.onclick = () => call("reply", { title: n.title })
   answers.append(reply)
   div.append(answers)
   return div
@@ -58,12 +57,13 @@ function need(n) {
 function lane(l) {
   const s = el("section"), h = el("h3", "", l.name), ol = el("ol")
   const done = l.steps.filter(x => x.state === "done").length
+  const at = l.steps.findIndex(x => x.state !== "done")
   h.append(el("span", "", `${done}/${l.steps.length}`)); s.append(h, ol)
   l.steps.forEach((x, i) => {
-    const li = el("li", x.state); li.append(el("i"), el("span", "l", x.label))
+    const li = el("li", x.state + (i === at ? " at" : "")); li.append(el("i"), el("span", "l", x.label))
+    if (i === at) li.append(el("span", "here", "← you are here"))
     if (x.value) li.append(el("span", "v", x.value))
     ol.append(li)
-    if (x.state === "done" && l.steps[i + 1]?.state !== "done" && i + 1 < l.steps.length) ol.append(el("li", "here", "← you are here"))
   })
   return s
 }

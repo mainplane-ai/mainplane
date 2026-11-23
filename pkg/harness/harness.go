@@ -361,12 +361,15 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	if a, ok := h.Holder(id); ok {
 		limit, changed = a.Config.ContextLimit, core(conf) != core(a.Config.Conf)
 	}
+	why := ""
 	if p := statefile.ContextUsed(chain); p > limit {
-		h.killAll(ctx, id, chain)
-		return h.handoff(ctx, s, fmt.Sprintf("context %d exceeds limit %d", p, limit))
+		why = fmt.Sprintf("context %d exceeds limit %d", p, limit)
 	} else if changed {
+		why = "the agent's config changed"
+	}
+	if why != "" {
 		h.killAll(ctx, id, chain)
-		return h.handoff(ctx, s, "the agent's config changed")
+		return h.handoff(ctx, s, why, fmt.Sprintf(carry, id, why, id))
 	}
 	var add []statefile.Record
 	if status == statefile.StatusFailed {
@@ -385,7 +388,25 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 			return "", err
 		}
 	}
-	return h.step(ctx, s, id, conf, chain)
+	st, err := h.step(ctx, s, id, conf, chain)
+	return h.carryOn(ctx, s, chain, st, err)
+}
+
+// carryOn is a step's status, unless the agent asked to continue and the
+// step ended the turn: then the session hands off. A turn that ends without
+// its last step drops the ask, which was for that turn.
+func (h *Harness) carryOn(ctx context.Context, s *session, chain []statefile.Record, st statefile.Status, err error) (statefile.Status, error) {
+	if err != nil || st == statefile.StatusFailed {
+		s.takeCarry()
+	}
+	if err != nil || st != statefile.StatusClosed {
+		return st, err
+	}
+	if text := s.takeCarry(); text != "" {
+		h.killAll(ctx, s.id, chain)
+		return h.handoff(ctx, s, asked, text)
+	}
+	return st, nil
 }
 
 // rebuilt explains a refusal this harness can see coming: it no longer

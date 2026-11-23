@@ -1065,3 +1065,49 @@ func TestMadeUpIDs(t *testing.T) {
 		t.Fatalf("%d locks and %d files for agents that are not", n, len(entries))
 	}
 }
+
+// An agent that asks to continue goes on in a new session as soon as its
+// turn ends, not before: the handoff is the new session's first message,
+// and the old session ends as at a rollover.
+func TestContinueAgent(t *testing.T) {
+	r := newRig(t)
+	a := r.create(AgentCreate{Config: r.conf(100_000, 0, "w1")}, "web")
+	s1 := a.Sessions[0]
+	if err := r.h.ContinueAgent(s1, "early"); err == nil {
+		t.Fatal("a continue with no turn running was taken")
+	}
+	r.step = func(string) turn {
+		if r.steps == 1 { // under r.mu: the first step runs the call, the next ends the turn, the third is s2's
+			return turn{code: "wait", input: 100}
+		}
+		return turn{input: 100}
+	}
+	if _, _, err := r.h.PostAgent(context.Background(), a.ID, "web", "", []Part{{Type: "text/plain", Body: []byte("start")}}); err != nil {
+		t.Fatal(err)
+	}
+	<-r.started
+	if err := r.h.ContinueAgent(s1, "the handoff"); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.sessions(a.ID); len(got) != 1 {
+		t.Fatalf("continued before the turn ended: %v", got)
+	}
+	close(r.release)
+	r.until(func() bool { return len(r.sessions(a.ID)) == 2 })
+	r.settled(a.ID)
+	s2 := r.sessions(a.ID)[1]
+	chain := r.chain(s1)
+	if tip := chain[len(chain)-1]; tip.Kind != statefile.Error || !strings.Contains(string(tip.Body), "the agent asked to continue") || chain[len(chain)-4].Kind != statefile.Text {
+		t.Fatalf("tip of s1: %v", chain[len(chain)-3:])
+	}
+	msgs := slices.DeleteFunc(r.chain(s2), func(rec statefile.Record) bool { return rec.Kind != statefile.Message })
+	if len(msgs) != 1 || string(msgs[0].Body) != "the handoff" || msgs[0].Via != "rollover" {
+		t.Fatalf("messages of s2: %v", msgs)
+	}
+	if got := r.bodies(s2, statefile.System, "continue"); len(got) != 1 || !strings.Contains(got[0], "the agent asked to continue") || !strings.Contains(got[0], s1+".log") {
+		t.Fatalf("continue of s2: %q", got)
+	}
+	if r.steps != 3 {
+		t.Fatalf("%d model calls, want 3", r.steps)
+	}
+}

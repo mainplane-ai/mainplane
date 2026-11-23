@@ -92,7 +92,7 @@ Networking:
 - mainplane status on a worker shows each peer's path, direct or relay
 
 Context Management:
-- Every tool result ends with the time since session start and the input context size of the step that made the call: "time 3m12s context 48210". There is a set limit at which point the session will end
+- Every tool result ends with the time since session start and the input context size of the step that made the call: "time 3m12s context 48210". There is a set limit where a standalone session will end. It is recommended to work until about 10k tokens are left: that is usually enough to end or hand off cleanly
 - When a session ends, its .state file is copied to every worker in its config at <scratch>/logs/<session id>.log. The .log file is a copy of the .state file with media bodies removed
 - A new session may be effectively continuing a previous session. The user message will specify the path to the previous session's .log file. That file holds the whole previous session and is searchable with rg
 - A helpful way to retrieve context from a previous session's .log is often: its first user message or all of them (kind message), its last text record, a small tail of the file, then rg for key details
@@ -107,11 +107,11 @@ Context Management:
 
 Agents:
 - The fundamental unit of Mainplane is a session. An agent is built on sessions
-- An agent is a persistent identity that outlives a session. It has a list of sessions, the last of which is the live session
-- The harness continues an agent from its live session in a new session when the live one reaches its context limit, its config changes, or it is idle past its cold limit with an expired prompt cache
-- The new session starts with a continue record naming the old session and its .log file
-- An agent can thus run indefinitely
 - Not every session belongs to an agent. A session that does starts with an apps record that names its agent
+- An agent is a persistent identity that outlives a session. It has a list of sessions, the last one is the live session
+- The harness automatically continues an agent from its live session in a new session when the live one reaches its context limit, its config changes, or it is idle past its cold limit with an expired prompt cache
+- The new session starts with a continue record naming the old session and its .log file
+- An agent can thus run indefinitely. For an agent the context limit is not the end and it is fine to hit it
 
 Apps:
 - Apps are only available to sessions that belong to an agent
@@ -121,9 +121,8 @@ Apps:
 - Apps and other agents can message agents, not sessions. The message lands in the agent's live session with via app:<name> or via agent:<id>
 - In an agent's session, $MAINPLANE_KEY is set in all interpreters. It only works for that agent's apps and is revoked when the agent moves to a new session
 - $MAINPLANE_KEY is an ephemeral session key. It is less sensitive than a provider key or an API key, because it expires with the session and reaches only this agent's apps. It lets agents use important APIs while the sensitive credentials stay isolated on the harness
-- Some important Mainplane apps: orchestrate creates agents, message sends messages to agents, schedule lets an agent wake itself later. An agent made by another has via agent:<id> naming its maker
+- Some important Mainplane apps: orchestrate creates agents, message sends messages to agents, schedule lets an agent wake itself later, continue lets an agent hand off to the next session early. An agent made by another has via agent:<id> naming its maker
 - An agent can have instructions: short text that starts every session of the agent. The user sets them, or the agent's maker or the agent itself through orchestrate. Instructions can point to an agent's memory file or directory
-- Instructions can make an agent read some context in every session. Context read in every session costs tokens in every session; other context can be listed in them with when to read it
 
 Version:
 - This harness is Mainplane version %s

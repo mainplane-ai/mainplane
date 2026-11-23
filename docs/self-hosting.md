@@ -478,7 +478,7 @@ and it stops working when the agent moves to a new session or loses the app.
 On a worker, `mainplane skill` lists the agent's apps, `mainplane skill <app>`
 prints how to use one, and `mainplane app <app> <method> <path> [body]` calls it.
 
-Four apps are built in:
+Five apps are built in:
 
 - `schedule`: timers, once or on a cron, that message the agent later. They
   outlive sessions and harness restarts.
@@ -486,10 +486,15 @@ Four apps are built in:
 - `orchestrate`: an agent creates agents of its own, reads them and stops
   them, with the `/agents` routes under `/apps/orchestrate`, which show it
   only those agents. An agent it creates gets no worker and no app that it
-  lacks itself, and `cold_limit` 100000 unless its config sets one. Of itself
-  it can change only its instructions.
-- `project`: the project an agent is in: its status and line, and the files
-  of its dashboard ([web interface and projects](#web-interface-and-projects)).
+  lacks itself, and `cold_limit` 100000 unless its config sets one. A config's
+  unset `workers` are the caller's, and its unset `context_limit`, `tools`,
+  `input` and `params` come from the model's catalog preset. Of itself it can change only its instructions.
+- `continue`: an agent hands off to its next session at a point it picks.
+  When its turn ends, the next session starts as at the context limit, with
+  the handoff text as its first message.
+- `project`: the project an agent is in: its status and line, the files of
+  its dashboard, and the conversation of the user with the orchestrator
+  ([web interface and projects](#web-interface-and-projects)).
 
 More apps are folders in `apps/` beside the config. `skill.md` is what an
 agent reads; its first line is `# <name>: <what it does>`. `app.json` is
@@ -555,8 +560,8 @@ one-line note, and a dashboard. Creating one is one call:
 POST /projects?via=<who>   {"name","note","config","apps"}
 ```
 
-It creates the orchestrator from `config` with `apps` plus `message`,
-`orchestrate`, `project` and `schedule`, saves the project as `open`, copies a
+It creates the orchestrator from `config` with `apps` plus `continue`,
+`message`, `orchestrate`, `project` and `schedule`, saves the project as `open`, copies a
 starter dashboard into its store, and posts the orchestrator its first
 message, `via app:project`, which tells it its role. The user starts by
 answering the orchestrator's reply. The other routes are listed in

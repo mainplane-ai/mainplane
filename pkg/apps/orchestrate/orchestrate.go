@@ -42,6 +42,10 @@ const stopped = "Agent %s%s, which you created, stopped: its session %s is %s."
 // created stops.
 type App struct {
 	http.Handler
+	// Preset is the catalog's config for a model, which a create's config
+	// takes what it leaves out from. The project app has the catalog.
+	Preset func(ctx context.Context, model string) (statefile.Conf, bool, error)
+
 	ctx  context.Context
 	h    *harness.Harness
 	path string
@@ -67,8 +71,11 @@ var errEscalate = errors.New("an agent you create may use only workers and apps 
 //
 //	POST   /agents                      AgentCreate body, no "session"; and        -> {"id","session"}
 //	                                    "message", "notify_on_stop". With no
-//	                                    "config" the agent gets the caller's,
-//	                                    with no "cold_limit" 100000
+//	                                    "config" the agent gets the caller's;
+//	                                    a config's unset workers are the
+//	                                    caller's, its unset context_limit,
+//	                                    tools, input and params the model's
+//	                                    preset; with no "cold_limit" 100000
 //	GET    /agents                      ?status= ?limit= ?after=<id>               -> [AgentInfo]
 //	GET    /agents/{id}                 -> AgentInfo
 //	GET    /agents/{id}/records         ?session=, else the live one; then as      -> records
@@ -235,8 +242,8 @@ func peek(r *http.Request, v any) error {
 }
 
 // create makes an agent of the caller's: with no config it gets the
-// caller's, and with no cold limit coldLimit. It adopts no session: the
-// caller's key reaches none.
+// caller's, a config is filled in by fill, and with no cold limit it gets
+// coldLimit. It adopts no session: the caller's key reaches none.
 func (o *App) create(w http.ResponseWriter, r *http.Request, caller harness.Agent) error {
 	var c create
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
@@ -247,6 +254,8 @@ func (o *App) create(w http.ResponseWriter, r *http.Request, caller harness.Agen
 	}
 	if c.Config == nil {
 		c.Config = &caller.Config
+	} else if err := o.fill(r.Context(), c.Config, caller); err != nil {
+		return err
 	}
 	if c.Config.ColdLimit == 0 {
 		c.Config.ColdLimit = coldLimit
@@ -281,6 +290,30 @@ func (o *App) create(w http.ResponseWriter, r *http.Request, caller harness.Agen
 		return err
 	}
 	reply(w, map[string]string{"id": a.ID, "session": a.Sessions[0]})
+	return nil
+}
+
+// fill gives a config what it leaves out: the caller's workers, and the
+// context limit, tools, input and params of its model's preset. A model
+// with no preset keeps what it has, and the harness says what is missing.
+func (o *App) fill(ctx context.Context, c *harness.AgentConfig, caller harness.Agent) error {
+	if c.Workers == nil {
+		c.Workers = caller.Config.Workers
+	}
+	if c.ContextLimit != 0 && c.Tools != "" && c.Input != nil && c.Params != nil {
+		return nil
+	}
+	p, ok, err := o.Preset(ctx, c.Model)
+	if err != nil || !ok {
+		return err
+	}
+	c.ContextLimit, c.Tools, c.Preset = cmp.Or(c.ContextLimit, p.ContextLimit), cmp.Or(c.Tools, p.Tools), cmp.Or(c.Preset, p.Preset)
+	if c.Input == nil {
+		c.Input = p.Input
+	}
+	if c.Params == nil {
+		c.Params = p.Params
+	}
 	return nil
 }
 

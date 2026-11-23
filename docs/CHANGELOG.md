@@ -23,6 +23,10 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 - Building from source: `go generate ./pkg/web` before `go build` bundles the web interface (`task web`)
 - Catalog: Gemini 4 Carbon on Google and OpenRouter. GPT-6.2 on OpenAI and the ChatGPT subscription. Gemini 4 Neon on Google and OpenRouter, in place of Gemini 3.8 Flash. Tencent Hy4. Each provider defaults to its smallest model that every plan can use. OpenRouter models priced by time of day are priced at their peak
 - Windows workers: a `powershell` interpreter (Windows PowerShell 5.1) beside `pwsh`
+- Built-in app `continue`: an agent hands off to its next session at a point it picks. `POST /apps/continue/` takes the handoff text, at most 16 KiB. When the turn ends, the harness starts the next session as it does at the context limit, with the handoff as its first message. Every project orchestrator has the app
+- Projects: `GET /apps/project/conversation` gives any agent of a project the user's messages and the orchestrator's text in the turns the user opened, across the orchestrator's sessions: the newest 10,000 tokens as plain text, and `?before=` for older ones
+- `orchestrate`: a create's `config` that leaves fields out takes `workers` from the caller, and `context_limit`, `tools`, `input` and `params` from the model's catalog preset. Before, a config without `context_limit` was refused, and one without `workers` got none
+- Web interface: among the open projects, one whose agents are working sorts after one that stopped. The starter dashboard's timeline marks the first step that is not done, highlighted when it waits, in place of a pointer row before it. A needs card answers with Reply in the chat box under the dashboard; the inline reply field is gone
 - Releases are built with Go 1.27.4, which fixes GO-2026-6859 in net/http
 
 ## v0.5.13
