@@ -1,6 +1,6 @@
 # message: use to send a message to another agent by its id.
 
-The message app is one simple route. The message arrives in the other agent's session as a user message `via agent:<your id>`, and wakes it.
+The message app is one route. The message arrives in the other agent's session as a user message `via agent:<your id>`, and wakes it.
 
 ```
 curl -H "Authorization: Bearer $MAINPLANE_KEY" -d '{"to":"<agent id>","text":"PR #88 is open"}' $MAINPLANE_URL/apps/message
