@@ -266,10 +266,13 @@ async function content(kind: string, id: string, sub: string, signal: AbortSigna
   return sub === "settings" ? [await settings(p, signal)] : []
 }
 
+// raster is a picture's type, so Open image in new tab shows it. Not SVG: opened in a tab
+// it would run its scripts as this page, which holds the key.
+const raster = (name: string) => ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" })[name.split(".").pop()!.toLowerCase()] ?? ""
 // stored shows one file of a project's store, an image or its text: what is in it is never run.
 async function stored(p: Project, name: string, signal: AbortSignal) {
   const b = await file(p.id, name, signal)
-  const img = h("img", { alt: name, src: URL.createObjectURL(new Blob([b])) })
+  const img = h("img", { alt: name, src: URL.createObjectURL(new Blob([b], { type: raster(name) })) })
   img.style.maxWidth = "100%"
   return h("div", { className: "view" }, h("div", { className: "page" }, h("h2", null, name), /\.(png|jpe?g|gif|webp)$/i.test(name) ? img : h("pre", { className: "code" }, text(new Uint8Array(b)))))
 }
@@ -283,7 +286,7 @@ async function agentView(id: string, at: string, sub: string, signal: AbortSigna
     head.classList.add("up")
     Object.assign(head.querySelector<HTMLAnchorElement>(".back")!, { href: up, ariaLabel: "Agents" })
   }
-  const view = [head, ...chat(id, signal), composer(id, `Message ${name}`)]
+  const view = [head, chat(id, signal), composer(id, `Message ${name}`)]
   if (sub === "settings") return [...view, sheet("Agent", name, at, [instructions(a)], [h("a", { href: at, className: "btn" }, "Done")])]
   return view
 }
@@ -307,8 +310,8 @@ function keep(p: Project) {
   const tabs = h("div", { className: "tabs", role: "tablist" }, tab(at, "Dashboard"), tab(at + "/chat", "Chat"))
   const write = composer(p.orchestrator, `Message ${p.name}`)
   let on = false
-  const dash = dashboard(p, signal), [log, bar] = chat(p.orchestrator, signal, () => on), people = h("div", { className: "view" })
-  const nodes = [head, tabs, dash, log, bar, people, write]
+  const dash = dashboard(p, signal), log = chat(p.orchestrator, signal, () => on), people = h("div", { className: "view" })
+  const nodes = [head, tabs, dash, log, people, write]
   let top = 1e9 // where the chat is scrolled to, which one out of view forgets: past its end is its end
   const show = (sub: string | null) => {
     if (!log.style.cssText) top = log.scrollHeight - log.scrollTop - log.clientHeight < 40 ? 1e9 : log.scrollTop
@@ -318,7 +321,6 @@ function keep(p: Project) {
     dash.hidden = !on || sub === "chat" || sub === "agents" || sub === "files"
     write.hidden = !on || sub === "files"
     log.style.cssText = sub === "chat" ? "" : skip
-    bar.hidden = sub !== "chat"
     people.hidden = sub !== "agents"
     ;["", "chat"].forEach((name, i) => (tabs.children[i].ariaSelected = String(sub === name)))
     log.scrollTop = top

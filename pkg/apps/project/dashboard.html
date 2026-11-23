@@ -71,7 +71,7 @@ function lane(l) {
 async function card(c) {
   const div = el("div", "card " + (c.image ? "image" : "metric"))
   if (c.image) {
-    const img = el("img"); img.alt = ""; img.src = URL.createObjectURL(new Blob([await call("read", { name: c.image })]))
+    const img = el("img"); img.alt = ""; img.src = URL.createObjectURL(new Blob([await call("read", { name: c.image })], { type: "image/" + c.image.split(".").pop().replace("jpg", "jpeg").replace("svg", "svg+xml") })) // typed, so Open image in new tab shows it
     const body = el("div", "body"); body.append(el("h3", "", c.title), el("p", "", c.detail || ""))
     div.append(img, body)
   } else div.append(el("div", "date", c.date ? short(c.date) : ""), el("div", "value", c.value), el("h3", "", c.title), el("div", "label", c.detail || ""))

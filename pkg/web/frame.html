@@ -25,6 +25,16 @@ addEventListener("message", e => {
   })
   // A link opens beside the interface: this frame goes nowhere.
   addEventListener("click", e => { const a = e.target.closest?.("a[href]:not([href^='#'], [target])"); if (a) a.target = "_blank" }, true)
+  // A picture clicked opens large over the interface (not one in a link or a button, nor an icon).
+  addEventListener("click", e => {
+    const img = e.target.closest?.("img")
+    if (!img || img.closest("a, button") || img.width < 80) return
+    // Drawn and sent as a PNG: the frame may not fetch (connect-src none), and the page around cannot load this frame's blob: URL.
+    const c = Object.assign(document.createElement("canvas"), { width: img.naturalWidth, height: img.naturalHeight })
+    c.getContext("2d").drawImage(img, 0, 0)
+    // A picture from another site without CORS taints the canvas: it opens in a tab beside the interface instead.
+    try { c.toBlob(image => parent.postMessage({ image, alt: img.alt }, "*")) } catch { open(img.currentSrc, "_blank") }
+  })
   // A swipe on the page goes to the interface: on a phone it moves between the project's views.
   let t0 = null
   const slides = el => !!el && el.nodeType === 1 && ((el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflowX !== "visible") || slides(el.parentElement))
@@ -33,7 +43,8 @@ addEventListener("message", e => {
   document.write(e.data.html); document.close()
   // The interface's glass header and composer float over the page: it starts under the one and ends above the other.
   const [top, bottom] = e.data.inset
-  document.head.append(Object.assign(document.createElement("style"), { textContent: `body { height: auto !important; min-height: 100%; box-sizing: border-box; padding-top: ${top}px; padding-bottom: ${bottom}px }` }))
+  // The page keeps its own height (a board's panels scroll in it): the root is padded, and on a phone, where the page scrolls, its end is.
+  document.head.append(Object.assign(document.createElement("style"), { textContent: `html { box-sizing: border-box; height: 100%; padding: ${top}px 0 ${bottom}px } @media (max-width: 700px) { html { padding-bottom: 0 } body::after { content: ""; display: block; height: ${bottom}px } }` }))
 })
 parent.postMessage({ ready: true }, "*")
 </script>

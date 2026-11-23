@@ -22,7 +22,9 @@ main > .composer { flex: none; margin: 4px 16px 12px }
 main { position: relative }
 main > .composer { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1 }
 main > .composer :is(.field, > .btn.icon) { background: var(--glass); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--shadow-1), inset 0 0 0 .5px var(--color-floating-edge) }
-main:has(> .composer:not([hidden])) > .view { padding-bottom: calc(var(--composer-h, 0px) + 16px) }
+/* The chat pads its thread, not its scroller: the thread grows with the composer and the chat at its end stays there. */
+main:has(> .composer:not([hidden])) > .view:not(:has(> .thread)) { padding-bottom: calc(var(--composer-h, 0px) + 16px) }
+main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--composer-h, 0px) + 32px) }
 .composer .quote { display: flex; align-items: center; gap: 6px; padding: 6px 4px 0 14px; color: var(--color-text-2); font-size: 13px }
 .composer .quote > span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis }
 .composer .quote mp-icon { --icon-size: 14px }
@@ -60,8 +62,10 @@ main:has(> .composer:not([hidden])) > .view { padding-bottom: calc(var(--compose
 .thread .continued > summary::before, .thread .continued > summary::after { content: ""; flex: 1; height: 1px; background: var(--color-separator) }
 .thread .continued > summary:hover { color: var(--color-text-2) }
 .thread .error { color: var(--color-danger) }
-.agent-bar { display: flex; align-items: center; gap: 8px; margin: 0 16px; font: var(--text-footnote); color: var(--color-text-2) }
-.agent-bar span { flex: 1 }
+.thread .typing-row:not([hidden]) { flex-direction: row; align-items: center; justify-content: space-between }
+.thread .stop { --h: 32px; width: 32px; padding: 0; justify-content: center; border-radius: 50%; corner-shape: round; background: var(--glass); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--shadow-1), inset 0 0 0 .5px var(--color-floating-edge); color: var(--color-text) }
+.thread .stop mp-icon { --icon-size: 14px }
+.thread .stop mp-icon :is(path, rect) { fill: currentColor } /* a solid square, as in ChatGPT and Codex */
 .scrim { position: fixed; inset: 0; z-index: var(--z-sheet); display: grid; place-items: center; background: var(--color-scrim) }
 .sheet .form-row > .input { flex: 1; min-width: 0 } /* a field takes the row's room left of its name */
 /* Project settings: larger than the other sheets; Delete Project ends the page, full width, red on the form's gray (Apple). */
@@ -203,3 +207,8 @@ main:has(> .composer:not([hidden])) > .view { padding-bottom: calc(var(--compose
 :root:not(.pop)::view-transition-new(root), .pop::view-transition-old(root) { box-shadow: -4px 0 12px rgb(0 0 0 / .06) }
 .tab main > .toolbar:not([hidden]) { view-transition-name: head }
 .tab::view-transition-group(head) { animation: none }
+/* A dashboard's picture opened large (Photos): dark behind it, the whole picture, a glass close at the top. */
+.lightbox { position: fixed; inset: 0; z-index: var(--z-sheet); display: grid; place-items: center; padding: 56px 24px 24px; box-sizing: border-box; background: rgb(0 0 0 / .86); animation: mp-fade var(--duration-fast) var(--ease-standard) }
+.lightbox > img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 12px; corner-shape: round }
+.lightbox > .btn { position: absolute; top: 12px; right: 12px; --h: 40px; width: 40px; justify-content: center; border-radius: 50%; corner-shape: round; background: rgb(255 255 255 / .16); color: #fff; backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6) }
+@media (max-width: 700px) { .lightbox { padding: 72px 0 24px } .lightbox > img { border-radius: 0 } .lightbox > .btn { top: 16px; right: auto; left: 16px; --h: 44px; width: 44px } }
