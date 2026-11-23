@@ -486,9 +486,9 @@ Five apps are built in:
 - `orchestrate`: an agent creates agents of its own, reads them and stops
   them, with the `/agents` routes under `/apps/orchestrate`, which show it
   only those agents. An agent it creates gets no worker and no app that it
-  lacks itself, and `cold_limit` 100000 unless its config sets one. A config
-  that names only a `model` takes the caller's workers and the rest from the
-  model's catalog preset. Of itself it can change only its instructions.
+  lacks itself, and `cold_limit` 100000 unless its config sets one. A config's
+  unset `workers` are the caller's, and its unset `context_limit`, `tools`,
+  `input` and `params` come from the model's catalog preset. Of itself it can change only its instructions.
 - `continue`: an agent hands off to its next session at a point it picks.
   When its turn ends, the next session starts as at the context limit, with
   the handoff text as its first message.

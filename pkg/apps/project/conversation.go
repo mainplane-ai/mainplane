@@ -73,7 +73,7 @@ func (a *App) blocks(p Project) ([]said, error) {
 	}
 	var all []said
 	user, ended, calls := false, true, false
-	for _, id := range g.Sessions {
+	for k, id := range g.Sessions {
 		chain, err := a.h.Sessions.Load(id)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue // deleted through /sessions
@@ -81,7 +81,15 @@ func (a *App) blocks(p Project) ([]said, error) {
 		if err != nil {
 			return nil, err
 		}
+		// A message no step of an earlier session saw moved to the next one with its handoff.
+		moved := len(chain) + 1
+		if last := statefile.LastStep(chain); last != nil && k < len(g.Sessions)-1 {
+			moved = last.Upto
+		}
 		for _, rec := range chain {
+			if rec.Kind == statefile.Message && rec.N > moved {
+				continue
+			}
 			at, when := fmt.Sprintf("%s.%d", id, rec.N), rec.Time.UTC().Format("2006-01-02 15:04")
 			switch rec.Kind {
 			case statefile.Call:

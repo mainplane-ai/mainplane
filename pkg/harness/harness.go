@@ -390,6 +390,9 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	}
 	st, err := h.step(ctx, s, id, conf, chain)
 	if err != nil || st != statefile.StatusClosed {
+		if err != nil || st == statefile.StatusFailed {
+			s.takeCarry() // the turn ended without its last step: what the agent asked was for that turn
+		}
 		return st, err
 	}
 	if text := s.takeCarry(); text != "" {
