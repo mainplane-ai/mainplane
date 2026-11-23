@@ -136,6 +136,9 @@ func handler(api http.Handler) http.Handler {
 			h.Set("X-Content-Type-Options", "nosniff")
 			if path.Base(name) == "frame.html" {
 				h.Set("Content-Security-Policy", project.Dashboard(dsSource(r))) // of whatever the frame is told to show
+				if r.URL.Query().Has("file") {
+					h.Set("Content-Security-Policy", project.Sandbox) // a file of a store, as the store serves it: no network
+				}
 			}
 			send(w, r, b)
 			return

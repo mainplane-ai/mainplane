@@ -3,7 +3,7 @@
 
 import { type Agent, type Project, acted, api, decode, file, get, h, icon, named, text } from "./api"
 
-const frameURL = new URL("frame.html", import.meta.url).href
+export const frameURL = new URL("frame.html", import.meta.url).href
 type Stored = { name: string; size: number; modified: string; body?: string }
 const bare = (f: Stored) => ({ name: f.name, size: f.size, modified: f.modified })
 // tail is how many of an agent's last records a dashboard is told of: what the agent does now, not its history.
