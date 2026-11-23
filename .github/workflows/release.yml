@@ -72,10 +72,16 @@ jobs:
       # Accessibility) for the code's designated requirement. An ad-hoc
       # signature's is its cdhash, so each release asked again, and the first
       # file access on a drive hung until someone answered the dialog (#164).
-      # One self-signed certificate keeps the requirement across releases.
-      - name: codesign macOS binaries
+      # The Developer ID certificate keeps the requirement across releases.
+      # Gatekeeper also wants the binaries notarized, which needs the hardened
+      # runtime and a secure timestamp. A bare binary cannot hold a stapled
+      # ticket, so Gatekeeper looks the ticket up online.
+      - name: codesign and notarize macOS binaries
         env:
-          PEM: ${{ secrets.MACOS_SIGNING_PEM }}
+          PEM: ${{ secrets.MACOS_DEVELOPER_ID_PEM }}
+          NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_API_KEY_ID }}
+          NOTARY_P8: ${{ secrets.APPLE_NOTARY_API_KEY_P8 }}
           # not RCODESIGN_*: rcodesign reads those as its config
           SIGNER_SHA256: dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002
         run: |
@@ -83,11 +89,15 @@ jobs:
           echo "$SIGNER_SHA256  $RUNNER_TEMP/rcodesign.tgz" | sha256sum -c
           tar -xzf "$RUNNER_TEMP/rcodesign.tgz" -C "$RUNNER_TEMP" --strip-components=1
           printf '%s\n' "$PEM" > "$RUNNER_TEMP/macos.pem"
+          printf '%s\n' "$NOTARY_P8" > "$RUNNER_TEMP/notary.p8"
           for f in dist/*-darwin-*; do
             b=$(basename "$f")
-            "$RUNNER_TEMP/rcodesign" sign --pem-file "$RUNNER_TEMP/macos.pem" --binary-identifier "ai.mainplane.${b%-darwin-*}" --timestamp-url none "$f"
+            "$RUNNER_TEMP/rcodesign" sign --pem-file "$RUNNER_TEMP/macos.pem" --binary-identifier "ai.mainplane.${b%-darwin-*}" --code-signature-flags runtime "$f"
           done
-          rm "$RUNNER_TEMP/macos.pem"
+          "$RUNNER_TEMP/rcodesign" encode-app-store-connect-api-key -o "$RUNNER_TEMP/notary.json" "$NOTARY_ISSUER" "$NOTARY_KEY_ID" "$RUNNER_TEMP/notary.p8"
+          zip -qj "$RUNNER_TEMP/darwin.zip" dist/*-darwin-*
+          "$RUNNER_TEMP/rcodesign" notary-submit --api-key-file "$RUNNER_TEMP/notary.json" --wait "$RUNNER_TEMP/darwin.zip"
+          rm "$RUNNER_TEMP/macos.pem" "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/notary.json" "$RUNNER_TEMP/darwin.zip"
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
