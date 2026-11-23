@@ -29,6 +29,7 @@ type session struct {
 	f       *statefile.File // the file, while a step holds it
 	changed chan struct{}   // closed and replaced on every append, and when a runner ends
 	retry   bool            // a run asked to step past a failed tip
+	carry   string          // the agent asked to continue: the next session's first message, once this turn ends
 	stopped string          // who asked for the stop, while one is in flight
 	logs    sync.Mutex      // held by copyLogs from Load to the last Write, so an older copy never lands last
 	copied  map[string]int  // under logs: for each worker, the n of the tip its copy ends at

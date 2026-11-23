@@ -8,6 +8,12 @@
 /* Page layout only. Components come from the design system; copy one in here to change it. */
 html, body { height: 100%; margin: 0; background: var(--color-bg); }
 #empty { height: 100%; box-sizing: border-box; align-content: center; }
+/* The first step not done is where a lane is: marked, the rail dashed after it, and highlighted when it waits. */
+.timeline li.at .l { color: var(--color-text); font-weight: 600; }
+.timeline li.at .here { flex: none; font: var(--text-caption); color: var(--color-text-2); }
+.timeline li.at ~ li::before { background: repeating-linear-gradient(to bottom, var(--color-text-3) 0 3px, transparent 3px 6px); }
+.timeline li.at.wait { background: var(--color-fill); border-radius: 6px; }
+.timeline li.at.wait > i { border-color: var(--color-status-waiting); }
 </style>
 <body class="mp">
 <main class="board" hidden>
@@ -57,12 +63,13 @@ function need(n) {
 function lane(l) {
   const s = el("section"), h = el("h3", "", l.name), ol = el("ol")
   const done = l.steps.filter(x => x.state === "done").length
+  const at = l.steps.findIndex(x => x.state !== "done")
   h.append(el("span", "", `${done}/${l.steps.length}`)); s.append(h, ol)
   l.steps.forEach((x, i) => {
-    const li = el("li", x.state); li.append(el("i"), el("span", "l", x.label))
+    const li = el("li", x.state + (i === at ? " at" : "")); li.append(el("i"), el("span", "l", x.label))
+    if (i === at) li.append(el("span", "here", "← you are here"))
     if (x.value) li.append(el("span", "v", x.value))
     ol.append(li)
-    if (x.state === "done" && l.steps[i + 1]?.state !== "done" && i + 1 < l.steps.length) ol.append(el("li", "here", "← you are here"))
   })
   return s
 }

@@ -80,7 +80,8 @@ const when = (t: string) => {
 function drawList() {
   const q = search.value.trim().toLowerCase()
   const at = location.pathname.split("/")[2]
-  const rows = statuses.flatMap(s => projects.filter(p => p.status === s && (!only || s === only) && (!q || p.name.toLowerCase().includes(q)))).map(p => {
+  // Within open, a project that is working comes after one that stopped, which more likely waits on the user.
+  const rows = statuses.flatMap(s => projects.filter(p => p.status === s && (!only || s === only) && (!q || p.name.toLowerCase().includes(q))).sort((a, b) => s === "open" ? +a.working - +b.working : 0)).map(p => {
     const line = h("small", null, p.line)
     if (p.working) line.prepend(h("span", { className: "typing inline", role: "status", ariaLabel: "Working" }, h("i"), h("i"), h("i")))
     return h("a", { href: `/projects/${p.id}`, className: `row ${p.working ? "working" : rowClass[p.status]}${pinned().includes(p.id) ? " pinned" : ""}`, role: "option", ariaSelected: String(p.id === at), ariaDescription: p.working ? "Working" : said[p.status] },

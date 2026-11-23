@@ -24,6 +24,13 @@ import (
 // of each of its sessions, and what it posts or makes through an app.
 const AgentVia = "agent:"
 
+// Person is whether a message's via is a person's, through a connector such
+// as web, tui or cli: not the harness's own (job, retry, rollover), and not
+// an app's or an agent's.
+func Person(via string) bool {
+	return via != "" && !slices.Contains([]string{"job", "retry", "rollover"}, via) && !strings.HasPrefix(via, "app:") && !strings.HasPrefix(via, AgentVia)
+}
+
 // MaxInstructions is the most bytes of instructions an agent holds: every
 // session of the agent reads them whole, so they are a cost each one pays.
 const MaxInstructions = 4 << 10
@@ -89,6 +96,7 @@ var (
 const (
 	continued = "This session continues agent %s from session %s, which ended: %s. The whole of that session is in <scratch>/logs/%s.log on every worker: search it with rg for what you need, do not read it whole. The agent's sessions, oldest first: %s"
 	carry     = "Session %s hit its limit mid-task (%s). Retrieve what you were doing from <scratch>/logs/%s.log and continue."
+	asked     = "the agent asked to continue"
 	appsHead  = "You are agent %s. Apps are services on the harness that this agent may call from any worker:\n  curl -H \"Authorization: Bearer $MAINPLANE_KEY\" $MAINPLANE_URL/apps/<app>/...\nEvery app has a skill file meant to be read before its first use: GET $MAINPLANE_URL/skills/<app>, or mainplane skill <app>. The key works only while this is the agent's live session.\nApps:\n"
 )
 
@@ -634,13 +642,14 @@ func (h *Harness) roll(ctx context.Context, a *Agent, next, why string) error {
 	return h.save(*a)
 }
 
-// handoff is a rollover mid-task, from inside the step that found the live
-// session s past its limit or under a config no longer the agent's. s ends
-// failed, the error at its tip, so no restart steps it again. The log of s
-// is on its workers before the next session exists, so its first run finds
-// it. The messages no step of s saw move to the next session, which is told
-// to go on and kicked.
-func (h *Harness) handoff(ctx context.Context, s *session, why string) (statefile.Status, error) {
+// handoff is a rollover from inside a step of the live session s: one that
+// found s past its limit or under a config no longer the agent's, or that
+// ended a turn after the agent asked to continue. s ends failed, the error
+// at its tip, so no restart steps it again. The log of s is on its workers
+// before the next session exists, so its first run finds it. The messages
+// no step of s saw move to the next session, which gets text as a message
+// and is kicked.
+func (h *Harness) handoff(ctx context.Context, s *session, why, text string) (statefile.Status, error) {
 	fail := func(text string) (statefile.Status, error) {
 		_, err := h.append(s, errorRecord("", text))
 		return statefile.StatusFailed, err
@@ -687,10 +696,39 @@ func (h *Harness) handoff(ctx context.Context, s *session, why string) (statefil
 			}
 		}
 	}
-	if _, err := h.Post(context.WithoutCancel(ctx), next, "rollover", "", []Part{{Type: "text/plain", Body: fmt.Appendf(nil, carry, s.id, why, s.id)}}); err != nil {
+	if _, err := h.Post(context.WithoutCancel(ctx), next, "rollover", "", []Part{{Type: "text/plain", Body: []byte(text)}}); err != nil {
 		return "", err
 	}
 	return statefile.StatusFailed, nil
+}
+
+// ContinueAgent is the continue app's word that the agent of the live
+// session asks to go on in a new one: once the turn under way ends, the
+// session hands off as at its limit, with text as the next session's first
+// message. It holds in memory: a restart of the harness forgets it.
+func (h *Harness) ContinueAgent(session, text string) error {
+	if _, ok := h.Holder(session); !ok {
+		return fmt.Errorf("session %s is not an agent's live session", session)
+	}
+	s := h.session(session)
+	h.mu.Lock()
+	running := s.running
+	h.mu.Unlock()
+	if !running {
+		return fmt.Errorf("session %s is not stepping: a continue takes effect when a turn ends, so ask from within one", session)
+	}
+	s.mu.Lock()
+	s.carry = text
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *session) takeCarry() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	text := s.carry
+	s.carry = ""
+	return text
 }
 
 // AllAgents is every agent as its file has it now. No session is read.

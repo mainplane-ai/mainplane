@@ -104,7 +104,7 @@ func Dashboard(ds string) string {
 var maxStore int64 = 256 << 20
 
 // required are the apps every orchestrator has, whatever a create asks for.
-var required = []string{"message", "orchestrate", "project", "schedule"}
+var required = []string{"continue", "message", "orchestrate", "project", "schedule"}
 
 // A file's name is path segments of letters, digits, dot, dash and underscore.
 var fileName = regexp.MustCompile(`^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$`)
@@ -166,6 +166,8 @@ type App struct {
 //	GET    /                the agent's project                            -> Project
 //	PUT    /status          {"status","line"}                              -> Project
 //	GET    /models          -> [Model]
+//	GET    /conversation    ?before=<session>.<n>; the user and the            -> text
+//	                        orchestrator, newest 10,000 tokens
 //	GET    /files/          ?prefix=                                       -> [File]
 //	GET    /files/{name}    -> the file
 //	PUT    /files/{name}    the file as the body                           -> 204
@@ -215,6 +217,9 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 		return a.status(w, r, p.ID, "Agent "+agent, harness.AgentVia+agent, agent)
 	})
 	mux.HandleFunc("GET /models", a.models)
+	mine("GET /conversation", func(w http.ResponseWriter, r *http.Request, p Project, _ string) error {
+		return a.conversation(w, r, p)
+	})
 	mine("GET /files/{name...}", func(w http.ResponseWriter, r *http.Request, p Project, _ string) error { return a.get(w, r, p.ID) })
 	mine("PUT /files/{name...}", func(w http.ResponseWriter, r *http.Request, p Project, _ string) error { return a.put(w, r, p.ID) })
 	mine("DELETE /files/{name...}", func(w http.ResponseWriter, r *http.Request, p Project, _ string) error {
@@ -692,6 +697,21 @@ func (a *App) models(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = reply(w, ms)
+}
+
+// Preset is the config the models list has for model, a "provider/model":
+// what a config that names only its model is filled from. False when the
+// harness serves no such model.
+func (a *App) Preset(ctx context.Context, model string) (statefile.Conf, bool, error) {
+	ms, err := a.presets(ctx)
+	if err != nil {
+		return statefile.Conf{}, false, err
+	}
+	i := slices.IndexFunc(ms, func(m Model) bool { return m.Config.Model == model })
+	if i < 0 {
+		return statefile.Conf{}, false, nil
+	}
+	return ms[i].Config, true, nil
 }
 
 // connected is the models as the first message lists them.

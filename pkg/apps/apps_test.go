@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -799,7 +800,7 @@ func TestProject(t *testing.T) {
 	r.want(400, "full", "POST", "/projects", `{"name":" ","config":{"model":"fake/m1","context_limit":1000,"workers":[]}}`)
 	p := r.project()
 	orch, err := r.h.Agent(p.Orchestrator)
-	if err != nil || orch.Via != "web" || orch.Name != "Kimi evals" || !slices.Equal(orch.Apps, []string{"message", "orchestrate", "project", "schedule"}) {
+	if err != nil || orch.Via != "web" || orch.Name != "Kimi evals" || !slices.Equal(orch.Apps, []string{"continue", "message", "orchestrate", "project", "schedule"}) {
 		t.Fatalf("orchestrator: %+v %v", orch, err)
 	}
 	r.settled(orch.ID)
@@ -947,4 +948,76 @@ func TestProjectStore(t *testing.T) {
 	if got := r.want(200, "full", "GET", "/projects", ""); strings.TrimSpace(got) != "[]" {
 		t.Fatalf("projects after the deletes: %s", got)
 	}
+}
+
+// conversation: what people said to the orchestrator and its text in their
+// turns, newest last, paged from the newest back by bytes.
+func TestConversation(t *testing.T) {
+	r := newRig(t)
+	p := r.project()
+	orch, _ := r.h.Agent(p.Orchestrator)
+	child := r.under(r.key(orch))
+	post := func(via, text string) {
+		if _, _, err := r.h.PostAgent(context.Background(), orch.ID, via, "", []harness.Part{{Type: "text/plain", Body: []byte(text)}}); err != nil {
+			t.Fatal(err)
+		}
+		r.settled(orch.ID)
+	}
+	get := func(path string) string {
+		// the times are to the minute: take them out
+		return regexp.MustCompile(`--- \S+ \S+ `).ReplaceAllString(r.want(200, r.key(child), "GET", "/apps/project/conversation"+path, ""), "--- ")
+	}
+	post("web", "hello")
+	post("app:schedule", "tick")
+	if got := get(""); got != "--- user (web)\nhello\n--- orchestrator\nok\n" {
+		t.Fatalf("conversation: %q", got)
+	}
+	big := strings.Repeat("x", 50_000)
+	post("tui", big)
+	got := get("")
+	earlier := regexp.MustCompile(`^\[earlier: mainplane app project GET "/conversation\?before=(\S+)"\]\n`).FindStringSubmatch(got)
+	if earlier == nil || !strings.HasSuffix(got, "\n--- orchestrator\nok\n") || strings.Contains(got, "user") {
+		t.Fatalf("over the budget: %.200q", got)
+	}
+	got = get("?before=" + earlier[1])
+	cut := regexp.MustCompile(`^\[earlier: mainplane app project GET "/conversation\?before=(\S+)"\]\n--- user \(tui\)\n\[\.\.\.\] x+\n$`).FindStringSubmatch(got)
+	if n := len(got) - len(strings.SplitAfter(got, "\n")[0]); cut == nil || n > 40_000 || n < 39_900 { // the budget is the blocks', less the times taken out
+		t.Fatalf("one block over the budget: %d bytes, %.200q", len(got), got)
+	}
+	if got := get("?before=" + cut[1]); got != "--- user (web)\nhello\n--- orchestrator\nok\n" {
+		t.Fatalf("the first page: %q", got)
+	}
+	r.want(404, r.key(child), "GET", "/apps/project/conversation?before=nope.1", "")
+}
+
+// A create's config that names only its model takes the rest from the
+// model's preset and the workers from the caller.
+func TestCreateFromPreset(t *testing.T) {
+	r := newRig(t)
+	r.m.project.Catalog = func(context.Context) (catalog.Catalog, error) {
+		return catalog.Catalog{
+			Presets: map[string]catalog.Preset{"fake/m1": {Name: "M1", Provider: "fake", Model: "m1", ContextLimit: 250_000, Tools: "patch", Input: []string{"image/png"}}},
+			Groups:  map[string][]string{"self-hosted-all": {"fake/m1"}},
+		}, nil
+	}
+	a := r.agent(conf("w1"), "orchestrate")
+	var v struct{ ID string }
+	_ = json.Unmarshal([]byte(r.want(200, r.key(a), "POST", "/apps/orchestrate/agents", `{"config":{"model":"fake/m1"}}`)), &v)
+	made, err := r.h.Agent(v.ID)
+	if c := made.Config; err != nil || c.ContextLimit != 250_000 || c.Tools != "patch" || !slices.Equal(c.Input, []string{"image/png"}) || c.Preset != "fake/m1" || len(c.Workers) != 1 || c.ColdLimit != 100_000 {
+		t.Fatalf("made: %+v %v", made.Config, err)
+	}
+	_ = json.Unmarshal([]byte(r.want(200, r.key(a), "POST", "/apps/orchestrate/agents", `{"config":{"model":"fake/m1","context_limit":5000,"workers":[]}}`)), &v)
+	if made, _ = r.h.Agent(v.ID); made.Config.ContextLimit != 5000 || len(made.Config.Workers) != 0 || made.Config.Tools != "patch" {
+		t.Fatalf("what a config sets stays: %+v", made.Config)
+	}
+}
+
+// continue: a body is required, and outside a running turn it is refused.
+func TestContinueApp(t *testing.T) {
+	r := newRig(t)
+	a := r.agent(conf("w1"), "continue")
+	r.want(400, r.key(a), "POST", "/apps/continue/", " ")
+	r.want(400, r.key(a), "POST", "/apps/continue/", strings.Repeat("x", 16<<10+1))
+	r.want(409, r.key(a), "POST", "/apps/continue/", "the handoff")
 }

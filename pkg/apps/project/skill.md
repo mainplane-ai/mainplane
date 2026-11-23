@@ -7,12 +7,14 @@ The project exists to take cognitive load off the user.
 The user mainly looks only at the dashboard and sends messages mainly to the orchestrator, which orchestrates the other agents and maintains the status and the dashboard.
 The sidebar lists open projects first (the UI says "needs you" to the user), then waiting, then closed. A project that is open and actively working is sorted below one that is stopped, which is more likely blocked on the user.
 A click on a project shows its dashboard first. The orchestrator's chat, and the chat of any agent, open only when the user clicks to view them. A chat shows user messages and the agent's text output; calls and messages from apps, agents and jobs are collapsed.
+It is recommended that every agent of the project reads `/conversation` when it starts and before it asks the user anything: the user's own words, without relaying them.
 
 ```
 A="Authorization: Bearer $MAINPLANE_KEY"; U=$MAINPLANE_URL/apps/project
 curl -H "$A" $U/                                                    # the project: id, name, orchestrator, status, line
 curl -H "$A" -X PUT -d '{"status":"waiting","line":"waiting on the EV cert"}' $U/status
 curl -H "$A" $U/models                                              # the models connected now, each with a full config for orchestrate
+curl -H "$A" $U/conversation                                        # the user's messages and the orchestrator's answers to them, the newest 10k tokens as text
 curl -H "$A" "$U/files/?prefix=cards/"                              # list: [{"name","size","modified"}]
 curl -H "$A" $U/files/index.html                                    # read one file
 curl -H "$A" -X PUT --data-binary @index.html $U/files/index.html   # write one file, whole
