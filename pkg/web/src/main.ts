@@ -4,7 +4,7 @@
 import { type Agent, type Conf, type Model, type Project, acted, api, file, get, h, icon, initials, key, login, logout, text } from "./api"
 import { chat } from "./chat"
 import { composer } from "./composer"
-import { dashboard } from "./dashboard"
+import { dashboard, frameURL } from "./dashboard"
 import { picker } from "./picker"
 import lockup from "./lockup.svg"
 declare const MPMenu: { open: (menu: HTMLElement, at: Element | { x: number; y: number }, target?: Element) => void }
@@ -270,9 +270,16 @@ async function content(kind: string, id: string, sub: string, signal: AbortSigna
 // raster is a picture's type, so Open image in new tab shows it. Not SVG: opened in a tab
 // it would run its scripts as this page, which holds the key.
 const raster = (name: string) => ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" })[name.split(".").pop()!.toLowerCase()] ?? ""
-// stored shows one file of a project's store, an image or its text: what is in it is never run.
+// stored shows one file of a project's store: an image, or its text, or an HTML file as a page.
+// The page runs in a dashboard's frame, under the policy the store serves its files with: no network.
 async function stored(p: Project, name: string, signal: AbortSignal) {
   const b = await file(p.id, name, signal)
+  if (/\.html?$/i.test(name)) {
+    const frame = h("iframe", { src: frameURL + "?file", className: "dash", title: name })
+    frame.setAttribute("sandbox", "allow-scripts") // the store's Sandbox policy: no popups, no key
+    addEventListener("message", e => e.source === frame.contentWindow && e.data?.ready === true && frame.contentWindow!.postMessage({ html: text(new Uint8Array(b)), inset: [matchMedia("(max-width: 700px)").matches ? 60 : 0, 0] }, "*"), { signal })
+    return frame
+  }
   const img = h("img", { alt: name, src: URL.createObjectURL(new Blob([b], { type: raster(name) })) })
   img.style.maxWidth = "100%"
   return h("div", { className: "view" }, h("div", { className: "page" }, h("h2", null, name), /\.(png|jpe?g|gif|webp)$/i.test(name) ? img : h("pre", { className: "code" }, text(new Uint8Array(b)))))

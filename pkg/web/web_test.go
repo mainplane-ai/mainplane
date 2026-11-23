@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/mainplane-ai/mainplane/pkg/apps/project"
 )
 
 // A navigation gets the page at any path, every other request the API, and
@@ -40,6 +42,9 @@ func TestHandler(t *testing.T) {
 	root, _ := build()
 	if w := get("GET", root+"frame.html", "Sec-Fetch-Mode", "navigate"); w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Security-Policy"), "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox;") || w.Header().Get("Cache-Control") != forever {
 		t.Errorf("frame: %d %v", w.Code, w.Header())
+	}
+	if w := get("GET", root+"frame.html?file"); w.Header().Get("Content-Security-Policy") != project.Sandbox {
+		t.Errorf("frame of a file: %v", w.Header())
 	}
 	if w := get("GET", "/web/0000000000000000/frame.html"); w.Code != 404 {
 		t.Errorf("a file of another build: %d", w.Code)
