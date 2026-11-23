@@ -39,6 +39,10 @@ const (
 	resume   = "Continue"
 )
 
+// rejoin is how long after a restart a step waits for its session's workers:
+// they dial back in on their own, which took about 3.5 minutes after an update.
+const rejoin = 5 * time.Minute
+
 type Harness struct {
 	Sessions  statefile.Sessions
 	Providers map[string]provider.Provider // read and replaced under pmu once the harness runs
@@ -63,6 +67,8 @@ type Harness struct {
 	agents map[string]Agent       // a cache of the agents' files
 	live   map[string]string      // live session -> its agent
 	alocks map[string]*sync.Mutex // an agent's lock: one post or change at a time
+
+	rejoined time.Time // set by Resume: until then a step waits for its session's workers
 }
 
 // provider splits a config's provider/model string and finds the provider.
@@ -375,6 +381,7 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	if status == statefile.StatusFailed {
 		add = append(add, statefile.Record{Header: statefile.Header{Kind: statefile.Message, Type: "text/plain", Via: "retry"}, Body: []byte(resume)})
 	}
+	h.await(ctx, conf.Workers)
 	if list := h.workers(conf.Workers); list != strings.TrimPrefix(strings.TrimPrefix(last(chain, "workers"), workersFirst), workersChanged) {
 		add = append(add, system("workers", workersChanged+list))
 	}
@@ -390,6 +397,18 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	}
 	st, err := h.step(ctx, s, id, conf, chain)
 	return h.carryOn(ctx, s, chain, st, err)
+}
+
+// await waits until every worker is connected, the restart's wait is over,
+// or ctx ends.
+func (h *Harness) await(ctx context.Context, workers []statefile.Worker) {
+	for time.Now().Before(h.rejoined) && slices.ContainsFunc(workers, func(w statefile.Worker) bool { _, ok := h.Workers.Get(w.Name); return !ok }) {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 // carryOn is a step's status, unless the agent asked to continue and the
@@ -482,9 +501,12 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 		return "", appendErr
 	}
 	if err != nil {
-		if via := s.stoppedBy(); via != "" {
+		switch via := s.stoppedBy(); {
+		case via != "":
 			_, err := h.append(s, errorRecord(via, fmt.Sprintf(halted, via)))
 			return statefile.StatusFailed, err
+		case ctx.Err() != nil: // the harness is shutting down: the session stays open for Resume
+			return "", err
 		}
 		_, err := h.append(s, errorRecord("", err.Error()+rebuilt(p, model, conf, chain)))
 		return statefile.StatusFailed, err
@@ -493,8 +515,9 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 	if _, err := h.append(s, statefile.Record{Header: hdr}); err != nil {
 		return "", err
 	}
-	// the same model only: a copy may go on with another, which counts tokens its own way
-	short := hdr.Provider == floor.Provider && hdr.Model == floor.Model && hdr.Usage.Prompt() > 0 && hdr.Usage.Prompt() < floor.Usage.Prompt()
+	// the same model and harness only: a copy may go on with another model,
+	// which counts tokens its own way, and a new harness builds another prompt
+	short := hdr.Provider == floor.Provider && hdr.Model == floor.Model && hdr.Harness == floor.Harness && hdr.Usage.Prompt() > 0 && hdr.Usage.Prompt() < floor.Usage.Prompt()
 	for _, c := range calls {
 		r := result(c.ID, "not run")
 		if ctx.Err() == nil && !short {

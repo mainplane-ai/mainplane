@@ -11,11 +11,13 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
+	"github.com/mainplane-ai/mainplane/pkg/version"
 )
 
 // session is what the harness holds in memory about one session: a cache of
@@ -469,8 +471,12 @@ func (h *Harness) killAll(ctx context.Context, id string, chain []statefile.Reco
 // Resume kicks every session that needs a step. This is the open-files index,
 // rebuilt from the tips on start; a failed session waits for a run or a
 // message. A file that does not read is logged and left out, not a reason to
-// stay down.
+// stay down. Each session it kicks gets a note of the restart, and of the
+// update when its last step was by another version; its steps wait a while
+// for its workers to dial back in.
 func (h *Harness) Resume(ctx context.Context) error {
+	now := time.Now()
+	h.rejoined = now.Add(rejoin)
 	if err := h.LoadAgents(); err != nil {
 		return err
 	}
@@ -485,6 +491,18 @@ func (h *Harness) Resume(ctx context.Context) error {
 			continue
 		}
 		if info.Status == statefile.StatusOpen || info.Status == statefile.StatusInterrupted {
+			chain, err := h.Sessions.Load(id)
+			if err != nil {
+				log.Printf("session %s: %v", id, err)
+				continue
+			}
+			update := ""
+			if last := statefile.LastStep(chain); last != nil && last.Harness != "" && last.Harness != version.V {
+				update = fmt.Sprintf(" for the update %s -> %s", last.Harness, version.V)
+			}
+			if err := h.note(h.session(id), id, system("harness", fmt.Sprintf("The harness restarted at %s%s. Steps and calls in flight were cut. Workers reconnect by themselves.", now.UTC().Format(time.RFC3339), update))); err != nil {
+				log.Printf("session %s: %v", id, err)
+			}
 			h.Kick(ctx, id)
 		}
 	}
