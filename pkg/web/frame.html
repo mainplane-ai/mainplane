@@ -32,7 +32,8 @@ addEventListener("message", e => {
     // Drawn and sent as a PNG: the frame may not fetch (connect-src none), and the page around cannot load this frame's blob: URL.
     const c = Object.assign(document.createElement("canvas"), { width: img.naturalWidth, height: img.naturalHeight })
     c.getContext("2d").drawImage(img, 0, 0)
-    c.toBlob(image => parent.postMessage({ image, alt: img.alt }, "*"))
+    // A picture from another site without CORS taints the canvas: it opens in a tab beside the interface instead.
+    try { c.toBlob(image => parent.postMessage({ image, alt: img.alt }, "*")) } catch { open(img.currentSrc, "_blank") }
   })
   // A swipe on the page goes to the interface: on a phone it moves between the project's views.
   let t0 = null
