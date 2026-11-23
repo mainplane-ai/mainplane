@@ -653,8 +653,8 @@ func TestShutdownMidCall(t *testing.T) {
 		i, err := r.h.Info(id)
 		return err == nil && i.Status != statefile.StatusStepping
 	})
-	if st := statefile.Derive(r.chain(id)); st != statefile.StatusOpen {
-		t.Fatalf("status %s after a shutdown", st)
+	if st := statefile.Derive(r.chain(id)); st != statefile.StatusOpen || !slices.Contains(r.bodies(id, statefile.Result, ""), "stopped, effect unknown") {
+		t.Fatalf("status %s, results %q after a shutdown", st, r.bodies(id, statefile.Result, ""))
 	}
 }
 
