@@ -276,7 +276,7 @@ async function stored(p: Project, name: string, signal: AbortSignal) {
   const b = await file(p.id, name, signal)
   if (/\.html?$/i.test(name)) {
     const frame = h("iframe", { src: frameURL + "?file", className: "dash", title: name })
-    frame.setAttribute("sandbox", "allow-scripts allow-popups allow-popups-to-escape-sandbox") // as a dashboard's: the key is out of its reach
+    frame.setAttribute("sandbox", "allow-scripts") // the store's Sandbox policy: no popups, no key
     addEventListener("message", e => e.source === frame.contentWindow && e.data?.ready === true && frame.contentWindow!.postMessage({ html: text(new Uint8Array(b)), inset: [matchMedia("(max-width: 700px)").matches ? 60 : 0, 0] }, "*"), { signal })
     return frame
   }
