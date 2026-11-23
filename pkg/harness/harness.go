@@ -501,9 +501,12 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 		return "", appendErr
 	}
 	if err != nil {
-		if via := s.stoppedBy(); via != "" {
+		switch via := s.stoppedBy(); {
+		case via != "":
 			_, err := h.append(s, errorRecord(via, fmt.Sprintf(halted, via)))
 			return statefile.StatusFailed, err
+		case ctx.Err() != nil: // the harness is shutting down: the session stays open for Resume
+			return "", err
 		}
 		_, err := h.append(s, errorRecord("", err.Error()+rebuilt(p, model, conf, chain)))
 		return statefile.StatusFailed, err

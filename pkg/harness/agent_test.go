@@ -55,6 +55,9 @@ func newRig(t *testing.T) *rig {
 	r.step = func(string) turn { return turn{input: 10} }
 	p := provider.Anthropic("", "k")
 	p.Run = func(ctx context.Context, body []byte, cache *provider.Cache, emit func(statefile.Record)) (statefile.Header, error) {
+		if err := ctx.Err(); err != nil {
+			return statefile.Header{}, err
+		}
 		r.mu.Lock()
 		r.steps++
 		step := r.step
@@ -628,6 +631,31 @@ func TestShrinkAcrossUpdate(t *testing.T) {
 	version.V = "v-new"
 	close(r.release)
 	r.settled(a.ID)
+}
+
+// A shutdown mid-call cuts the call and leaves the session open, not failed,
+// so the next harness steps it again.
+func TestShutdownMidCall(t *testing.T) {
+	r := newRig(t)
+	r.step = func(string) turn { return turn{code: "wait", input: 10} }
+	id, err := r.h.Create(context.Background(), Create{Model: "fake/m1", ContextLimit: 1000, Workers: []statefile.Worker{{Name: "w1"}}}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	if _, err := r.h.Post(ctx, id, "test", "", []Part{{Type: "text/plain", Body: []byte("start")}}); err != nil {
+		t.Fatal(err)
+	}
+	<-r.started
+	cancel()
+	close(r.release)
+	r.until(func() bool {
+		i, err := r.h.Info(id)
+		return err == nil && i.Status != statefile.StatusStepping
+	})
+	if st := statefile.Derive(r.chain(id)); st != statefile.StatusOpen {
+		t.Fatalf("status %s after a shutdown", st)
+	}
 }
 
 // A session that needs a step when the harness starts is told of the restart
