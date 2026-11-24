@@ -53,14 +53,14 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, done: (
   }
   const finish = () => { localStorage.setItem(ran, "1"); done() }
 
-  // page is one step: Back, then its art, title and words in the middle, then its buttons at the foot.
-  const page = (art: HTMLElement, title: string, words: string, body: Node[], ...foot: HTMLElement[]) => root.replaceChildren(
-    h("div", { className: "ob-top" }, h("button", { className: "btn plain sm up", type: "button", onclick: () => move(-1) }, icon("chevron-left"), "Back")),
-    h("div", { className: "ob-step" }, art, h("h1", null, title), ...(words ? [h("p", null, words)] : []), ...body),
-    h("div", { className: "ob-foot" }, ...foot))
+  // page is one step: its title and words in the middle, then at the foot any other choice over Back and the
+  // step's own button, side by side and the same size (Apple's Setup Assistant).
+  const page = (title: string, words: string, body: Node[], next: HTMLElement, ...more: HTMLElement[]) => root.replaceChildren(
+    h("div", { className: "ob-step" }, h("h1", null, title), ...(words ? [h("p", null, words)] : []), ...body), foot(next, ...more))
+  const foot = (next: HTMLElement, ...more: HTMLElement[]) => h("div", { className: "ob-foot" }, ...more,
+    h("div", { className: "ob-row" }, h("button", { className: "btn lg", type: "button", onclick: () => move(-1) }, "Back"), next))
   const button = (label: string, onclick: () => void, filled = true) =>
     h("button", { className: "btn lg " + (filled ? "filled" : "plain"), type: "button", onclick }, label)
-  const glyph = (name: string) => h("div", { className: "ob-art" }, icon(name))
   const fail = (e: unknown) => alert(e instanceof Error ? e.message : e)
 
   let live: (() => void) | null = null // redraws the live part of the step in view after a poll
@@ -74,19 +74,19 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, done: (
         return
       }
       case "login": {
-        root.replaceChildren(h("div", { className: "ob-top" }, h("button", { className: "btn plain sm up", type: "button", onclick: () => move(-1) }, icon("chevron-left"), "Back")),
-          loginForm(() => { step = "provider"; draw(); void poll() }))
+        const form = loginForm(() => { step = "provider"; draw(); void poll() })
+        root.replaceChildren(form, foot(button("Log In", () => (form as HTMLFormElement).requestSubmit())))
         return
       }
       case "provider": {
         const next = button("Continue", () => move(1))
         live = () => (next.disabled = providers < 1)
-        page(glyph("sliders"), "Connect a Model Provider", "Your agents think with its models. Connect one to begin.", [providersPanel()], next)
+        page("Connect a Model Provider", "Your agents think with its models. Connect one to begin.", [providersPanel()], next)
         break
       }
       case "sharing": {
         const set = (share: boolean) => api("/settings", { json: { data_sharing: { share, via: "web", text: "b1" } } }).then(() => { sharing = false; step = "workers"; draw() }, fail)
-        page(glyph("heart"), "Help Improve Mainplane", "Allow the use of your sessions to improve Mainplane and train AI models. You can change this in Settings.", [],
+        page("Help Improve Mainplane", "Allow the use of your sessions to improve Mainplane and train AI models. You can change this in Settings.", [],
           button("Allow", () => set(true)), button("Don't Allow", () => set(false), false))
         break
       }
@@ -104,7 +104,7 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, done: (
           next.disabled = !ws.some(w => !w.refused)
           later.hidden = !next.disabled
         }
-        page(glyph("computer"), "Connect Workers", "A worker is a machine your agents use. Run this one-line install on a machine to connect it.", [lines, box], next, later)
+        page("Connect Workers", "A worker is a machine your agents use. Run this one-line install on a machine to connect it.", [lines, box], next, later)
         break
       }
       case "device": {
@@ -115,7 +115,7 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, done: (
           copy.onclick = () => navigator.clipboard.writeText(link).then(() => (copy.lastElementChild!.textContent = "Copied"))
           box.replaceChildren(install(minted), h("p", { className: "note" }, "On a phone or another browser, open the login link instead."), h("div", { className: "actions" }, copy))
         }
-        page(glyph("message"), "Use Mainplane on Another Device", "Your sessions sync across any device with a Mainplane API key. Run this one-line install to add the terminal app to another device, then run mainplane there.",
+        page("Use Mainplane on Another Device", "Your sessions sync across any device with a Mainplane API key. Run this one-line install to add the terminal app to another device, then run mainplane there.",
           [box], button("Continue", () => move(1)))
         if (minted) show()
         else mint().then(show, e => box.replaceChildren(h("p", { className: "note" }, "Could not make an API key: " + (e instanceof Error ? e.message : e))))
@@ -127,7 +127,7 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, done: (
           make.disabled = true
           api("/drives/shared", { method: "PUT", json: { server: s.includes("admin") ? "admin" : s[0], workers: ["*"] } }).then(finish, e => { make.disabled = false; fail(e) })
         })
-        page(glyph("folder"), "Host a Shared Drive", "Mainplane can host files shared among all your workers. Add a shared drive for all workers?", [], make, button("Not Now", finish, false))
+        page("Host a Shared Drive", "Mainplane can host files shared among all your workers. Add a shared drive for all workers?", [], make, button("Not Now", finish, false))
         break
       }
     }

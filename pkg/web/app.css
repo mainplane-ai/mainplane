@@ -36,19 +36,18 @@ main > .tabs { margin: 0 16px }
 .providers .form-row > .input:first-child { text-align: left } /* the paste field is the whole row */
 /* Onboarding (Apple's Setup Assistant): Back at the top, one step in the middle (art, title, words), its buttons at the foot. */
 .onboard { min-height: 100%; box-sizing: border-box; max-width: 520px; margin: 0 auto; padding: 16px 24px calc(32px + env(safe-area-inset-bottom)); display: flex; flex-direction: column }
-.onboard > .ob-top { height: 32px; margin-left: -8px }
-.onboard > .ob-top > .up { gap: 2px }
 .onboard > .ob-step { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 24px 0 }
-.onboard > .ob-step > :is(.ob-art, h1, p) { text-align: center }
-.onboard .ob-art mp-icon { --icon-size: 56px; color: var(--color-text) }
-.onboard .ob-step > h1 { margin: 16px 0 8px; font: var(--text-title-1); letter-spacing: var(--tracking-title-1) }
+.onboard > .ob-step > :is(h1, p) { text-align: center }
+.onboard .ob-step > h1 { margin: 0 0 8px; font: var(--text-title-1); letter-spacing: var(--tracking-title-1) }
 .onboard .ob-step > p { margin: 0 0 24px; font: var(--text-body-large); color: var(--color-text-2) }
 .onboard > .welcome > .mark { display: flex; justify-content: center; height: 56px; color: var(--color-text) }
 .onboard > .welcome > .mark > svg { height: 100%; width: auto; max-width: 100% }
-.onboard > .ob-foot { display: grid; gap: 8px; width: 100%; max-width: 320px; margin: 0 auto }
-.onboard > .ob-foot > .btn { justify-content: center }
-.onboard > .ob-foot > .btn[hidden] { display: none }
+.onboard > .ob-foot { display: grid; gap: 8px; width: 100%; max-width: 400px; margin: 0 auto }
+.onboard > .ob-foot .btn { justify-content: center }
+.onboard > .ob-foot .btn[hidden] { display: none }
+.onboard > .ob-row, .onboard .ob-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px }
 .onboard > .login { min-height: 0; flex: 1 }
+.onboard > .login > .btn.filled { display: none } /* Log In is in the foot, beside Back */
 .onboard .providers .empty { display: none } /* the step's title says it */
 .onboard .form-row > mp-icon { color: var(--color-text-2) }
 .onboard .section-l { margin-top: 20px }
