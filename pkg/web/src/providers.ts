@@ -108,14 +108,14 @@ export function providersPanel(): HTMLElement {
     const steps = h("ol", { className: "steps" })
     const paste = input({ ariaLabel: "Pasted text" })
     const go = h("button", { className: "btn filled", type: "submit" }, "Connect")
-    const clip = h("button", { className: "btn sm", type: "button", hidden: !navigator.clipboard?.readText, onclick: () => navigator.clipboard.readText().then(t => (paste.value = t.trim()), fail) }, "Paste")
-    const form = h("form", { hidden: true }, h("div", { className: "form" }, h("div", { className: "form-row" }, paste, clip)), h("div", { className: "actions" }, go))
+    const open = h("a", { className: "btn filled open", target: "_blank", rel: "noopener", hidden: true })
+    const form = h("form", { hidden: true }, h("div", { className: "form" }, h("div", { className: "form-row" }, paste)), h("div", { className: "actions" }, go))
     let live = true
     const end = (st: Login) => {
       live = false
       if (st.state === "done") return void reload()
       status.textContent = st.error ?? "The sign-in failed."
-      form.hidden = true
+      form.hidden = open.hidden = true
       steps.replaceChildren()
       status.after(h("div", { className: "actions" }, h("button", { className: "btn", type: "button", onclick: () => signin(o) }, "Try Again")))
     }
@@ -135,13 +135,15 @@ export function providersPanel(): HTMLElement {
       status.textContent = "Signing in..."
       api("/providers/" + id + "/login/code", { json: { code: text } }).catch(e => { go.disabled = false; status.textContent = ""; fail(e) })
     }
-    show("Sign in to " + o.name, add, steps, form, status)
+    show("Sign in to " + o.name, add, steps, open, form, status)
     api("/providers/" + id + "/login", { json: { shape: p.shape, url: p.url } }).then(r => r.json() as Promise<Login>).then(st => {
       if (st.state !== "pending") return end(st)
       const loopback = new URL(st.url).searchParams.get("redirect_uri")?.startsWith("http://")
       const vendor = o.name.split(" ")[0]
+      // The steps come first, so they are read before the person leaves for the vendor's site.
+      Object.assign(open, { href: st.url, textContent: "Open " + vendor, hidden: false })
       steps.replaceChildren(
-        h("li", null, h("span", null, "Open " + vendor + " and sign in."), h("a", { className: "btn filled sm", href: st.url, target: "_blank", rel: "noopener" }, "Open " + vendor)),
+        h("li", null, "Open " + vendor + " below and sign in."),
         ...(loopback
           ? [h("li", null, "You end on a page that does not load. That is expected: the address of that page is the sign-in."), h("li", null, "Copy the address from the address bar, come back, and paste it here.")]
           : [h("li", null, vendor + " shows a code. Copy it, come back, and paste it here.")]))

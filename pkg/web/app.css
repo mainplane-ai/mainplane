@@ -31,7 +31,8 @@ main > .tabs { margin: 0 16px }
 .providers input[type=number] { appearance: textfield; -moz-appearance: textfield }
 .providers input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none }
 .providers .steps { display: grid; gap: 12px; margin: 0 0 16px; padding-left: 22px; font: var(--text-body) }
-.providers .steps > li > span { display: block; margin-bottom: 8px }
+.providers .open { display: flex; justify-content: center; margin-bottom: 16px }
+.providers .open + form .actions { margin-top: 12px }
 .providers .form-row > .input:first-child { text-align: left } /* the paste field is the whole row */
 /* Log in: one narrow column in the middle of the screen, the lockup over it (a phone's sign-in) */
 .login { min-height: 100%; box-sizing: border-box; max-width: 360px; margin: 0 auto; padding: 32px 24px calc(32px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; justify-content: center; gap: 12px; text-align: center }
