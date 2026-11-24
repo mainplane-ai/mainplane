@@ -101,18 +101,25 @@ jobs:
             "$RUNNER_TEMP/rcodesign" notary-submit --api-key-file "$RUNNER_TEMP/notary.json" --wait --max-wait-seconds 3600 "$RUNNER_TEMP/darwin.zip"
           fi
           rm -f "$RUNNER_TEMP/macos.pem" "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/notary.json" "$RUNNER_TEMP/darwin.zip"
-      # The EV key is non-exportable in an Azure Key Vault HSM. The Entra app
-      # trusts this environment's OIDC subject and holds Key Vault Crypto User
-      # and Certificate User on this one vault: no client secret.
+      # Stable tags sign with the Mainplane, Inc. EV key, non-exportable in an
+      # Azure Key Vault HSM; the EV certificate's plan counts signatures, so -rc
+      # tags sign with Artifact Signing. Each Entra app trusts only this
+      # environment's OIDC subject: no client secret.
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        if: ${{ !contains(github.ref_name, '-rc') }}
         with:
           client-id: ${{ vars.EV_AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.EV_AZURE_TENANT_ID }}
           allow-no-subscriptions: true
-      # Defender blocks unsigned Go binaries as Sabsik.FL.A!ml. Signed with the
-      # Mainplane, Inc. EV code signing certificate; the vault returns only the
-      # leaf, so the chain to the intermediate comes from EV_CERT_CHAIN_PEM.
-      # Every signature is timestamped, so it outlives the certificate.
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        if: ${{ contains(github.ref_name, '-rc') }}
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      # Defender blocks unsigned Go binaries as Sabsik.FL.A!ml. Every signature
+      # is timestamped, so it outlives the certificate. The vault returns only
+      # the EV leaf, so the chain to the intermediate comes from EV_CERT_CHAIN_PEM.
       - name: Authenticode sign Windows binaries
         env:
           JSIGN_SHA256: 7b4a01ba81e9ee866f09a5e45d40c928707eb5286f4e20d4042c67a141ae5e62
@@ -121,14 +128,23 @@ jobs:
           curl -fsSLo "$RUNNER_TEMP/jsign.deb" https://github.com/ebourg/jsign/releases/download/7.5/jsign_7.5_all.deb
           echo "$JSIGN_SHA256  $RUNNER_TEMP/jsign.deb" | sha256sum -c
           sudo apt-get update -qq && sudo apt-get install -y -qq "$RUNNER_TEMP/jsign.deb" osslsigncode
-          printf '%s\n' "$CHAIN" > "$RUNNER_TEMP/chain.pem"
-          TOKEN=$(az account get-access-token --resource https://vault.azure.net --query accessToken -o tsv)
-          echo "::add-mask::$TOKEN"
-          export TOKEN
-          jsign --storetype AZUREKEYVAULT --keystore mainplane-ev-kv --storepass env:TOKEN \
-            --alias mainplane-ev-codesign-2026b --certfile "$RUNNER_TEMP/chain.pem" \
-            --tsaurl http://ts.ssl.com --tsmode RFC3161 dist/*-windows-*.exe
-          for f in dist/*-windows-*.exe; do osslsigncode verify -in "$f"; done
+          if [[ $TAG == *-rc* ]]; then
+            TOKEN=$(az account get-access-token --resource https://codesigning.azure.net --query accessToken -o tsv)
+            echo "::add-mask::$TOKEN"
+            export TOKEN
+            jsign --storetype TRUSTEDSIGNING --keystore "${{ vars.ARTIFACT_SIGNING_ENDPOINT }}" --storepass env:TOKEN \
+              --alias "${{ vars.ARTIFACT_SIGNING_ACCOUNT }}/${{ vars.ARTIFACT_SIGNING_PROFILE }}" \
+              --tsaurl http://timestamp.acs.microsoft.com --tsmode RFC3161 dist/*-windows-*.exe
+          else
+            printf '%s\n' "$CHAIN" > "$RUNNER_TEMP/chain.pem"
+            TOKEN=$(az account get-access-token --resource https://vault.azure.net --query accessToken -o tsv)
+            echo "::add-mask::$TOKEN"
+            export TOKEN
+            jsign --storetype AZUREKEYVAULT --keystore mainplane-ev-kv --storepass env:TOKEN \
+              --alias mainplane-ev-codesign-2026b --certfile "$RUNNER_TEMP/chain.pem" \
+              --tsaurl http://ts.ssl.com --tsmode RFC3161 dist/*-windows-*.exe
+            for f in dist/*-windows-*.exe; do osslsigncode verify -in "$f"; done
+          fi
       # After signing: the sums cover the bytes users run.
       - name: SHA256SUMS
         run: cd dist && sha256sum * > SHA256SUMS
