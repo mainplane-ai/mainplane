@@ -42,6 +42,7 @@ type Prompt struct {
 type versions struct {
 	Current string `json:"current"`
 	Latest  string `json:"latest,omitempty"`
+	Notes   string `json:"notes,omitempty"` // the changelog of latest, when it is not current
 }
 
 // An update downloads one binary and restarts the harness.
@@ -62,18 +63,25 @@ func (a *api) settings(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	// latest is optional: wait for it no longer than a connector waits
-	latest, l := "", make(chan string, 1)
-	go func() { v, _ := release.Latest(); l <- v }()
+	// latest and its notes are optional: wait for them no longer than a connector waits
+	vs, l := versions{Current: version.V}, make(chan versions, 1)
+	go func() {
+		v := vs
+		v.Latest, _ = release.Latest()
+		if v.Latest != "" && v.Latest != v.Current {
+			v.Notes, _ = release.Notes(v.Latest)
+		}
+		l <- v
+	}()
 	select {
-	case latest = <-l:
+	case vs = <-l:
 	case <-time.After(5 * time.Second):
 	}
 	u := c.DataSharing
 	if doNotTrack() {
 		u = &DataSharing{Via: "DO_NOT_TRACK"}
 	}
-	reply(w, settings{&versions{version.V, latest}, u, &Prompt{c.prompt(), c.Prompt == nil}})
+	reply(w, settings{&vs, u, &Prompt{c.prompt(), c.Prompt == nil}})
 }
 
 func (a *api) setSettings(w http.ResponseWriter, r *http.Request) {

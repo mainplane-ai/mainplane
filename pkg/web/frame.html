@@ -1,5 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
+<meta name="color-scheme" content="light dark"><!-- else the frame is drawn white over a dark page until the dashboard comes -->
 <script>
 // A dashboard is shown here: this frame has an origin of its own and holds
 // no key. The page around it sends the dashboard's HTML and answers what the
@@ -44,7 +45,7 @@ addEventListener("message", e => {
   // The interface's glass header and composer float over the page: it starts under the one and ends above the other.
   const [top, bottom] = e.data.inset
   // The page keeps its own height (a board's panels scroll in it): the root is padded, and on a phone, where the page scrolls, its end is.
-  document.head.append(Object.assign(document.createElement("style"), { textContent: `html { box-sizing: border-box; height: 100%; padding: ${top}px 0 ${bottom}px } @media (max-width: 700px) { html { padding-bottom: 0 } body::after { content: ""; display: block; height: ${bottom}px } }` }))
+  document.head.append(Object.assign(document.createElement("style"), { textContent: `html { color-scheme: light dark; box-sizing: border-box; height: 100%; padding: ${top}px 0 ${bottom}px } @media (max-width: 700px) { html { padding-bottom: 0 } body::after { content: ""; display: block; height: ${bottom}px } }` }))
 })
 parent.postMessage({ ready: true }, "*")
 </script>

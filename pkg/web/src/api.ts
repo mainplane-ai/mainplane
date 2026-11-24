@@ -1,7 +1,7 @@
 // The harness's API as the page calls it. The key goes in a header of each
 // call and is kept in this origin's storage: no cookie holds it.
 
-export type Project = { id: string; name: string; orchestrator: string; status: string; line: string; updated: string; counter: number; working: boolean }
+export type Project = { id: string; name: string; orchestrator: string; status: string; line: string; color?: string; monogram?: string; updated: string; counter: number; working: boolean }
 export type Conf = { model: string; workers: { name: string }[] | null; preset?: string; [more: string]: unknown }
 export type Agent = { id: string; name?: string; config: Conf; apps: string[]; instructions?: string; sessions: string[]; status: string; updated: string }
 export type Model = { id: string; name: string; provider: string; config: Conf; settings?: { name: string; values: { name: string; params: Record<string, unknown> }[] }[] }
@@ -103,3 +103,26 @@ export function icon(name: string) {
 
 // initials stand for a name in an avatar.
 export const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("") || "?"
+
+// avatarColors are the palette tokens of pkg/design/tokens.json, in picker order.
+export const avatarColors = ["slate", "sky", "indigo", "sage", "ochre", "terracotta", "rose", "plum"] as const
+export type AvatarColor = (typeof avatarColors)[number]
+
+// avatarColor is a project's saved color, or a steady one picked from its id.
+export function avatarColor(p: Pick<Project, "id" | "color">): AvatarColor {
+  if (p.color && (avatarColors as readonly string[]).includes(p.color)) return p.color as AvatarColor
+  let hash = 0
+  for (let i = 0; i < p.id.length; i++) hash = (hash * 31 + p.id.charCodeAt(i)) >>> 0
+  return avatarColors[hash % avatarColors.length]
+}
+
+// avatar is the round monogram badge for a project.
+export function avatar(p: Pick<Project, "id" | "name" | "color" | "monogram">): HTMLElement {
+  const el = h("span", { className: "avatar" }, p.monogram || initials(p.name))
+  el.dataset.color = avatarColor(p)
+  return el
+}
+
+// saveAvatar stores a project's custom color and monogram (empty resets each to its default).
+export const saveAvatar = async (id: string, color: string, monogram: string) =>
+  (await api(`/projects/${id}/avatar`, { method: "PUT", json: { color, monogram } })).json() as Promise<Project>

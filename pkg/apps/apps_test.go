@@ -874,6 +874,37 @@ func TestProject(t *testing.T) {
 	if len(list) != 1 || list[0].Status != project.Open || list[0].Line != "results" || list[0].Working {
 		t.Fatalf("list: %+v", list)
 	}
+
+	testAvatarRename(t, r, p.ID, list[0].Updated, notes)
+}
+
+// testAvatarRename: a valid color and monogram persist without bumping updated or notifying the
+// orchestrator; a rename changes the name and leaves the orchestrator a note.
+func testAvatarRename(t *testing.T, r *rig, id string, updated time.Time, notes func() []string) {
+	r.want(400, "full", "PUT", "/projects/"+id+"/avatar", `{"color":"neon","monogram":"MW"}`)
+	r.want(400, "full", "PUT", "/projects/"+id+"/avatar", `{"color":"sky","monogram":"ABC"}`)
+	r.want(400, "full", "PUT", "/projects/"+id+"/avatar", "{\"color\":\"sky\",\"monogram\":\"A\\n\"}")
+	r.want(404, "full", "PUT", "/projects/00000000/avatar", `{"color":"sky","monogram":"MW"}`)
+	var av project.Project
+	_ = json.Unmarshal([]byte(r.want(200, "full", "PUT", "/projects/"+id+"/avatar", `{"color":"sky","monogram":" MW "}`)), &av)
+	if av.Color != "sky" || av.Monogram != "MW" || !av.Updated.Equal(updated) {
+		t.Fatalf("avatar set: %+v", av)
+	}
+	if len(notes()) != 2 {
+		t.Fatalf("avatar left a note: %v", notes())
+	}
+	// rename: the name changes and the orchestrator reads a note of it
+	r.want(400, "full", "PUT", "/projects/"+id+"/name?via=web", `{"name":"  "}`)
+	r.want(400, "full", "PUT", "/projects/"+id+"/name", `{"name":"Bakery"}`)
+	var rn project.Project
+	_ = json.Unmarshal([]byte(r.want(200, "full", "PUT", "/projects/"+id+"/name?via=web", `{"name":" Bakery "}`)), &rn)
+	if rn.Name != "Bakery" || len(notes()) != 3 {
+		t.Fatalf("rename: %+v, notes %v", rn, notes())
+	}
+	// clearing returns to defaults and omits empty fields
+	if got := r.want(200, "full", "PUT", "/projects/"+id+"/avatar", `{"color":"","monogram":""}`); strings.Contains(got, `"color"`) || strings.Contains(got, `"monogram"`) {
+		t.Fatalf("avatar reset kept fields: %s", got)
+	}
 }
 
 // store: a project's agents write its files by name and a full key reads
