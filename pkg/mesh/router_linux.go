@@ -24,20 +24,30 @@ const (
 // Network is the project's /48, from this machine's address on the mesh,
 // for a server that lets in only the mesh.
 func Network() (netip.Prefix, error) {
-	ifc, err := net.InterfaceByName(tunName)
+	a, err := Addr()
 	if err != nil {
 		return netip.Prefix{}, err
+	}
+	return project(netip.PrefixFrom(a, 128)), nil
+}
+
+// Addr is this machine's address on the mesh, for a server that listens on
+// the mesh only.
+func Addr() (netip.Addr, error) {
+	ifc, err := net.InterfaceByName(tunName)
+	if err != nil {
+		return netip.Addr{}, err
 	}
 	as, err := ifc.Addrs()
 	if err != nil {
-		return netip.Prefix{}, err
+		return netip.Addr{}, err
 	}
 	for _, a := range as {
 		if p, err := netip.ParsePrefix(a.String()); err == nil && !p.Addr().IsLinkLocalUnicast() {
-			return project(p), nil
+			return p.Addr(), nil
 		}
 	}
-	return netip.Prefix{}, errors.New("no address on the mesh yet")
+	return netip.Addr{}, errors.New("no address on the mesh yet")
 }
 
 // alone has nothing to check: a second worker's TUN of the same name fails

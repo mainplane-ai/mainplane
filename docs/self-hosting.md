@@ -400,6 +400,9 @@ server. Nothing is shared until the harness config names a drive:
   services stay off; the drive's smbd, `mainplane-smbd`, takes connections from
   the mesh only. Every file on a drive belongs to the server's operator,
   whoever wrote it.
+- Drives are mesh only: no mount over a LAN or Tailscale. NFS listens on the
+  server's mesh address alone, and `rpcbind` and `rpc-statd`, which NFSv4 does
+  not need, are masked while the machine serves drives.
 - Workers mount at `/drives/<name>` (Linux), `/Volumes/<name>` (macOS, listed
   in Finder under the server's `<server>--<project>.mainplane.net`), and a
   letter from `W:` down (Windows, in the operator's session, listed in Explorer
