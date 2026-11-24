@@ -221,6 +221,8 @@ async function render() {
   if (/^\/projects\/?$/.test(location.pathname)) history.replaceState(null, "", "/") // the list has no path of its own: /projects is home
   shown = location.pathname
   const [kind, id, sub, agent, more] = location.pathname.split("/").slice(1)
+  if (kind !== "welcome" && key() && !onboarded()) await setUp()
+  if (signal.aborted) return
   document.body.classList.toggle("out", !key() || !onboarded() || kind === "welcome")
   document.body.classList.toggle("home", location.pathname === "/" || location.pathname === "/new") // a phone shows the list under the new project sheet
   drawList()
@@ -256,7 +258,6 @@ function toolbar(who: string | Pick<Project, "id" | "name" | "color" | "monogram
 
 let ob: HTMLElement | null = null // the onboarding, kept while it runs: a render keeps its step
 async function content(kind: string, id: string, sub: string, signal: AbortSignal, agent = "", more = ""): Promise<HTMLElement[]> {
-  if (kind !== "welcome" && key() && !onboarded()) await setUp()
   if (!onboarded() || kind === "welcome") return [ob ??= onboarding(loginForm, kind === "welcome", () => { ob = null; void refresh().then(() => go(projects.length ? "/" : "/new")) })]
   if (!key()) return [loginForm()]
   if (!projects.length) await refresh()

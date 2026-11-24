@@ -93,7 +93,7 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, again: 
         return
       }
       case "login": {
-        const form = loginForm(() => void setUp().then(set => set ? done() : (step = "provider", draw(), void poll())))
+        const form = loginForm(() => void (again ? Promise.resolve(false) : setUp()).then(set => set ? done() : (step = "provider", draw(), void poll())))
         root.replaceChildren(top(), form, foot(button("Log In", () => (form as HTMLFormElement).requestSubmit())))
         return
       }

@@ -26,7 +26,8 @@ export function logout(refused = false) {
 // refused asks again after a moment: one 401, say while the harness restarts, must not end a login.
 const refused = async () => {
   await new Promise(t => setTimeout(t, 2000))
-  return (await fetch("/", { headers: { Authorization: "Bearer " + key() }, cache: "no-cache" }).catch(() => null))?.status === 401
+  const s = (await fetch("/", { headers: { Authorization: "Bearer " + key() }, cache: "no-cache" }).catch(() => null))?.status
+  return s === 401 || s === 429 // 429: turned away for refused keys
 }
 
 type Options = { method?: string; json?: unknown; text?: string; form?: FormData; body?: BodyInit; signal?: AbortSignal }
