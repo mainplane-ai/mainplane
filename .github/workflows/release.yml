@@ -94,10 +94,13 @@ jobs:
             b=$(basename "$f")
             "$RUNNER_TEMP/rcodesign" sign --pem-file "$RUNNER_TEMP/macos.pem" --binary-identifier "ai.mainplane.${b%-darwin-*}" --code-signature-flags runtime "$f"
           done
-          "$RUNNER_TEMP/rcodesign" encode-app-store-connect-api-key -o "$RUNNER_TEMP/notary.json" "$NOTARY_ISSUER" "$NOTARY_KEY_ID" "$RUNNER_TEMP/notary.p8"
-          zip -qj "$RUNNER_TEMP/darwin.zip" dist/*-darwin-*
-          "$RUNNER_TEMP/rcodesign" notary-submit --api-key-file "$RUNNER_TEMP/notary.json" --wait --max-wait-seconds 3600 "$RUNNER_TEMP/darwin.zip"
-          rm "$RUNNER_TEMP/macos.pem" "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/notary.json" "$RUNNER_TEMP/darwin.zip"
+          # an -rc is signed but not notarized: Apple can take hours, and only a stable release needs it
+          if [[ $TAG != *-rc.* ]]; then
+            "$RUNNER_TEMP/rcodesign" encode-app-store-connect-api-key -o "$RUNNER_TEMP/notary.json" "$NOTARY_ISSUER" "$NOTARY_KEY_ID" "$RUNNER_TEMP/notary.p8"
+            zip -qj "$RUNNER_TEMP/darwin.zip" dist/*-darwin-*
+            "$RUNNER_TEMP/rcodesign" notary-submit --api-key-file "$RUNNER_TEMP/notary.json" --wait --max-wait-seconds 3600 "$RUNNER_TEMP/darwin.zip"
+          fi
+          rm -f "$RUNNER_TEMP/macos.pem" "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/notary.json" "$RUNNER_TEMP/darwin.zip"
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
