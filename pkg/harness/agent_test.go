@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -996,6 +998,37 @@ func TestAgentRoutes(t *testing.T) {
 		t.Fatalf("post: %+v %v", posted, err)
 	}
 	r.settled(made.ID)
+	// A part that more parts follow waits for them: the session wakes once, at the last.
+	steps := func() int { return len(r.bodies(made.Session, statefile.Step, "")) }
+	before := steps()
+	do(200, "POST", "/agents/"+made.ID+"/records?via=web&more=1", "a photo")
+	if got := do(200, "GET", "/agents/"+made.ID, ""); strings.Contains(got, `"status":"stepping"`) || steps() != before {
+		t.Fatalf("a post that more follow woke the session: %s", got)
+	}
+	do(200, "POST", "/agents/"+made.ID+"/records?via=web", "the text")
+	r.settled(made.ID)
+	if steps() != before+1 {
+		t.Fatalf("steps after the last part: %d, want %d", steps(), before+1)
+	}
+	// A post over the bound, one body or multipart, is too large and says the bound.
+	var mp strings.Builder
+	mw := multipart.NewWriter(&mp)
+	pw, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"image/jpeg"}})
+	_, _ = pw.Write(make([]byte, MaxPost))
+	_ = mw.Close()
+	for ctype, body := range map[string]string{"text/plain": strings.Repeat("x", MaxPost+1), mw.FormDataContentType(): mp.String()} {
+		req, _ := http.NewRequest("POST", srv.URL+"/agents/"+made.ID+"/records?via=web", strings.NewReader(body))
+		req.Header.Set("Content-Type", ctype)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusRequestEntityTooLarge || !strings.Contains(string(b), "8 MiB") {
+			t.Fatalf("%s over the bound: %d %s", ctype, resp.StatusCode, b)
+		}
+	}
 	do(400, "POST", "/agents/"+made.ID+"/records", "no via")
 	do(204, "PUT", "/agents/"+made.ID+"/name?via=web", "chief")
 	do(204, "PUT", "/agents/"+made.ID+"/apps?via=phone", `[]`)

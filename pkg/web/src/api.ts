@@ -36,7 +36,8 @@ export async function api(path: string, o: Options = {}): Promise<Response> {
     cache: "no-cache", // a file of a store is asked for again and answered 304 while it is the same
   })
   if (r.status === 401) logout(true)
-  if (!r.ok) throw new Error((await r.text()).trim() || r.statusText)
+  // A proxy's error page (Cloudflare's 413) is HTML: its status says more than its markup.
+  if (!r.ok) throw new Error((!r.headers.get("Content-Type")?.startsWith("text/html") && (await r.text()).trim()) || `${r.status} ${r.statusText}`.trim())
   return r
 }
 
