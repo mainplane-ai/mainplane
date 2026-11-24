@@ -3,6 +3,8 @@
 // a sign-in or a local server, and a provider's page with its models and Disconnect.
 
 import { type Model, api, get, h, icon } from "./api"
+import codeMotion from "./signin-claude.svg"
+import addressMotion from "./signin-chatgpt.svg"
 
 type Info = { name: string; shape: string; url: string; context_limit?: number }
 type Cat = { name: string; shape: string; url?: string; session?: string }
@@ -118,6 +120,7 @@ export function providersPanel(host?: Host): HTMLElement {
     const [id, p] = Object.entries(o.keyed)[0]
     const status = h("p", { className: "note" }, "Starting the sign-in...")
     const steps = h("ol", { className: "steps" })
+    const motion = h("div", { className: "motion", ariaHidden: "true", hidden: true }) // the steps, drawn (signin-*.svg: SMIL and classes only, as the CSP takes no inline style)
     const paste = input({ ariaLabel: "Pasted text" })
     const open = h("a", { className: "btn filled open", target: "_blank", rel: "noopener", hidden: true })
     const form = h("form", { hidden: true }, h("div", { className: "form" }, h("div", { className: "form-row" }, paste)))
@@ -127,7 +130,7 @@ export function providersPanel(host?: Host): HTMLElement {
       live = false
       if (st.state === "done") return succeed()
       status.textContent = st.error ?? "The sign-in failed."
-      form.hidden = open.hidden = go.hidden = true
+      form.hidden = open.hidden = go.hidden = motion.hidden = true
       steps.replaceChildren()
       status.after(h("div", { className: "actions" }, h("button", { className: "btn", type: "button", onclick: () => signin(o) }, "Try Again")))
     }
@@ -147,13 +150,17 @@ export function providersPanel(host?: Host): HTMLElement {
       status.textContent = "Signing in..."
       api("/providers/" + id + "/login/code", { json: { code: text } }).catch(e => { go.disabled = false; status.textContent = ""; fail(e) })
     }
-    show("Sign in to " + o.name, add, [steps, open, form, status], go)
+    show("Sign in to " + o.name, add, [motion, steps, open, form, status], go)
     api("/providers/" + id + "/login", { json: { shape: p.shape, url: p.url } }).then(r => r.json() as Promise<Login>).then(st => {
       if (st.state !== "pending") return end(st)
       const loopback = new URL(st.url).searchParams.get("redirect_uri")?.startsWith("http://")
       const vendor = o.name.split(" ")[0]
       // The steps come first, so they are read before the person leaves for the vendor's site.
       Object.assign(open, { href: st.url, textContent: "Open " + vendor, hidden: false })
+      motion.innerHTML = loopback ? addressMotion : codeMotion
+      motion.hidden = false
+      const svg = motion.querySelector("svg")!
+      if (matchMedia("(prefers-reduced-motion: reduce)").matches) { svg.pauseAnimations(); svg.setCurrentTime(9) } // its last frame: the check
       steps.replaceChildren(
         h("li", null, "Open " + vendor + " below and sign in."),
         ...(loopback
