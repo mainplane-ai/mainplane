@@ -129,6 +129,8 @@ export function composer(agent: string, placeholder: string): HTMLElement {
     }
   }
 
+  // One message's posts end before the next one's begin: its last post wakes the agent to all of its parts.
+  let queue: Promise<unknown> = Promise.resolve()
   form.onsubmit = async e => {
     e.preventDefault()
     if (!box.value.trim() && !files.length) return
@@ -139,7 +141,7 @@ export function composer(agent: string, placeholder: string): HTMLElement {
     // A post at a time stays far under the bound of one; all but the last say more follow, so the agent
     // wakes once, to all of them. left is what has not reached the harness.
     let left: (string | File)[] = [...(text.trim() ? [text] : []), ...sending]
-    const sent = (async () => {
+    const sent = queue.then(async () => {
       for (const [i, f] of sending.entries()) left[left.length - sending.length + i] = await shrink(f) // one at a time: a phone has little memory for big pictures
       const big = left.find(p => typeof p !== "string" && p.size > limit) as File | undefined
       if (big) throw new Error(`${big.name} is ${size(big.size)}, over the limit of ${limit >> 20} MiB for one post`)
@@ -149,7 +151,8 @@ export function composer(agent: string, placeholder: string): HTMLElement {
         await api(`/agents/${agent}/records?via=web${left.length > 1 ? "&more=1" : ""}`, typeof p === "string" ? { text: p } : { form: body })
         left.shift()
       }
-    })()
+    })
+    queue = sent.catch(() => {})
     // The box is free for the next message at once, and a chat shows this one while it is on its way.
     dispatchEvent(new CustomEvent("sending", { detail: { agent, text, files: sending, sent } }))
     box.value = ""

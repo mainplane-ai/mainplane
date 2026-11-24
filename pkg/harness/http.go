@@ -169,7 +169,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 			fail(w, err)
 			return
 		}
-		n, err := h.post(ctx, r.PathValue("id"), via, r.Header.Get("Idempotency-Key"), parts, r.URL.Query().Get("more") == "")
+		n, err := h.post(ctx, r.PathValue("id"), via, r.Header.Get("Idempotency-Key"), parts, r.URL.Query().Get("more") != "1")
 		if err != nil {
 			fail(w, err)
 			return
@@ -318,7 +318,7 @@ func (h *Harness) serveAgentPost(ctx context.Context, w http.ResponseWriter, r *
 		fail(w, err)
 		return
 	}
-	s, n, err := h.postAgent(ctx, r.PathValue("id"), via, r.Header.Get("Idempotency-Key"), parts, r.URL.Query().Get("more") == "")
+	s, n, err := h.postAgent(ctx, r.PathValue("id"), via, r.Header.Get("Idempotency-Key"), parts, r.URL.Query().Get("more") != "1")
 	if err != nil {
 		fail(w, err)
 		return
@@ -335,8 +335,12 @@ func fail(w http.ResponseWriter, err error) {
 	var big *http.MaxBytesError
 	switch {
 	case errors.As(err, &big):
-		code, err = http.StatusRequestEntityTooLarge, fmt.Errorf("over the limit of %d MiB for one post", big.Limit>>20)
-		log.Printf("refused a post: %v", err)
+		limit := fmt.Sprintf("%d bytes", big.Limit)
+		if big.Limit%(1<<20) == 0 {
+			limit = fmt.Sprintf("%d MiB", big.Limit>>20)
+		}
+		code, err = http.StatusRequestEntityTooLarge, fmt.Errorf("the request body is over the limit of %s", limit)
+		log.Printf("refused a request: %v", err)
 	case errors.Is(err, ErrNoAgent):
 		code = http.StatusNotFound
 	case errors.Is(err, ErrLive):
