@@ -148,7 +148,9 @@ export function composer(agent: string, placeholder: string): HTMLElement {
       while (left.length) {
         const p = left[0], body = new FormData()
         if (typeof p !== "string") body.append("file", p, p.name)
-        await api(`/agents/${agent}/records?via=web${left.length > 1 ? "&more=1" : ""}`, typeof p === "string" ? { text: p } : { form: body })
+        // A post that hangs (a phone that lost its network) ends in two minutes, so the next message is not held up for good.
+        const signal = AbortSignal.timeout(120e3)
+        await api(`/agents/${agent}/records?via=web${left.length > 1 ? "&more=1" : ""}`, typeof p === "string" ? { text: p, signal } : { form: body, signal })
         left.shift()
       }
     })
