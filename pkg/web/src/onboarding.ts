@@ -49,7 +49,6 @@ function install(args: string): HTMLElement {
 export function onboarding(loginForm: (done: () => void) => HTMLElement, again: boolean, done: () => void): HTMLElement {
   const root = h("div", { className: "onboard" })
   let step: Step = again || !key() && !sessionStorage.getItem("refused") ? "welcome" : key() ? "provider" : "login"
-  let providers = -1 // how many were connected at the last poll; -1 before the first
   let workers: Worker[] = []
   let network = "", join = "", minted = ""
   let sharing = false // the harness has not been asked to share data yet
@@ -66,9 +65,10 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, again: 
 
   // page is one step as in iOS Setup Assistant: Back at the top left, its title and words, then at the foot
   // the step's one blue button and under it, at times, the way to skip it.
-  const page = (title: string, words: string, body: Node[], next: HTMLElement, skip?: HTMLElement) => root.replaceChildren(top(),
-    h("div", { className: "ob-step" }, h("h1", null, title), ...(words ? [h("p", null, words)] : []), ...body), foot(next, skip))
-  const top = () => h("div", { className: "ob-top" }, h("button", { className: "btn icon ob-back", type: "button", ariaLabel: "Back", onclick: () => move(-1) }, icon("chevron-left")))
+  // A step with no button goes on only by a choice in it (Add Provider).
+  const page = (title: string, words: string, body: Node[], next: HTMLElement | null, skip?: HTMLElement, back = () => move(-1)) => root.replaceChildren(top(back),
+    h("div", { className: "ob-step" }, h("h1", null, title), ...(words ? [h("p", null, words)] : []), ...body), ...(next ? [foot(next, skip)] : []))
+  const top = (back = () => move(-1)) => h("div", { className: "ob-top" }, h("button", { className: "btn icon ob-back", type: "button", ariaLabel: "Back", onclick: back }, icon("chevron-left")))
   const foot = (next: HTMLElement, skip?: HTMLElement) => h("div", { className: "ob-foot" }, next, ...(skip ? [skip] : []))
   const button = (label: string, onclick: () => void, filled = true) =>
     h("button", { className: "btn lg " + (filled ? "filled" : "plain"), type: "button", onclick }, label)
@@ -89,10 +89,20 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, again: 
         root.replaceChildren(top(), form, foot(button("Log In", () => (form as HTMLFormElement).requestSubmit())))
         return
       }
+      // provider is Add Provider alone: a pick opens its key or sign-in, whose Connect connects it and goes on.
+      // More can be connected in Settings.
       case "provider": {
-        const next = button("Continue", () => move(1))
-        live = () => (next.disabled = providers < 1)
-        page("Connect a Model Provider", "Your agents think with its models. Connect one to begin.", [providersPanel()], next)
+        providersPanel({
+          show: (title, back, nodes, go) => {
+            if (step !== "provider") return // gone on before the catalog came
+            if (go) go.className = "btn lg filled"
+            const body = h("div", { className: "providers" }, ...nodes)
+            if (back) page(title, "", [body], go, undefined, back)
+            else page("Connect a Model Provider", "Your agents think with its models. Pick one to begin.", [body], null)
+            root.closest("main")?.scrollTo(0, 0)
+          },
+          done: () => move(1),
+        })
         break
       }
       case "sharing": {
@@ -160,8 +170,7 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, again: 
     }
   })())
 
-  // poll reads what the steps show every second and a half while the onboarding is on screen. A provider
-  // connected on its step moves on, as in the terminal app.
+  // poll reads what the steps show every second and a half while the onboarding is on screen.
   let polling = false
   const poll = async () => {
     if (polling || !key()) return
@@ -169,12 +178,10 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, again: 
     const st = await get<{ data_sharing?: unknown; version: { current: string } }>("/settings").catch(() => null)
     sharing = !!st && !st.data_sharing && st.version.current !== "dev"
     do {
-      const [ps, ws, top, j] = await Promise.all([get<unknown[]>("/providers"), get<Worker[]>("/workers"), get<{ network: string }>("/"), get<{ join: string }>("/join")]).catch(() => [null, null, null, null])
-      if (ps) {
-        const more = providers >= 0 && ps.length > providers
-        ;[providers, workers, network, join] = [ps.length, ws!, top!.network, j!.join]
-        if (more && step === "provider") move(1)
-        else live?.()
+      const [ws, top, j] = await Promise.all([get<Worker[]>("/workers"), get<{ network: string }>("/"), get<{ join: string }>("/join")]).catch(() => [null, null, null])
+      if (ws) {
+        ;[workers, network, join] = [ws, top!.network, j!.join]
+        live?.()
       }
       await new Promise(t => setTimeout(t, 1500))
     } while (root.isConnected)
