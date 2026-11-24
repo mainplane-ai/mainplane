@@ -89,7 +89,9 @@ export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElem
   let end = true
   const toEnd = () => (log.scrollTop = log.scrollHeight)
   log.addEventListener("scroll", () => (end = log.scrollHeight - log.scrollTop - log.clientHeight < 40), { passive: true })
-  new ResizeObserver(() => end && toEnd()).observe(thread, { box: "border-box" }) // border-box: the composer growing pads the thread
+  const keep = new ResizeObserver(() => end && toEnd())
+  keep.observe(thread, { box: "border-box" }) // border-box: the composer growing pads the thread
+  keep.observe(log) // a phone's keyboard coming up makes the chat shorter
   const calls = new Map<string, HTMLElement>()
   // A message shows as it is sent, before the harness has it. Its record takes its place; one that fails is taken back.
   const pending = h("div")

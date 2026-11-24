@@ -31,6 +31,36 @@ async function shrink(f: File): Promise<File> {
   return b ? new File([b], f.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" }) : f
 }
 
+// On a phone the page is the visual viewport: iOS lays a keyboard over the page and pans it, so the page
+// takes the height and the place of what is still seen, and the composer sits right on the keyboard (app.css).
+const vv = window.visualViewport
+const fit = () => {
+  const s = document.documentElement.style
+  s.setProperty("--vv-h", vv!.height + "px")
+  s.setProperty("--vv-top", vv!.offsetTop + "px")
+}
+vv?.addEventListener("resize", fit)
+vv?.addEventListener("scroll", fit)
+if (vv) fit()
+// A swipe down on a chat or a composer, or a tap on a thread, puts the keyboard away (Messages).
+let touch: { y: number; x: number; on: Element } | null = null
+addEventListener("touchstart", e => {
+  const t = e.touches[0]
+  touch = e.touches.length === 1 && e.target instanceof Element && e.target.closest("main") ? { x: t.clientX, y: t.clientY, on: e.target } : null
+}, { passive: true })
+addEventListener("touchmove", e => {
+  const t = e.touches[0], box = document.activeElement
+  if (!touch || !(box instanceof HTMLTextAreaElement) || !box.closest(".composer")) return
+  const dy = t.clientY - touch.y
+  if (dy > 30 && dy > 2 * Math.abs(t.clientX - touch.x)) box.blur(), (touch = null)
+}, { passive: true })
+addEventListener("touchend", e => {
+  const t = e.changedTouches[0], from = touch, box = document.activeElement
+  touch = null
+  if (!from || !(box instanceof HTMLTextAreaElement) || !box.closest(".composer")) return
+  if (Math.hypot(t.clientX - from.x, t.clientY - from.y) < 10 && from.on.closest(".thread") && !from.on.closest("a, button, summary, input, textarea, [role=button]")) box.blur()
+}, { passive: true })
+
 const kind = (f: File) => (f.name.match(/\.(\w+)$/)?.[1] ?? f.type.split("/")[1] ?? "File").toUpperCase()
 
 export function composer(agent: string, placeholder: string): HTMLElement {
@@ -122,7 +152,16 @@ export function composer(agent: string, placeholder: string): HTMLElement {
     r.start()
     update()
   }
+  // A touch on Send does not take the focus from the box, so the keyboard stays up for the next message.
+  // A mouse click is as it was: the focus goes to the button.
+  let keep = false
+  act.onpointerdown = e => {
+    keep = act.type === "submit" && e.pointerType !== "mouse" && document.activeElement === box
+    if (keep) e.preventDefault()
+  }
   act.onclick = e => {
+    if (keep) box.focus()
+    keep = false
     if (act.type === "button") {
       e.preventDefault()
       dictate()
