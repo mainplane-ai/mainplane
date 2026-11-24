@@ -31,7 +31,7 @@ main > .tabs { margin: 0 16px }
 .providers input[type=number] { appearance: textfield; -moz-appearance: textfield }
 .providers input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none }
 .providers .motion { margin: 0 0 16px }
-.providers .motion svg { display: block; width: 100%; height: auto; max-height: 200px }
+.providers .motion svg { display: block; width: 100%; height: auto; max-height: 240px }
 .motion { color: var(--color-text) }
 .motion .m-line { stroke: var(--color-text-3) }
 .motion .m-fill { fill: var(--color-surface-2) }
