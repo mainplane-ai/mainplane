@@ -34,6 +34,10 @@ const (
 	// cloudflared rides out network loss on its own and exits only when it
 	// cannot go on. Starting again at once would spin.
 	restartWait = 5 * time.Second
+	// cloudflared does not exit when Cloudflare drops a quick tunnel, as it
+	// does after about 10 minutes without a connection: it retries "Tunnel
+	// not found" forever. Its name, gone then too, is checked this often.
+	nameCheck = time.Minute
 	// A new quick tunnel's name resolves seconds after Cloudflare makes it,
 	// but a resolver asked before then keeps the miss for up to 60s, the
 	// trycloudflare.com negative TTL.
@@ -83,7 +87,9 @@ func Quick(ctx context.Context, dir, origin string, up func(url string)) error {
 		}
 		if ok {
 			up("https://" + c.Hostname)
-			err = run(ctx, bin, conf, origin, nil, "--credentials-file", file, c.TunnelID)
+			err = watched(ctx, c.Hostname, func(ctx context.Context) error {
+				return run(ctx, bin, conf, origin, nil, "--credentials-file", file, c.TunnelID)
+			})
 		} else {
 			err = errors.Join(fmt.Errorf("%s does not resolve: Cloudflare dropped the tunnel", c.Hostname), os.Remove(file))
 		}
@@ -127,7 +133,36 @@ func run(ctx context.Context, bin, conf, origin string, env []string, args ...st
 	cmd := exec.CommandContext(ctx, bin, append([]string{"tunnel", "--config", conf, "--loglevel", "warn", "--url", origin, "run"}, args...)...)
 	cmd.Env = append(os.Environ(), env...)
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
-	return fmt.Errorf("cloudflared: %w", cmd.Run())
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("cloudflared: %w", err)
+	}
+	return errors.New("cloudflared exited")
+}
+
+// watched is run of a quick tunnel named host, stopped when host stops
+// resolving, so the loop around it gets a new tunnel. A failed lookup, as
+// while the network is down, stops nothing.
+func watched(ctx context.Context, host string, run func(context.Context) error) error {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(nameCheck):
+			}
+			if ok, err := named(ctx, host, false); err == nil && !ok {
+				cancel(fmt.Errorf("%s stopped resolving: Cloudflare dropped the tunnel", host))
+				return
+			}
+		}
+	}()
+	err := run(ctx)
+	if cause := context.Cause(ctx); cause != nil {
+		return cause
+	}
+	return err
 }
 
 // pause logs why cloudflared stopped and waits restartWait, unless ctx ends
