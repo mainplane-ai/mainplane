@@ -206,6 +206,6 @@ export function providersPanel(host?: Host): HTMLElement {
       e => models.replaceChildren(h("p", { className: "note" }, "Could not list its models: " + (e instanceof Error ? e.message : e))))
   }
 
-  load().then(host ? add : list, e => panel.replaceChildren(h("p", { className: "note" }, "Could not load the providers: " + (e instanceof Error ? e.message : e))))
+  load().then(host ? add : list, e => show("", null, [h("p", { className: "note" }, "Could not load the providers: " + (e instanceof Error ? e.message : e))]))
   return panel
 }

@@ -281,10 +281,11 @@ func Harness(ctx context.Context, path string) error {
 	routes.HandleFunc("PUT /providers/{name}", noContent(func(r *http.Request) error {
 		return setProvider(path, r.PathValue("name"), r.Body, h.SetProviders)
 	}))
+	logins := &logins{ctx: ctx, path: path, serve: h.SetProviders, m: map[string]*login{}}
 	routes.HandleFunc("DELETE /providers/{name}", noContent(func(r *http.Request) error {
+		logins.stop(r.PathValue("name"))
 		return removeProvider(path, r.PathValue("name"), h.SetProviders)
 	}))
-	logins := &logins{ctx: ctx, path: path, serve: h.SetProviders, m: map[string]*login{}}
 	routes.HandleFunc("POST /providers/{name}/login", logins.start)
 	routes.HandleFunc("POST /providers/{name}/login/code", logins.paste)
 	routes.HandleFunc("GET /providers/{name}/login", logins.get)
@@ -494,7 +495,7 @@ func removeProvider(path, name string, serve func(map[string]provider.Provider))
 		return err
 	}
 	p, ok := c.Providers[name]
-	if !ok {
+	if !ok || name != filepath.Base(name) || !filepath.IsLocal(name) {
 		return fmt.Errorf("no provider %q", name)
 	}
 	delete(c.Providers, name)
@@ -502,13 +503,15 @@ func removeProvider(path, name string, serve func(map[string]provider.Provider))
 	if err != nil {
 		return err
 	}
+	if provider.Logins[p.Shape] != nil {
+		if err := os.RemoveAll(providerDir(filepath.Dir(path), name)); err != nil {
+			return err
+		}
+	}
 	if err := saveConfig(path, c); err != nil {
 		return err
 	}
 	serve(ps)
-	if provider.Logins[p.Shape] != nil {
-		return os.RemoveAll(providerDir(filepath.Dir(path), name))
-	}
 	return nil
 }
 

@@ -89,7 +89,7 @@ func (c Catalog) Offered() []Offer {
 	placed := map[string]bool{}
 	for _, sec := range Sections {
 		for _, id := range sec.IDs {
-			if _, ok := c.Providers[id]; ok {
+			if _, ok := c.Providers[id]; ok && !placed[id] {
 				out = append(out, Offer{sec.Name, id})
 				for _, k := range c.Keyed(id) {
 					placed[k] = true

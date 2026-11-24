@@ -56,9 +56,11 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, again: 
   const servers = () => workers.filter(w => !w.refused && w.drive_server).map(w => w.name)
   const order = (): Step[] => ["welcome", ...(key() ? [] : ["login" as const]), "provider", ...(sharing ? ["sharing" as const] : []), "workers", "device", ...(servers().length ? ["drive" as const] : [])]
   const move = (d: number) => {
-    const o = order(), i = o.indexOf(step)
-    if (i + d >= o.length) return finish()
-    step = o[Math.max(0, i + d)]
+    // a step that left the order (no drive server now) moves from where it was
+    const o = order(), all: Step[] = ["welcome", "login", "provider", "sharing", "workers", "device", "drive"]
+    const at = o.filter(s => all.indexOf(s) < all.indexOf(step)).length, i = at + (o.includes(step) || d < 0 ? d : 0)
+    if (i >= o.length) return finish()
+    step = o[Math.max(0, i)]
     draw()
   }
   const finish = () => { localStorage.setItem(ran, "1"); done() }

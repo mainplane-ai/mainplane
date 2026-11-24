@@ -117,6 +117,19 @@ func (ls *logins) start(w http.ResponseWriter, r *http.Request) {
 	reply(w, l.view())
 }
 
+// stop cancels the login of name, if one runs, and waits for its end, so it
+// cannot save the provider after a Disconnect.
+func (ls *logins) stop(name string) {
+	ls.mu.Lock()
+	l := ls.m[name]
+	delete(ls.m, name)
+	ls.mu.Unlock()
+	if l != nil {
+		l.cancel()
+		<-l.done
+	}
+}
+
 // paste is POST /providers/{name}/login/code with {"code"}: what the prompt
 // asked the user to paste.
 func (ls *logins) paste(w http.ResponseWriter, r *http.Request) {
