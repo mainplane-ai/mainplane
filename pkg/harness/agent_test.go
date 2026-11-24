@@ -929,6 +929,47 @@ func TestCopyVia(t *testing.T) {
 	}
 }
 
+// A post's parts can come one post each, and a post over the bound says the bound.
+func TestAgentPostParts(t *testing.T) {
+	r := newRig(t)
+	srv := httptest.NewServer(Handler(context.Background(), r.h))
+	defer srv.Close()
+	a := r.create(AgentCreate{Config: r.conf(1000, 0)}, "web")
+	post := func(code int, query, ctype, body string) string {
+		t.Helper()
+		resp, err := http.Post(srv.URL+"/agents/"+a.ID+"/records?via=web"+query, ctype, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != code {
+			t.Fatalf("post%s: %d %s, want %d", query, resp.StatusCode, b, code)
+		}
+		return string(b)
+	}
+	// A part that more parts follow waits for them: the session wakes once, at the last.
+	post(200, "&more=1", "text/plain", "a photo")
+	if info, _ := r.h.AgentInfo(a.ID); info.Status == statefile.StatusStepping || len(r.bodies(a.live(), statefile.Step, "")) != 0 {
+		t.Fatalf("a post that more follow woke the session: %+v", info)
+	}
+	post(200, "", "text/plain", "the text")
+	r.settled(a.ID)
+	if n := len(r.bodies(a.live(), statefile.Step, "")); n != 1 {
+		t.Fatalf("steps after the last part: %d, want 1", n)
+	}
+	var mp strings.Builder
+	mw := multipart.NewWriter(&mp)
+	pw, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"image/jpeg"}})
+	_, _ = pw.Write(make([]byte, MaxPost))
+	_ = mw.Close()
+	for ctype, body := range map[string]string{"text/plain": strings.Repeat("x", MaxPost+1), mw.FormDataContentType(): mp.String()} {
+		if got := post(http.StatusRequestEntityTooLarge, "", ctype, body); !strings.Contains(got, "8 MiB") {
+			t.Fatalf("%s over the bound: %s", ctype, got)
+		}
+	}
+}
+
 // The /agents routes.
 func TestAgentRoutes(t *testing.T) {
 	r := newRig(t)
@@ -998,37 +1039,6 @@ func TestAgentRoutes(t *testing.T) {
 		t.Fatalf("post: %+v %v", posted, err)
 	}
 	r.settled(made.ID)
-	// A part that more parts follow waits for them: the session wakes once, at the last.
-	steps := func() int { return len(r.bodies(made.Session, statefile.Step, "")) }
-	before := steps()
-	do(200, "POST", "/agents/"+made.ID+"/records?via=web&more=1", "a photo")
-	if got := do(200, "GET", "/agents/"+made.ID, ""); strings.Contains(got, `"status":"stepping"`) || steps() != before {
-		t.Fatalf("a post that more follow woke the session: %s", got)
-	}
-	do(200, "POST", "/agents/"+made.ID+"/records?via=web", "the text")
-	r.settled(made.ID)
-	if steps() != before+1 {
-		t.Fatalf("steps after the last part: %d, want %d", steps(), before+1)
-	}
-	// A post over the bound, one body or multipart, is too large and says the bound.
-	var mp strings.Builder
-	mw := multipart.NewWriter(&mp)
-	pw, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"image/jpeg"}})
-	_, _ = pw.Write(make([]byte, MaxPost))
-	_ = mw.Close()
-	for ctype, body := range map[string]string{"text/plain": strings.Repeat("x", MaxPost+1), mw.FormDataContentType(): mp.String()} {
-		req, _ := http.NewRequest("POST", srv.URL+"/agents/"+made.ID+"/records?via=web", strings.NewReader(body))
-		req.Header.Set("Content-Type", ctype)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusRequestEntityTooLarge || !strings.Contains(string(b), "8 MiB") {
-			t.Fatalf("%s over the bound: %d %s", ctype, resp.StatusCode, b)
-		}
-	}
 	do(400, "POST", "/agents/"+made.ID+"/records", "no via")
 	do(204, "PUT", "/agents/"+made.ID+"/name?via=web", "chief")
 	do(204, "PUT", "/agents/"+made.ID+"/apps?via=phone", `[]`)
