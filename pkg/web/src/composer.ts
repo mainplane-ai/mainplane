@@ -58,7 +58,7 @@ addEventListener("touchend", e => {
   const t = e.changedTouches[0], from = touch, box = document.activeElement
   touch = null
   if (!from || !(box instanceof HTMLTextAreaElement) || !box.closest(".composer")) return
-  if (Math.hypot(t.clientX - from.x, t.clientY - from.y) < 10 && from.on.closest(".thread") && !from.on.closest("a, button, input, textarea")) box.blur()
+  if (Math.hypot(t.clientX - from.x, t.clientY - from.y) < 10 && from.on.closest(".thread") && !from.on.closest("a, button, summary, input, textarea, [role=button]")) box.blur()
 }, { passive: true })
 
 const kind = (f: File) => (f.name.match(/\.(\w+)$/)?.[1] ?? f.type.split("/")[1] ?? "File").toUpperCase()
@@ -152,11 +152,11 @@ export function composer(agent: string, placeholder: string): HTMLElement {
     r.start()
     update()
   }
-  // A touch on the button does not take the focus from the box, so the keyboard stays up for the next message.
+  // A touch on Send does not take the focus from the box, so the keyboard stays up for the next message.
   // A mouse click is as it was: the focus goes to the button.
   let keep = false
   act.onpointerdown = e => {
-    keep = e.pointerType !== "mouse" && document.activeElement === box
+    keep = act.type === "submit" && e.pointerType !== "mouse" && document.activeElement === box
     if (keep) e.preventDefault()
   }
   act.onclick = e => {
