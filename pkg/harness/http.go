@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"maps"
 	"mime"
 	"mime/multipart"
@@ -42,7 +43,10 @@ const MaxPost = 8 << 20
 //	                                  part, each with its Content-Type. With
 //	                                  an Idempotency-Key header, a repost
 //	                                  appends only the parts not yet held
-//	                                  under that key and returns the post's n
+//	                                  under that key and returns the post's n.
+//	                                  ?more=1: more parts of this message
+//	                                  follow; the session wakes at the post
+//	                                  without it and takes them as one turn
 //	POST /sessions/{id}/retry         step from the tip, whatever it is            -> {"status"}
 //	POST /sessions/{id}/stop          ?via= required. cut a running step, write    -> 204; the records
 //	                                  it down; kill its environments and jobs        say what happened
@@ -165,7 +169,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 			fail(w, err)
 			return
 		}
-		n, err := h.Post(ctx, r.PathValue("id"), via, r.Header.Get("Idempotency-Key"), parts)
+		n, err := h.post(ctx, r.PathValue("id"), via, r.Header.Get("Idempotency-Key"), parts, r.URL.Query().Get("more") != "1")
 		if err != nil {
 			fail(w, err)
 			return
@@ -314,7 +318,7 @@ func (h *Harness) serveAgentPost(ctx context.Context, w http.ResponseWriter, r *
 		fail(w, err)
 		return
 	}
-	s, n, err := h.PostAgent(ctx, r.PathValue("id"), via, r.Header.Get("Idempotency-Key"), parts)
+	s, n, err := h.postAgent(ctx, r.PathValue("id"), via, r.Header.Get("Idempotency-Key"), parts, r.URL.Query().Get("more") != "1")
 	if err != nil {
 		fail(w, err)
 		return
@@ -323,11 +327,20 @@ func (h *Harness) serveAgentPost(ctx context.Context, w http.ResponseWriter, r *
 }
 
 // fail answers a request the harness refuses: an agent no file has is not
-// found, an agent's live session is not deleted, the rest is the caller's
-// to fix.
+// found, an agent's live session is not deleted, a body over its bound is
+// too large (and logged: it is a person's post the harness never saw), the
+// rest is the caller's to fix.
 func fail(w http.ResponseWriter, err error) {
 	code := http.StatusBadRequest
+	var big *http.MaxBytesError
 	switch {
+	case errors.As(err, &big):
+		limit := fmt.Sprintf("%d bytes", big.Limit)
+		if big.Limit%(1<<20) == 0 {
+			limit = fmt.Sprintf("%d MiB", big.Limit>>20)
+		}
+		code, err = http.StatusRequestEntityTooLarge, fmt.Errorf("the request body is over the limit of %s", limit)
+		log.Printf("refused a request: %v", err)
 	case errors.Is(err, ErrNoAgent):
 		code = http.StatusNotFound
 	case errors.Is(err, ErrLive):

@@ -9,6 +9,28 @@ type Recognition = { lang: string; interimResults: boolean; continuous: boolean;
 const Speech = (window as unknown as { SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition }).SpeechRecognition ?? (window as unknown as { webkitSpeechRecognition?: new () => Recognition }).webkitSpeechRecognition
 
 const size = (n: number) => (n < 1e3 ? `${n} B` : n < 1e6 ? `${Math.round(n / 1e3)} KB` : `${(n / 1e6).toFixed(1)} MB`)
+// limit is the harness's bound on one post (harness.MaxPost).
+const limit = 8 << 20
+
+// shrink is a photo as a JPEG of at most 2000 px on its long side: a phone's
+// 3-8 MB HEIC or JPEG becomes a few hundred KB. A file the browser cannot
+// decode, a GIF, and a small picture go as they are.
+async function shrink(f: File): Promise<File> {
+  if (!f.type.startsWith("image/") || f.type === "image/gif" || f.type === "image/svg+xml") return f
+  const img = await createImageBitmap(f).catch(() => null)
+  if (!img) return f
+  const k = Math.min(1, 2000 / Math.max(img.width, img.height))
+  if (k === 1 && f.size < 1e6 && /^image\/(jpeg|png|webp)$/.test(f.type)) return img.close(), f
+  const c = h("canvas", { width: Math.round(img.width * k), height: Math.round(img.height * k) })
+  const g = c.getContext("2d")!
+  g.fillStyle = "#fff" // what is transparent in a PNG is white, not black, in the JPEG
+  g.fillRect(0, 0, c.width, c.height)
+  g.drawImage(img, 0, 0, c.width, c.height)
+  img.close()
+  const b = await new Promise<Blob | null>(go => c.toBlob(go, "image/jpeg", 0.85))
+  return b ? new File([b], f.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" }) : f
+}
+
 const kind = (f: File) => (f.name.match(/\.(\w+)$/)?.[1] ?? f.type.split("/")[1] ?? "File").toUpperCase()
 
 export function composer(agent: string, placeholder: string): HTMLElement {
@@ -107,17 +129,32 @@ export function composer(agent: string, placeholder: string): HTMLElement {
     }
   }
 
+  // One message's posts end before the next one's begin: its last post wakes the agent to all of its parts.
+  let queue: Promise<unknown> = Promise.resolve()
   form.onsubmit = async e => {
     e.preventDefault()
     if (!box.value.trim() && !files.length) return
     const typed = box.value, was = to, sending = files.splice(0)
     const text = was && typed.trim() ? `Replying to: "${was}"\n\n${typed}` : typed
     listening?.stop()
-    // Each part is one message record: the text, then each file with its type.
-    const body = new FormData()
-    if (text.trim()) body.append("text", new Blob([text], { type: "text/plain" }))
-    for (const f of sending) body.append("file", f, f.name)
-    const sent = api(`/agents/${agent}/records?via=web`, sending.length ? { form: body } : { text })
+    // Each part is one post and one message record: the text, then each file with its type, photos shrunk.
+    // A post at a time stays far under the bound of one; all but the last say more follow, so the agent
+    // wakes once, to all of them. left is what has not reached the harness.
+    let left: (string | File)[] = [...(text.trim() ? [text] : []), ...sending]
+    const sent = queue.then(async () => {
+      for (const [i, f] of sending.entries()) left[left.length - sending.length + i] = await shrink(f) // one at a time: a phone has little memory for big pictures
+      const big = left.find(p => typeof p !== "string" && p.size > limit) as File | undefined
+      if (big) throw new Error(`${big.name} is ${size(big.size)}, over the limit of ${limit >> 20} MiB for one post`)
+      while (left.length) {
+        const p = left[0], body = new FormData()
+        if (typeof p !== "string") body.append("file", p, p.name)
+        // A post that hangs (a phone that lost its network) ends in two minutes, so the next message is not held up for good.
+        const signal = AbortSignal.timeout(120e3)
+        await api(`/agents/${agent}/records?via=web${left.length > 1 ? "&more=1" : ""}`, typeof p === "string" ? { text: p, signal } : { form: body, signal })
+        left.shift()
+      }
+    })
+    queue = sent.catch(() => {})
     // The box is free for the next message at once, and a chat shows this one while it is on its way.
     dispatchEvent(new CustomEvent("sending", { detail: { agent, text, files: sending, sent } }))
     box.value = ""
@@ -129,12 +166,14 @@ export function composer(agent: string, placeholder: string): HTMLElement {
       await sent
       acted()
     } catch (err) {
-      if (!box.value) {
-        box.value = typed // back in the box, unless the next message is there
+      // What did not go is back in the composer: the text unless the next message is there, and the files.
+      if (left[0] === text && !box.value) {
+        box.value = typed
         replying(was)
       }
-      add(sending)
-      alert(err)
+      add(sending.slice(sending.length - left.filter(p => typeof p !== "string").length))
+      const some = left.length < sending.length + (text.trim() ? 1 : 0) ? " (what went before it waits for the rest)" : ""
+      alert(`Not sent: ${(err as Error).message}${some}`)
     }
   }
   box.oninput = update

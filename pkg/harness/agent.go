@@ -568,6 +568,10 @@ func (h *Harness) DeleteAgent(ctx context.Context, id, via string) error {
 // does, so one agent never steps two sessions at once. It returns the
 // session the post landed on and its n.
 func (h *Harness) PostAgent(ctx context.Context, id, via, key string, parts []Part) (string, int, error) {
+	return h.postAgent(ctx, id, via, key, parts, true)
+}
+
+func (h *Harness) postAgent(ctx context.Context, id, via, key string, parts []Part, kick bool) (string, int, error) {
 	a, unlock, err := h.holdAgent(id)
 	if err != nil {
 		return "", 0, err
@@ -592,7 +596,7 @@ func (h *Harness) PostAgent(ctx context.Context, id, via, key string, parts []Pa
 			s = next
 		}
 	}
-	n, err := h.Post(ctx, s, via, key, parts)
+	n, err := h.post(ctx, s, via, key, parts, kick)
 	return s, n, err
 }
 

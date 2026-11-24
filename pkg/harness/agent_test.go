@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -924,6 +926,47 @@ func TestCopyVia(t *testing.T) {
 	}
 	if via := r.chain(a.live())[0].Via; via != AgentVia+a.ID {
 		t.Fatalf("the source after its copies: via %q", via)
+	}
+}
+
+// A post's parts can come one post each, and a post over the bound says the bound.
+func TestAgentPostParts(t *testing.T) {
+	r := newRig(t)
+	srv := httptest.NewServer(Handler(context.Background(), r.h))
+	defer srv.Close()
+	a := r.create(AgentCreate{Config: r.conf(1000, 0)}, "web")
+	post := func(code int, query, ctype, body string) string {
+		t.Helper()
+		resp, err := http.Post(srv.URL+"/agents/"+a.ID+"/records?via=web"+query, ctype, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != code {
+			t.Fatalf("post%s: %d %s, want %d", query, resp.StatusCode, b, code)
+		}
+		return string(b)
+	}
+	// A part that more parts follow waits for them: the session wakes once, at the last.
+	post(200, "&more=1", "text/plain", "a photo")
+	if info, _ := r.h.AgentInfo(a.ID); info.Status == statefile.StatusStepping || len(r.bodies(a.live(), statefile.Step, "")) != 0 {
+		t.Fatalf("a post that more follow woke the session: %+v", info)
+	}
+	post(200, "", "text/plain", "the text")
+	r.settled(a.ID)
+	if n := len(r.bodies(a.live(), statefile.Step, "")); n != 1 {
+		t.Fatalf("steps after the last part: %d, want 1", n)
+	}
+	var mp strings.Builder
+	mw := multipart.NewWriter(&mp)
+	pw, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"image/jpeg"}})
+	_, _ = pw.Write(make([]byte, MaxPost))
+	_ = mw.Close()
+	for ctype, body := range map[string]string{"text/plain": strings.Repeat("x", MaxPost+1), mw.FormDataContentType(): mp.String()} {
+		if got := post(http.StatusRequestEntityTooLarge, "", ctype, body); !strings.Contains(got, "8 MiB") {
+			t.Fatalf("%s over the bound: %s", ctype, got)
+		}
 	}
 }
 

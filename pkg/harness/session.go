@@ -113,6 +113,12 @@ type Part struct {
 // with a key appends only the parts the file does not hold with that key, so
 // a connector that lost the reply posts again and the post ends whole, once.
 func (h *Harness) Post(ctx context.Context, id, via, key string, parts []Part) (int, error) {
+	return h.post(ctx, id, via, key, parts, true)
+}
+
+// post is Post that kicks the session only with kick: a post that more parts
+// of the same message follow leaves them all for one turn.
+func (h *Harness) post(ctx context.Context, id, via, key string, parts []Part, kick bool) (int, error) {
 	s := h.session(id)
 	n, err := func() (int, error) {
 		s.mu.Lock()
@@ -151,7 +157,9 @@ func (h *Harness) Post(ctx context.Context, id, via, key string, parts []Part) (
 	if err != nil {
 		return 0, err
 	}
-	h.Kick(ctx, id)
+	if kick {
+		h.Kick(ctx, id)
+	}
 	return n, nil
 }
 
