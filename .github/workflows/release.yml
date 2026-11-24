@@ -143,6 +143,7 @@ jobs:
             jsign --storetype AZUREKEYVAULT --keystore mainplane-ev-kv --storepass env:TOKEN \
               --alias mainplane-ev-codesign-2026b --certfile "$RUNNER_TEMP/chain.pem" \
               --tsaurl http://ts.ssl.com --tsmode RFC3161 dist/*-windows-*.exe
+            # Only EV: Ubuntu's CA bundle lacks the Microsoft root that Artifact Signing chains to
             for f in dist/*-windows-*.exe; do osslsigncode verify -in "$f"; done
           fi
       # After signing: the sums cover the bytes users run.
