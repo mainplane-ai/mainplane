@@ -42,10 +42,12 @@ main > .tabs { margin: 0 16px }
 .onboard .ob-step > p { margin: 0 0 24px; font: var(--text-body-large); color: var(--color-text-2) }
 .onboard > .welcome > .mark { display: flex; justify-content: center; height: 56px; color: var(--color-text) }
 .onboard > .welcome > .mark > svg { height: 100%; width: auto; max-width: 100% }
-.onboard > .ob-foot { display: grid; gap: 8px; width: 100%; max-width: 400px; margin: 0 auto }
-.onboard > .ob-foot .btn { justify-content: center }
+.onboard > .ob-top { height: 40px; margin-left: -4px }
+.onboard .ob-back { width: 40px; height: 40px; padding: 0; border-radius: 999px; corner-shape: round; background: var(--color-fill) } /* iOS 26: a round Back at the top left */
+.onboard > .ob-foot { display: grid; gap: 4px; width: 100%; max-width: 400px; margin: 0 auto }
+.onboard > .ob-foot .btn { justify-content: center; width: 100% }
+.onboard > .ob-foot .btn.plain { --fg: var(--color-text); font-weight: 600 } /* the skip is ink, not blue: blue is the one way on */
 .onboard > .ob-foot .btn[hidden] { display: none }
-.onboard > .ob-row, .onboard .ob-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px }
 .onboard > .login { min-height: 0; flex: 1 }
 .onboard > .login > .btn.filled { display: none } /* Log In is in the foot, beside Back */
 .onboard .providers .empty { display: none } /* the step's title says it */

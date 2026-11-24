@@ -53,12 +53,12 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, done: (
   }
   const finish = () => { localStorage.setItem(ran, "1"); done() }
 
-  // page is one step: its title and words in the middle, then at the foot any other choice over Back and the
-  // step's own button, side by side and the same size (Apple's Setup Assistant).
-  const page = (title: string, words: string, body: Node[], next: HTMLElement, ...more: HTMLElement[]) => root.replaceChildren(
-    h("div", { className: "ob-step" }, h("h1", null, title), ...(words ? [h("p", null, words)] : []), ...body), foot(next, ...more))
-  const foot = (next: HTMLElement, ...more: HTMLElement[]) => h("div", { className: "ob-foot" }, ...more,
-    h("div", { className: "ob-row" }, h("button", { className: "btn lg", type: "button", onclick: () => move(-1) }, "Back"), next))
+  // page is one step as in iOS Setup Assistant: Back at the top left, its title and words, then at the foot
+  // the step's one blue button and under it, at times, the way to skip it.
+  const page = (title: string, words: string, body: Node[], next: HTMLElement, skip?: HTMLElement) => root.replaceChildren(top(),
+    h("div", { className: "ob-step" }, h("h1", null, title), ...(words ? [h("p", null, words)] : []), ...body), foot(next, skip))
+  const top = () => h("div", { className: "ob-top" }, h("button", { className: "btn icon ob-back", type: "button", ariaLabel: "Back", onclick: () => move(-1) }, icon("chevron-left")))
+  const foot = (next: HTMLElement, skip?: HTMLElement) => h("div", { className: "ob-foot" }, next, ...(skip ? [skip] : []))
   const button = (label: string, onclick: () => void, filled = true) =>
     h("button", { className: "btn lg " + (filled ? "filled" : "plain"), type: "button", onclick }, label)
   const fail = (e: unknown) => alert(e instanceof Error ? e.message : e)
@@ -75,7 +75,7 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, done: (
       }
       case "login": {
         const form = loginForm(() => { step = "provider"; draw(); void poll() })
-        root.replaceChildren(form, foot(button("Log In", () => (form as HTMLFormElement).requestSubmit())))
+        root.replaceChildren(top(), form, foot(button("Log In", () => (form as HTMLFormElement).requestSubmit())))
         return
       }
       case "provider": {
@@ -87,7 +87,7 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, done: (
       case "sharing": {
         const set = (share: boolean) => api("/settings", { json: { data_sharing: { share, via: "web", text: "b1" } } }).then(() => { sharing = false; step = "workers"; draw() }, fail)
         page("Help Improve Mainplane", "Allow the use of your sessions to improve Mainplane and train AI models. You can change this in Settings.", [],
-          button("Allow", () => set(true)), button("Don't Allow", () => set(false), false))
+          button("Share with Mainplane", () => set(true)), button("Don't Share", () => set(false), false))
         break
       }
       case "workers": {
