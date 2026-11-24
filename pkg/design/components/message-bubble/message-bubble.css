@@ -1,5 +1,5 @@
 .thread { display: flex; flex-direction: column; gap: 2px; font: var(--text-body-large); }
-.msg { display: flex; flex-direction: column; align-items: flex-start; max-width: 100%; }
+.msg { display: flex; flex-direction: column; align-items: flex-start; max-width: 100%; min-width: 0; }
 .msg.sent { align-items: flex-end; }
 .msg + .msg.first { margin-top: 10px; }
 .bubble { position: relative; max-width: min(72%, 520px); padding: 7px 12px 8px; border-radius: 18px; background: var(--color-bubble-received); color: var(--color-bubble-received-ink); overflow-wrap: anywhere; }

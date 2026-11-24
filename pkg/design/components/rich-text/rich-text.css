@@ -1,5 +1,5 @@
 .rt { --syn-c: var(--color-text-3);
-  max-width: 640px; min-width: 0; font: var(--text-body-large); color: var(--color-text); overflow-wrap: break-word; }
+  max-width: 640px; min-width: 0; font: var(--text-body-large); color: var(--color-text); overflow-wrap: anywhere; }
 .rt > :first-child { margin-top: 0; } .rt > :last-child { margin-bottom: 0; }
 .rt p { margin: 0 0 12px; }
 .rt h1, .rt h2, .rt h3 { margin: 20px 0 6px; color: var(--color-text); }
@@ -19,7 +19,7 @@
 .rt blockquote p { margin: 0; }
 .rt hr { border: 0; border-top: 1px solid var(--color-separator); margin: 20px 0; }
 /* inline code */
-.rt code, .rt-inline code { font: 400 0.87em/1 var(--font-mono); padding: 2px 5px; border-radius: var(--radius-4); background: var(--color-fill); white-space: nowrap; }
+.rt code, .rt-inline code { font: 400 0.87em/1 var(--font-mono); padding: 2px 5px; border-radius: var(--radius-4); background: var(--color-fill); overflow-wrap: anywhere; -webkit-box-decoration-break: clone; box-decoration-break: clone; } /* a long command wraps: a chat never scrolls sideways */
 .msg.sent .rt-inline code { background: color-mix(in srgb, var(--color-bubble-sent-ink) 20%, transparent); }
 .rt-inline strong { font-weight: 600; }
 /* code block: quiet header with the language and a copy button that shows on hover or focus */
