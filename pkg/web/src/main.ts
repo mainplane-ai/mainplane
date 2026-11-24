@@ -8,7 +8,7 @@ import { composer } from "./composer"
 import { dashboard, frameURL } from "./dashboard"
 import { picker } from "./picker"
 import { providersPanel } from "./providers"
-import { onboarded, onboarding } from "./onboarding"
+import { onboarded, onboarding, setUp } from "./onboarding"
 import lockup from "./lockup.svg"
 declare const MPMenu: { open: (menu: HTMLElement, at: Element | { x: number; y: number }, target?: Element) => void }
 
@@ -221,6 +221,8 @@ async function render() {
   if (/^\/projects\/?$/.test(location.pathname)) history.replaceState(null, "", "/") // the list has no path of its own: /projects is home
   shown = location.pathname
   const [kind, id, sub, agent, more] = location.pathname.split("/").slice(1)
+  if (kind !== "welcome" && key() && !onboarded()) await setUp()
+  if (signal.aborted) return
   document.body.classList.toggle("out", !key() || !onboarded() || kind === "welcome")
   document.body.classList.toggle("home", location.pathname === "/" || location.pathname === "/new") // a phone shows the list under the new project sheet
   drawList()

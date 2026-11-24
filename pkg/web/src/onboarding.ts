@@ -9,6 +9,12 @@ import lockup from "./lockup.svg"
 const ran = "mainplane-onboarded"
 export const onboarded = () => !!localStorage.getItem(ran)
 
+// setUp marks the onboarding done in a browser on a harness that has a provider: it was set up already.
+export async function setUp() {
+  if ((await get<unknown[]>("/providers").catch(() => [])).length) localStorage.setItem(ran, "1")
+  return onboarded()
+}
+
 type Worker = { name: string; refused?: string; drive_server?: boolean }
 type Step = "welcome" | "login" | "provider" | "sharing" | "workers" | "device" | "drive"
 
@@ -87,7 +93,7 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, again: 
         return
       }
       case "login": {
-        const form = loginForm(() => { step = "provider"; draw(); void poll() })
+        const form = loginForm(() => void (again ? Promise.resolve(false) : setUp()).then(set => set ? done() : (step = "provider", draw(), void poll())))
         root.replaceChildren(top(), form, foot(button("Log In", () => (form as HTMLFormElement).requestSubmit())))
         return
       }
