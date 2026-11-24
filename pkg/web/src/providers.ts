@@ -160,7 +160,7 @@ export function providersPanel(host?: Host): HTMLElement {
       motion.innerHTML = loopback ? addressMotion : codeMotion
       motion.hidden = false
       const svg = motion.querySelector("svg")!
-      if (matchMedia("(prefers-reduced-motion: reduce)").matches) { svg.pauseAnimations(); svg.setCurrentTime(9) } // its last frame: the check
+      if (matchMedia("(prefers-reduced-motion: reduce)").matches) { svg.pauseAnimations(); svg.setCurrentTime(loopback ? 12.6 : 11.5) } // its Signed in frame
       steps.replaceChildren(
         h("li", null, "Open " + vendor + " below and sign in."),
         ...(loopback

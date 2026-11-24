@@ -30,13 +30,14 @@ main > .tabs { margin: 0 16px }
 .providers .actions { margin-top: 16px }
 .providers input[type=number] { appearance: textfield; -moz-appearance: textfield }
 .providers input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none }
-.providers .motion { max-width: 320px; margin: 0 auto 20px; color: var(--color-text) }
+.providers .motion { max-width: 400px; margin: 0 auto 20px }
 .providers .motion svg { display: block; width: 100%; height: auto }
+@media (max-width: 600px) { .providers .motion { max-width: none } }
+.motion { color: var(--color-text) }
 .motion .m-line { stroke: var(--color-text-3) }
 .motion .m-fill { fill: var(--color-surface-2) }
 .motion .m-accent { fill: var(--color-accent) }
 .motion .m-accent-line { stroke: var(--color-accent) }
-.motion .m-muted { fill: var(--color-text-3) }
 .providers .steps { display: grid; gap: 12px; margin: 0 0 16px; padding-left: 22px; font: var(--text-body) }
 .providers .open { display: flex; justify-content: center; margin-bottom: 16px }
 .providers .open + form .actions { margin-top: 12px }
