@@ -177,7 +177,8 @@ main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--compose
 .pin { width: 88px }
 .pin > .avatar { width: 56px; height: 56px; font-size: 20px }
 @media (max-width: 700px) {
-  body { display: block; padding: 0; position: fixed; inset: 0 } /* pinned to the screen: iOS has no page to bounce when a drag starts on a bar */
+  /* Pinned to the screen: iOS has no page to bounce when a drag starts on a bar. It fills what the keyboard leaves seen (composer.ts), so the composer sits on the keyboard. */
+  body { display: block; padding: 0; position: fixed; inset: var(--vv-top, 0px) 0 auto; height: var(--vv-h, 100%) }
   /* A phone's project list: Edit and the filter, then a large title on top; search and New float at the bottom (items/project-view-mobile). */
   body > .sidebar { position: relative; width: auto; height: 100%; box-sizing: border-box; border-radius: 0; padding: 0; background: var(--color-bg) }
   /* The bar and search float over the list, which scrolls under them (Messages). */
