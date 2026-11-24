@@ -18,7 +18,17 @@ const lines = (args: string): [string, string, string][] => [
   ["Windows", "& ([scriptblock]::Create((irm " + script + ".ps1))) ", args],
 ]
 
-// install is the one-line install with its OS picked, the secret blurred until pointed at, and Copy.
+// veil blurs what holds a key until it is clicked, and again on the next click, so a shared screen or a
+// screenshot does not give it away. A click that ends a text selection leaves it as it is.
+function veil<T extends HTMLElement>(el: T, what: string): T {
+  const label = h("span", { className: "veil-label" }, "Show " + what)
+  el.classList.add("veil", "veiled")
+  el.append(label)
+  el.onclick = () => { if (!getSelection()?.isCollapsed) return; el.classList.toggle("veiled") }
+  return el
+}
+
+// install is the one-line install with its OS picked, the secret veiled, and Copy.
 function install(args: string): HTMLElement {
   const ls = lines(args)
   const code = h("code")
@@ -32,7 +42,7 @@ function install(args: string): HTMLElement {
     copy.lastElementChild!.textContent = "Copy"
   }
   pick(/Win/.test(navigator.platform) ? 1 : 0)
-  return h("div", { className: "install" }, seg, h("pre", null, code), h("div", { className: "actions" }, copy))
+  return h("div", { className: "install" }, seg, veil(h("pre", null, code), "Command"), h("div", { className: "actions" }, copy))
 }
 
 // again opens it from the start in a browser where it ran (/welcome).
@@ -114,13 +124,10 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, again: 
         const show = async () => {
           const at = location.origin + "/#k=", link = at + encodeURIComponent(minted)
           const { renderSVG } = await import(new URL("qrcode.js", import.meta.url).href) as { renderSVG: (s: string, o?: { pixelSize?: number }) => string }
-          // The code holds the key: blurred until clicked, so a shared screen or a screenshot does not give it away.
-          const qr = Object.assign(h("button", { className: "qr veiled", type: "button", ariaLabel: "Show QR Code" }), { innerHTML: renderSVG(link, { pixelSize: 4 }) })
-          qr.append(h("span", null, "Show QR Code"))
-          qr.onclick = () => { qr.classList.toggle("veiled"); qr.ariaLabel = qr.classList.contains("veiled") ? "Show QR Code" : "Hide QR Code" }
+          const qr = veil(Object.assign(h("div", { className: "qr" }), { innerHTML: renderSVG(link, { pixelSize: 4 }) }), "QR Code")
           const copy = h("button", { className: "btn plain sm", type: "button" }, icon("copy"), h("span", null, "Copy Link"))
           copy.onclick = () => navigator.clipboard.writeText(link).then(() => (copy.lastElementChild!.textContent = "Copied"))
-          box.replaceChildren(qr, h("div", { className: "install" }, h("pre", null, h("code", null, at, h("span", { className: "secret" }, encodeURIComponent(minted)))), h("div", { className: "actions" }, copy)))
+          box.replaceChildren(qr, h("div", { className: "install" }, veil(h("pre", null, h("code", null, at, h("span", { className: "secret" }, encodeURIComponent(minted)))), "Link"), h("div", { className: "actions" }, copy)))
         }
         page("Use Mainplane on Another Device", "Your projects and chats are on every device logged in to this harness. Show the code and scan it with a phone's camera, or open the link in another browser.",
           [box], button("Continue", () => move(1)))

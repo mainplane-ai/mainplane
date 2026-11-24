@@ -54,15 +54,17 @@ main > .tabs { margin: 0 16px }
 .onboard .form-row > mp-icon { color: var(--color-text-2) }
 .onboard .section-l { margin-top: 20px }
 .onboard .qr { width: 200px; margin: 0 auto 20px; padding: 12px; border-radius: var(--radius-10); background: #fff } /* black on white in dark mode too: cameras read it best */
-.onboard .qr { display: block; position: relative; border: 0; cursor: pointer }
-.onboard .qr > svg { display: block; width: 100%; transition: filter .2s }
-.onboard .qr.veiled > svg { filter: blur(14px); opacity: .5 }
-.onboard .qr > span { position: absolute; inset: 0; display: grid; place-items: center; font: 600 15px/20px var(--font-text); color: #000 }
-.onboard .qr:not(.veiled) > span { display: none }
+.onboard .qr > svg { display: block; width: 100% }
+/* A veiled thing holds a key: blurred, its Show label over it, until a click (the QR code, the link, an install line) */
+.veil { position: relative; cursor: pointer }
+.veil > :not(.veil-label) { transition: filter .2s, opacity .2s }
+.veil.veiled > svg { filter: blur(14px); opacity: .5 }
+.veil.veiled > code { filter: blur(6px); opacity: .4 }
+.veil > .veil-label { position: absolute; inset: 0; display: grid; place-items: center; font: 600 15px/20px var(--font-text); color: var(--color-text) }
+.qr.veil > .veil-label { color: #000 }
+.veil:not(.veiled) > .veil-label { display: none }
 .install { display: grid; gap: 8px }
 .install > pre { margin: 0; padding: 12px 14px; border-radius: var(--radius-6); background: var(--color-fill); font: var(--text-mono); white-space: pre-wrap; word-break: break-all }
-.install .secret { filter: blur(4px); transition: filter .2s }
-.install > pre:hover .secret { filter: none }
 .install > .actions { margin: 0 }
 /* Log in: one narrow column in the middle of the screen, the lockup over it (a phone's sign-in) */
 .login { min-height: 100%; box-sizing: border-box; max-width: 360px; margin: 0 auto; padding: 32px 24px calc(32px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; justify-content: center; gap: 12px; text-align: center }
