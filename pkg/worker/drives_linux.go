@@ -618,10 +618,12 @@ func dropDrives(*user.User) error {
 	for _, p := range slices.Sorted(maps.Keys(mountpoints())) {
 		errs = append(errs, unmount(p, true))
 	}
-	if err := os.Remove(nfsConf); err == nil {
-		errs = append(errs, run("systemctl", append([]string{"unmask"}, strings.Fields(rpcUnits)...)...))
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	if err := os.Remove(nfsConf); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		errs = append(errs, err)
+	}
+	// The mask is its own mark, so an unmask that failed is tried again.
+	if t, _ := os.Readlink("/etc/systemd/system/rpcbind.socket"); t == "/dev/null" {
+		errs = append(errs, run("systemctl", append([]string{"unmask"}, strings.Fields(rpcUnits)...)...))
 	}
 	return errors.Join(append(errs, unexport(), unsmb())...)
 }
