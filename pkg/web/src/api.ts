@@ -23,6 +23,12 @@ export function logout(refused = false) {
   location.reload()
 }
 
+// refused asks again after a moment: one 401, say while the harness restarts, must not end a login.
+const refused = async () => {
+  await new Promise(t => setTimeout(t, 2000))
+  return (await fetch("/", { headers: { Authorization: "Bearer " + key() }, cache: "no-cache" }).catch(() => null))?.status === 401
+}
+
 type Options = { method?: string; json?: unknown; text?: string; form?: FormData; body?: BodyInit; signal?: AbortSignal }
 
 // api is one call. An answer that is not a success is thrown as its text,
@@ -35,7 +41,7 @@ export async function api(path: string, o: Options = {}): Promise<Response> {
     signal: o.signal,
     cache: "no-cache", // a file of a store is asked for again and answered 304 while it is the same
   })
-  if (r.status === 401) logout(true)
+  if (r.status === 401 && await refused()) logout(true)
   // A proxy's error page (Cloudflare's 413) is HTML: its status says more than its markup.
   if (!r.ok) throw new Error((!r.headers.get("Content-Type")?.startsWith("text/html") && (await r.text()).trim()) || `${r.status} ${r.statusText}`.trim())
   return r

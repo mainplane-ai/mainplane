@@ -8,7 +8,7 @@ import { composer } from "./composer"
 import { dashboard, frameURL } from "./dashboard"
 import { picker } from "./picker"
 import { providersPanel } from "./providers"
-import { onboarded, onboarding } from "./onboarding"
+import { onboarded, onboarding, setUp } from "./onboarding"
 import lockup from "./lockup.svg"
 declare const MPMenu: { open: (menu: HTMLElement, at: Element | { x: number; y: number }, target?: Element) => void }
 
@@ -256,6 +256,7 @@ function toolbar(who: string | Pick<Project, "id" | "name" | "color" | "monogram
 
 let ob: HTMLElement | null = null // the onboarding, kept while it runs: a render keeps its step
 async function content(kind: string, id: string, sub: string, signal: AbortSignal, agent = "", more = ""): Promise<HTMLElement[]> {
+  if (kind !== "welcome" && key() && !onboarded()) await setUp()
   if (!onboarded() || kind === "welcome") return [ob ??= onboarding(loginForm, kind === "welcome", () => { ob = null; void refresh().then(() => go(projects.length ? "/" : "/new")) })]
   if (!key()) return [loginForm()]
   if (!projects.length) await refresh()
