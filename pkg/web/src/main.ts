@@ -721,8 +721,9 @@ async function harnessSettings(tab: string): Promise<HTMLElement> {
   let saved = box.value // unchanged, the default is not saved as the user's own: a later release's default still comes
   box.oninput = () => (save.textContent = "Save Instructions")
   save.onclick = attempt(async () => {
-    if (box.value !== saved) { await post({ prompt: { lines: box.value ? box.value.split("\n") : [] } }); saved = box.value; reset.hidden = false }
-    save.textContent = "Saved"
+    const text = box.value // what is sent: an edit while it goes stays unsaved
+    if (text !== saved) { await post({ prompt: { lines: text ? text.split("\n") : [] } }); saved = text; reset.hidden = false }
+    if (box.value === text) save.textContent = "Saved"
   })
   reset.onclick = attempt(async () => { await post({ prompt: { default: true } }); saved = box.value = (await get<Settings>("/settings")).prompt.lines.join("\n"); reset.hidden = true })
   const told = h("div", null, h("div", { className: "form" }, h("div", { className: "form-row" }, box)),

@@ -530,7 +530,7 @@ func (a *App) rename(w http.ResponseWriter, r *http.Request, p Project) error {
 		return err
 	}
 	if in.Name = strings.TrimSpace(in.Name); in.Name == "" {
-		return errors.New("a name is not empty")
+		return errors.New("a name is required")
 	} else if err := harness.CheckName(in.Name); err != nil {
 		return err
 	}

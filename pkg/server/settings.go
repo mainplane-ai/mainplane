@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -73,12 +74,11 @@ func (a *api) settings(w http.ResponseWriter, r *http.Request) {
 		if l == "" || l == version.V {
 			return
 		}
-		log, err := release.Get(l, "CHANGELOG.md") // signed, as for the update itself
+		changes, err := release.Get(l, "CHANGELOG.md") // signed, as for the update itself
 		if err != nil {
-			nc <- ""
-			return
+			log.Printf("harness: release notes of %s: %v", l, err)
 		}
-		nc <- notes(string(log), version.V)
+		nc <- notes(string(changes), version.V)
 	}()
 	select {
 	case vs.Latest = <-lc:
