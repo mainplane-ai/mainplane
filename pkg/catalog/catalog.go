@@ -13,6 +13,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -63,6 +64,48 @@ func (c Catalog) Keyed(id string) []string {
 		}
 	}
 	return ids
+}
+
+// Sections order the providers a connector offers: subscriptions first, then
+// each kind of provider, the ones people use most first. A provider the
+// catalog adds later is under More, by name, until it is placed here.
+var Sections = []struct {
+	Name string
+	IDs  []string
+}{
+	{"Subscriptions", []string{"claude-code", "chatgpt", "opencode-go"}},
+	{"Frontier labs", []string{"anthropic", "openai", "google", "meta", "xai", "deepseek", "moonshot", "zai", "minimax", "xiaomi", "mistral"}},
+	{"Clouds", []string{"bedrock"}},
+	{"Gateways", []string{"openrouter"}},
+}
+
+// Offer is a provider a connector offers, under its section.
+type Offer struct{ Section, ID string }
+
+// Offered is the providers to offer, a group once: those of Sections in
+// order, then the rest under More, by name.
+func (c Catalog) Offered() []Offer {
+	var out []Offer
+	placed := map[string]bool{}
+	for _, sec := range Sections {
+		for _, id := range sec.IDs {
+			if _, ok := c.Providers[id]; ok && !placed[id] {
+				out = append(out, Offer{sec.Name, id})
+				for _, k := range c.Keyed(id) {
+					placed[k] = true
+				}
+			}
+		}
+	}
+	byName := func(a, b string) int {
+		return strings.Compare(strings.ToLower(c.Providers[a].Name), strings.ToLower(c.Providers[b].Name))
+	}
+	for _, id := range slices.SortedFunc(maps.Keys(c.Providers), byName) {
+		if !placed[id] && c.Keyed(id)[0] == id {
+			out = append(out, Offer{"More", id})
+		}
+	}
+	return out
 }
 
 // Preset is a full session config but its workers.

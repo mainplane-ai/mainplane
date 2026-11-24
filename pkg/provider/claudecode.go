@@ -646,15 +646,29 @@ func claudeEnviron(dir string) []string {
 }
 
 // tail keeps the last bytes claude wrote to stderr for the error.
-type tail struct{ b bytes.Buffer }
+type tail struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
 
 func (t *tail) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.b.Write(p)
 	if over := t.b.Len() - 4096; over > 0 {
 		t.b.Next(over)
 	}
 	return len(p), nil
 }
+
+func (t *tail) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.b.String()
+}
+
+// visit starts the line claude auth login prints its second URL on.
+const visit = "If the browser didn't open, visit: "
 
 var installMu sync.Mutex
 
@@ -741,13 +755,14 @@ func installClaude(ctx context.Context, dir string) (string, error) {
 }
 
 // claudeLogin is Anthropic's own sign-in: claude auth login, with the
-// provider's dir as its config dir, waits on a callback on localhost, and
-// opens the URL that redirects there with $BROWSER, here a script that keeps
-// it in a file. The person opens that URL and signs in on claude.ai. A
-// browser on the harness's machine lands on claude itself; any other
-// browser's page does not load, and its address, pasted, is handed to
-// claude here. claude keeps the login in dir; the harness sees only the
-// code, which works once.
+// provider's dir as its config dir. It opens a URL that redirects to its
+// callback on localhost with $BROWSER, here a script that keeps it in a
+// file, and prints a second URL, for a browser on another machine, whose
+// sign-in ends on Anthropic's page with a code to copy; it reads that code
+// on stdin. The person opens the second URL and pastes the code. A pasted
+// localhost address, of the first URL, is handed to claude's callback.
+// claude keeps the login in dir; the harness sees only the code, which
+// works once.
 func claudeLogin(ctx context.Context, dir string, show func(Prompt), paste <-chan string) error {
 	bin, err := installClaude(ctx, dir)
 	if err != nil {
@@ -763,7 +778,8 @@ func claudeLogin(ctx context.Context, dir string, show func(Prompt), paste <-cha
 	_ = os.Remove(script + ".url")
 	cmd := exec.CommandContext(ctx, bin, "auth", "login", "--claudeai")
 	cmd.Dir, cmd.Env, cmd.WaitDelay = dir, append(claudeEnviron(dir), "BROWSER="+script), 5*time.Second
-	if _, err := cmd.StdinPipe(); err != nil { // open: at its end claude would stop waiting for a code
+	stdin, err := cmd.StdinPipe() // open: at its end claude would stop waiting for a code
+	if err != nil {
 		return err
 	}
 	var out tail
@@ -774,7 +790,7 @@ func claudeLogin(ctx context.Context, dir string, show func(Prompt), paste <-cha
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	var opened []byte
-	for len(opened) == 0 {
+	for len(opened) == 0 || !strings.Contains(out.String(), visit) {
 		select {
 		case err := <-done:
 			return fmt.Errorf("claude auth login ended before it opened its URL: %w: %s", err, out.b.Bytes())
@@ -790,10 +806,18 @@ func claudeLogin(ctx context.Context, dir string, show func(Prompt), paste <-cha
 	if err != nil {
 		return err
 	}
-	show(Prompt{Text: "Visit this URL in a browser and log in to Claude. Then paste the address it sends you to.", URL: u.String(), Paste: true})
+	manual, _, _ := strings.Cut(strings.SplitAfterN(out.String(), visit, 2)[1], "\n")
+	show(Prompt{Text: "Visit this URL in a browser and sign in to Claude. Then copy the code it shows and paste it here.", URL: strings.TrimSpace(manual), Paste: true})
 	for {
 		select {
 		case text := <-paste:
+			text = strings.TrimSpace(text)
+			if !strings.HasPrefix(text, "http") {
+				if _, err := io.WriteString(stdin, text+"\n"); err != nil {
+					return err
+				}
+				continue
+			}
 			if err := claudeCallback(ctx, cb, text); err != nil {
 				return err
 			}

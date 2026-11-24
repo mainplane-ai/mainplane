@@ -7,6 +7,8 @@ import { rich } from "./rich"
 import { composer } from "./composer"
 import { dashboard, frameURL } from "./dashboard"
 import { picker } from "./picker"
+import { providersPanel } from "./providers"
+import { onboarded, onboarding } from "./onboarding"
 import lockup from "./lockup.svg"
 declare const MPMenu: { open: (menu: HTMLElement, at: Element | { x: number; y: number }, target?: Element) => void }
 
@@ -219,7 +221,7 @@ async function render() {
   if (/^\/projects\/?$/.test(location.pathname)) history.replaceState(null, "", "/") // the list has no path of its own: /projects is home
   shown = location.pathname
   const [kind, id, sub, agent, more] = location.pathname.split("/").slice(1)
-  document.body.classList.toggle("out", !key())
+  document.body.classList.toggle("out", !key() || !onboarded() || kind === "welcome")
   document.body.classList.toggle("home", location.pathname === "/" || location.pathname === "/new") // a phone shows the list under the new project sheet
   drawList()
   try {
@@ -252,7 +254,9 @@ function toolbar(who: string | Pick<Project, "id" | "name" | "color" | "monogram
     h("span", { className: "spacer" }), h("span", { className: "tb-group" }, ...buttons))
 }
 
+let ob: HTMLElement | null = null // the onboarding, kept while it runs: a render keeps its step
 async function content(kind: string, id: string, sub: string, signal: AbortSignal, agent = "", more = ""): Promise<HTMLElement[]> {
+  if (!onboarded() || kind === "welcome") return [ob ??= onboarding(loginForm, kind === "welcome", () => { ob = null; void refresh().then(() => go(projects.length ? "/" : "/new")) })]
   if (!key()) return [loginForm()]
   if (!projects.length) await refresh()
   const none = h("div", { className: "view" }, h("div", { className: "empty" }, icon("grid"), h("h3", null, "No project open"), h("p", null, "Pick one from the list, or make a new one.")))
@@ -434,13 +438,13 @@ const line = (p: Project) => [p.working ? "Working" : said[p.status], p.line].fi
 // loginForm is the page a browser with no key opens to, a phone's home screen app too (it keeps its own storage):
 // the lockup, then the key or the link `mainplane web` prints, whole. A phone can scan the link's QR code instead:
 // its own camera app would open the link in the browser, not in a home screen app.
-function loginForm(): HTMLElement {
+function loginForm(done: () => void = () => void render()): HTMLElement {
   const k = h("input", { className: "input lg", type: "password", required: true, placeholder: "API key or login link", autocomplete: "current-password", ariaLabel: "API key or login link" })
   const note = h("p", null, sessionStorage.getItem("refused") ? "The harness refused that key." : "Log in to this harness.")
   const enter = (v: string) => {
     sessionStorage.removeItem("refused")
     login(decodeURIComponent(v.split("#k=").pop()!))
-    void render()
+    done()
   }
   const video = h("video", { muted: true, playsInline: true, autoplay: true })
   const box = h("div", { className: "scan", hidden: true }, video)
@@ -676,7 +680,7 @@ function usageView(u: Usage): HTMLElement[] {
 // providers, the instructions every session gets, and data sharing. Each part saves on its own (iOS Settings).
 type Settings = { version: { current: string; latest?: string; notes?: string }; data_sharing?: { share: boolean; at?: string; via?: string }; prompt: { lines: string[]; default?: boolean } }
 async function harnessSettings(tab: string): Promise<HTMLElement> {
-  const [st, root, providers] = await Promise.all([get<Settings>("/settings"), get<{ name: string; version: string }>("/"), get<{ name: string }[]>("/providers")])
+  const [st, root] = await Promise.all([get<Settings>("/settings"), get<{ name: string; version: string }>("/")])
   const post = (body: object) => api("/settings", { method: "POST", json: body })
   const value = (v: string) => h("span", { className: "value" }, v)
   const general = h("div", null, h("div", { className: "form" }, row("Network", value(root.name), "div"), row("Address", value(location.host), "div"), row("Version", value(st.version.current), "div")),
@@ -715,9 +719,7 @@ async function harnessSettings(tab: string): Promise<HTMLElement> {
       h("div", { className: "form-row foot" }, ...(notes ? [more] : []), now)), line)
   }
 
-  // Providers: what is connected. Connecting one comes here.
-  const provs = h("div", null, ...section("Connected", ...providers.map(p => row(p.name, h("span"), "div"))),
-    ...(providers.length ? [] : [h("div", { className: "empty" }, h("h3", null, "No providers"), h("p", null, "The models of a provider you connect show here."))]))
+  const provs = providersPanel()
 
   // Instructions: the lines every new session gets after the system prompt.
   const box = h("textarea", { className: "input textarea", rows: 16, value: st.prompt.lines.join("\n"), ariaLabel: "Instructions" })

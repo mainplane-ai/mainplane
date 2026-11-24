@@ -278,14 +278,14 @@ func Harness(ctx context.Context, path string) error {
 	relay.Handle(mux, derp)
 	routes := http.NewServeMux()
 	routes.Handle("/", harness.Handler(ctx, h))
-	routes.HandleFunc("PUT /providers/{name}", func(w http.ResponseWriter, r *http.Request) {
-		if err := setProvider(path, r.PathValue("name"), r.Body, h.SetProviders); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
+	routes.HandleFunc("PUT /providers/{name}", noContent(func(r *http.Request) error {
+		return setProvider(path, r.PathValue("name"), r.Body, h.SetProviders)
+	}))
 	logins := &logins{ctx: ctx, path: path, serve: h.SetProviders, m: map[string]*login{}}
+	routes.HandleFunc("DELETE /providers/{name}", noContent(func(r *http.Request) error {
+		logins.stop(r.PathValue("name"))
+		return removeProvider(path, r.PathValue("name"), h.SetProviders)
+	}))
 	routes.HandleFunc("POST /providers/{name}/login", logins.start)
 	routes.HandleFunc("POST /providers/{name}/login/code", logins.paste)
 	routes.HandleFunc("GET /providers/{name}/login", logins.get)
@@ -465,6 +465,48 @@ func saveProvider(path, name string, in Provider, serve func(map[string]provider
 	ps, err := providers(filepath.Dir(path), c.Providers)
 	if err != nil {
 		return err
+	}
+	if err := saveConfig(path, c); err != nil {
+		return err
+	}
+	serve(ps)
+	return nil
+}
+
+// noContent answers 204 when do succeeds and 400 with its error when not.
+func noContent(do func(*http.Request) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := do(r); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// removeProvider takes the provider name out of the config at path and
+// serves the rest. A session on it fails at its next step. A sign-in's dir,
+// where its tokens are, goes with it: Disconnect signs out.
+func removeProvider(path, name string, serve func(map[string]provider.Provider)) error {
+	keyMu.Lock()
+	defer keyMu.Unlock()
+	c, err := Load(path)
+	if err != nil {
+		return err
+	}
+	p, ok := c.Providers[name]
+	if !ok || name != filepath.Base(name) || !filepath.IsLocal(name) {
+		return fmt.Errorf("no provider %q", name)
+	}
+	delete(c.Providers, name)
+	ps, err := providers(filepath.Dir(path), c.Providers)
+	if err != nil {
+		return err
+	}
+	if provider.Logins[p.Shape] != nil {
+		if err := os.RemoveAll(providerDir(filepath.Dir(path), name)); err != nil {
+			return err
+		}
 	}
 	if err := saveConfig(path, c); err != nil {
 		return err

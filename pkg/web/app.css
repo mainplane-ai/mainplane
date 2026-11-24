@@ -21,6 +21,58 @@ main > .tabs { margin: 0 16px }
 .page h2 { margin: 0; font: var(--text-title-2); letter-spacing: var(--tracking-title-2) }
 .page p { margin: 0; color: var(--color-text-2) }
 .actions { display: flex; gap: 8px; justify-content: flex-end }
+/* Settings > Providers: pages pushed inside the tab, each with Back over its title. */
+.providers > .page-head { display: grid; justify-items: start; gap: 2px; margin-bottom: 12px }
+.providers > .page-head > .up { margin-left: -8px; gap: 2px }
+.providers > .page-head > h3 { margin: 0 2px; font: var(--text-title-3) }
+.providers > .search { margin-bottom: 4px }
+.providers > .form.add { margin-top: 18px }
+.providers .actions { margin-top: 16px }
+.providers input[type=number] { appearance: textfield; -moz-appearance: textfield }
+.providers input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none }
+.providers .motion { margin: 0 0 16px }
+.providers .motion svg { display: block; width: 100%; height: auto; max-height: 240px }
+.motion { color: var(--color-text) }
+.motion .m-line { stroke: var(--color-text-3) }
+.motion .m-fill { fill: var(--color-surface-2) }
+.motion .m-accent { fill: var(--color-accent) }
+.motion .m-accent-line { stroke: var(--color-accent) }
+.providers .steps { display: grid; gap: 12px; margin: 0 0 16px; padding-left: 22px; font: var(--text-body) }
+.providers .open { display: flex; justify-content: center; margin-bottom: 16px }
+.providers .open + form .actions { margin-top: 12px }
+.providers .form-row > .input:first-child { text-align: left } /* the paste field is the whole row */
+/* Onboarding (Apple's Setup Assistant): Back at the top, one step in the middle (art, title, words), its buttons at the foot. */
+.onboard { min-height: 100%; box-sizing: border-box; width: 100%; max-width: 496px; margin: 0 auto; padding: 16px 24px calc(32px + env(safe-area-inset-bottom)); display: flex; flex-direction: column }
+.onboard > .ob-step { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 24px 0 }
+.onboard > .ob-step > :is(h1, p) { text-align: center }
+.onboard .ob-step > h1 { margin: 0 0 8px; font: var(--text-title-1); letter-spacing: var(--tracking-title-1) }
+.onboard .ob-step > p { margin: 0 0 24px; font: var(--text-body-large); color: var(--color-text-2) }
+.onboard > .welcome > .mark { display: flex; justify-content: center; height: 56px; color: var(--color-text) }
+.onboard > .welcome > .mark > svg { height: 100%; width: auto; max-width: 100% }
+.onboard > .ob-top { height: 40px; margin-left: -4px }
+.onboard .ob-back { width: 40px; height: 40px; padding: 0; border-radius: 999px; corner-shape: round; background: var(--color-fill) } /* iOS 26: a round Back at the top left */
+.onboard > .ob-foot { display: grid; gap: 4px }
+.onboard > .ob-foot .btn { justify-content: center; width: 100% }
+.onboard > .ob-foot .btn.plain { --fg: var(--color-text); font-weight: 600 } /* the skip is ink, not blue: blue is the one way on */
+.onboard > .ob-foot .btn[hidden] { display: none }
+.onboard > .login { min-height: 0; flex: 1 }
+.onboard > .login > .btn.filled { display: none } /* Log In is in the foot, beside Back */
+.onboard .providers .empty { display: none } /* the step's title says it */
+.onboard .form-row > mp-icon { color: var(--color-text-2) }
+.onboard .section-l { margin-top: 20px }
+.onboard .qr { width: 200px; margin: 0 auto 20px; padding: 12px; border-radius: var(--radius-10); background: #fff } /* black on white in dark mode too: cameras read it best */
+.onboard .qr > svg { display: block; width: 100% }
+/* A veiled thing holds a key: blurred, its Show label over it, until a click (the QR code, the link, an install line) */
+.veil { position: relative; cursor: pointer }
+.veil > :not(.veil-label) { transition: filter .2s, opacity .2s }
+.veil.veiled > svg { filter: blur(14px); opacity: .5 }
+.veil.veiled > code { filter: blur(6px); opacity: .4 }
+.veil > .veil-label { position: absolute; inset: 0; display: grid; place-items: center; font: 600 15px/20px var(--font-text); color: var(--color-text) }
+.qr.veil > .veil-label { color: #000 }
+.veil:not(.veiled) > .veil-label { display: none }
+.install { display: grid; gap: 8px }
+.install > pre { margin: 0; padding: 12px 14px; border-radius: var(--radius-6); background: var(--color-fill); font: var(--text-mono); white-space: pre-wrap; word-break: break-all }
+.install > .actions { margin: 0 }
 /* Log in: one narrow column in the middle of the screen, the lockup over it (a phone's sign-in) */
 .login { min-height: 100%; box-sizing: border-box; max-width: 360px; margin: 0 auto; padding: 32px 24px calc(32px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; justify-content: center; gap: 12px; text-align: center }
 .login > .mark { display: flex; justify-content: center; height: 44px; margin-bottom: 20px; color: var(--color-text) }
@@ -85,28 +137,28 @@ main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--compose
 .thread .stop mp-icon { --icon-size: 14px }
 .thread .stop mp-icon :is(path, rect) { fill: currentColor } /* a solid square, as in ChatGPT and Codex */
 .scrim { position: fixed; inset: 0; z-index: var(--z-sheet); display: grid; place-items: center; background: var(--color-scrim) }
-.sheet .form-row > .input { flex: 1; min-width: 0 } /* a field takes the row's room left of its name */
+:is(.sheet, .onboard) .form-row > .input { flex: 1; min-width: 0 } /* a field takes the row's room left of its name */
 /* Project settings: larger than the other sheets; Delete Project ends the page, full width, red on the form's gray (Apple). */
 .sheet.large { width: min(540px, 100% - 32px); max-height: calc(100% - 64px) }
 .sheet .delete { width: 100%; margin-top: 24px; background: color-mix(in srgb, var(--color-text) 4%, transparent); color: var(--color-danger) }
-.sheet .form > .form-row > .textarea { padding-block: 4px }
+:is(.sheet, .onboard) .form > .form-row > .textarea { padding-block: 4px }
 .sheet.tabbed { height: min(640px, 100% - 64px) } /* one height for every tab: a switch does not move the sheet */
 .sheet.tabbed > .body { flex: 1 }
 .sheet > .body > .tabs { margin: 0 4px 16px }
 .sheet .tabs { overflow-x: auto; scrollbar-width: none } /* a narrow phone scrolls the tabs sideways, not the page */
 .sheet .tabs > button { flex: none }
 /* Appearance: the avatar large over its letters and color rows (iOS contact) */
-.sheet .form + form.stack { margin-top: 18px }
+:is(.sheet, .onboard) .form + form.stack { margin-top: 18px }
 .sheet .big-avatar { display: grid; place-items: center; padding: 8px 0 20px }
 .sheet .big-avatar > .avatar { width: 88px; height: 88px; font-size: 36px }
 .sheet .swatches { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-block: 4px }
-.sheet .form-row:has(> .swatches) { flex-wrap: wrap; row-gap: 8px } /* the colors go under Color when the row is narrow */
-.sheet .form-row:has(> .swatches) > .row-main { flex: none }
+:is(.sheet, .onboard) .form-row:has(> .swatches) { flex-wrap: wrap; row-gap: 8px } /* the colors go under Color when the row is narrow */
+:is(.sheet, .onboard) .form-row:has(> .swatches) > .row-main { flex: none }
 .sheet .swatches { flex: 1 }
 .sheet .swatches > .avatar { width: 26px; height: 26px; padding: 0; border: 0; cursor: default }
 .sheet .swatches > .avatar[aria-checked="true"] { outline: 2px solid var(--color-text); outline-offset: 2px }
-.sheet .form-row > .textarea { flex: 1 }
-.sheet .section-l { margin: 18px 10px 6px; font: var(--text-subheadline); color: var(--color-text-2) }
+:is(.sheet, .onboard) .form-row > .textarea { flex: 1 }
+:is(.sheet, .onboard) .section-l { margin: 18px 10px 6px; font: var(--text-subheadline); color: var(--color-text-2) }
 .sheet > footer > .danger { margin-right: auto }
 .stack { display: grid; gap: 8px; margin-top: 8px }
 .toolbar .agents .count:empty { display: none }
@@ -198,11 +250,11 @@ main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--compose
   .sheet > header h2 { font-size: 17px; line-height: 22px }
   .sheet > header > .btn.icon { grid-column: 1; grid-row: 1; justify-self: start; --h: 44px; --ib-r: 22px; border-radius: 50%; corner-shape: round; background: var(--color-floating); box-shadow: var(--shadow-1) } /* the same circle as the back button on a page */
   .sheet > header > .btn.icon mp-icon { --icon-size: 20px }
-  .sheet .form-row { min-height: 48px; padding-inline: 16px }
-  .sheet .form-row + .form-row::before { left: 16px; right: 0 }
-  .sheet .form-row b, .sheet .form-row > :is(input.input, textarea.input) { font-size: 17px; line-height: 22px }
-  .sheet .form { border-radius: 24px; corner-shape: round }
-  .sheet .section-l { margin-inline: 16px; font-size: 13px }
+  :is(.sheet, .onboard) .form-row { min-height: 48px; padding-inline: 16px }
+  :is(.sheet, .onboard) .form-row + .form-row::before { left: 16px; right: 0 }
+  :is(.sheet, .onboard) .form-row b, :is(.sheet, .onboard) .form-row > :is(input.input, textarea.input) { font-size: 17px; line-height: 22px }
+  :is(.sheet, .onboard) .form { border-radius: 24px; corner-shape: round }
+  :is(.sheet, .onboard) .section-l { margin-inline: 16px; font-size: 13px }
   .sheet > footer { padding-bottom: max(var(--pad), env(safe-area-inset-bottom)) }
   .sheet > footer > .btn { flex: 1; --h: 44px; font-size: 17px }
   /* Project settings on a phone: a page pushed from the side over the project (Slack iPhone), not a sheet. Back stays where it is; the name is plain text. */
