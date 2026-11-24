@@ -278,20 +278,12 @@ func Harness(ctx context.Context, path string) error {
 	relay.Handle(mux, derp)
 	routes := http.NewServeMux()
 	routes.Handle("/", harness.Handler(ctx, h))
-	routes.HandleFunc("PUT /providers/{name}", func(w http.ResponseWriter, r *http.Request) {
-		if err := setProvider(path, r.PathValue("name"), r.Body, h.SetProviders); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
-	routes.HandleFunc("DELETE /providers/{name}", func(w http.ResponseWriter, r *http.Request) {
-		if err := removeProvider(path, r.PathValue("name"), h.SetProviders); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
+	routes.HandleFunc("PUT /providers/{name}", noContent(func(r *http.Request) error {
+		return setProvider(path, r.PathValue("name"), r.Body, h.SetProviders)
+	}))
+	routes.HandleFunc("DELETE /providers/{name}", noContent(func(r *http.Request) error {
+		return removeProvider(path, r.PathValue("name"), h.SetProviders)
+	}))
 	logins := &logins{ctx: ctx, path: path, serve: h.SetProviders, m: map[string]*login{}}
 	routes.HandleFunc("POST /providers/{name}/login", logins.start)
 	routes.HandleFunc("POST /providers/{name}/login/code", logins.paste)
@@ -478,6 +470,17 @@ func saveProvider(path, name string, in Provider, serve func(map[string]provider
 	}
 	serve(ps)
 	return nil
+}
+
+// noContent answers 204 when do succeeds and 400 with its error when not.
+func noContent(do func(*http.Request) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := do(r); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 // removeProvider takes the provider name out of the config at path and
