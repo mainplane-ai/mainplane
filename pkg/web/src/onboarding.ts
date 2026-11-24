@@ -109,16 +109,19 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, done: (
       }
       case "device": {
         const box = h("div", null, h("p", { className: "note" }, minted ? "" : "Making an API key..."))
-        const show = () => {
-          const link = location.origin + "/#k=" + encodeURIComponent(minted)
-          const copy = h("button", { className: "btn plain sm", type: "button" }, icon("link"), h("span", null, "Copy Login Link"))
+        // The login link as a QR code for a phone's camera, and as text to copy, its key blurred until pointed at.
+        const show = async () => {
+          const at = location.origin + "/#k=", link = at + encodeURIComponent(minted)
+          const { renderSVG } = await import(new URL("qrcode.js", import.meta.url).href) as { renderSVG: (s: string, o?: { pixelSize?: number }) => string }
+          const qr = Object.assign(h("div", { className: "qr" }), { innerHTML: renderSVG(link, { pixelSize: 4 }) })
+          const copy = h("button", { className: "btn plain sm", type: "button" }, icon("copy"), h("span", null, "Copy Link"))
           copy.onclick = () => navigator.clipboard.writeText(link).then(() => (copy.lastElementChild!.textContent = "Copied"))
-          box.replaceChildren(install(minted), h("p", { className: "note" }, "On a phone or another browser, open the login link instead."), h("div", { className: "actions" }, copy))
+          box.replaceChildren(qr, h("div", { className: "install" }, h("pre", null, h("code", null, at, h("span", { className: "secret" }, encodeURIComponent(minted)))), h("div", { className: "actions" }, copy)))
         }
-        page("Use Mainplane on Another Device", "Your sessions sync across any device with a Mainplane API key. Run this one-line install to add the terminal app to another device, then run mainplane there.",
+        page("Use Mainplane on Another Device", "Your projects and chats are on every device logged in to this harness. Scan this code with a phone's camera, or open the link in another browser.",
           [box], button("Continue", () => move(1)))
-        if (minted) show()
-        else mint().then(show, e => box.replaceChildren(h("p", { className: "note" }, "Could not make an API key: " + (e instanceof Error ? e.message : e))))
+        if (minted) void show()
+        else mint().then(show).catch(e => box.replaceChildren(h("p", { className: "note" }, "Could not make the login link: " + (e instanceof Error ? e.message : e))))
         break
       }
       case "drive": {
@@ -134,11 +137,11 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, done: (
     live?.()
   }
 
-  // mint makes the API key for another device, named as the terminal app names its own: the first tui-N free.
+  // mint makes the API key for another device: the first web-N free, as the terminal app makes tui-N.
   let minting: Promise<void> | null = null
   const mint = () => (minting ??= (async () => {
     for (let i = 1; ; i++) {
-      const r = await fetch("/keys", { method: "POST", headers: { Authorization: "Bearer " + key() }, body: JSON.stringify({ name: "tui-" + i }) })
+      const r = await fetch("/keys", { method: "POST", headers: { Authorization: "Bearer " + key() }, body: JSON.stringify({ name: "web-" + i }) })
       if (r.status === 409) continue
       if (!r.ok) { minting = null; throw new Error((await r.text()).trim() || r.statusText) }
       minted = (await r.json()).key

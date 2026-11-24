@@ -27,6 +27,7 @@ import (
 //go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 src/main.ts --bundle --minify --loader:.svg=text --format=esm --target=es2022 --log-level=warning --outfile=dist/app.js
 //go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 vendor/temml.mjs --minify --format=esm --target=es2022 --log-level=warning --outfile=dist/math.js
 //go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 vendor/jsqr.mjs --minify --format=esm --target=es2022 --log-level=warning --outfile=dist/qr.js
+//go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 vendor/uqr.mjs --minify --format=esm --target=es2022 --log-level=warning --outfile=dist/qrcode.js
 
 //go:embed all:dist app.css frame.html favicon.svg pwa
 var embedded embed.FS
@@ -65,7 +66,7 @@ var types = map[string]string{".js": "text/javascript; charset=utf-8", ".css": "
 // which has their hash in it.
 func build() (root string, assets map[string][]byte) {
 	assets, sum := map[string][]byte{}, sha256.New()
-	for _, name := range []string{script, "dist/math.js", "dist/qr.js", "app.css", "frame.html", "pwa/manifest.webmanifest", "pwa/icon-180.png", "pwa/icon-192.png", "pwa/icon-512.png", "pwa/maskable-512.png"} {
+	for _, name := range []string{script, "dist/math.js", "dist/qr.js", "dist/qrcode.js", "app.css", "frame.html", "pwa/manifest.webmanifest", "pwa/icon-180.png", "pwa/icon-192.png", "pwa/icon-512.png", "pwa/maskable-512.png"} {
 		if b, err := fs.ReadFile(files, name); err == nil {
 			assets[path.Base(name)] = b
 			sum.Write(b)

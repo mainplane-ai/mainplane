@@ -51,6 +51,8 @@ main > .tabs { margin: 0 16px }
 .onboard .providers .empty { display: none } /* the step's title says it */
 .onboard .form-row > mp-icon { color: var(--color-text-2) }
 .onboard .section-l { margin-top: 20px }
+.onboard .qr { width: 200px; margin: 0 auto 20px; padding: 12px; border-radius: var(--radius-10); background: #fff } /* black on white in dark mode too: cameras read it best */
+.onboard .qr > svg { display: block; width: 100% }
 .install { display: grid; gap: 8px }
 .install > pre { margin: 0; padding: 12px 14px; border-radius: var(--radius-6); background: var(--color-fill); font: var(--text-mono); white-space: pre-wrap; word-break: break-all }
 .install .secret { filter: blur(4px); transition: filter .2s }
