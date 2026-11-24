@@ -35,9 +35,10 @@ function install(args: string): HTMLElement {
   return h("div", { className: "install" }, seg, h("pre", null, code), h("div", { className: "actions" }, copy))
 }
 
-export function onboarding(loginForm: (done: () => void) => HTMLElement, done: () => void): HTMLElement {
+// again opens it from the start in a browser where it ran (/welcome).
+export function onboarding(loginForm: (done: () => void) => HTMLElement, again: boolean, done: () => void): HTMLElement {
   const root = h("div", { className: "onboard" })
-  let step: Step = key() ? "provider" : sessionStorage.getItem("refused") ? "login" : "welcome"
+  let step: Step = again || !key() && !sessionStorage.getItem("refused") ? "welcome" : key() ? "provider" : "login"
   let providers = -1 // how many were connected at the last poll; -1 before the first
   let workers: Worker[] = []
   let network = "", join = "", minted = ""

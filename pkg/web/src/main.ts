@@ -216,7 +216,7 @@ async function render() {
   if (/^\/projects\/?$/.test(location.pathname)) history.replaceState(null, "", "/") // the list has no path of its own: /projects is home
   shown = location.pathname
   const [kind, id, sub, agent, more] = location.pathname.split("/").slice(1)
-  document.body.classList.toggle("out", !key() || !onboarded())
+  document.body.classList.toggle("out", !key() || !onboarded() || kind === "welcome")
   document.body.classList.toggle("home", location.pathname === "/" || location.pathname === "/new") // a phone shows the list under the new project sheet
   drawList()
   try {
@@ -251,7 +251,7 @@ function toolbar(who: string | Pick<Project, "id" | "name" | "color" | "monogram
 
 let ob: HTMLElement | null = null // the onboarding, kept while it runs: a render keeps its step
 async function content(kind: string, id: string, sub: string, signal: AbortSignal, agent = "", more = ""): Promise<HTMLElement[]> {
-  if (!onboarded()) return [ob ??= onboarding(loginForm, () => { ob = null; void refresh().then(() => go(projects.length ? "/" : "/new")) })]
+  if (!onboarded() || kind === "welcome") return [ob ??= onboarding(loginForm, kind === "welcome", () => { ob = null; void refresh().then(() => go(projects.length ? "/" : "/new")) })]
   if (!key()) return [loginForm()]
   if (!projects.length) await refresh()
   const none = h("div", { className: "view" }, h("div", { className: "empty" }, icon("grid"), h("h3", null, "No project open"), h("p", null, "Pick one from the list, or make a new one.")))
