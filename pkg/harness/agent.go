@@ -265,7 +265,7 @@ func (h *Harness) CreateAgent(ctx context.Context, c AgentCreate, via string) (A
 	if a.Apps == nil {
 		a.Apps = []string{}
 	}
-	if err := checkName(a.Name); err != nil {
+	if err := CheckName(a.Name); err != nil {
 		return a, err
 	}
 	if err := checkInstructions(a.Instructions); err != nil {
@@ -511,7 +511,7 @@ func (h *Harness) SetAgentInstructions(id, via, text string) error {
 // agent's file holds what the agent is now and no history, so who named it
 // goes to the log, as who deleted a session does.
 func (h *Harness) SetAgentName(id, via, name string) error {
-	if err := checkName(name); err != nil {
+	if err := CheckName(name); err != nil {
 		return err
 	}
 	a, unlock, err := h.holdAgent(id)

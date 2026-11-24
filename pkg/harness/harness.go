@@ -182,7 +182,7 @@ func (h *Harness) create(ctx context.Context, id string, c Create, via string) e
 	if err != nil {
 		return err
 	}
-	if err := checkName(c.Name); err != nil {
+	if err := CheckName(c.Name); err != nil {
 		return err
 	}
 	if c.Name != "" && via == "" {

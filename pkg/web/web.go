@@ -65,7 +65,7 @@ var types = map[string]string{".js": "text/javascript; charset=utf-8", ".css": "
 // which has their hash in it.
 func build() (root string, assets map[string][]byte) {
 	assets, sum := map[string][]byte{}, sha256.New()
-	for _, name := range []string{script, "dist/math.js", "dist/qr.js", "app.css", "frame.html", "pwa/manifest.webmanifest", "pwa/icon-180.png", "pwa/icon-512.png", "pwa/maskable-512.png"} {
+	for _, name := range []string{script, "dist/math.js", "dist/qr.js", "app.css", "frame.html", "pwa/manifest.webmanifest", "pwa/icon-180.png", "pwa/icon-192.png", "pwa/icon-512.png", "pwa/maskable-512.png"} {
 		if b, err := fs.ReadFile(files, name); err == nil {
 			assets[path.Base(name)] = b
 			sum.Write(b)

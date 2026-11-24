@@ -47,30 +47,6 @@ func Latest() (string, error) {
 	return string(bytes.TrimSpace(b)), err
 }
 
-// Notes is the changelog's section of release v, as markdown without its
-// heading, from the changelog at v's tag.
-func Notes(v string) (string, error) {
-	c := http.Client{Timeout: timeout}
-	resp, err := c.Get("https://raw.githubusercontent.com/mainplane-ai/mainplane/" + v + "/docs/CHANGELOG.md")
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("changelog of %s: %s", v, resp.Status)
-	}
-	b, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	_, s, ok := strings.Cut(string(b), "\n## "+v+"\n")
-	if !ok {
-		return "", fmt.Errorf("the changelog of %s has no section for it", v)
-	}
-	s, _, _ = strings.Cut(s, "\n## ")
-	return strings.TrimSpace(s), nil
-}
-
 // Get is file of release v, checked against v's signed SHA256SUMS.
 func Get(v, file string) ([]byte, error) {
 	sums, err := fetch(v + "/SHA256SUMS")

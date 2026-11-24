@@ -42,7 +42,7 @@ type Prompt struct {
 type versions struct {
 	Current string `json:"current"`
 	Latest  string `json:"latest,omitempty"`
-	Notes   string `json:"notes,omitempty"` // the changelog of latest, when it is not current
+	Notes   string `json:"notes,omitempty"` // the changelog's sections above current, when latest is not current
 }
 
 // An update downloads one binary and restarts the harness.
@@ -63,19 +63,32 @@ func (a *api) settings(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	// latest and its notes are optional: wait for them no longer than a connector waits
-	vs, l := versions{Current: version.V}, make(chan versions, 1)
+	// latest and its notes are optional: wait for them no longer than a
+	// connector waits. latest comes first, so slow notes do not hide it.
+	vs, deadline := versions{Current: version.V}, time.After(5*time.Second)
+	lc, nc := make(chan string, 1), make(chan string, 1)
 	go func() {
-		v := vs
-		v.Latest, _ = release.Latest()
-		if v.Latest != "" && v.Latest != v.Current {
-			v.Notes, _ = release.Notes(v.Latest)
+		l, _ := release.Latest()
+		lc <- l
+		if l == "" || l == version.V {
+			return
 		}
-		l <- v
+		log, err := release.Get(l, "CHANGELOG.md") // signed, as for the update itself
+		if err != nil {
+			nc <- ""
+			return
+		}
+		nc <- notes(string(log), version.V)
 	}()
 	select {
-	case vs = <-l:
-	case <-time.After(5 * time.Second):
+	case vs.Latest = <-lc:
+	case <-deadline:
+	}
+	if vs.Latest != "" && vs.Latest != vs.Current {
+		select {
+		case vs.Notes = <-nc:
+		case <-deadline:
+		}
 	}
 	u := c.DataSharing
 	if doNotTrack() {

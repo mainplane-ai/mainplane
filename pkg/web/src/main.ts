@@ -450,9 +450,11 @@ function loginForm(): HTMLElement {
   scan.onclick = async () => {
     if (stream) return stop()
     let jsQR: (d: Uint8ClampedArray, w: number, h: number, o?: { inversionAttempts: string }) => { data: string } | null
+    const cam = navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
     try {
-      ;[stream, { default: jsQR }] = await Promise.all([navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false }), import(new URL("qr.js", import.meta.url).href)])
+      ;[stream, { default: jsQR }] = await Promise.all([cam, import(new URL("qr.js", import.meta.url).href)])
     } catch (e) {
+      cam.then(s => s.getTracks().forEach(t => t.stop()), () => {}) // the camera opened but the decoder did not load
       note.textContent = (e as Error).name === "NotAllowedError" ? "The camera is not allowed. Allow it in the browser's settings, or paste the link." : "The camera did not open: " + (e as Error).message
       return
     }
@@ -716,9 +718,13 @@ async function harnessSettings(tab: string): Promise<HTMLElement> {
   const box = h("textarea", { className: "input textarea", rows: 16, value: st.prompt.lines.join("\n"), ariaLabel: "Instructions" })
   const save = h("button", { className: "btn" }, "Save Instructions")
   const reset = h("button", { className: "btn plain", hidden: !!st.prompt.default }, "Use the Default")
+  let saved = box.value // unchanged, the default is not saved as the user's own: a later release's default still comes
   box.oninput = () => (save.textContent = "Save Instructions")
-  save.onclick = attempt(async () => { await post({ prompt: { lines: box.value ? box.value.split("\n") : [] } }); save.textContent = "Saved"; reset.hidden = false })
-  reset.onclick = attempt(async () => { await post({ prompt: { default: true } }); box.value = (await get<Settings>("/settings")).prompt.lines.join("\n"); reset.hidden = true })
+  save.onclick = attempt(async () => {
+    if (box.value !== saved) { await post({ prompt: { lines: box.value ? box.value.split("\n") : [] } }); saved = box.value; reset.hidden = false }
+    save.textContent = "Saved"
+  })
+  reset.onclick = attempt(async () => { await post({ prompt: { default: true } }); saved = box.value = (await get<Settings>("/settings")).prompt.lines.join("\n"); reset.hidden = true })
   const told = h("div", null, h("div", { className: "form" }, h("div", { className: "form-row" }, box)),
     h("p", { className: "note" }, "Every new session starts with them, after the system prompt."), h("div", { className: "actions" }, reset, save))
 
@@ -744,17 +750,18 @@ async function harnessSettings(tab: string): Promise<HTMLElement> {
 // tabbed is a large sheet with one section in view at a time, as in Slack's channel details. The tab is in the path
 // (base, base/<tab>), so a link can open one. On a phone it is a page pushed from the side under head, the foot at its top right.
 function tabbed(title: string, base: string, close: string, panels: [string, string, HTMLElement][], tab: string, foot: Node[], more: Node[], over: Node[], head: HTMLElement): HTMLElement {
-  const show = (k: string) => {
+  // The first show writes no address: the view may already be gone to a later one, and its address is right.
+  const show = (k: string, write = true) => {
     for (const [n, , el] of panels) el.hidden = n !== k
     tabs.querySelectorAll("button").forEach(b => (b.ariaSelected = String(b.value === k)))
     requestAnimationFrame(() => tabs.querySelector("[aria-selected=true]")!.scrollIntoView({ block: "nearest", inline: "nearest" })) // once the sheet is in the page
-    history.replaceState(null, "", base + (k === panels[0][0] ? "" : "/" + k))
+    if (write) history.replaceState(null, "", base + (k === panels[0][0] ? "" : "/" + k))
   }
   const tabs = h("div", { className: "tabs", role: "tablist" }, ...panels.map(([k, name]) => h("button", { role: "tab", value: k, onclick: () => show(k) } as Partial<HTMLButtonElement>, name)))
   const s = sheet(title, "", close, [...panels.map(p => p[2]), ...more], foot, ...over)
   s.querySelector(".sheet")!.classList.add("large", "tabbed")
   s.querySelector(".sheet > header")!.after(tabs)
-  show(panels.some(p => p[0] === tab) ? tab : panels[0][0])
+  show(panels.some(p => p[0] === tab) ? tab : panels[0][0], false)
   if (!matchMedia("(max-width: 700px)").matches) return s
   head.append(...foot)
   s.classList.add("push")

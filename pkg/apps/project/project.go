@@ -529,23 +529,26 @@ func (a *App) rename(w http.ResponseWriter, r *http.Request, p Project) error {
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, harness.MaxPost)).Decode(&in); err != nil {
 		return err
 	}
-	if in.Name = strings.TrimSpace(in.Name); in.Name == "" || len(in.Name) > harness.MaxName || strings.ContainsAny(in.Name, "\r\n") {
-		return fmt.Errorf("name: one line of at most %d bytes", harness.MaxName)
+	if in.Name = strings.TrimSpace(in.Name); in.Name == "" {
+		return errors.New("a name is not empty")
+	} else if err := harness.CheckName(in.Name); err != nil {
+		return err
 	}
 	a.mu.Lock()
 	cur, ok := a.projects[p.ID]
 	var err error
+	old := ""
 	if !ok {
 		err = fmt.Errorf("%w: no project %q", fs.ErrNotExist, p.ID)
 	} else {
-		cur.Name = in.Name
+		old, cur.Name = cur.Name, in.Name
 		err = a.save(cur)
 	}
 	a.mu.Unlock()
 	if err != nil {
 		return err
 	}
-	if err := a.h.NoteAgent(cur.Orchestrator, via, "project", fmt.Sprintf(renamed, "The user", p.Name, cur.Name)); err != nil && !errors.Is(err, harness.ErrNoAgent) {
+	if err := a.h.NoteAgent(cur.Orchestrator, via, "project", fmt.Sprintf(renamed, "The user", old, cur.Name)); err != nil && !errors.Is(err, harness.ErrNoAgent) {
 		return err
 	}
 	return reply(w, cur)
@@ -816,7 +819,8 @@ func (a *App) usage(w http.ResponseWriter, r *http.Request, p Project) error {
 	cat := a.cat
 	a.cmu.Unlock()
 	if err != nil {
-		return err
+		http.Error(w, err.Error(), http.StatusBadGateway) // as models does
+		return nil
 	}
 	infos, err := a.h.List()
 	if err != nil {
@@ -849,23 +853,8 @@ func (a *App) usage(w http.ResponseWriter, r *http.Request, p Project) error {
 			if out.Since.IsZero() || i.Created.Before(out.Since) {
 				out.Since = i.Created
 			}
-			prov, name, _ := strings.Cut(i.Config.Model, "/")
-			pr, priced := cat.Presets[cmp.Or(i.Config.Preset, i.Config.Model)]
-			if !priced {
-				pr, priced = cat.Presets[i.Config.Model]
-			}
-			billing, cost := "none", 0.0
-			switch {
-			case slices.Contains(plans, cat.Providers[prov].Shape):
-				billing = "subscription"
-			case priced && pr.Cost != catalog.Cost{}:
-				billing = "tokens"
-				c, u := pr.Cost, i.Usage
-				cost = (float64(u.Input)*c.Input + float64(u.Output)*c.Output + float64(u.CacheRead)*c.CacheRead + float64(u.CacheWrite)*c.CacheWrite) / 1e6
-			}
-			if priced {
-				name = pr.Name
-			}
+			prov, _, _ := strings.Cut(i.Config.Model, "/")
+			name, billing, cost := price(cat, i.Config, i.Usage)
 			m := models[i.Config.Model]
 			if m == nil {
 				m = &Spend{ID: i.Config.Model, Name: name, Provider: cmp.Or(cat.Providers[prov].Name, prov), Billing: "none"}
@@ -886,6 +875,28 @@ func (a *App) usage(w http.ResponseWriter, r *http.Request, p Project) error {
 		return cmp.Or(cmp.Compare(y.Cost, x.Cost), cmp.Compare(sum(y.Tokens), sum(x.Tokens)), strings.Compare(x.ID, y.ID))
 	})
 	return reply(w, out)
+}
+
+// price is the name of a session's model, its billing and its cost at the
+// catalog's list price.
+func price(cat catalog.Catalog, c statefile.Conf, u statefile.Usage) (name, billing string, cost float64) {
+	prov, name, _ := strings.Cut(c.Model, "/")
+	// a config's preset only names it: it prices the session only when it is of the session's model
+	pr, priced := cat.Presets[c.Preset]
+	if !priced || pr.Provider+"/"+pr.Model != c.Model {
+		pr, priced = cat.Presets[c.Model]
+	}
+	if priced {
+		name = pr.Name
+	}
+	switch {
+	case slices.Contains(plans, cat.Providers[prov].Shape):
+		return name, "subscription", 0
+	case priced && pr.Cost != catalog.Cost{}:
+		k := pr.Cost
+		return name, "tokens", (float64(u.Input)*k.Input + float64(u.Output)*k.Output + float64(u.CacheRead)*k.CacheRead + float64(u.CacheWrite)*k.CacheWrite) / 1e6
+	}
+	return name, "none", 0
 }
 
 func (a *App) models(w http.ResponseWriter, r *http.Request) {

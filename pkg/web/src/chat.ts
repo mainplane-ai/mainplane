@@ -157,14 +157,22 @@ export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElem
     const earlier = agent.sessions.slice(0, agent.sessions.indexOf(session))
     // The session before loads as the top of the chat comes near, as in Messages, and what the user reads stays in place.
     let loading = Promise.resolve()
-    const before = () => (loading = loading.then(async () => {
-      if (!earlier.length) return
-      const part = h("div")
-      draw(await records((part.dataset.session = earlier.pop()!), 0, signal), part)
-      const below = log.scrollHeight - log.scrollTop
-      top.after(part) // the session after it starts with a rule of its own
-      if (!end) log.scrollTop = log.scrollHeight - below
-    }))
+    // A failed load leaves its session in earlier and the queue going: the top coming near again asks again.
+    const before = () => {
+      const p = loading.then(async () => {
+        const s = earlier.at(-1)
+        if (!s) return
+        const part = h("div")
+        part.dataset.session = s
+        draw(await records(s, 0, signal), part)
+        earlier.pop()
+        const below = log.scrollHeight - log.scrollTop
+        top.after(part) // the session after it starts with a rule of its own
+        if (!end) log.scrollTop = log.scrollHeight - below
+      })
+      loading = p.catch(() => {})
+      return p
+    }
     const near = new IntersectionObserver(async ([e]) => {
       if (!e.isIntersecting || !earlier.length) return
       await before()
