@@ -181,7 +181,7 @@ export function providersPanel(): HTMLElement {
     const models = h("div")
     const out = h("button", { className: "btn danger delete", type: "button" }, "Disconnect")
     out.onclick = () => {
-      if (!confirm(`Disconnect ${c.name}? Sessions on its models stop working.`)) return
+      if (!confirm(`Disconnect ${c.name}? ${c.offer?.sign_in ? "Its sign-in is deleted from the harness, and sessions" : "Sessions"} on its models stop working.`)) return
       out.disabled = true
       Promise.all(c.names.map(n => api("/providers/" + n, { method: "DELETE" }))).then(reload, e => { out.disabled = false; fail(e) })
     }

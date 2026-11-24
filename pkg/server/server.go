@@ -481,7 +481,8 @@ func saveProvider(path, name string, in Provider, serve func(map[string]provider
 }
 
 // removeProvider takes the provider name out of the config at path and
-// serves the rest. A session on it fails at its next step. Its dir stays.
+// serves the rest. A session on it fails at its next step. A sign-in's dir,
+// where its tokens are, goes with it: Disconnect signs out.
 func removeProvider(path, name string, serve func(map[string]provider.Provider)) error {
 	keyMu.Lock()
 	defer keyMu.Unlock()
@@ -489,7 +490,8 @@ func removeProvider(path, name string, serve func(map[string]provider.Provider))
 	if err != nil {
 		return err
 	}
-	if _, ok := c.Providers[name]; !ok {
+	p, ok := c.Providers[name]
+	if !ok {
 		return fmt.Errorf("no provider %q", name)
 	}
 	delete(c.Providers, name)
@@ -501,6 +503,9 @@ func removeProvider(path, name string, serve func(map[string]provider.Provider))
 		return err
 	}
 	serve(ps)
+	if provider.Logins[p.Shape] != nil {
+		return os.RemoveAll(providerDir(filepath.Dir(path), name))
+	}
 	return nil
 }
 
