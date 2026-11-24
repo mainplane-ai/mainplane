@@ -36,8 +36,12 @@ const (
 // locks live in side daemons. A dead client's delegations go after 20s, not 90s: an agent
 // between tool calls does not notice 20s. After a start, new locks wait out the grace
 // in which clients reclaim theirs, which one lease is enough for: 20s, not 90s.
+// The mesh only: nfsd listens on this machine's mesh address alone, and
+// with v2 off too, which mountd takes as on unless told, mountd opens no port.
 const nfsConfText = `# mainplane drives, written by mainplaned
 [nfsd]
+host=%s
+vers2=n
 vers3=n
 vers4=y
 vers4.0=y
@@ -404,8 +408,29 @@ func nfsServer() error {
 			return err
 		}
 	}
-	return write(nfsConf, nfsConfText, "systemctl", "restart", "nfs-server")
+	a, err := mesh.Addr()
+	if err != nil {
+		return err
+	}
+	// NFSv4 needs no rpcbind or statd, which listen on every address. Masked,
+	// since nfs-server pulls rpcbind in.
+	if err := write(nfsConf, fmt.Sprintf(nfsConfText, a), "sh", "-c", "systemctl mask --now "+rpcUnits+" && systemctl restart nfs-server"); err != nil {
+		return err
+	}
+	// A boot starts nfs-server before the mesh has its address, which nfsd
+	// then fails to listen on: started at the first round after one.
+	out, err := exec.Command("ss", "-Hltn", "sport", "=", ":"+nfsPort).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ss: %w: %s", err, out)
+	}
+	if !strings.Contains(string(out), net.JoinHostPort(a.String(), nfsPort)) {
+		return run("systemctl", "restart", "nfs-server")
+	}
+	return nil
 }
+
+// rpcUnits serve NFSv3 only: drives mask them while they serve.
+const rpcUnits = "rpcbind.socket rpcbind.service rpc-statd.service"
 
 // canServe is whether this machine can serve drives: it does, or it passes
 // the preflight.
@@ -593,7 +618,9 @@ func dropDrives(*user.User) error {
 	for _, p := range slices.Sorted(maps.Keys(mountpoints())) {
 		errs = append(errs, unmount(p, true))
 	}
-	if err := os.Remove(nfsConf); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := os.Remove(nfsConf); err == nil {
+		errs = append(errs, run("systemctl", append([]string{"unmask"}, strings.Fields(rpcUnits)...)...))
+	} else if !errors.Is(err, fs.ErrNotExist) {
 		errs = append(errs, err)
 	}
 	return errors.Join(append(errs, unexport(), unsmb())...)
