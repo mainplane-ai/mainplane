@@ -9,25 +9,25 @@
 .sheet > footer { display: flex; justify-content: flex-end; gap: 8px; padding: 0 var(--pad) var(--pad); }
 
 /* Grouped form (System Settings) */
-.sheet .form { border-radius: var(--radius-10); background: color-mix(in srgb, var(--color-text) 4%, transparent); }
-.sheet .form-row { display: flex; align-items: center; gap: 16px; min-height: 40px; padding: 8px 10px; box-sizing: border-box; position: relative; }
-.sheet .form-row + .form-row::before { content: ""; position: absolute; top: 0; left: 10px; right: 10px; height: var(--hairline); background: var(--color-separator); }
-.sheet .form-row .row-main { flex: 1; min-width: 0; display: grid; gap: 1px; }
-.sheet .form-row b { font: 400 13px/18px var(--font-text); }
-.sheet .form-row small { font: var(--text-subheadline); color: var(--color-text-2); }
-.sheet .form + .form { margin-top: 10px; }
+:is(.sheet, .onboard) .form { border-radius: var(--radius-10); background: color-mix(in srgb, var(--color-text) 4%, transparent); }
+:is(.sheet, .onboard) .form-row { display: flex; align-items: center; gap: 16px; min-height: 40px; padding: 8px 10px; box-sizing: border-box; position: relative; }
+:is(.sheet, .onboard) .form-row + .form-row::before { content: ""; position: absolute; top: 0; left: 10px; right: 10px; height: var(--hairline); background: var(--color-separator); }
+:is(.sheet, .onboard) .form-row .row-main { flex: 1; min-width: 0; display: grid; gap: 1px; }
+:is(.sheet, .onboard) .form-row b { font: 400 13px/18px var(--font-text); }
+:is(.sheet, .onboard) .form-row small { font: var(--text-subheadline); color: var(--color-text-2); }
+:is(.sheet, .onboard) .form + .form { margin-top: 10px; }
 /* A row that opens a page (iOS disclosure row): the whole row is the button, a chevron at its end. */
-.sheet button.form-row { width: 100%; margin: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: default; }
-.sheet button.form-row:first-child { border-radius: var(--radius-10) var(--radius-10) 0 0; }
-.sheet button.form-row:last-child { border-bottom-left-radius: var(--radius-10); border-bottom-right-radius: var(--radius-10); }
-.sheet button.form-row:only-child { border-radius: var(--radius-10); }
-.sheet button.form-row:hover { background: var(--color-fill); }
-.sheet button.form-row:active { background: var(--color-fill-pressed); }
-.sheet button.form-row > mp-icon:first-child { --icon-size: 16px; flex: none; color: var(--color-text-2); }
-.sheet .form-row > .chev { --icon-size: 14px; flex: none; color: var(--color-text-3); }
+:is(.sheet, .onboard) button.form-row { width: 100%; margin: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: default; }
+:is(.sheet, .onboard) button.form-row:first-child { border-radius: var(--radius-10) var(--radius-10) 0 0; }
+:is(.sheet, .onboard) button.form-row:last-child { border-bottom-left-radius: var(--radius-10); border-bottom-right-radius: var(--radius-10); }
+:is(.sheet, .onboard) button.form-row:only-child { border-radius: var(--radius-10); }
+:is(.sheet, .onboard) button.form-row:hover { background: var(--color-fill); }
+:is(.sheet, .onboard) button.form-row:active { background: var(--color-fill-pressed); }
+:is(.sheet, .onboard) button.form-row > mp-icon:first-child { --icon-size: 16px; flex: none; color: var(--color-text-2); }
+:is(.sheet, .onboard) .form-row > .chev { --icon-size: 14px; flex: none; color: var(--color-text-3); }
 /* A text field in a grouped form is the row itself (System Settings > About > Name): no box and no ring, the value right aligned in ink; a long text is the whole row, left aligned. Focus shows only the caret. */
-.sheet .form-row > :is(input.input, textarea.input) { flex: 1; min-width: 0; height: auto; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; outline: none; font: var(--text-body); color: var(--color-text); }
-.sheet .form-row > input.input { text-align: right; }
-.sheet .form-row > textarea.input { padding: 2px 0; resize: none; }
-.sheet .note { margin: 6px 10px 0; font: var(--text-subheadline); color: var(--color-text-2); }
+:is(.sheet, .onboard) .form-row > :is(input.input, textarea.input) { flex: 1; min-width: 0; height: auto; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; outline: none; font: var(--text-body); color: var(--color-text); }
+:is(.sheet, .onboard) .form-row > input.input { text-align: right; }
+:is(.sheet, .onboard) .form-row > textarea.input { padding: 2px 0; resize: none; }
+:is(.sheet, .onboard) .note { margin: 6px 10px 0; font: var(--text-subheadline); color: var(--color-text-2); }
 @keyframes mp-sheet { from { opacity: 0; transform: translateY(calc(8px * var(--motion))) scale(calc(1 - .02 * var(--motion))); } }
