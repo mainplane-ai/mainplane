@@ -44,12 +44,17 @@ document.body.classList.add("mp")
 document.body.append(side, main)
 
 // A login link carries the key after the #, which no server sees. It is
-// saved and taken out of the address bar.
-const linked = location.hash.match(/^#k=(.+)$/)
-if (linked) {
-  login(decodeURIComponent(linked[1]))
+// saved and taken out of the address bar. A tab already on the page gets the
+// link as a change of the # alone, which loads nothing: hashchange reads it.
+function linked() {
+  const k = location.hash.match(/^#k=(.+)$/)
+  if (!k) return false
+  login(decodeURIComponent(k[1]))
   history.replaceState(null, "", location.pathname)
+  return true
 }
+linked()
+addEventListener("hashchange", () => linked() && void render())
 
 let projects: Project[] = []
 // A project visited keeps its views in the page, hidden while another view
