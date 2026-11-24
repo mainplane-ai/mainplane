@@ -35,6 +35,7 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 - Harness: an update restart no longer fails the sessions it cuts. After a restart a session waits up to 5 minutes for its workers to reconnect, and gets a note that the harness restarted, with both versions after an update. A step cut by the shutdown leaves the session open, not failed, and a smaller prompt after an update is no longer taken for a prompt the provider cut
 - Drives: a Linux drive server serves NFS on its mesh address only. rpcbind, rpc.statd and rpc.mountd no longer listen (rpcbind and statd are masked while the machine serves drives), and the harness opens no peerapi port. Before, they listened on every interface, which faces the internet on a server with no firewall
 - macOS: release binaries are signed with the Mainplane, Inc. Developer ID and notarized by Apple. The signing identity changes this once, so macOS asks again for the permissions it gave the old one, such as Network Volumes, Screen Recording and Accessibility. After that they hold across releases
+- Windows: release binaries are signed with the Mainplane, Inc. EV code signing certificate, so Windows names Mainplane, Inc. as the publisher, in place of a personal identity
 - Releases are built with Go 1.27.4, which fixes GO-2026-6859 in net/http
 
 ## v0.5.13
