@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -42,6 +43,7 @@ type Prompt struct {
 type versions struct {
 	Current string `json:"current"`
 	Latest  string `json:"latest,omitempty"`
+	Notes   string `json:"notes,omitempty"` // the changelog's sections above current, when latest is not current
 }
 
 // An update downloads one binary and restarts the harness.
@@ -62,18 +64,37 @@ func (a *api) settings(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	// latest is optional: wait for it no longer than a connector waits
-	latest, l := "", make(chan string, 1)
-	go func() { v, _ := release.Latest(); l <- v }()
+	// latest and its notes are optional: wait for them no longer than a
+	// connector waits. latest comes first, so slow notes do not hide it.
+	vs, deadline := versions{Current: version.V}, time.After(5*time.Second)
+	lc, nc := make(chan string, 1), make(chan string, 1)
+	go func() {
+		l, _ := release.Latest()
+		lc <- l
+		if l == "" || l == version.V {
+			return
+		}
+		changes, err := release.Get(l, "CHANGELOG.md") // signed, as for the update itself
+		if err != nil {
+			log.Printf("harness: release notes of %s: %v", l, err)
+		}
+		nc <- notes(string(changes), version.V)
+	}()
 	select {
-	case latest = <-l:
-	case <-time.After(5 * time.Second):
+	case vs.Latest = <-lc:
+	case <-deadline:
+	}
+	if vs.Latest != "" && vs.Latest != vs.Current {
+		select {
+		case vs.Notes = <-nc:
+		case <-deadline:
+		}
 	}
 	u := c.DataSharing
 	if doNotTrack() {
 		u = &DataSharing{Via: "DO_NOT_TRACK"}
 	}
-	reply(w, settings{&versions{version.V, latest}, u, &Prompt{c.prompt(), c.Prompt == nil}})
+	reply(w, settings{&vs, u, &Prompt{c.prompt(), c.Prompt == nil}})
 }
 
 func (a *api) setSettings(w http.ResponseWriter, r *http.Request) {

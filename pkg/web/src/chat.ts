@@ -112,8 +112,10 @@ export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElem
       } else if (r.kind === "message" && r.via === "rollover") divider(into, shown(r))
       else if (r.kind === "message") group(into, "events", item([h("span", null, r.via === "app:project" ? "Project created" : from(r.via))], shown(r)))
       else if (r.kind === "text") say(into, false, shown(r))
-      else if (r.kind === "error") into.append(h("div", { className: "msg system error" }, shown(r)))
-      else if (r.kind === "system" && r.source === "continue" && r.n > 1 && !/^[0-9a-f]{8}\s*$/.test(shown(r))) divider(into, shown(r))
+      // A handoff ends its session with the id of the next one, then the error that says why: the next session's rule shows it.
+      else if (r.kind === "error" && into.dataset.handoff !== String(r.n - 1)) into.append(h("div", { className: "msg system error" }, shown(r)))
+      else if (r.kind === "system" && r.source === "continue" && /^[0-9a-f]{8}\s*$/.test(shown(r))) into.dataset.handoff = String(r.n)
+      else if (r.kind === "system" && r.source === "continue" && r.n > 1) delete into.dataset.handoff, divider(into, shown(r))
       else if (r.kind === "call") {
         const c = JSON.parse(text(r.body)), a = typeof c.arguments === "string" ? JSON.parse(c.arguments || "{}") : c.arguments ?? {}
         const name = String(c.name).split("__").pop()!
@@ -135,9 +137,9 @@ export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElem
   }
 
   const follow = async () => {
-    const more = h("button", { className: "btn plain sm", hidden: true }, "Load the session before")
+    const top = h("div") // the earlier sessions go after it
     const live = h("div")
-    thread.append(more, live, pending, typing) // the typing bubble is the last item while the agent works
+    thread.append(top, live, pending, typing) // the typing bubble is the last item while the agent works
     // A turn is one call: the next records of the session followed, which session is the live one, and whether the agent works.
     let session = "", n = 0, status = ""
     const turn = async (wait: string, signal: AbortSignal) => {
@@ -153,14 +155,32 @@ export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElem
     const [agent, first] = await Promise.all([get<Agent>(`/agents/${id}`, signal), turn("", signal)])
     live.dataset.session = session = first
     const earlier = agent.sessions.slice(0, agent.sessions.indexOf(session))
-    more.hidden = !earlier.length
-    const before = async () => {
-      const part = h("div")
-      draw(await records((part.dataset.session = earlier.pop()!), 0, signal), part)
-      more.after(part) // the session after it starts with a rule of its own
-      more.hidden = !earlier.length
+    // The session before loads as the top of the chat comes near, as in Messages, and what the user reads stays in place.
+    let loading = Promise.resolve()
+    // A failed load leaves its session in earlier and the queue going: the top coming near again asks again.
+    const before = () => {
+      const p = loading.then(async () => {
+        const s = earlier.at(-1)
+        if (!s) return
+        const part = h("div")
+        part.dataset.session = s
+        draw(await records(s, 0, signal), part)
+        earlier.pop()
+        const below = log.scrollHeight - log.scrollTop
+        top.after(part) // the session after it starts with a rule of its own
+        if (!end) log.scrollTop = log.scrollHeight - below
+      })
+      loading = p.catch(() => {})
+      return p
     }
-    more.onclick = before
+    const near = new IntersectionObserver(async ([e]) => {
+      if (!e.isIntersecting || !earlier.length) return
+      await before()
+      near.unobserve(top) // the top may still be near: observing again asks once more
+      near.observe(top)
+    }, { root: log, rootMargin: "800px 0px 0px 0px" })
+    near.observe(top)
+    signal.addEventListener("abort", () => near.disconnect())
     // seek shows the record the address names, as #<session>.<n>, under the sessions back to its own.
     const seek = async () => {
       const [, s, n] = location.hash.match(/^#(\w+)\.(\d+)$/) ?? []

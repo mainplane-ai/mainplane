@@ -61,6 +61,8 @@ const (
 	index = "index.html"
 	// maxLine bounds a status line: one line of a sidebar.
 	maxLine = 100
+	// maxMonogram bounds a project's custom avatar letters: one or two fit a circle.
+	maxMonogram = 2
 	// maxFile bounds one file of a store, so a write is held in memory.
 	maxFile = 8 << 20
 	// depth bounds the walk from an agent up to who made it. Nothing makes a
@@ -85,6 +87,7 @@ const (
 	// changed is the note an orchestrator reads when someone else set its
 	// project's status. It is a system record: it wakes nobody.
 	changed = "%s set the status of project %q to %s, with the line %q. This is a note, not a message: nobody waits for an answer to it."
+	renamed = "%s renamed project %q to %q. This is a note, not a message: nobody waits for an answer to it."
 )
 
 // Dashboard is the policy a dashboard is shown under. Its origin is its own,
@@ -106,6 +109,9 @@ var maxStore int64 = 256 << 20
 // required are the apps every orchestrator has, whatever a create asks for.
 var required = []string{"continue", "message", "orchestrate", "project", "schedule"}
 
+// Colors are the avatar palette tokens of the design system (pkg/design/tokens.json).
+var Colors = []string{"slate", "sky", "indigo", "sage", "ochre", "terracotta", "rose", "plum"}
+
 // A file's name is path segments of letters, digits, dot, dash and underscore.
 var fileName = regexp.MustCompile(`^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$`)
 
@@ -119,6 +125,8 @@ type Project struct {
 	Orchestrator string    `json:"orchestrator"`
 	Status       string    `json:"status"`
 	Line         string    `json:"line"`
+	Color        string    `json:"color,omitempty"`
+	Monogram     string    `json:"monogram,omitempty"`
 	Updated      time.Time `json:"updated"`
 	Counter      int       `json:"counter"`
 }
@@ -239,6 +247,9 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 //	GET    /projects/{id}/agents      -> [AgentInfo]: the orchestrator, then the agents under it
 //	PUT    /projects/{id}/status      {"status","line"}; ?via= required. the orchestrator    -> Project
 //	                                  reads a note of it at its next step, and is not woken
+//	PUT    /projects/{id}/name        {"name"}; ?via= required. the orchestrator reads a note of it -> Project
+//	PUT    /projects/{id}/avatar      {"color","monogram"}; empty resets each to its default -> Project
+//	GET    /projects/{id}/usage       -> Usage: cost and tokens, by agent and by model
 //	DELETE /projects/{id}             ?via= required. ?agents=1 deletes its agents too       -> 204
 //	GET    /projects/{id}/files/      ?prefix= ?bodies=1 for those of the small files too    -> [File]
 //	GET    /projects/{id}/files/{name} -> the file
@@ -273,6 +284,11 @@ func (a *App) Routes(mux *http.ServeMux) {
 			return errors.New("?via= names who is acting")
 		}
 		return a.status(w, r, p.ID, "The user", via, "")
+	})
+	one("PUT /projects/{id}/name", a.rename)
+	one("GET /projects/{id}/usage", a.usage)
+	one("PUT /projects/{id}/avatar", func(w http.ResponseWriter, r *http.Request, p Project) error {
+		return a.avatar(w, r, p.ID)
 	})
 	one("DELETE /projects/{id}", a.remove)
 	one("GET /projects/{id}/files/{name...}", func(w http.ResponseWriter, r *http.Request, p Project) error { return a.get(w, r, p.ID) })
@@ -502,6 +518,75 @@ func (a *App) status(w http.ResponseWriter, r *http.Request, id, who, by, agent 
 	return reply(w, p)
 }
 
+// rename names the project. Its orchestrator keeps its own name: a connector
+// renames it too if it wants them alike. The orchestrator reads a note of it.
+func (a *App) rename(w http.ResponseWriter, r *http.Request, p Project) error {
+	via := r.URL.Query().Get("via")
+	if via == "" {
+		return errors.New("?via= names who is acting")
+	}
+	var in struct{ Name string }
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, harness.MaxPost)).Decode(&in); err != nil {
+		return err
+	}
+	if in.Name = strings.TrimSpace(in.Name); in.Name == "" {
+		return errors.New("a name is required")
+	} else if err := harness.CheckName(in.Name); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	cur, ok := a.projects[p.ID]
+	var err error
+	old := ""
+	if !ok {
+		err = fmt.Errorf("%w: no project %q", fs.ErrNotExist, p.ID)
+	} else {
+		old, cur.Name = cur.Name, in.Name
+		err = a.save(cur)
+	}
+	a.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if err := a.h.NoteAgent(cur.Orchestrator, via, "project", fmt.Sprintf(renamed, "The user", old, cur.Name)); err != nil && !errors.Is(err, harness.ErrNoAgent) {
+		return err
+	}
+	return reply(w, cur)
+}
+
+// avatar sets the project's color token and monogram. Either may be empty to
+// return to the default chosen from the project's id and name.
+func (a *App) avatar(w http.ResponseWriter, r *http.Request, id string) error {
+	var in struct{ Color, Monogram string }
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, harness.MaxPost)).Decode(&in); err != nil {
+		return err
+	}
+	if in.Color != "" && !slices.Contains(Colors, in.Color) {
+		return fmt.Errorf("color %q: it is one of %s, or empty for the default", in.Color, strings.Join(Colors, ", "))
+	}
+	if strings.ContainsAny(in.Monogram, "\r\n") {
+		return fmt.Errorf("monogram: at most %d characters on one line", maxMonogram)
+	}
+	in.Monogram = strings.TrimSpace(in.Monogram)
+	if utf8.RuneCountInString(in.Monogram) > maxMonogram {
+		return fmt.Errorf("monogram: at most %d characters on one line", maxMonogram)
+	}
+	a.mu.Lock()
+	p, ok := a.projects[id]
+	var err error
+	if !ok {
+		err = fmt.Errorf("%w: no project %q", fs.ErrNotExist, id)
+	} else {
+		p.Color, p.Monogram = in.Color, in.Monogram
+		err = a.save(p)
+	}
+	a.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return reply(w, p)
+}
+
 // get serves one file of the project's store, or with no name the list of
 // the files whose names start with ?prefix=.
 func (a *App) get(w http.ResponseWriter, r *http.Request, id string) error {
@@ -644,14 +729,8 @@ func (a *App) presets(ctx context.Context) ([]Model, error) {
 	if a.listed != nil && time.Since(a.listedAt) < modelsAge {
 		return a.listed, nil
 	}
-	if time.Since(a.catAt) > catalogAge {
-		c, err := a.Catalog(ctx)
-		if err != nil && a.catAt.IsZero() {
-			return nil, fmt.Errorf("catalog: %w", err)
-		}
-		if err == nil {
-			a.cat, a.catAt = c, time.Now()
-		}
+	if err := a.fetch(ctx); err != nil {
+		return nil, err
 	}
 	served, err := a.h.ProviderInfos()
 	if err != nil {
@@ -688,6 +767,136 @@ func (a *App) presets(ctx context.Context) ([]Model, error) {
 	}
 	a.listed, a.listedAt = out, time.Now()
 	return out, nil
+}
+
+// fetch makes a.cat the catalog, fetched at most once in catalogAge; when a
+// fetch fails the one before it is used. The caller holds cmu.
+func (a *App) fetch(ctx context.Context) error {
+	if time.Since(a.catAt) <= catalogAge {
+		return nil
+	}
+	c, err := a.Catalog(ctx)
+	if err != nil && a.catAt.IsZero() {
+		return fmt.Errorf("catalog: %w", err)
+	}
+	if err == nil {
+		a.cat, a.catAt = c, time.Now()
+	}
+	return nil
+}
+
+// Usage is what a project's agents have used: in USD at the catalog's list
+// price of each session's model today, and in tokens. A session's model is
+// priced, on a subscription (its use counts against a plan, not per token),
+// or has no price, such as a local model. Cost is of the priced ones. A
+// deleted session is not counted.
+type Usage struct {
+	Cost   float64         `json:"cost"`
+	Tokens statefile.Usage `json:"tokens"`
+	Since  time.Time       `json:"since,omitzero"` // its oldest session's start
+	Agents []Spend         `json:"agents"`         // the orchestrator, then the agents under it
+	Models []Spend         `json:"models"`         // most cost first, then most tokens
+}
+
+// Spend is one agent's or one model's part. Billing is "tokens",
+// "subscription" or "none"; an agent's is "tokens" when any of its sessions
+// is priced, else "subscription" when any is on one.
+type Spend struct {
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	Provider string          `json:"provider,omitempty"` // a model's
+	Billing  string          `json:"billing"`
+	Cost     float64         `json:"cost"`
+	Tokens   statefile.Usage `json:"tokens"`
+}
+
+// plans are the shapes of the providers a subscription pays for.
+var plans = []string{"chatgpt", "claude-code"}
+
+func (a *App) usage(w http.ResponseWriter, r *http.Request, p Project) error {
+	a.cmu.Lock()
+	err := a.fetch(r.Context())
+	cat := a.cat
+	a.cmu.Unlock()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway) // as models does
+		return nil
+	}
+	infos, err := a.h.List()
+	if err != nil {
+		return err
+	}
+	byID := map[string]harness.Info{}
+	for _, i := range infos {
+		byID[i.ID] = i
+	}
+	add := func(s *Spend, billing string, cost float64, u statefile.Usage) {
+		s.Cost += cost
+		s.Tokens.Input += u.Input
+		s.Tokens.Output += u.Output
+		s.Tokens.CacheRead += u.CacheRead
+		s.Tokens.CacheWrite += u.CacheWrite
+		if s.Billing != "tokens" && billing != "none" {
+			s.Billing = billing
+		}
+	}
+	out := Usage{Agents: []Spend{}, Models: []Spend{}}
+	total := Spend{}
+	models := map[string]*Spend{}
+	for _, g := range a.members()[p.ID] {
+		ag := Spend{ID: g.ID, Name: cmp.Or(g.Name, g.ID), Billing: "none"}
+		for _, id := range g.Sessions {
+			i, ok := byID[id]
+			if !ok {
+				continue
+			}
+			if out.Since.IsZero() || i.Created.Before(out.Since) {
+				out.Since = i.Created
+			}
+			prov, _, _ := strings.Cut(i.Config.Model, "/")
+			name, billing, cost := price(cat, i.Config, i.Usage)
+			m := models[i.Config.Model]
+			if m == nil {
+				m = &Spend{ID: i.Config.Model, Name: name, Provider: cmp.Or(cat.Providers[prov].Name, prov), Billing: "none"}
+				models[i.Config.Model] = m
+			}
+			add(m, billing, cost, i.Usage)
+			add(&ag, billing, cost, i.Usage)
+			add(&total, billing, cost, i.Usage)
+		}
+		out.Agents = append(out.Agents, ag)
+	}
+	out.Cost, out.Tokens = total.Cost, total.Tokens
+	for _, m := range models {
+		out.Models = append(out.Models, *m)
+	}
+	sum := func(u statefile.Usage) int { return u.Input + u.Output + u.CacheRead + u.CacheWrite }
+	slices.SortFunc(out.Models, func(x, y Spend) int {
+		return cmp.Or(cmp.Compare(y.Cost, x.Cost), cmp.Compare(sum(y.Tokens), sum(x.Tokens)), strings.Compare(x.ID, y.ID))
+	})
+	return reply(w, out)
+}
+
+// price is the name of a session's model, its billing and its cost at the
+// catalog's list price.
+func price(cat catalog.Catalog, c statefile.Conf, u statefile.Usage) (name, billing string, cost float64) {
+	prov, name, _ := strings.Cut(c.Model, "/")
+	// a config's preset only names it: it prices the session only when it is of the session's model
+	pr, priced := cat.Presets[c.Preset]
+	if !priced || pr.Provider+"/"+pr.Model != c.Model {
+		pr, priced = cat.Presets[c.Model]
+	}
+	if priced {
+		name = pr.Name
+	}
+	switch {
+	case slices.Contains(plans, cat.Providers[prov].Shape):
+		return name, "subscription", 0
+	case priced && pr.Cost != catalog.Cost{}:
+		k := pr.Cost
+		return name, "tokens", (float64(u.Input)*k.Input + float64(u.Output)*k.Output + float64(u.CacheRead)*k.CacheRead + float64(u.CacheWrite)*k.CacheWrite) / 1e6
+	}
+	return name, "none", 0
 }
 
 func (a *App) models(w http.ResponseWriter, r *http.Request) {

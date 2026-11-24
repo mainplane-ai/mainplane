@@ -192,7 +192,8 @@ func (h *Harness) SetWorkers(id, via string, workers []statefile.Worker) (int, e
 // MaxName bounds a session's name: a title a list shows on one line.
 const MaxName = 100
 
-func checkName(n string) error {
+// CheckName checks a name of an agent or project.
+func CheckName(n string) error {
 	if len(n) > MaxName || !utf8.ValidString(n) || strings.ContainsFunc(n, newline) {
 		return fmt.Errorf("a name is one line of at most %d bytes of UTF-8", MaxName)
 	}
@@ -209,7 +210,7 @@ func name(via, n string) statefile.Record {
 // SetName appends a name record under the lock a post takes. An empty name
 // removes the session's name. The model never sees it and status is unchanged.
 func (h *Harness) SetName(id, via, n string) (int, error) {
-	if err := checkName(n); err != nil {
+	if err := CheckName(n); err != nil {
 		return 0, err
 	}
 	s := h.session(id)
