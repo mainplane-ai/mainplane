@@ -7,6 +7,7 @@ import { rich } from "./rich"
 import { composer } from "./composer"
 import { dashboard, frameURL } from "./dashboard"
 import { picker } from "./picker"
+import { providersPanel } from "./providers"
 import lockup from "./lockup.svg"
 declare const MPMenu: { open: (menu: HTMLElement, at: Element | { x: number; y: number }, target?: Element) => void }
 
@@ -671,7 +672,7 @@ function usageView(u: Usage): HTMLElement[] {
 // providers, the instructions every session gets, and data sharing. Each part saves on its own (iOS Settings).
 type Settings = { version: { current: string; latest?: string; notes?: string }; data_sharing?: { share: boolean; at?: string; via?: string }; prompt: { lines: string[]; default?: boolean } }
 async function harnessSettings(tab: string): Promise<HTMLElement> {
-  const [st, root, providers] = await Promise.all([get<Settings>("/settings"), get<{ name: string; version: string }>("/"), get<{ name: string }[]>("/providers")])
+  const [st, root] = await Promise.all([get<Settings>("/settings"), get<{ name: string; version: string }>("/")])
   const post = (body: object) => api("/settings", { method: "POST", json: body })
   const value = (v: string) => h("span", { className: "value" }, v)
   const general = h("div", null, h("div", { className: "form" }, row("Network", value(root.name), "div"), row("Address", value(location.host), "div"), row("Version", value(st.version.current), "div")),
@@ -710,9 +711,7 @@ async function harnessSettings(tab: string): Promise<HTMLElement> {
       h("div", { className: "form-row foot" }, ...(notes ? [more] : []), now)), line)
   }
 
-  // Providers: what is connected. Connecting one comes here.
-  const provs = h("div", null, ...section("Connected", ...providers.map(p => row(p.name, h("span"), "div"))),
-    ...(providers.length ? [] : [h("div", { className: "empty" }, h("h3", null, "No providers"), h("p", null, "The models of a provider you connect show here."))]))
+  const provs = providersPanel()
 
   // Instructions: the lines every new session gets after the system prompt.
   const box = h("textarea", { className: "input textarea", rows: 16, value: st.prompt.lines.join("\n"), ariaLabel: "Instructions" })

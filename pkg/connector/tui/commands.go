@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"net"
 	"net/http"
 	neturl "net/url"
@@ -829,48 +828,14 @@ func (s *session) customItems(own []harness.ProviderInfo, cur statefile.Conf) ([
 	return items, errs
 }
 
-// providerSections orders /providers: subscriptions first, then each kind
-// of provider, the ones people use most first. A provider the catalog adds
-// later is under More, by name, until it is placed here.
-var providerSections = []struct {
-	name string
-	ids  []string
-}{
-	{"Subscriptions", []string{"claude-code", "chatgpt", "opencode-go"}},
-	{"Frontier labs", []string{"anthropic", "openai", "google", "meta", "xai", "deepseek", "moonshot", "zai", "minimax", "xiaomi", "mistral"}},
-	{"Clouds", []string{"bedrock"}},
-	{"Gateways", []string{"openrouter"}},
-}
-
-// providers is the menu of the catalog's providers, in providerSections, a
+// providers is the menu of the catalog's providers, in catalog.Sections, a
 // group once. Picking one asks for its key, and the harness serves it, and
 // each provider that takes the same key, with the catalog's shape and url.
 func (s *session) providers(a *App) {
 	s.withProviders(a, func(cat *catalog.Catalog, ps []harness.ProviderInfo) {
-		type entry struct{ section, id string }
-		var order []entry
-		placed := map[string]bool{}
-		for _, sec := range providerSections {
-			for _, id := range sec.ids {
-				if _, ok := cat.Providers[id]; ok {
-					order = append(order, entry{sec.name, id})
-					for _, k := range cat.Keyed(id) {
-						placed[k] = true
-					}
-				}
-			}
-		}
-		byName := func(a, b string) int {
-			return strings.Compare(strings.ToLower(cat.Providers[a].Name), strings.ToLower(cat.Providers[b].Name))
-		}
-		for _, id := range slices.SortedFunc(maps.Keys(cat.Providers), byName) {
-			if !placed[id] && cat.Keyed(id)[0] == id {
-				order = append(order, entry{"More", id})
-			}
-		}
 		m := &Menu{}
-		for _, e := range order {
-			id := e.id
+		for _, e := range cat.Offered() {
+			id := e.ID
 			p, hint := cat.Providers[id], ""
 			if slices.ContainsFunc(ps, func(x harness.ProviderInfo) bool { return x.Name == id }) {
 				hint = "connected"
@@ -879,7 +844,7 @@ func (s *session) providers(a *App) {
 			if _, ok := provider.Logins[p.Shape]; ok {
 				pick = func(a *App, _ *MenuItem) { s.signin(a, id, p) }
 			}
-			m.Items = append(m.Items, MenuItem{Label: p.Name, Hint: hint, Section: e.section, Pick: pick})
+			m.Items = append(m.Items, MenuItem{Label: p.Name, Hint: hint, Section: e.Section, Pick: pick})
 		}
 		a.OpenMenu("Providers", m)
 	})
@@ -958,13 +923,18 @@ type sized struct {
 func (s sized) Height(w int) int { return len(s.b.Rows(s.a, w)) }
 
 // landing is the shape of the address the browser lands on after the login
-// at url: its loopback callback with a code and state.
+// at url: its loopback callback with a code and state. A login that ends on
+// the vendor's own page, which shows a code, takes the code.
 func landing(url string) string {
 	u, err := neturl.Parse(url)
 	if err != nil {
 		return ""
 	}
-	return u.Query().Get("redirect_uri") + "?code=...&state=..."
+	cb := u.Query().Get("redirect_uri")
+	if !strings.HasPrefix(cb, "http://") {
+		return "Code"
+	}
+	return cb + "?code=...&state=..."
 }
 
 // catch serves the loopback callback that url redirects to, until ctx ends,

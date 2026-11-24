@@ -16,6 +16,15 @@
 .sheet .form-row b { font: 400 13px/18px var(--font-text); }
 .sheet .form-row small { font: var(--text-subheadline); color: var(--color-text-2); }
 .sheet .form + .form { margin-top: 10px; }
+/* A row that opens a page (iOS disclosure row): the whole row is the button, a chevron at its end. */
+.sheet button.form-row { width: 100%; margin: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: default; }
+.sheet button.form-row:first-child { border-radius: var(--radius-10) var(--radius-10) 0 0; }
+.sheet button.form-row:last-child { border-bottom-left-radius: var(--radius-10); border-bottom-right-radius: var(--radius-10); }
+.sheet button.form-row:only-child { border-radius: var(--radius-10); }
+.sheet button.form-row:hover { background: var(--color-fill); }
+.sheet button.form-row:active { background: var(--color-fill-pressed); }
+.sheet button.form-row > mp-icon:first-child { --icon-size: 16px; flex: none; color: var(--color-text-2); }
+.sheet .form-row > .chev { --icon-size: 14px; flex: none; color: var(--color-text-3); }
 /* A text field in a grouped form is the row itself (System Settings > About > Name): no box and no ring, the value right aligned in ink; a long text is the whole row, left aligned. Focus shows only the caret. */
 .sheet .form-row > :is(input.input, textarea.input) { flex: 1; min-width: 0; height: auto; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; outline: none; font: var(--text-body); color: var(--color-text); }
 .sheet .form-row > input.input { text-align: right; }

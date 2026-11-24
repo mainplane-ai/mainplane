@@ -285,6 +285,13 @@ func Harness(ctx context.Context, path string) error {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	routes.HandleFunc("DELETE /providers/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if err := removeProvider(path, r.PathValue("name"), h.SetProviders); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	logins := &logins{ctx: ctx, path: path, serve: h.SetProviders, m: map[string]*login{}}
 	routes.HandleFunc("POST /providers/{name}/login", logins.start)
 	routes.HandleFunc("POST /providers/{name}/login/code", logins.paste)
@@ -462,6 +469,30 @@ func saveProvider(path, name string, in Provider, serve func(map[string]provider
 	}
 	p.ContextLimit = cmp.Or(in.ContextLimit, p.ContextLimit)
 	c.Providers[name] = p
+	ps, err := providers(filepath.Dir(path), c.Providers)
+	if err != nil {
+		return err
+	}
+	if err := saveConfig(path, c); err != nil {
+		return err
+	}
+	serve(ps)
+	return nil
+}
+
+// removeProvider takes the provider name out of the config at path and
+// serves the rest. A session on it fails at its next step. Its dir stays.
+func removeProvider(path, name string, serve func(map[string]provider.Provider)) error {
+	keyMu.Lock()
+	defer keyMu.Unlock()
+	c, err := Load(path)
+	if err != nil {
+		return err
+	}
+	if _, ok := c.Providers[name]; !ok {
+		return fmt.Errorf("no provider %q", name)
+	}
+	delete(c.Providers, name)
 	ps, err := providers(filepath.Dir(path), c.Providers)
 	if err != nil {
 		return err

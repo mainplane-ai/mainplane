@@ -166,6 +166,7 @@ type App struct {
 	catAt    time.Time
 	listed   []Model
 	listedAt time.Time
+	served   []harness.ProviderInfo // what listed was made for
 }
 
 // New loads the projects in dir and is the app. An agent of a project
@@ -256,6 +257,7 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 //	PUT    /projects/{id}/files/{name} the file, whole                                       -> 204
 //	DELETE /projects/{id}/files/{name}                                                       -> 204
 //	GET    /models                    -> [Model]
+//	GET    /catalog/providers         -> [Offer]: the providers to connect
 func (a *App) Routes(mux *http.ServeMux) {
 	handle := func(pattern string, fn func(w http.ResponseWriter, r *http.Request) error) {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) { answer(w, fn(w, r)) })
@@ -275,6 +277,7 @@ func (a *App) Routes(mux *http.ServeMux) {
 	handle("POST /projects", a.create)
 	handle("GET /projects", a.list)
 	mux.HandleFunc("GET /models", a.models)
+	handle("GET /catalog/providers", a.offers)
 	one("GET /projects/{id}/agents", func(w http.ResponseWriter, r *http.Request, p Project) error {
 		return reply(w, a.agents(p))
 	})
@@ -726,14 +729,15 @@ func (a *App) write(w http.ResponseWriter, id, name string, body []byte) error {
 func (a *App) presets(ctx context.Context) ([]Model, error) {
 	a.cmu.Lock()
 	defer a.cmu.Unlock()
-	if a.listed != nil && time.Since(a.listedAt) < modelsAge {
+	served, err := a.h.ProviderInfos()
+	if err != nil {
+		return nil, err
+	}
+	// A provider connected or disconnected shows at once.
+	if a.listed != nil && time.Since(a.listedAt) < modelsAge && slices.Equal(served, a.served) {
 		return a.listed, nil
 	}
 	if err := a.fetch(ctx); err != nil {
-		return nil, err
-	}
-	served, err := a.h.ProviderInfos()
-	if err != nil {
 		return nil, err
 	}
 	out := []Model{}
@@ -765,7 +769,7 @@ func (a *App) presets(ctx context.Context) ([]Model, error) {
 			out = append(out, Model{model, id, "Custom", statefile.Conf{Model: model, Tools: "default", ContextLimit: cmp.Or(s.ContextLimit, catalog.CustomLimit), Input: []string{}}, nil})
 		}
 	}
-	a.listed, a.listedAt = out, time.Now()
+	a.listed, a.listedAt, a.served = out, time.Now(), served
 	return out, nil
 }
 
@@ -906,6 +910,38 @@ func (a *App) models(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = reply(w, ms)
+}
+
+// Offer is a catalog provider the user can connect, as Settings offers it:
+// a group once, under its section. Keyed is each provider its key or
+// sign-in is set on. SignIn is a subscription's sign-in in place of a key.
+type Offer struct {
+	ID      string                      `json:"id"`
+	Name    string                      `json:"name"`
+	Section string                      `json:"section"`
+	SignIn  bool                        `json:"sign_in,omitempty"`
+	Keyed   map[string]catalog.Provider `json:"keyed"`
+}
+
+// offers is the catalog's providers to connect, in the terminal app's order.
+func (a *App) offers(w http.ResponseWriter, r *http.Request) error {
+	a.cmu.Lock()
+	err := a.fetch(r.Context())
+	cat := a.cat
+	a.cmu.Unlock()
+	if err != nil {
+		return err
+	}
+	out := []Offer{}
+	for _, o := range cat.Offered() {
+		p := cat.Providers[o.ID]
+		keyed := map[string]catalog.Provider{}
+		for _, k := range cat.Keyed(o.ID) {
+			keyed[k] = cat.Providers[k]
+		}
+		out = append(out, Offer{o.ID, p.Name, o.Section, slices.Contains(plans, p.Shape), keyed})
+	}
+	return reply(w, out)
 }
 
 // Preset is the config the models list has for model, a "provider/model":
