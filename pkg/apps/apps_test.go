@@ -1052,3 +1052,36 @@ func TestContinueApp(t *testing.T) {
 	r.want(400, r.key(a), "POST", "/apps/continue/", strings.Repeat("x", 16<<10+1))
 	r.want(409, r.key(a), "POST", "/apps/continue/", "the handoff")
 }
+
+// A project's stop stops every agent of it, the orchestrator too, and ends
+// what would wake them again: their timers and the notice of a stop.
+func TestProjectStop(t *testing.T) {
+	r := newRig(t)
+	p := r.project()
+	orch, _ := r.h.Agent(p.Orchestrator)
+	var v struct{ ID string }
+	_ = json.Unmarshal([]byte(r.want(200, r.key(orch), "POST", "/apps/orchestrate/agents", `{"apps":["schedule"],"notify_on_stop":true}`)), &v)
+	child, _ := r.h.Agent(v.ID)
+	for _, a := range []harness.Agent{orch, child} {
+		r.want(200, r.key(a), "POST", "/apps/schedule", `{"in":"1h","text":"wake"}`)
+	}
+	watches := filepath.Join(r.dir, "app-data", "orchestrate", "watches.json")
+	if b, _ := os.ReadFile(watches); !strings.Contains(string(b), child.ID) {
+		t.Fatalf("no watch to drop: %s", b)
+	}
+	r.want(400, "full", "POST", "/projects/"+p.ID+"/stop", "")
+	r.want(204, "full", "POST", "/projects/"+p.ID+"/stop?via=web", "")
+	for _, a := range []harness.Agent{orch, child} {
+		if got := r.want(200, r.key(a), "GET", "/apps/schedule", ""); strings.TrimSpace(got) != "[]" {
+			t.Fatalf("timers of %s after the stop: %s", a.ID, got)
+		}
+		chain, err := r.h.Sessions.Load(a.Sessions[len(a.Sessions)-1])
+		if err != nil || chain[len(chain)-1].Source != "stop" {
+			t.Fatalf("%s not stopped: %v", a.ID, err)
+		}
+	}
+	if b, _ := os.ReadFile(watches); strings.Contains(string(b), child.ID) {
+		t.Fatalf("watch kept: %s", b)
+	}
+	r.want(404, "full", "POST", "/projects/00000000/stop?via=web", "")
+}

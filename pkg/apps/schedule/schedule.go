@@ -45,7 +45,10 @@ type Timer struct {
 	Next  time.Time `json:"next"`
 }
 
-type app struct {
+// App is the schedule app: its routes, and Clear for the harness's own use.
+type App struct {
+	http.Handler
+
 	h    *harness.Harness
 	path string
 
@@ -60,8 +63,8 @@ type app struct {
 //	POST   /       {"text", and one of "in", "at", "cron"}  -> Timer
 //	GET    /       -> the caller's [Timer]
 //	DELETE /{id}   -> 204
-func New(ctx context.Context, h *harness.Harness, dir string) (http.Handler, error) {
-	a := &app{h: h, path: filepath.Join(dir, "timers.json"), wake: make(chan struct{}, 1)}
+func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
+	a := &App{h: h, path: filepath.Join(dir, "timers.json"), wake: make(chan struct{}, 1)}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
@@ -105,7 +108,25 @@ func New(ctx context.Context, h *harness.Harness, dir string) (http.Handler, err
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	return mux, nil
+	a.Handler = mux
+	return a, nil
+}
+
+// Clear deletes every timer of the agent: a stopped project's agents wake at
+// no timer.
+func (a *App) Clear(agent string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	old := a.timers
+	a.timers = slices.DeleteFunc(slices.Clone(old), func(t Timer) bool { return t.Agent == agent })
+	if len(a.timers) == len(old) {
+		return nil
+	}
+	if err := a.save(); err != nil {
+		a.timers = old
+		return err
+	}
+	return nil
 }
 
 func reply(w http.ResponseWriter, v any) {
@@ -113,7 +134,7 @@ func reply(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func (a *app) add(w http.ResponseWriter, r *http.Request) {
+func (a *App) add(w http.ResponseWriter, r *http.Request) {
 	var in struct{ Text, In, At, Cron string }
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, harness.MaxPost)).Decode(&in); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -159,7 +180,7 @@ func (a *app) add(w http.ResponseWriter, r *http.Request) {
 
 // save writes the timers whole, as a temporary file renamed over the old
 // one. The caller holds mu.
-func (a *app) save() error {
+func (a *App) save() error {
 	b, err := json.MarshalIndent(a.timers, "", "  ")
 	if err != nil {
 		return err
@@ -173,7 +194,7 @@ func (a *app) save() error {
 // run fires each timer when it is due. A timer due while the harness was
 // down fires at once. The post carries the timer and its time as a key, so
 // one that landed before a crash could record it is not sent twice.
-func (a *app) run(ctx context.Context) {
+func (a *App) run(ctx context.Context) {
 	for {
 		now := time.Now()
 		a.mu.Lock()

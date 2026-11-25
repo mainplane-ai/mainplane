@@ -16,8 +16,8 @@ const statuses = ["open", "waiting", "closed"]
 // A project's status as a sidebar row shows it: open is the user's turn.
 const rowClass: Record<string, string> = { open: "needs", waiting: "waiting", closed: "closed" }
 const said: Record<string, string> = { open: "Needs you", waiting: "Waiting", closed: "Closed" }
-// required are the apps every orchestrator has: the project app adds them whatever is asked.
-const required = ["message", "orchestrate", "project", "schedule"]
+// required are the apps every orchestrator has: the project app adds them whatever is asked, so they are not shown.
+const required = ["continue", "message", "orchestrate", "project", "schedule"]
 const lastModel = "mainplane-model"
 const last = "mainplane-project" // the project last in view, where the page opens
 
@@ -224,7 +224,7 @@ async function render() {
   if (kind !== "welcome" && key() && !onboarded()) await setUp()
   if (signal.aborted) return
   document.body.classList.toggle("out", !key() || !onboarded() || kind === "welcome")
-  document.body.classList.toggle("home", location.pathname === "/" || location.pathname === "/new") // a phone shows the list under the new project sheet
+  document.body.classList.toggle("home", /^\/(new(\/\w+)?)?$/.test(location.pathname)) // a phone shows the list under the new project sheet
   drawList()
   try {
     const nodes = await content(kind, id, sub, signal, agent, more)
@@ -262,7 +262,7 @@ async function content(kind: string, id: string, sub: string, signal: AbortSigna
   if (!key()) return [loginForm()]
   if (!projects.length) await refresh()
   const none = h("div", { className: "view" }, h("div", { className: "empty" }, icon("grid"), h("h3", null, "No project open"), h("p", null, "Pick one from the list, or make a new one.")))
-  if (kind === "new") return [none, await createForm()]
+  if (kind === "new") return [none, await createForm(id ?? "")]
   if (kind === "settings") {
     const to = projects.find(p => p.id === localStorage.getItem(last))
     if (to && !kept.has(to.id)) keep(to)
@@ -430,6 +430,7 @@ function projectMenu(p: Project): HTMLElement {
     h("div", { className: "menu", role: "menu", hidden: true }, ...statuses.map(s => h("button", { role: "menuitemradio", ariaChecked: String(s === p.status), onclick: setStatus(s) } as Partial<HTMLButtonElement>, h("span", null, said[s])))),
     item("pencil", "Rename", () => go(`/projects/${p.id}/settings/name`)),
     item("image", "Change icon", () => go(`/projects/${p.id}/settings/appearance`)),
+    item("stop", "Stop all agents", attempt(() => stopProject(p)), "danger"),
     h("hr"), item("pin", pinned().includes(p.id) ? "Unpin" : "Pin", () => { pin(p.id); drawList(); menu.querySelector(".pin-item span")!.textContent = pinned().includes(p.id) ? "Unpin" : "Pin"; document.querySelector(".toolbar .star")?.setAttribute("aria-pressed", String(pinned().includes(p.id))) }, "pin-item"),
     item("trash", "Delete", attempt(() => removeProject(p)), "danger"))
   return menu
@@ -539,9 +540,9 @@ async function options(cur?: Agent): Promise<{ el: HTMLElement[]; over: HTMLElem
   const has = cur?.config.workers ?? [] // an agent with no worker has null
   const names = new Set([...workers.filter(w => !w.refused).map(w => w.name), ...has.map(w => w.name)])
   const ws = section("Workers", ...(names.size ? [...names].map(n => box(n, !cur || has.some(w => w.name === n))) : [none("No workers connected")]))
-  // The apps every orchestrator has are shown on and locked: they are kept as they are.
+  // Only the apps there is a choice of: the ones every orchestrator has are kept as they are. None, and the section is hidden.
   const fixed = required.filter(r => (cur ? cur.apps : apps.map(a => a.name)).includes(r))
-  const as = section("Apps", ...fixed.map(a => box(a, true, true)), ...apps.filter(a => !required.includes(a.name)).map(a => box(a.name, !cur || cur.apps.includes(a.name))))
+  const as = section("Apps", ...apps.filter(a => !required.includes(a.name)).map(a => box(a.name, !cur || cur.apps.includes(a.name))))
   return {
     el: [h("div", { className: "form" }, row("Model", pk.trigger, "div")), ...ws, ...as],
     over: pk.pops,
@@ -555,7 +556,8 @@ async function options(cur?: Agent): Promise<{ el: HTMLElement[]; over: HTMLElem
   }
 }
 
-async function createForm(): Promise<HTMLElement> {
+// createForm is the new project sheet, in the tabs of a project's settings: its name and model, then its workers.
+async function createForm(tab: string): Promise<HTMLElement> {
   const o = await options()
   const name = h("input", { className: "input", placeholder: "Harbor Bakery", ariaLabel: "Name" })
   const note = h("textarea", { className: "input textarea", rows: 3, placeholder: "What is it for? (optional)", ariaLabel: "What it is for" })
@@ -567,8 +569,12 @@ async function createForm(): Promise<HTMLElement> {
     await refresh()
     go(`/projects/${p.id}/chat`) // where the orchestrator's first reply arrives
   })
-  const body = [h("div", { className: "form" }, row("Name", name), h("label", { className: "form-row" }, note)), ...o.el] // every choice in view, as in iOS Settings
-  return sheet("New project", "", "/", body, [create], ...o.over)
+  const panels: [string, string, HTMLElement][] = [
+    ["general", "General", h("div", null, h("div", { className: "form" }, row("Name", name), h("label", { className: "form-row" }, note)), o.el[0])],
+    ["workers", "Workers", h("div", null, o.el[2])],
+    ...(o.el[4].hidden ? [] : [["apps", "Apps", h("div", null, o.el[4])] as [string, string, HTMLElement]]),
+  ]
+  return tabbed("New project", "/new", "/", panels, tab, [create], [], o.over, null)
 }
 
 // instructions is the text every session of the agent starts with. The
@@ -628,14 +634,15 @@ async function settings(p: Project, signal: AbortSignal, tab = ""): Promise<HTML
   })
   // Delete is the last thing in the page, full width (Apple); back or the X is the way out, so there is no Cancel.
   const remove = h("button", { className: "btn danger delete", onclick: attempt(() => removeProject(p)) }, "Delete Project")
+  const halt = h("button", { className: "btn danger delete", onclick: attempt(() => stopProject(p)) }, "Stop All Agents")
   // Usage comes after the sheet opens: the first ask may wait for the catalog.
   const usage = h("div", null, h("div", { className: "empty" }, h("p", null, "Loading...")))
   get<Usage>(`/projects/${p.id}/usage`, signal).then(u => usage.replaceChildren(...usageView(u)), e => usage.replaceChildren(h("div", { className: "empty" }, h("p", null, String(e?.message ?? e)))))
   // Tabs as in Slack's channel details: one section in view, each in grouped cards. The tab is in the path, so a link can open one.
   const panels: Record<string, HTMLElement> = {
-    general: h("div", null, h("div", { className: "form" }, row("Name", named), row("Status", status, "div"), row("Line", text)), o.el[0], remove),
+    general: h("div", null, h("div", { className: "form" }, row("Name", named), row("Status", status, "div"), row("Line", text)), o.el[0], halt, remove),
     workers: h("div", null, o.el[2]),
-    apps: h("div", null, o.el[4]),
+    ...(o.el[4].hidden ? {} : { apps: h("div", null, o.el[4]) }),
     instructions: h("div", null, h("div", { className: "form" }, h("div", { className: "form-row" }, told)), h("p", { className: "note" }, "Every session of the orchestrator starts with them.")),
     appearance: h("div", null, h("div", { className: "big-avatar" }, big), h("div", { className: "form" }, row("Letters", mono), row("Color", h("div", { className: "swatches", role: "radiogroup", ariaLabel: "Color" }, ...swatches), "div"))),
     usage,
@@ -759,7 +766,8 @@ async function harnessSettings(tab: string): Promise<HTMLElement> {
 
 // tabbed is a large sheet with one section in view at a time, as in Slack's channel details. The tab is in the path
 // (base, base/<tab>), so a link can open one. On a phone it is a page pushed from the side under head, the foot at its top right.
-function tabbed(title: string, base: string, close: string, panels: [string, string, HTMLElement][], tab: string, foot: Node[], more: Node[], over: Node[], head: HTMLElement): HTMLElement {
+// With no head, a phone keeps the sheet (New project rises from the bottom) and its tabs start the page.
+function tabbed(title: string, base: string, close: string, panels: [string, string, HTMLElement][], tab: string, foot: Node[], more: Node[], over: Node[], head: HTMLElement | null): HTMLElement {
   // The first show writes no address: the view may already be gone to a later one, and its address is right.
   const show = (k: string, write = true) => {
     for (const [n, , el] of panels) el.hidden = n !== k
@@ -773,6 +781,7 @@ function tabbed(title: string, base: string, close: string, panels: [string, str
   s.querySelector(".sheet > header")!.after(tabs)
   show(panels.some(p => p[0] === tab) ? tab : panels[0][0], false)
   if (!matchMedia("(max-width: 700px)").matches) return s
+  if (!head) return (s.querySelector(".sheet > .body")!.prepend(tabs), s)
   head.append(...foot)
   s.classList.add("push")
   s.querySelector(".sheet > header")!.replaceWith(head)
@@ -788,6 +797,14 @@ void render()
 addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") void fetch(import.meta.url, { method: "HEAD" }).then(r => r.status === 404 && location.reload(), () => {})
 })
+
+// stopProject asks, then stops every agent of the project at once: an emergency stop. Their timers end too,
+// so only a message wakes one again.
+async function stopProject(p: Project) {
+  if (!confirm(`Stop every agent of "${p.name}" now? Their running work and timers end. They start again only when you write to them.`)) return
+  await api(`/projects/${p.id}/stop?via=web`, { method: "POST" })
+  acted()
+}
 
 // removeProject asks, then deletes the project and maybe its agents.
 async function removeProject(p: Project) {

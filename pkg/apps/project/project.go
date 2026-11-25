@@ -153,6 +153,8 @@ type File struct {
 type App struct {
 	http.Handler
 	Catalog func(context.Context) (catalog.Catalog, error) // the published catalog; a test sets its own
+	// Unschedule and Unwatch end what would wake a stopped project's agent: its timers, and its maker's wish to hear of its stop.
+	Unschedule, Unwatch func(agent string) error
 
 	ctx context.Context
 	h   *harness.Harness
@@ -252,6 +254,8 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 //	PUT    /projects/{id}/avatar      {"color","monogram"}; empty resets each to its default -> Project
 //	GET    /projects/{id}/usage       -> Usage: cost and tokens, by agent and by model
 //	DELETE /projects/{id}             ?via= required. ?agents=1 deletes its agents too       -> 204
+//	POST   /projects/{id}/stop        ?via= required. stops every agent of it, ends their    -> 204
+//	                                  timers and stop notices: only a post wakes one again
 //	GET    /projects/{id}/files/      ?prefix= ?bodies=1 for those of the small files too    -> [File]
 //	GET    /projects/{id}/files/{name} -> the file
 //	PUT    /projects/{id}/files/{name} the file, whole                                       -> 204
@@ -294,6 +298,7 @@ func (a *App) Routes(mux *http.ServeMux) {
 		return a.avatar(w, r, p.ID)
 	})
 	one("DELETE /projects/{id}", a.remove)
+	one("POST /projects/{id}/stop", a.stop)
 	one("GET /projects/{id}/files/{name...}", func(w http.ResponseWriter, r *http.Request, p Project) error { return a.get(w, r, p.ID) })
 	one("PUT /projects/{id}/files/{name...}", func(w http.ResponseWriter, r *http.Request, p Project) error { return a.put(w, r, p.ID) })
 	one("DELETE /projects/{id}/files/{name...}", func(w http.ResponseWriter, r *http.Request, p Project) error {
@@ -480,6 +485,37 @@ func (a *App) remove(w http.ResponseWriter, r *http.Request, p Project) error {
 	}
 	if err := a.drop(p.ID); err != nil {
 		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// stop is the emergency stop of a project. First nothing is left to wake its
+// agents (timers, and the notice to a maker that its agent stopped), then each
+// stops, the last made first and the orchestrator last. Then again for the
+// agents made meanwhile, until there are none.
+func (a *App) stop(w http.ResponseWriter, r *http.Request, p Project) error {
+	by := r.URL.Query().Get("via")
+	if by == "" {
+		return errors.New("?via= names who is acting")
+	}
+	done := map[string]bool{}
+	for {
+		members := slices.DeleteFunc(a.members()[p.ID], func(g harness.Agent) bool { return done[g.ID] })
+		if len(members) == 0 {
+			break
+		}
+		for _, g := range members {
+			if err := errors.Join(a.Unschedule(g.ID), a.Unwatch(g.ID)); err != nil {
+				return err
+			}
+		}
+		for _, g := range slices.Backward(members) {
+			if err := a.h.Stop(r.Context(), g.Sessions[len(g.Sessions)-1], by); err != nil {
+				return err
+			}
+			done[g.ID] = true
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil
