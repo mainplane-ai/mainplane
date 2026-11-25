@@ -139,6 +139,7 @@ func New(ctx context.Context, h *harness.Harness, dir string, k ed25519.PrivateK
 		return nil, err
 	}
 	orch.Preset = m.project.Preset
+	m.project.Unschedule, m.project.Unwatch = sched.Clear, orch.Unwatch
 	m.builtin["project"] = app{name: "project", skill: project.Skill, handler: m.project}
 	m.builtin["schedule"] = app{name: "schedule", skill: schedule.Skill, handler: sched}
 	m.builtin["message"] = app{name: "message", skill: message.Skill, handler: message.New(ctx, h)}

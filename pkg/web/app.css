@@ -87,14 +87,15 @@ main > .tabs { margin: 0 16px }
 .login > small { margin-top: 12px; font: var(--text-subheadline); color: var(--color-text-3, var(--color-text-2)) }
 /* It floats with nothing behind it (iOS glass): the chat and the dashboard scroll under it. */
 :root { --glass: var(--color-glass); --glass-blur: blur(var(--frosted-blur)) saturate(var(--frosted-saturate)); --glass-ring: inset 0 0 0 .5px var(--color-glass-edge), inset 0 1px 0 var(--color-glass-shine) }
-/* What scrolls under floating controls fades into the page there (iOS 26 scroll edge), so the glass reads over any content. */
-:root { --edge-top: linear-gradient(var(--color-bg) 65%, transparent); --edge-bottom: linear-gradient(transparent, color-mix(in srgb, var(--color-bg) 85%, transparent) 60%) }
+/* What scrolls under floating controls fades into the page there (iOS 26 scroll edge), so the glass reads over any content.
+   At the bottom the fade is all above the controls: beside and under them is the page, and no text shows through. */
+:root { --edge-top: linear-gradient(var(--color-bg) 65%, transparent); --edge-bottom: linear-gradient(transparent, var(--color-bg) var(--edge-fade)); --edge-fade: 20px }
 main { position: relative }
-main > .composer { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; margin: 0; padding: 4px 16px 12px; background: var(--edge-bottom) }
+main > .composer { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; margin: 0; padding: var(--edge-fade) 16px 12px; background: var(--edge-bottom) }
 main > .composer :is(.field, > .btn.icon) { background: var(--glass); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--shadow-1), var(--glass-ring) }
 /* The chat pads its thread, not its scroller: the thread grows with the composer and the chat at its end stays there. The height has the composer's padding in it. */
 main:has(> .composer:not([hidden])) > .view:not(:has(> .thread)) { padding-bottom: var(--composer-h, 0px) }
-main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--composer-h, 0px) + 16px) }
+main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--composer-h, 0px) + 4px) }
 .composer .quote { display: flex; align-items: center; gap: 6px; padding: 6px 4px 0 14px; color: var(--color-text-2); font-size: 13px }
 .composer .quote > span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis }
 .composer .quote mp-icon { --icon-size: 14px }
@@ -141,6 +142,7 @@ main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--compose
 /* Project settings: larger than the other sheets; Delete Project ends the page, full width, red on the form's gray (Apple). */
 .sheet.large { width: min(540px, 100% - 32px); max-height: calc(100% - 64px) }
 .sheet .delete { width: 100%; margin-top: 24px; background: color-mix(in srgb, var(--color-text) 4%, transparent); color: var(--color-danger) }
+.sheet .delete + .delete { margin-top: 12px } /* Stop All Agents, then Delete Project */
 :is(.sheet, .onboard) .form > .form-row > .textarea { padding-block: 4px }
 .sheet.tabbed { height: min(640px, 100% - 64px) } /* one height for every tab: a switch does not move the sheet */
 .sheet.tabbed > .body { flex: 1 }
@@ -182,7 +184,7 @@ main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--compose
   /* A phone's project list: Edit and the filter, then a large title on top; search and New float at the bottom (items/project-view-mobile). */
   body > .sidebar { position: relative; width: auto; height: 100%; box-sizing: border-box; border-radius: 0; padding: 0; background: var(--color-bg) }
   /* The bar and search float over the list, which scrolls under them (Messages). */
-  .sidebar > .scroll { height: 100%; box-sizing: border-box; padding: 52px 0 92px }
+  .sidebar > .scroll { height: 100%; box-sizing: border-box; padding: 52px 0 96px }
   .sidebar > .bar { position: absolute; top: 0; left: 0; right: 0; z-index: 2; padding: 8px 16px 16px; background: var(--edge-top) }
   .sidebar > .bar > .btn { height: 44px; min-width: 44px; padding-inline: 16px; border-radius: 22px; corner-shape: round; background: var(--color-floating); box-shadow: var(--shadow-1); color: var(--color-text); font: var(--text-body) }
   .sidebar > .bar > .btn.icon { padding: 0; justify-content: center }
@@ -206,7 +208,7 @@ main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--compose
   .island-panel > .row.danger { color: var(--color-danger) }
   .island-panel > hr { border: 0; height: var(--hairline); margin: 6px 14px; background: var(--color-separator) }
   .sidebar .list { flex: 1 0 auto; align-content: start }
-  .sidebar > .top { position: absolute; bottom: 0; left: 0; right: 0; z-index: 2; padding: 16px 16px 28px; background: var(--edge-bottom) }
+  .sidebar > .top { position: absolute; bottom: 0; left: 0; right: 0; z-index: 2; padding: var(--edge-fade) 16px 28px; background: var(--edge-bottom) }
   .sidebar > .top > .search { height: 48px; border-radius: 24px; background: var(--color-floating); box-shadow: var(--shadow-1) }
   .sidebar > .top mp-icon { --icon-size: 22px; color: var(--color-text) } /* Messages iPhone: ink glyphs, larger */
   .sidebar > .top > .btn.icon { --h: 48px; border-radius: 50%; corner-shape: round; background: var(--color-floating); box-shadow: var(--shadow-1) }
@@ -236,7 +238,7 @@ main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--compose
   .toolbar > span.title b { font-size: 16px }
   .toolbar > span.title small { font-size: 12px }
   /* The composer on a phone (iMessage iOS 26): + a 42 px floating circle, the field a 40 px floating capsule with a 32 px send in it, 17 px text (less makes iOS zoom in on focus). */
-  main > .composer { padding: 4px 16px 10px }
+  main > .composer { padding-bottom: 10px }
   .composer > .btn.icon { --h: 42px; background: var(--color-floating); box-shadow: var(--shadow-1); color: var(--color-text) }
   .composer > .btn.icon mp-icon { --icon-size: 20px }
   .composer .field { border-radius: 20px; background: var(--color-floating); box-shadow: var(--shadow-1), inset 0 0 0 .5px var(--color-floating-edge) }
@@ -244,6 +246,7 @@ main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--compose
   /* A sheet on a phone (iOS 26 New Message): from the bottom, full width, 38 px top corners, the title centered with the close X a 44 px floating circle at the right; 17 px rows and fields (less makes iOS zoom in on focus); the actions two wide 44 px buttons. */
   .scrim { place-items: end stretch }
   .sheet { --pad: 16px; width: 100%; height: calc(100% - 8px - env(safe-area-inset-top)); max-height: none; align-self: end; border-radius: 38px 38px 0 0; corner-shape: round; background: var(--color-bg); animation: mp-sheet-up .25s cubic-bezier(.2,.8,.2,1) }
+  .sheet:is(.large, .tabbed) { width: 100%; height: calc(100% - 8px - env(safe-area-inset-top)); max-height: none } /* New project: the tabbed sheet rises from the bottom as the others do */
   .sheet > header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; padding: 16px 16px 0 }
   .sheet > header hgroup { grid-column: 2; grid-row: 1; padding: 0; text-align: center }
   .sheet > header > :not(hgroup, .btn.icon) { grid-column: 3; grid-row: 1; justify-self: end; --h: 44px; padding-inline: 18px; border-radius: 22px; corner-shape: round; font-size: 17px }

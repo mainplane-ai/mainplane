@@ -353,6 +353,10 @@ func (o *App) watch(agent, parent string) error {
 	return nil
 }
 
+// Unwatch drops what the agent's maker asked to be told of its stop: a
+// stopped project's orchestrator is not woken by its agents' stops.
+func (o *App) Unwatch(agent string) error { return o.watch(agent, "") }
+
 // Stopped is the harness's word that an agent's live session ended a run
 // closed or failed. The agent that asked is told once; a rollover never
 // gets here.
