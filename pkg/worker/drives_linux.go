@@ -87,7 +87,9 @@ IPAddressAllow=%s
 // NFS write either, so it reads old content for as long as it polls; and a
 // kernel lease answers each NFS open NFS4ERR_DELAY, which the macOS client
 // retries after 4, 8, 16, 30s. Every file is the operator's, whoever wrote
-// it, as over NFS.
+// it, as over NFS. Dot files are plain files, since Windows refuses to
+// overwrite a hidden one; only the volume icon's files stay hidden. The
+// archive bit is not mapped to the owner's execute bit.
 const smbConfText = `# mainplane drives, written by mainplaned
 [global]
 	server role = standalone server
@@ -110,6 +112,9 @@ const smbConfText = `# mainplane drives, written by mainplaned
 	max log size = 1000
 	posix locking = yes
 	oplocks = no
+	hide dot files = no
+	hide files = /.VolumeIcon.icns/._./
+	map archive = no
 	force user = %[2]s
 `
 
@@ -183,8 +188,10 @@ func serve(es []Export, op *user.User) []Drive {
 		default:
 			if derr := makeDir(d.Path, e.Name, op); derr != nil {
 				d.State, d.Error = Failed, derr.Error()
-			} else if len(e.Clients) > 0 { // a line with no clients would export to everyone
-				lines = append(lines, exportLine(d.Path, e, op))
+			} else {
+				if l := exportLine(d.Path, e, op); l != "" {
+					lines = append(lines, l)
+				}
 				shares += share(d.Path, e, users)
 			}
 		}
@@ -363,16 +370,25 @@ func unsmb() error {
 	return run("systemctl", "daemon-reload")
 }
 
+// exportLine is e's line of our exports for its NFS clients, those that do
+// not mount over SMB. None: no line, since one with no clients would export
+// to everyone.
 func exportLine(path string, e Export, op *user.User) string {
 	mode := "rw"
 	if e.Name == Sessions {
 		mode = "ro"
 	}
-	line := path
+	line := ""
 	for _, c := range e.Clients {
+		if c.SMB != nil {
+			continue
+		}
 		line += fmt.Sprintf(" %s(%s,sync,all_squash,anonuid=%s,anongid=%s,no_subtree_check)", c.Addr, mode, op.Uid, op.Gid)
 	}
-	return line
+	if line == "" {
+		return ""
+	}
+	return path + line
 }
 
 // makeDir makes a drive's directory, op's, with the volume icon. Sessions is the harness's own,
