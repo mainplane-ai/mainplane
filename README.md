@@ -29,8 +29,8 @@ Read more in [docs/self-hosting.md](docs/self-hosting.md), and [docs/privacy-and
 # Features
 ### Access from anywhere
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/web-ui-dark.png">
-  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/web-ui-light.png" alt="The Mainplane web UI: a project dashboard on the desktop, and the project's chat on a phone" width="960">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/web-ui-v2-dark.png">
+  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/web-ui-v2-light.png" alt="The Mainplane web UI: a project dashboard on the desktop, and the project's chat on a phone" width="960">
 </picture>
 
 - Run `mainplane web` to get the link to the web interface, or its QR code to open it on your phone.
