@@ -31,17 +31,22 @@ async function shrink(f: File): Promise<File> {
   return b ? new File([b], f.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" }) : f
 }
 
-// On a phone the page is the visual viewport: iOS lays a keyboard over the page and pans it, so the page
-// takes the height and the place of what is still seen, and the composer sits right on the keyboard (app.css).
+// On a phone, while a field has the keyboard up, the page is the visual viewport: iOS lays the keyboard over
+// the page and pans it, so the page takes the height and the place of what is still seen, and the composer
+// sits right on the keyboard (app.css). With no field in focus the page is the screen: an iOS home-screen
+// app can report a stale visual viewport, and a page taller than the screen does not scroll its list.
 const vv = window.visualViewport
+const typing = () => document.activeElement?.matches("textarea, input:not([type=checkbox], [type=radio], [type=range], [type=button], [type=submit], [type=file], [type=color]), [contenteditable]") ?? false
 const fit = () => {
   const s = document.documentElement.style
-  s.setProperty("--vv-h", vv!.height + "px")
-  s.setProperty("--vv-top", vv!.offsetTop + "px")
+  if (!vv || !typing()) return s.removeProperty("--vv-h"), s.removeProperty("--vv-top")
+  s.setProperty("--vv-h", vv.height + "px")
+  s.setProperty("--vv-top", vv.offsetTop + "px")
 }
 vv?.addEventListener("resize", fit)
 vv?.addEventListener("scroll", fit)
-if (vv) fit()
+addEventListener("focusin", fit)
+addEventListener("focusout", () => setTimeout(fit)) // after the focus has moved on
 // A swipe down on a chat or a composer, or a tap on a thread, puts the keyboard away (Messages).
 let touch: { y: number; x: number; on: Element } | null = null
 addEventListener("touchstart", e => {
