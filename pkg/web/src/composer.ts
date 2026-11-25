@@ -36,7 +36,7 @@ async function shrink(f: File): Promise<File> {
 // sits right on the keyboard (app.css). With no field in focus the page is the screen: an iOS home-screen
 // app can report a stale visual viewport, and a page taller than the screen does not scroll its list.
 const vv = window.visualViewport
-const typing = () => document.activeElement?.matches("textarea, input, [contenteditable]") ?? false
+const typing = () => document.activeElement?.matches("textarea, input:not([type=checkbox], [type=radio], [type=range], [type=button], [type=submit], [type=file], [type=color]), [contenteditable]") ?? false
 const fit = () => {
   const s = document.documentElement.style
   if (!vv || !typing()) return s.removeProperty("--vv-h"), s.removeProperty("--vv-top")
