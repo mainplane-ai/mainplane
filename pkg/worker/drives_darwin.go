@@ -45,6 +45,12 @@ const (
 // the macOS 26 kernel panic when the client then moves on to the next one.
 const mountOpts = "vers=4.0,hard,intr,actimeo=1,resvport,inet6"
 
+// The macOS client marks a mount not responding after this many seconds
+// without a reply, and macOS then offers Disconnect All, which drops unsaved
+// writes. The default, 5 s, is shorter than the 5-9 s the mesh takes to come
+// back after a wake. A mount takes the value when it is made.
+const downDelay = "vfs.generic.nfs.client.initialdowndelay=30"
+
 // reconcile mounts what want says, unmounts what it no longer says, and
 // returns each drive as it is now.
 func reconcile(want Desired, _ *user.User) []Drive {
@@ -109,6 +115,10 @@ func mount(m Mount, p, src string) Drive {
 	opts := mountOpts
 	if m.Name == Sessions {
 		opts += ",ro"
+	}
+	if out, err := exec.Command("sysctl", "-w", downDelay).CombinedOutput(); err != nil {
+		d.State, d.Error = Failed, fmt.Sprintf("sysctl: %v: %s", err, bytes.TrimSpace(out))
+		return d
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), mountWait)
 	defer cancel()
