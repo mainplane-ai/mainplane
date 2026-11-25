@@ -52,6 +52,7 @@ type App struct {
 	h    *harness.Harness
 	path string
 
+	post   sync.Mutex // held over a timer's last check and its post, so no post outlives a Clear
 	mu     sync.Mutex
 	timers []Timer
 	wake   chan struct{} // a timer was added: the wait may be shorter now
@@ -115,6 +116,8 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 // Clear deletes every timer of the agent: a stopped project's agents wake at
 // no timer.
 func (a *App) Clear(agent string) error {
+	a.post.Lock()
+	defer a.post.Unlock()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	old := a.timers
@@ -208,13 +211,16 @@ func (a *App) run(ctx context.Context) {
 		}
 		a.mu.Unlock()
 		for _, t := range due {
+			a.post.Lock()
 			a.mu.Lock()
 			there := slices.ContainsFunc(a.timers, func(o Timer) bool { return o.ID == t.ID })
 			a.mu.Unlock()
 			if !there { // deleted while an earlier one of the batch was posted
+				a.post.Unlock()
 				continue
 			}
 			_, _, err := a.h.PostAgent(ctx, t.Agent, "app:schedule", t.ID+"@"+t.Next.Format(time.RFC3339Nano), []harness.Part{{Type: "text/plain", Body: fmt.Appendf(nil, "[timer %s] %s", t.ID, t.Text)}})
+			a.post.Unlock()
 			gone := errors.Is(err, harness.ErrNoAgent) || err == nil && t.Cron == ""
 			switch {
 			case gone:

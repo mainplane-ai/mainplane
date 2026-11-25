@@ -493,7 +493,8 @@ func (a *App) remove(w http.ResponseWriter, r *http.Request, p Project) error {
 // stop is the emergency stop of a project. First nothing is left to wake its
 // agents (timers, and the notice to a maker that its agent stopped), then each
 // stops, the last made first and the orchestrator last. Then again for the
-// agents made meanwhile, until there are none.
+// agents made meanwhile, and for those whose live session rolled over to a new
+// one, until there are none.
 func (a *App) stop(w http.ResponseWriter, r *http.Request, p Project) error {
 	by := r.URL.Query().Get("via")
 	if by == "" {
@@ -501,7 +502,7 @@ func (a *App) stop(w http.ResponseWriter, r *http.Request, p Project) error {
 	}
 	done := map[string]bool{}
 	for {
-		members := slices.DeleteFunc(a.members()[p.ID], func(g harness.Agent) bool { return done[g.ID] })
+		members := slices.DeleteFunc(a.members()[p.ID], func(g harness.Agent) bool { return done[g.Sessions[len(g.Sessions)-1]] })
 		if len(members) == 0 {
 			break
 		}
@@ -511,10 +512,11 @@ func (a *App) stop(w http.ResponseWriter, r *http.Request, p Project) error {
 			}
 		}
 		for _, g := range slices.Backward(members) {
-			if err := a.h.Stop(r.Context(), g.Sessions[len(g.Sessions)-1], by); err != nil {
+			live := g.Sessions[len(g.Sessions)-1]
+			if err := a.h.Stop(r.Context(), live, by); err != nil {
 				return err
 			}
-			done[g.ID] = true
+			done[live] = true
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
