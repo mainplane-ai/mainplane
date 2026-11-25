@@ -30,9 +30,9 @@ import (
 // placed, because Windows cannot replace a running one.
 const (
 	name = "mainplane-server"
-	// Dir and all under it: SYSTEM, Administrators and the operator full
-	// control, nothing inherited and no one else.
-	sddl = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;%s)"
+	// Dir and all under it: Administrators the owner, SYSTEM, Administrators
+	// and the operator full control, nothing inherited and no one else.
+	sddl = "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;%s)"
 	// A harness that fails starts again after 5 s, then every minute; a day
 	// without failures resets the count.
 	firstRestart, laterRestart, resetAfter = 5 * time.Second, time.Minute, 24 * 60 * 60
@@ -116,7 +116,9 @@ func (s service) Execute(_ []string, reqs <-chan svc.ChangeRequest, status chan<
 // code runs unelevated as them, reads and edits the config and keys. A
 // protected DACL drops every entry an earlier install or someone else left on
 // Dir, and an empty unprotected one on each child drops its own, so it
-// inherits Dir's alone.
+// inherits Dir's alone. Administrators own all, since an owner may always
+// change the DACL. A link or junction in Dir, which the harness never makes,
+// is refused: the harness would write through it.
 func prepare() error {
 	if err := stop(); err != nil {
 		return err
@@ -124,6 +126,9 @@ func prepare() error {
 	op, err := user.Current()
 	if err != nil {
 		return err
+	}
+	if fi, err := os.Lstat(Dir); err == nil && fi.Mode().Type() != fs.ModeDir {
+		return fmt.Errorf("%s is a link or junction, which the harness never makes; remove it", Dir)
 	}
 	if err := os.MkdirAll(Dir, 0o700); err != nil {
 		return err
@@ -136,7 +141,11 @@ func prepare() error {
 	if err != nil {
 		return err
 	}
-	if err := windows.SetNamedSecurityInfo(Dir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil); err != nil {
+	owner, _, err := sd.Owner()
+	if err != nil {
+		return err
+	}
+	if err := windows.SetNamedSecurityInfo(Dir, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, owner, nil, dacl, nil); err != nil {
 		return err
 	}
 	if sd, err = windows.SecurityDescriptorFromString("D:"); err != nil {
@@ -146,11 +155,14 @@ func prepare() error {
 	if err != nil {
 		return err
 	}
-	return filepath.WalkDir(Dir, func(p string, _ fs.DirEntry, err error) error {
+	return filepath.WalkDir(Dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || p == Dir {
 			return err
 		}
-		return windows.SetNamedSecurityInfo(p, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.UNPROTECTED_DACL_SECURITY_INFORMATION, nil, nil, empty, nil)
+		if d.Type()&^fs.ModeDir != 0 {
+			return fmt.Errorf("%s is a link or junction, which the harness never makes; remove it", p)
+		}
+		return windows.SetNamedSecurityInfo(p, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.UNPROTECTED_DACL_SECURITY_INFORMATION, owner, nil, empty, nil)
 	})
 }
 
