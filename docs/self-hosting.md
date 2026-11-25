@@ -407,6 +407,9 @@ server. Nothing is shared until the harness config names a drive:
   in Finder under the server's `<server>--<project>.mainplane.net`), and a
   letter from `W:` down (Windows, in the operator's session, listed in Explorer
   as `<name> (W:)`). The server mounts its own drives from its disk.
+- The server puts `.VolumeIcon.icns` and `._.` at each drive's root, so macOS
+  shows the drive with the Mainplane icon. It writes one only when it is
+  missing, so an icon set in Get Info stays.
 - `sessions` is the harness's `sessions/` directory, read-only, for workers
   named in it. Its server is `admin`, so it exists only on a Linux harness.
   Act on sessions through the API, not the files.

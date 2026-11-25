@@ -3,6 +3,7 @@ package worker
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -374,7 +375,7 @@ func exportLine(path string, e Export, op *user.User) string {
 	return line
 }
 
-// makeDir makes a drive's directory, op's. Sessions is the harness's own,
+// makeDir makes a drive's directory, op's, with the volume icon. Sessions is the harness's own,
 // so a machine without it is not the harness's.
 func makeDir(path, name string, op *user.User) error {
 	if name == Sessions {
@@ -383,15 +384,46 @@ func makeDir(path, name string, op *user.User) error {
 		}
 		return nil
 	}
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	}
-	if err := os.MkdirAll(path, 0o755); err != nil {
-		return err
-	}
 	uid, _ := strconv.Atoi(op.Uid)
 	gid, _ := strconv.Atoi(op.Gid)
-	return os.Lchown(path, uid, gid)
+	if _, err := os.Stat(path); err != nil {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			return err
+		}
+		if err := os.Lchown(path, uid, gid); err != nil {
+			return err
+		}
+	}
+	return volumeIcon(path, uid, gid)
+}
+
+// A Mac shows a drive with the Mainplane icon: the icon file, and the
+// AppleDouble file that holds the drive root's Finder info, its custom icon
+// flag set, in the 4096 bytes a Mac itself writes there over NFS. Without
+// the empty attribute header in it, macOS ignores the flag.
+var (
+	//go:embed drive.icns
+	driveIcns []byte
+	//go:embed drive.appledouble
+	driveAppleDouble []byte
+)
+
+// volumeIcon puts each of the icon's files at path when it is missing, so
+// a drive keeps the icon, and an icon a user chose stays.
+func volumeIcon(path string, uid, gid int) error {
+	for name, b := range map[string][]byte{".VolumeIcon.icns": driveIcns, "._.": driveAppleDouble} {
+		p := filepath.Join(path, name)
+		if _, err := os.Lstat(p); err == nil {
+			continue
+		}
+		if err := os.WriteFile(p, b, 0o644); err != nil {
+			return err
+		}
+		if err := os.Lchown(p, uid, gid); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // nfsServer makes this machine an NFS server the first time a drive names it:
