@@ -127,6 +127,9 @@ func prepare() error {
 	if err != nil {
 		return err
 	}
+	if fi, err := os.Lstat(Dir); err == nil && fi.Mode().Type() != fs.ModeDir {
+		return fmt.Errorf("%s is a link or junction, which the harness never makes; remove it", Dir)
+	}
 	if err := os.MkdirAll(Dir, 0o700); err != nil {
 		return err
 	}
