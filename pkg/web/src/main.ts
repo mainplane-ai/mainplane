@@ -8,7 +8,7 @@ import { composer } from "./composer"
 import { dashboard, frameURL } from "./dashboard"
 import { picker } from "./picker"
 import { providersPanel } from "./providers"
-import { onboarded, onboarding, setUp } from "./onboarding"
+import { type Worker, deviceKey, install, loginLink, onboarded, onboarding, setUp, workerRows } from "./onboarding"
 import lockup from "./lockup.svg"
 declare const MPMenu: { open: (menu: HTMLElement, at: Element | { x: number; y: number }, target?: Element) => void }
 
@@ -759,9 +759,40 @@ async function harnessSettings(tab: string): Promise<HTMLElement> {
   const privacy = h("div", null, h("div", { className: "form" }, row("Help improve Mainplane", sw)),
     h("p", { className: "note" }, "Allow the use of your sessions to improve Mainplane and train AI models."), since)
 
+  // Workers (as onboarding's Connect Workers): the connected ones, kept current while the tab is open, then the
+  // one-line install that connects another.
+  const connected = h("div"), lines = h("div"), state = h("div")
+  const workers = h("div", null, h("p", { className: "section-l" }, "Connected"), connected,
+    h("p", { className: "section-l" }, "Connect a Worker"), state, lines, h("p", { className: "note" }, "A worker is a machine your agents use. Run this one-line install on a machine to connect it."))
+  void (async () => {
+    do {
+      const [ws, top, j] = await Promise.all([get<Worker[]>("/workers"), get<{ network: string }>("/"), get<{ join: string }>("/join")]).catch(() => [null, null, null])
+      if (ws) {
+        const named = ws.filter(w => w.name)
+        connected.replaceChildren(named.length ? workerRows(named) : h("div", { className: "form" }, h("div", { className: "form-row" }, h("span", { className: "row-main" }, h("small", null, "No workers connected")))))
+        state.replaceChildren(...(top!.network !== "ready" ? [h("p", { className: "note" }, top!.network === "starting" ? "The network is starting. The line works once it is ready." : "The network failed: " + top!.network)] : []))
+        if (j!.join && !lines.firstChild) lines.append(install(j!.join)) // the line stays put while the workers above it change
+      }
+      await new Promise(t => setTimeout(t, 1500))
+    } while (workers.isConnected) // in the page by the first wait
+  })()
+
+  // Devices (as onboarding's Another Device): a login link is a new key, so it is made only when asked for.
+  // The keys logged in, each to revoke, will be a list above it.
+  const link = h("div")
+  const make = h("button", { className: "btn filled" }, "Show Login Link")
+  make.onclick = attempt(async () => {
+    make.disabled = true
+    try { link.replaceChildren(...await loginLink(await deviceKey())) } catch (e) { make.disabled = false; throw e }
+    make.remove()
+  })
+  const devices = h("div", null, h("p", { className: "section-l" }, "Log In Another Device"), link,
+    h("p", { className: "note" }, "Your projects and chats are on every device logged in to this harness. Show the code and scan it with a phone's camera, or open the link in another browser."),
+    h("div", { className: "actions" }, make))
+
   const head = toolbar("Settings", "", null)
   head.querySelector(".avatar")!.remove()
-  return tabbed("Settings", "/settings", "/", [["general", "General", general], ["update", "Update", update], ["providers", "Providers", provs], ["instructions", "Instructions", told], ["privacy", "Privacy", privacy]], tab, [], [], [], head)
+  return tabbed("Settings", "/settings", "/", [["general", "General", general], ["update", "Update", update], ["providers", "Providers", provs], ["workers", "Workers", workers], ["devices", "Devices", devices], ["instructions", "Instructions", told], ["privacy", "Privacy", privacy]], tab, [], [], [], head)
 }
 
 // tabbed is a large sheet with one section in view at a time, as in Slack's channel details. The tab is in the path
