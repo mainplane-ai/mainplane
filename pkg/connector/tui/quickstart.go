@@ -427,7 +427,7 @@ func (q *quickstart) finish(a *App) {
 // the drives step Enter makes the drive and Esc skips it.
 func (q *quickstart) Key(a *App, k term.Key) bool {
 	if q.step == stepSplash {
-		if !q.plane.flying {
+		if !q.plane.flying && !a.T.Caps.Linux { // the Linux console draws no plane to fly
 			q.plane.flying, q.plane.fly = true, q.plane.t
 		} else {
 			q.to(a, stepProviders)
