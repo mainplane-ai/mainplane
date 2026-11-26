@@ -95,21 +95,21 @@ func linked() bool {
 	return err == nil && fi.Mode()&fs.ModeSymlink != 0
 }
 
-// Upgrade makes exe release v's: Bin, once linked, by v's App, whether exe
-// is the link or the binary it points to.
-// Releases before firstApp have no App: Bin becomes their bare binary, as
+// Upgrade makes exe release v's and returns the path to run it from: Bin,
+// once linked, by v's App, whether exe is the link or the binary it points
+// to. Releases before firstApp have no App: Bin becomes their bare binary, as
 // they installed it, and App goes.
-func Upgrade(exe, v string) error {
+func Upgrade(exe, v string) (string, error) {
 	if (exe == Bin || exe == appBin) && linked() {
 		if semver.Compare(v, firstApp) >= 0 {
-			return bundle(v)
+			return exe, bundle(v)
 		}
 		if err := release.Install(Bin, "mainplane", v); err != nil {
-			return err
+			return "", err
 		}
-		return os.RemoveAll(App)
+		return Bin, os.RemoveAll(App)
 	}
-	return release.Install(exe, "mainplane", v)
+	return exe, release.Install(exe, "mainplane", v)
 }
 
 // firstApp is the first release with an App.
