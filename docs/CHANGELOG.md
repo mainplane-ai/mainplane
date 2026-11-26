@@ -2,6 +2,23 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.6.1
+
+- macOS workers run from `/Applications/Mainplane.app`, with `/usr/local/bin/mainplane` a link into it. Privacy settings and their prompts now show Mainplane with its icon, and the grants hold across updates. A worker moves into the app at its first start after this update. Each Mac must grant once again: until someone clicks Allow in that Mac's Network Volumes dialog, its drives wait. Accessibility and Screen Recording need a new grant too. The old "mainplane" rows can be removed. Releases add `mainplane-darwin-<arch>.app.zip`
+- Web interface: Settings has Workers and Devices tabs, after Providers. Workers lists the connected workers and has the one-line install of a new worker. Devices makes a login link and QR code for another device; the key is made only when you click Show Login Link. Before, both were only in onboarding
+- Web interface: New project has the tabs of project settings: General, Workers and Apps, with the tab in the path (`/new/workers`). The apps that every orchestrator gets are no longer shown as locked boxes, and the Apps tab shows only when there is a choice. Stop All Agents (in a project's menu and in its settings) stops every agent of a project, after it removes their schedule timers and orchestrate watches, so only a new message wakes them (`POST /projects/{id}/stop`)
+- Web interface on a phone: Return in the composer is a new line, and only the send button sends. The page follows the visual viewport only while a field has focus, so the project list of a home-screen app scrolls again
+- Tunnel: when Cloudflare drops the harness's quick tunnel, as it does after about 10 minutes offline, the harness gets a new one about a minute after the network is back. Before, it stayed on the dead URL until cloudflared was killed
+- Harness: a prompt that shrinks after a cache miss, because the vendor rebuilt the thinking in it, no longer fails the session with "The provider cut the context" (seen on GPT-6.2 Sol and Claude Code Opus)
+- Linux workers: the mesh rule comes back within milliseconds when systemd-networkd removes it. Before, the worker was off the mesh for up to 14 minutes after a networkd restart. The install keeps needrestart from restarting `mainplaned`, which killed every run and job after a library update
+- Drives: Windows sees dot files (`.git`, `.env`) and can write them, a file made on Windows gets mode 644, not 744, and a drive with only SMB clients gets no NFS export. On macOS a drive shows the Mainplane icon in Finder, and the worker waits 30 s, not 5 s, before macOS marks a drive not responding, so a wake from sleep no longer shows "Server connections interrupted"
+- macOS and Linux updates leave no `mainplane.old-<n>` beside the binary, and remove the ones earlier updates left
+- macOS 12 workers work (runs and reads failed on `env -C`). install.sh on macOS older than 12 says that Mainplane needs macOS 12 or later
+- Windows harness install: Dir and its children are owned by Administrators, and a link or junction under Dir is refused
+- Terminal app: it works on the Linux text console (`TERM=linux`), with a theme and glyphs it can draw. Alt+P and Alt+N go to the previous and next session on every terminal
+- Windows release binaries are EV-signed on stable tags only. `-rc` tags are signed with Artifact Signing
+- README: the web interface and `mainplane web`, with a screenshot
+
 ## v0.6.0
 
 - Agents: an agent is an id, a config and a list of apps over a chain of sessions, so it outlives a context limit. A message to an agent (`POST /agents/{id}/records`, `mainplane agent message`) lands on its live session, or on a new session when the live one should not go on: its config changed, it is at `context_limit`, or its prompt cache is cold and it is past the new `cold_limit`. A session that passes its limit mid-task hands off to the next one. The new session is told where the old session's log is on its workers. Agents are for connectors that outlive a context: a web UI, a chat channel, a scheduler. Eleven `/agents` routes, with `mainplane agents` and `mainplane agent new|info|message|retry|stop|delete|name|config|apps|instructions`. An agent's `usage` is the sum over its sessions, less any session deleted since
