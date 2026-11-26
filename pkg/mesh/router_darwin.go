@@ -66,6 +66,9 @@ func keep(tun string, a netip.Prefix) error {
 	return nil
 }
 
+// watchRules has no rule to watch.
+func watchRules(func()) error { return nil }
+
 // dropRule has nothing to drop: the route goes with the TUN.
 func dropRule() {}
 
