@@ -49,6 +49,7 @@ type Caps struct {
 	Dark      bool
 	Kitty     bool
 	Progress  bool // shows OSC 9;4 progress in its tab
+	Linux     bool // the Linux text console: 8 colors, a font of 512 glyphs
 }
 
 // Terminal is the open terminal. Events carries input, focus and resize. Every
@@ -107,7 +108,8 @@ func Open() (*Terminal, error) {
 	t.mu.Unlock()
 	t.Write(enter + query)
 	t.Flush()
-	t.Caps = Caps{Truecolor: truecolor(), Dark: true, Progress: progress()}
+	linux := os.Getenv("TERM") == "linux"
+	t.Caps = Caps{Truecolor: truecolor() || linux, Dark: true, Progress: progress(), Linux: linux}
 	deadline := time.After(queryWait)
 	for done := false; !done; {
 		select {
@@ -147,7 +149,8 @@ func (t *Terminal) modes() error {
 
 // truecolor is whether the terminal takes 24-bit color. There is no reliable
 // query, so it is the convention: COLORTERM, or a terminal known to have it.
-// Terminal.app sets neither, and gets 256 colors.
+// Terminal.app sets neither, and gets 256 colors. The Linux console takes
+// 24-bit color too and folds it to its 8 itself (drivers/tty/vt/vt.c).
 func truecolor() bool {
 	ct := os.Getenv("COLORTERM")
 	return ct == "truecolor" || ct == "24bit" || os.Getenv("WT_SESSION") != "" || isWindows

@@ -46,7 +46,7 @@ func (r *Renderer) Render(b *Buffer) {
 			if c.W == 2 { // blank both cells first, for a terminal that draws it 1 wide
 				o.WriteString("  " + cup(x, y))
 			}
-			o.WriteString(c.G)
+			o.WriteString(r.glyph(c.G))
 			cx, cy = x+int(c.W), y
 			if len(c.G) > 1 {
 				cx = -1
@@ -72,6 +72,20 @@ func (r *Renderer) Render(b *Buffer) {
 // screen already.
 func shown(row, front []Cell, x int) bool {
 	return row[x] == front[x] && (row[x].W != 2 || x+1 >= len(row) || row[x+1] == front[x+1])
+}
+
+// linuxGlyphs stands in for glyphs the Linux console's fonts lack: the
+// spinner's braille, turned the same way, and marks.
+var linuxGlyphs = map[string]string{
+	"⣀": "-", "⡄": "\\", "⠆": "|", "⠃": "/", "⠋": "-", "⠙": "\\", "⠸": "|", "⢠": "/",
+	"◆": "*", "◇": "o", "✓": "*",
+}
+
+func (r *Renderer) glyph(g string) string {
+	if s, ok := linuxGlyphs[g]; ok && r.t.Caps.Linux {
+		return s
+	}
+	return g
 }
 
 func cup(x, y int) string { return "\x1b[" + strconv.Itoa(y+1) + ";" + strconv.Itoa(x+1) + "H" }

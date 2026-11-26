@@ -30,12 +30,22 @@ var (
 		Text: term.Hex("#172428"), Muted: term.Hex("#59696e"), Accent: term.Hex("#0087a4"),
 		Selection: term.Hex("#c4e3ea"), Error: term.Hex("#c4363a"),
 	}
+	// linux is for the Linux console, which folds each color to one of its 8:
+	// a background to the one of the channels at 0x80 or more.
+	linux = Theme{
+		BG: term.Hex("#000000"), Panel: term.Hex("#0000aa"),
+		Text: term.Hex("#ffffff"), Muted: term.Hex("#aaaaaa"), Accent: term.Hex("#55ffff"),
+		Selection: term.Hex("#aa00aa"), Error: term.Hex("#ff5555"),
+	}
 )
 
 // themeFor is the theme for the terminal. With 256 colors the panel keeps a
 // shade apart from the screen.
 func themeFor(c term.Caps) Theme {
 	t := light
+	if c.Linux {
+		return linux
+	}
 	if c.Dark {
 		t = dark
 	}

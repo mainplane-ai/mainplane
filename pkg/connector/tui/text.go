@@ -104,7 +104,7 @@ func (Wordmark) Draw(a *App, c *Canvas, r Rect) {
 		w = max(w, term.Width(l))
 	}
 	st := term.Style{FG: a.Theme.Text, Attr: term.Bold}
-	if r.W < w {
+	if r.W < w || a.T.Caps.Linux { // its fonts lack the wordmark's blocks
 		c.Text(r.X+max(0, (r.W-9)/2), r.Y+len(wordmark)/2, "mainplane", st)
 		return
 	}
