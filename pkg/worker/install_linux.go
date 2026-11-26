@@ -61,11 +61,8 @@ func Install(token string) error {
 // unregister stops the worker and removes its unit; none installed is fine.
 // A stop that fails is an error, since the worker would run on.
 func unregister() error {
-	if err := os.Remove(needrestartPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
-	}
 	if _, err := os.Stat(unitPath); errors.Is(err, fs.ErrNotExist) {
-		return nil
+		return dropNeedrestart()
 	}
 	if err := run("systemctl", "disable", "--now", "mainplaned"); err != nil {
 		return err
@@ -73,5 +70,17 @@ func unregister() error {
 	if err := os.Remove(unitPath); err != nil {
 		return err
 	}
+	if err := dropNeedrestart(); err != nil {
+		return err
+	}
 	return run("systemctl", "daemon-reload")
+}
+
+// dropNeedrestart removes the needrestart override; none is fine. Callers run
+// it once the worker is stopped, so a running worker keeps it.
+func dropNeedrestart() error {
+	if err := os.Remove(needrestartPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
 }
