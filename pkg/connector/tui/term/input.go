@@ -253,14 +253,11 @@ func parseOne(b []byte) (int, Event) {
 	if len(b) == 1 {
 		return 0, nil
 	}
+	if bytes.HasPrefix(b, []byte("\x1b[[")) {
+		return linuxF(b)
+	}
 	switch b[1] {
 	case '[':
-		if len(b) > 3 && b[2] == '[' { // the Linux console's F1 to F5: ESC [ [ A to E
-			if b[3] == 'A' {
-				return 4, Key{Code: KeyF1}
-			}
-			return 4, nil
-		}
 		for i := 2; i < len(b); i++ {
 			switch c := b[i]; {
 			case c >= 0x40 && c <= 0x7e:
@@ -300,6 +297,17 @@ func parseOne(b []byte) (int, Event) {
 		ev = k
 	}
 	return n, ev
+}
+
+// linuxF decodes the Linux console's F1 to F5, ESC [ [ A to E.
+func linuxF(b []byte) (int, Event) {
+	switch {
+	case len(b) < 4:
+		return 0, nil
+	case b[3] == 'A':
+		return 4, Key{Code: KeyF1}
+	}
+	return 4, nil
 }
 
 // escKey decodes ESC ESC: Esc, or Alt and a CSI or SS3 key, as Terminal.app

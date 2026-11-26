@@ -166,9 +166,6 @@ func (p *plane) flown() bool {
 }
 
 func (p *plane) Draw(a *App, c *Canvas, r Rect) {
-	if a.T.Caps.Linux { // no braille in its fonts
-		return
-	}
 	now := time.Now()
 	if p.last.IsZero() {
 		p.last = now
@@ -181,7 +178,7 @@ func (p *plane) Draw(a *App, c *Canvas, r Rect) {
 	p.t += dt
 	bank, turn, d, f, done := p.flight()
 	area := r.H
-	if !p.on() || done || area <= 0 {
+	if !p.on() || done || area <= 0 || a.T.Caps.Linux { // no braille in the Linux console's fonts
 		return
 	}
 	// The mouse from -1 to 1 about the center, held at the edge past

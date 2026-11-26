@@ -46,10 +46,7 @@ func (r *Renderer) Render(b *Buffer) {
 			if c.W == 2 { // blank both cells first, for a terminal that draws it 1 wide
 				o.WriteString("  " + cup(x, y))
 			}
-			if g, ok := linuxGlyphs[c.G]; ok && r.t.Caps.Linux {
-				c.G = g
-			}
-			o.WriteString(c.G)
+			o.WriteString(r.glyph(c.G))
 			cx, cy = x+int(c.W), y
 			if len(c.G) > 1 {
 				cx = -1
@@ -82,6 +79,13 @@ func shown(row, front []Cell, x int) bool {
 var linuxGlyphs = map[string]string{
 	"⣀": "-", "⡄": "\\", "⠆": "|", "⠃": "/", "⠋": "-", "⠙": "\\", "⠸": "|", "⢠": "/",
 	"◆": "*", "◇": "o", "✓": "*",
+}
+
+func (r *Renderer) glyph(g string) string {
+	if s, ok := linuxGlyphs[g]; ok && r.t.Caps.Linux {
+		return s
+	}
+	return g
 }
 
 func cup(x, y int) string { return "\x1b[" + strconv.Itoa(y+1) + ";" + strconv.Itoa(x+1) + "H" }
