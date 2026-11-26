@@ -8,7 +8,7 @@
   <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/web-ui-v2-light.png" alt="The Mainplane web UI: a project dashboard on the desktop, and the project's chat on a phone" width="960">
 </picture>
 
-Mainplane is its own agent harness. It runs the model loop and gives the model its tools: a shell and file tools on the computers you connect. It does not manage Codex or Claude Code. They can still run on a worker like any other program, and a Claude or ChatGPT subscription can be a provider.
+Mainplane is its own agent harness. It runs the model loop and gives the model its tools: a shell and file tools on the computers you connect. It does not manage your Codex or Claude Code sessions. Those can still run on a worker like any other program. A Claude or ChatGPT subscription can be a provider: for a Claude plan, the harness runs Claude Code for each step with Mainplane's tools.
 
 # Get started
 

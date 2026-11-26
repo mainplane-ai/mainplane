@@ -61,8 +61,8 @@ To connect it with less:
   need it.
 - Link it to no other worker. The harness still reaches it, but other
   workers do not ([the mesh](self-hosting.md#the-mesh)).
-- `mainplane worker remove <name>` takes it off the mesh within seconds, and
-  `mainplane uninstall` on it removes the worker.
+- `mainplane worker remove <name>` takes it off the mesh within seconds.
+  `mainplane uninstall` on it removes the worker from the machine.
 
 ### The web interface
 
