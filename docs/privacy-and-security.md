@@ -138,9 +138,12 @@ them with more, connect more.
 - The mesh is built from Tailscale's open-source code, not from Tailscale the
   service. Workers run a fork of the Tailscale client (WireGuard, NAT
   traversal, the DERP relay protocol). The harness is the coordinator, with
-  protocol code from headscale, and the relay. You need no Tailscale account.
-  The fork sends no logs to Tailscale and asks Tailscale's servers for no DNS,
-  and the relay map names only the harness and two STUN servers.
+  protocol code from headscale, and the relay. You need no Tailscale account,
+  and the mesh contacts no Tailscale server: its control URL is the harness,
+  its relay map names only the harness and two STUN servers, the fork never
+  uploads logs and never asks Tailscale's servers to resolve a name, and the
+  harness sends no DNS settings. Tailscale's update and captive portal code is
+  not in the build.
 - Tailscale on the same machine keeps working
   ([details](self-hosting.md#the-mesh)).
 
@@ -149,8 +152,9 @@ What listens:
 - Harness: HTTP on `127.0.0.1:8080` (`http` in the config). On the mesh only,
   its node `harness` serves port 7000 to workers and 8080 to the CLI on a
   worker. Its Claude Code provider and app daemons listen on `127.0.0.1`.
-- Worker: WireGuard on UDP 41642 on every address. It drops packets that are
-  not from a peer in its map. A TCP port on its mesh address, for the
+- Worker: WireGuard on UDP 41642 on every address. It drops a handshake
+  from a key that is not a peer in its map, data with no session, and path
+  messages from unknown keys. A TCP port on its mesh address, for the
   Tailscale peer API. A local socket for `mainplane status`
   (`/var/run/mainplaned.sock`, `\\.\pipe\mainplaned`).
 - A Linux worker that serves a drive: NFS on its mesh address, and Samba on
@@ -162,7 +166,9 @@ What connects out:
   `dl.mainplane.ai` (updates and the model list), `data.mainplane.ai` only
   when you allow sharing, STUN, and GitHub and npm for pinned downloads.
 - Worker: the harness URL, `pointer.mainplane.ai`, its peers, STUN,
-  `dl.mainplane.ai` (updates), GitHub (Bun) and wintun.net (Windows).
+  `dl.mainplane.ai` (updates, checked against the signed `SHA256SUMS`),
+  GitHub (Bun), wintun.net (Windows), and the LAN router (UPnP, NAT-PMP) to
+  ask for a port mapping.
 - Agents: whatever their commands reach, and `bugs.mainplane.ai` when an
   agent sends a report. The terminal app sends a crash report there only
   when you say yes.
