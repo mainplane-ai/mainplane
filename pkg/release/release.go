@@ -118,9 +118,14 @@ func Install(path, cmd, v string) error {
 // a new binary can take path. Windows renames a running binary but will not
 // replace or delete it, and a TUI may run any old binary for days, so each
 // gets a new name and the asides from before go only once nothing runs them.
+// Elsewhere a rename replaces a running binary, so path stays where it is: on
+// macOS each aside would be one more path client row in Privacy settings.
 func Aside(path string) (string, error) {
 	for _, f := range Asides(path) {
 		_ = os.Remove(f) // one still running stays for a later Aside
+	}
+	if runtime.GOOS != "windows" {
+		return path, nil
 	}
 	old := fmt.Sprintf("%s.old-%d", path, time.Now().UnixNano())
 	return old, os.Rename(path, old)
