@@ -457,16 +457,16 @@ func rebuilt(p provider.Provider, model string, conf statefile.Conf, chain []sta
 // the rest of the prompt anew and may drop or shorten that thinking, as
 // OpenAI and Anthropic do on a cache miss, so a prompt may shrink by it.
 func rethought(chain []statefile.Record, read int) int {
-	n, thought := 0, false
+	n, thought := 0, ""
 	for _, r := range chain {
 		switch r.Kind {
 		case statefile.Thinking:
-			thought = true
+			thought = r.Step
 		case statefile.Step:
-			if thought && r.Usage != nil && r.Usage.Prompt() >= read {
+			if thought == r.ID && r.Usage != nil && r.Usage.Prompt() >= read {
 				n += r.Usage.Output
 			}
-			thought = false
+			thought = ""
 		case statefile.Start, statefile.Config, statefile.System, statefile.Message, statefile.Text, statefile.Call, statefile.Result, statefile.Error, statefile.Name:
 		}
 	}
