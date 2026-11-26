@@ -75,6 +75,7 @@ func reconcile(want Desired, _ *user.User) []Drive {
 		}
 		have = append(have, d)
 	}
+	favorites(want, have) // before an unmount, while a leaving drive's Favorite still resolves
 	for _, p := range slices.Sorted(maps.Keys(at)) {
 		if ours(p, at[p]) && !wanted[p] {
 			if err := unmount(p, false); err != nil {
@@ -82,18 +83,19 @@ func reconcile(want Desired, _ *user.User) []Drive {
 			}
 		}
 	}
-	favorites(want, have)
 	return have
 }
 
-// favsFile names each drive this worker gave a Finder sidebar Favorite, so
-// one the user removed stays removed.
+// favsFile holds, for each user by uid, each drive whose Finder sidebar
+// Favorite the worker saw to, and whether the worker added it, so one the
+// user removed stays removed and one the user made stays theirs.
 var favsFile = filepath.Join(stateDir, "favorites.json")
 
-// favJS adds the Favorite for path, unless one is there, or removes it. An
-// item whose volume is not mounted resolves to nothing and is known by its
-// name. LSSharedFileList is deprecated but the only API for the list; it
-// needs no privacy grant, and Finder is not asked, so no prompt shows.
+// favJS adds the Favorite for path, unless one is there, and prints added,
+// or removes it. An item whose volume is not mounted resolves to nothing and
+// is known by its name. LSSharedFileList is deprecated but the only API for
+// the list; it needs no privacy grant, and Finder is not asked, so no prompt
+// shows.
 const favJS = `ObjC.import('CoreServices')
 function run([verb, path]) {
   const list = $.LSSharedFileListCreate($(), $.kLSSharedFileListFavoriteItems, $())
@@ -107,7 +109,9 @@ function run([verb, path]) {
     if ($.LSSharedFileListItemRemove(list, it)) throw new Error('could not remove ' + name)
     return
   }
-  if (verb == 'add' && !$.LSSharedFileListInsertItemURL(list, $.kLSSharedFileListItemLast, $(), $(), $.NSURL.fileURLWithPath(path), $(), $())) throw new Error('could not add ' + path)
+  if (verb != 'add') return
+  if (!$.LSSharedFileListInsertItemURL(list, $.kLSSharedFileListItemLast, $(), $(), $.NSURL.fileURLWithPath(path), $(), $())) throw new Error('could not add ' + path)
+  return 'added'
 }`
 
 // favErr is the last Favorite failure logged, so one that repeats each
@@ -115,46 +119,65 @@ function run([verb, path]) {
 var favErr string
 
 // favorites gives the user at the screen a Finder sidebar Favorite for each
-// drive once, when it is first mounted, and takes it away when the drive is
-// no longer this worker's. A Favorite is only a shortcut: a failure is
-// logged and tried again next round, never the drive's error. With no one
-// logged in at the screen it waits.
+// drive once, when it is first mounted, and takes the ones it added away
+// when the drive is no longer this worker's. A Favorite is only a shortcut:
+// a failure is logged and tried again next round, never the drive's error.
+// With no one logged in at the screen it waits.
 func favorites(want Desired, have []Drive) {
 	if os.Geteuid() != 0 {
 		return
 	}
-	var added []string
+	fi, err := os.Stat("/dev/console")
+	if err != nil {
+		favLog(err)
+		return
+	}
+	uid := strconv.FormatUint(uint64(fi.Sys().(*syscall.Stat_t).Uid), 10)
+	if uid == "0" { // the login window
+		return
+	}
+	all := map[string]map[string]bool{}
 	b, err := os.ReadFile(favsFile)
 	if err == nil {
-		err = json.Unmarshal(b, &added)
+		err = json.Unmarshal(b, &all)
 	}
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		favLog(err)
 		return
 	}
-	var keep []string
-	for _, n := range added {
-		if slices.ContainsFunc(want.Mount, func(m Mount) bool { return m.Name == n }) {
-			keep = append(keep, n)
-		} else if err := favorite("remove", filepath.Join(mountsDir, n)); err != nil {
-			favLog(err)
-			keep = append(keep, n)
-		}
+	seen, changed := all[uid], false
+	if seen == nil {
+		seen = map[string]bool{}
 	}
-	for _, d := range have {
-		if d.State != Mounted || slices.Contains(added, d.Name) {
+	for n, ours := range seen {
+		if slices.ContainsFunc(want.Mount, func(m Mount) bool { return m.Name == n }) {
 			continue
 		}
-		if err := favorite("add", d.Path); err != nil {
-			favLog(err)
-		} else {
-			keep = append(keep, d.Name)
+		if ours {
+			if _, err := favorite(uid, "remove", filepath.Join(mountsDir, n)); err != nil {
+				favLog(err)
+				continue
+			}
 		}
+		delete(seen, n)
+		changed = true
 	}
-	if slices.Equal(keep, added) {
+	for _, d := range have {
+		if _, ok := seen[d.Name]; ok || d.State != Mounted {
+			continue
+		}
+		out, err := favorite(uid, "add", d.Path)
+		if err != nil {
+			favLog(err)
+			continue
+		}
+		seen[d.Name], changed = out == "added", true
+	}
+	if !changed {
 		return
 	}
-	if b, err = json.Marshal(keep); err == nil {
+	all[uid] = seen
+	if b, err = json.Marshal(all); err == nil {
 		err = os.WriteFile(favsFile, b, 0o644)
 	}
 	if err != nil {
@@ -162,31 +185,21 @@ func favorites(want Desired, have []Drive) {
 	}
 }
 
-// favorite runs favJS as the user at the screen, in their login session,
-// where their sidebar's list is.
-func favorite(verb, path string) error {
-	fi, err := os.Stat("/dev/console")
-	if err != nil {
-		return err
-	}
-	uid := strconv.FormatUint(uint64(fi.Sys().(*syscall.Stat_t).Uid), 10)
-	if uid == "0" { // the login window
-		return errNoConsole
-	}
+// favorite runs favJS as user uid, in their login session, where their
+// sidebar's list is, and returns what it printed.
+func favorite(uid, verb, path string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), favWait)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "launchctl", "asuser", uid, "/usr/bin/sudo", "-n", "-H", "-u", "#"+uid, "--",
 		"/usr/bin/osascript", "-l", "JavaScript", "-e", favJS, verb, path).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%s %s: %w: %s", verb, path, err, bytes.TrimSpace(out))
+		return "", fmt.Errorf("%s %s: %w: %s", verb, path, err, bytes.TrimSpace(out))
 	}
-	return nil
+	return string(bytes.TrimSpace(out)), nil
 }
 
-var errNoConsole = errors.New("no one is logged in at the screen")
-
 func favLog(err error) {
-	if s := err.Error(); s != favErr && !errors.Is(err, errNoConsole) {
+	if s := err.Error(); s != favErr {
 		favErr = s
 		log.Printf("drives: Finder Favorite: %v", err)
 	}
