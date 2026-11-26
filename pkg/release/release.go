@@ -8,6 +8,7 @@
 package release
 
 import (
+	"archive/zip"
 	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
@@ -16,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -97,12 +99,8 @@ func Install(path, cmd, v string) error {
 	if err := os.Chmod(path+".new", 0o755); err != nil {
 		return err
 	}
-	out, err := exec.Command(path+".new", "version").Output()
-	if err != nil {
-		return fmt.Errorf("release %s: %s does not run: %w", v, name, err)
-	}
-	if got := string(bytes.TrimSpace(out)); got != v {
-		return fmt.Errorf("release %s: %s says it is %s", v, name, got)
+	if err := says(path+".new", v, name); err != nil {
+		return err
 	}
 	old, err := Aside(path)
 	if err != nil {
@@ -110,6 +108,75 @@ func Install(path, cmd, v string) error {
 	}
 	if err := os.Rename(path+".new", path); err != nil {
 		return errors.Join(err, os.Rename(old, path))
+	}
+	return nil
+}
+
+// InstallApp puts release v's macOS app bundle for this machine at app: the
+// zip of its Contents unpacked beside it, then renamed over the old bundle,
+// which goes. A binary still running from the old one keeps running.
+func InstallApp(app, v string) error {
+	name := "mainplane-darwin-" + runtime.GOARCH + ".app.zip"
+	b, err := Get(v, name)
+	if err != nil {
+		return err
+	}
+	z, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
+	if err != nil {
+		return fmt.Errorf("release %s: %s: %w", v, name, err)
+	}
+	if err := errors.Join(os.RemoveAll(app+".new"), os.RemoveAll(app+".old")); err != nil {
+		return err
+	}
+	for _, f := range z.File {
+		if err := unzip(f, app+".new"); err != nil {
+			return fmt.Errorf("release %s: %s: %w", v, name, err)
+		}
+	}
+	if err := says(filepath.Join(app+".new", "Contents", "MacOS", "mainplane"), v, name); err != nil {
+		return err
+	}
+	if err := os.Rename(app, app+".old"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := os.Rename(app+".new", app); err != nil {
+		return errors.Join(err, os.Rename(app+".old", app))
+	}
+	return os.RemoveAll(app + ".old")
+}
+
+// unzip writes f under dir with its mode, set apart from the write, which
+// root's umask would narrow.
+func unzip(f *zip.File, dir string) error {
+	if !filepath.IsLocal(f.Name) {
+		return fmt.Errorf("%s is outside the bundle", f.Name)
+	}
+	p := filepath.Join(dir, f.Name)
+	if f.FileInfo().IsDir() {
+		return os.MkdirAll(p, 0o755)
+	}
+	r, err := f.Open()
+	if err != nil {
+		return err
+	}
+	b, err := io.ReadAll(r)
+	if err := errors.Join(err, r.Close(), os.MkdirAll(filepath.Dir(p), 0o755)); err != nil {
+		return err
+	}
+	if err := os.WriteFile(p, b, f.Mode().Perm()); err != nil {
+		return err
+	}
+	return os.Chmod(p, f.Mode().Perm())
+}
+
+// says checks that the binary at path runs and says it is v.
+func says(path, v, name string) error {
+	out, err := exec.Command(path, "version").Output()
+	if err != nil {
+		return fmt.Errorf("release %s: %s does not run: %w", v, name, err)
+	}
+	if got := string(bytes.TrimSpace(out)); got != v {
+		return fmt.Errorf("release %s: %s says it is %s", v, name, got)
 	}
 	return nil
 }

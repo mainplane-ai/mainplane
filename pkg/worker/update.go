@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
-
-	"github.com/mainplane-ai/mainplane/pkg/release"
 )
 
 // A failed version is fetched again after a wait that starts at retryMin and
@@ -39,7 +37,7 @@ func update(v string) (string, error) {
 	}
 	exe, err := os.Executable()
 	if err == nil {
-		err = release.Install(exe, "mainplane", v)
+		err = Upgrade(exe, v)
 	}
 	if err != nil {
 		wait := retryMin

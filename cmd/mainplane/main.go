@@ -33,7 +33,6 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/elevate"
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
-	"github.com/mainplane-ai/mainplane/pkg/release"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
@@ -214,6 +213,7 @@ func work(install bool, args []string) {
 		if token, op, err = worker.Installed(); err != nil {
 			log.Fatalf("not joined: mainplane worker <network> <device code>, or mainplane install <network> <device code> once: %v", err)
 		}
+		worker.Rebundle()
 	case 1:
 		token = args[0]
 	case 2:
@@ -320,7 +320,7 @@ func update(v string) {
 		_ = os.Remove(f.Name())
 	}
 	fmt.Printf("mainplane %s -> %s, your mainplane-server's release: downloading\n", version.V, v)
-	if err := release.Install(exe, "mainplane", v); err != nil {
+	if err := worker.Upgrade(exe, v); err != nil {
 		log.Fatal(err)
 	}
 }

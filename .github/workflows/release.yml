@@ -94,10 +94,22 @@ jobs:
             b=$(basename "$f")
             "$RUNNER_TEMP/rcodesign" sign --pem-file "$RUNNER_TEMP/macos.pem" --binary-identifier "ai.mainplane.${b%-darwin-*}" --code-signature-flags runtime "$f"
           done
+          # The worker runs from Mainplane.app, which privacy settings show by its name and icon.
+          # Install and updates unpack the zip of its Contents (see release.InstallApp).
+          for a in amd64 arm64; do
+            app=$RUNNER_TEMP/app-$a/Mainplane.app
+            mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+            cp install/Info.plist "$app/Contents/"
+            cp install/Mainplane.icns "$app/Contents/Resources/"
+            cp "dist/mainplane-darwin-$a" "$app/Contents/MacOS/mainplane"
+            "$RUNNER_TEMP/rcodesign" sign --pem-file "$RUNNER_TEMP/macos.pem" --code-signature-flags runtime "$app"
+            (cd "$app" && zip -qry "$GITHUB_WORKSPACE/dist/mainplane-darwin-$a.app.zip" Contents)
+          done
           # an -rc is signed but not notarized: Apple can take hours, and only a stable release needs it
           if [[ $TAG != *-rc.* ]]; then
             "$RUNNER_TEMP/rcodesign" encode-app-store-connect-api-key -o "$RUNNER_TEMP/notary.json" "$NOTARY_ISSUER" "$NOTARY_KEY_ID" "$RUNNER_TEMP/notary.p8"
-            zip -qj "$RUNNER_TEMP/darwin.zip" dist/*-darwin-*
+            zip -qj "$RUNNER_TEMP/darwin.zip" dist/*-darwin-amd64 dist/*-darwin-arm64
+            (cd "$RUNNER_TEMP" && zip -qry darwin.zip app-amd64 app-arm64)
             "$RUNNER_TEMP/rcodesign" notary-submit --api-key-file "$RUNNER_TEMP/notary.json" --wait --max-wait-seconds 3600 "$RUNNER_TEMP/darwin.zip"
           fi
           rm -f "$RUNNER_TEMP/macos.pem" "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/notary.json" "$RUNNER_TEMP/darwin.zip"
