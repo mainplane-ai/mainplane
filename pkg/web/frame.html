@@ -26,16 +26,16 @@ addEventListener("message", e => {
   })
   // A link opens beside the interface: this frame goes nowhere.
   addEventListener("click", e => { const a = e.target.closest?.("a[href]:not([href^='#'], [target])"); if (a) a.target = "_blank" }, true)
-  // A picture clicked opens large over the interface (not one in a link or a button, nor an icon).
-  addEventListener("click", e => {
+  // A picture clicked opens large over the interface (not one in a link or a button, nor an icon), in place of what the page does with the click.
+  addEventListener("click", async e => {
     const img = e.target.closest?.("img")
-    if (!img || img.closest("a, button") || img.width < 80) return
-    // Drawn and sent as a PNG: the frame may not fetch (connect-src none), and the page around cannot load this frame's blob: URL.
-    const c = Object.assign(document.createElement("canvas"), { width: img.naturalWidth, height: img.naturalHeight })
-    c.getContext("2d").drawImage(img, 0, 0)
-    // A picture from another site without CORS taints the canvas: it opens in a tab beside the interface instead.
-    try { c.toBlob(image => parent.postMessage({ image, alt: img.alt }, "*")) } catch { open(img.currentSrc, "_blank") }
-  })
+    if (!img || img.closest("a, button") || img.width < 80 || !img.naturalWidth) return
+    e.preventDefault()
+    e.stopPropagation()
+    // Sent as the picture already decoded: the frame may not fetch (connect-src none), the page around cannot load this frame's blob: URL, and drawing a PNG again took seconds for a tall one.
+    // A picture from another site without CORS cannot be sent: it opens in a tab beside the interface instead.
+    try { const image = await createImageBitmap(img); parent.postMessage({ image, alt: img.alt }, "*", [image]) } catch { open(img.currentSrc, "_blank") }
+  }, true)
   // A swipe on the page goes to the interface: on a phone it moves between the project's views.
   let t0 = null
   const slides = el => !!el && el.nodeType === 1 && ((el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflowX !== "visible") || slides(el.parentElement))

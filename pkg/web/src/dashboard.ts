@@ -109,7 +109,7 @@ export function dashboard(p: Project, signal: AbortSignal): HTMLElement {
   addEventListener("message", async e => {
     const d = e.data
     if (e.source !== frame.contentWindow || typeof d !== "object" || d === null) return
-    if (d.image instanceof Blob) lightbox(d.image, String(d.alt ?? ""))
+    if (d.image instanceof ImageBitmap) lightbox(d.image, String(d.alt ?? ""))
     else if (Array.isArray(d.swipe)) dispatchEvent(new CustomEvent("swipe", { detail: d.swipe.map(Number) }))
     else if (d.ready === true) {
       ready = true
@@ -128,13 +128,16 @@ export function dashboard(p: Project, signal: AbortSignal): HTMLElement {
   return holder
 }
 
-// lightbox shows a dashboard's picture large over everything. Escape, the X or a click anywhere closes it.
-function lightbox(b: Blob, alt: string) {
-  const url = URL.createObjectURL(b)
-  const close = () => { box.remove(); URL.revokeObjectURL(url); removeEventListener("keydown", esc) }
+// lightbox shows a dashboard's picture large over everything: whole, or as wide as it fits and scrolled when it is tall.
+// Escape, the X or a click beside the picture closes it.
+function lightbox(b: ImageBitmap, alt: string) {
+  const pic = h("canvas", { width: b.width, height: b.height, role: "img", ariaLabel: alt || "Picture" })
+  pic.getContext("bitmaprenderer")!.transferFromImageBitmap(b)
+  const close = () => { box.remove(); removeEventListener("keydown", esc) }
   const esc = (e: KeyboardEvent) => { if (e.key === "Escape") close() }
   const x = h("button", { className: "btn icon", ariaLabel: "Close", onclick: close }, icon("close"))
-  const box = h("div", { className: "lightbox", role: "dialog", ariaModal: "true", ariaLabel: alt || "Picture", onclick: close }, h("img", { src: url, alt }), x)
+  const box = h("div", { className: "lightbox", role: "dialog", ariaModal: "true", ariaLabel: alt || "Picture", onclick: e => e.target !== pic && close() }, pic, x)
+  box.classList.toggle("tall", pic.height > 3 * pic.width) // taller than a phone's screen: a page, which shown whole is too small to read
   addEventListener("keydown", esc)
   document.body.append(box)
   x.focus() // the click left the focus in the dashboard's frame, where Escape does not reach this page
