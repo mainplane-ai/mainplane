@@ -452,6 +452,27 @@ func rebuilt(p provider.Provider, model string, conf statefile.Conf, chain []sta
 	return fmt.Sprintf("\n\nThis session was built by harness %s. This harness (%s) builds the same records into a different request, so the provider sees a different conversation. A session from an incompatible harness version cannot go on. Use /continue to carry it into a new session.", last.Harness, version.V)
 }
 
+// rethought is the output of each step in chain that thought and whose
+// prompt was past read, the cached tokens of the step after. A vendor builds
+// the rest of the prompt anew and may drop or shorten that thinking, as
+// OpenAI and Anthropic do on a cache miss, so a prompt may shrink by it.
+func rethought(chain []statefile.Record, read int) int {
+	n, thought := 0, false
+	for _, r := range chain {
+		switch r.Kind {
+		case statefile.Thinking:
+			thought = true
+		case statefile.Step:
+			if thought && r.Usage != nil && r.Usage.Prompt() >= read {
+				n += r.Usage.Output
+			}
+			thought = false
+		case statefile.Start, statefile.Config, statefile.System, statefile.Message, statefile.Text, statefile.Call, statefile.Result, statefile.Error, statefile.Name:
+		}
+	}
+	return n
+}
+
 func errorRecord(via, text string) statefile.Record {
 	return statefile.Record{Header: statefile.Header{Kind: statefile.Error, Type: "text/plain", Via: via}, Body: []byte(text)}
 }
@@ -517,7 +538,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 	}
 	// the same model and harness only: a copy may go on with another model,
 	// which counts tokens its own way, and a new harness builds another prompt
-	short := hdr.Provider == floor.Provider && hdr.Model == floor.Model && hdr.Harness == floor.Harness && hdr.Usage.Prompt() > 0 && hdr.Usage.Prompt() < floor.Usage.Prompt()
+	short := hdr.Provider == floor.Provider && hdr.Model == floor.Model && hdr.Harness == floor.Harness && hdr.Usage.Prompt() > 0 && hdr.Usage.Prompt() < floor.Usage.Prompt()-rethought(chain, hdr.Usage.CacheRead)
 	for _, c := range calls {
 		r := result(c.ID, "not run")
 		if ctx.Err() == nil && !short {
