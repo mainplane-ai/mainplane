@@ -1,5 +1,5 @@
 .need { padding: 12px 0; border-bottom: var(--hairline) solid var(--color-separator); }
-.need:last-child { box-shadow: none; padding-bottom: 0; }
+.need:last-child { border-bottom: none; padding-bottom: 0; }
 .need:first-of-type { padding-top: 0; }
 .need h3 { display: flex; gap: 8px; align-items: baseline; margin: 0; font: var(--text-headline); }
 .need h3::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; corner-shape: round; background: var(--color-accent); translate: 0 -1px; }

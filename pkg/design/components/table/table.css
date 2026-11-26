@@ -6,7 +6,7 @@
 .table td { padding: 7px 10px; border-bottom: var(--hairline) solid var(--color-separator); vertical-align: top; }
 .table td.num, .table th.num { text-align: right; }
 .table td.dim { color: var(--color-text-2); }
-.table tr[aria-selected="true"] td { background: var(--color-fill); box-shadow: none; }
+.table tr[aria-selected="true"] td { background: var(--color-fill); border-bottom-color: transparent; }
 .table tr[aria-selected="true"] td:first-child { border-radius: var(--radius-6) 0 0 var(--radius-6); }
 .table tr[aria-selected="true"] td:last-child { border-radius: 0 var(--radius-6) var(--radius-6) 0; }
-.table tbody tr:last-child td { box-shadow: none; }
+.table tbody tr:last-child td { border-bottom: none; }
