@@ -75,7 +75,7 @@ type Config struct {
 // none, so an unedited config gets each release's.
 func (c Config) prompt() []string {
 	if c.Prompt == nil {
-		return harness.DefaultPrompt
+		return harness.DefaultPolicyPrompt
 	}
 	return c.Prompt
 }

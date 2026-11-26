@@ -15,9 +15,9 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
-// defaultSystem states what the worker enforces, so the model is never
+// mechanicsPrompt states what the worker enforces, so the model is never
 // surprised by it. Not tuned: one prompt until a postmortem says otherwise.
-const defaultSystem = `
+const mechanicsPrompt = `
 You are an extremely capable AI agent running in the Mainplane harness
 
 Here is how the Mainplane harness works:
@@ -130,10 +130,10 @@ Version:
 - The official Mainplane domains are mainplane.ai and mainplane.net
 `
 
-// DefaultPrompt is the policy part of the system prompt, one string per line,
-// for a harness whose config has no prompt of its own. It is the user's to
-// change: the mechanics in defaultSystem are not.
-var DefaultPrompt = []string{
+// DefaultPolicyPrompt is the policy part of the system prompt, one string per
+// line, for a harness whose config has no prompt of its own. It is the user's
+// to change: the mechanics in mechanicsPrompt are not.
+var DefaultPolicyPrompt = []string{
 	"AGENTS.md:",
 	"- Files titled AGENTS.md are the persistent context for all agents. You can write to these files to persist context across sessions",
 	"- The readers of an AGENTS.md are Mainplane agents as capable as you. What is obvious to you is obvious to them",
@@ -183,7 +183,7 @@ var systems = map[string]string{}
 func System(model string, prompt []string) string {
 	s, ok := systems[model]
 	if !ok {
-		s = fmt.Sprintf(defaultSystem, version.V)
+		s = fmt.Sprintf(mechanicsPrompt, version.V)
 	}
 	if len(prompt) == 0 {
 		return s
