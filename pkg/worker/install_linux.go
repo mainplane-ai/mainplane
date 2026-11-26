@@ -61,6 +61,9 @@ func Install(token string) error {
 // unregister stops the worker and removes its unit; none installed is fine.
 // A stop that fails is an error, since the worker would run on.
 func unregister() error {
+	if err := os.Remove(needrestartPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	if _, err := os.Stat(unitPath); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
@@ -68,9 +71,6 @@ func unregister() error {
 		return err
 	}
 	if err := os.Remove(unitPath); err != nil {
-		return err
-	}
-	if err := os.Remove(needrestartPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	return run("systemctl", "daemon-reload")
