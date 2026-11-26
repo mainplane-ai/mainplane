@@ -48,6 +48,22 @@ What this means for where you connect a worker:
   any of them can try to steer an agent. Give a worker only what you would
   give an agent that reads all of them.
 
+### Your own computer as a worker
+
+A computer you use every day holds more than you may want agents to have.
+To connect it with less:
+
+- Make a separate user account for agents and install the worker from it.
+  Agent code then runs as that user and reads only what that user can read.
+- Or connect a VM on it instead, and share only the folders you choose.
+- A session controls only the workers in its config (`workers`, or /workers
+  in the terminal app). Leave your computer out of the sessions that do not
+  need it.
+- Link it to no other worker. The harness still reaches it, but other
+  workers do not ([the mesh](self-hosting.md#the-mesh)).
+- `mainplane worker remove <name>` takes it off the mesh within seconds, and
+  `mainplane uninstall` on it removes the worker.
+
 ### The web interface
 
 - The page keeps the API key in the browser's storage for the harness's URL
@@ -96,6 +112,62 @@ are now rare. A prompt injection in a tool result now rarely succeeds. A
 boundary of trust that is a set of machines can grow with the models. Put on a
 worker what you trust agents with, and keep the rest off it. When you trust
 them with more, connect more.
+
+## Network
+
+```
+ web, TUI, CLI, connectors                      model providers
+        |                                              ^
+        | HTTPS                                        | HTTPS
+        v                                              |
+ Cloudflare edge <====== cloudflared (outbound) --> harness: mainplane-server
+        ^                                           127.0.0.1:8080
+        |                                           coordinator, relay, mesh node "harness"
+        | HTTPS: coordinator (/ts2021), relay (/derp)
+        |
+   +----+---------------------+
+   |                          |
+ worker A (mainplaned) <====> worker B (mainplaned)
+   WireGuard, UDP 41642: direct, or through the relay in the harness.
+   Two workers talk only when a link names both. Each talks to the harness.
+```
+
+- The harness opens no inbound port. cloudflared, which the harness runs,
+  makes an outbound connection to Cloudflare and carries the harness URL to
+  `127.0.0.1:8080`. [Your own URL](self-hosting.md#your-own-url) can replace it.
+- The mesh is built from Tailscale's open-source code, not from Tailscale the
+  service. Workers run a fork of the Tailscale client (WireGuard, NAT
+  traversal, the DERP relay protocol). The harness is the coordinator, with
+  protocol code from headscale, and the relay. You need no Tailscale account.
+  The fork sends no logs to Tailscale and asks Tailscale's servers for no DNS,
+  and the relay map names only the harness and two STUN servers.
+- Tailscale on the same machine keeps working
+  ([details](self-hosting.md#the-mesh)).
+
+What listens:
+
+- Harness: HTTP on `127.0.0.1:8080` (`http` in the config). On the mesh only,
+  its node `harness` serves port 7000 to workers and 8080 to the CLI on a
+  worker. Its Claude Code provider and app daemons listen on `127.0.0.1`.
+- Worker: WireGuard on UDP 41642 on every address. It drops packets that are
+  not from a peer in its map. A TCP port on its mesh address, for the
+  Tailscale peer API. A local socket for `mainplane status`
+  (`/var/run/mainplaned.sock`, `\\.\pipe\mainplaned`).
+- A Linux worker that serves a drive: NFS on its mesh address, and Samba on
+  port 445 with only the mesh's addresses let in.
+
+What connects out:
+
+- Harness: model providers, Cloudflare (the tunnel), `pointer.mainplane.ai`,
+  `dl.mainplane.ai` (updates and the model list), `data.mainplane.ai` only
+  when you allow sharing, STUN, and GitHub and npm for pinned downloads.
+- Worker: the harness URL, `pointer.mainplane.ai`, its peers, STUN,
+  `dl.mainplane.ai` (updates), GitHub (Bun) and wintun.net (Windows).
+- Agents: whatever their commands reach, and `bugs.mainplane.ai` when an
+  agent sends a report. The terminal app sends a crash report there only
+  when you say yes.
+
+Each service is described below.
 
 ## Data privacy
 
