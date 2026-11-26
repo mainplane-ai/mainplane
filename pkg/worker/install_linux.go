@@ -10,6 +10,10 @@ import (
 const (
 	stateDir = "/var/lib/mainplane"
 	unitPath = "/etc/systemd/system/mainplaned.service"
+	// needrestart (run by unattended-upgrades) restarts services after
+	// library updates; a mainplaned restart kills every run and job.
+	needrestartPath = "/etc/needrestart/conf.d/mainplane.conf"
+	needrestartConf = "$nrconf{override_rc}{qr(^mainplaned\\.service$)} = 0;\n"
 )
 
 const unit = `[Unit]
@@ -35,6 +39,12 @@ func Install(token string) error {
 	if err := os.WriteFile(unitPath, fmt.Appendf(nil, unit, Bin), 0o644); err != nil {
 		return err
 	}
+	if err := os.MkdirAll("/etc/needrestart/conf.d", 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(needrestartPath, []byte(needrestartConf), 0o644); err != nil {
+		return err
+	}
 	if err := run("systemctl", "daemon-reload"); err != nil {
 		return err
 	}
@@ -52,7 +62,7 @@ func Install(token string) error {
 // A stop that fails is an error, since the worker would run on.
 func unregister() error {
 	if _, err := os.Stat(unitPath); errors.Is(err, fs.ErrNotExist) {
-		return nil
+		return dropNeedrestart()
 	}
 	if err := run("systemctl", "disable", "--now", "mainplaned"); err != nil {
 		return err
@@ -60,5 +70,17 @@ func unregister() error {
 	if err := os.Remove(unitPath); err != nil {
 		return err
 	}
+	if err := dropNeedrestart(); err != nil {
+		return err
+	}
 	return run("systemctl", "daemon-reload")
+}
+
+// dropNeedrestart removes the needrestart override; none is fine. Callers run
+// it once the worker is stopped, so a running worker keeps it.
+func dropNeedrestart() error {
+	if err := os.Remove(needrestartPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
 }
