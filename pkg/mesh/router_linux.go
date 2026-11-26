@@ -6,8 +6,13 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"os"
 	"os/exec"
+	"slices"
 	"strings"
+	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -74,8 +79,50 @@ func add(tun string, a netip.Prefix) error {
 	return nil
 }
 
-// keep puts back a's route and rule when something took them away, as
-// systemd-networkd does with every rule it did not make when it starts.
+// watchRules calls f each time an IPv6 rule of this machine goes, until
+// the func it returns stops it. Each time systemd-networkd configures a
+// link, as at every start, it removes every rule it did not make, ours too.
+// Without the rule a connection to the harness stalls until TCP gives up,
+// minutes later. A rule of tailscale's own router comes back the same way,
+// but its monitor hears IPv4 rules only.
+func watchRules(f func()) (func() error, error) {
+	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, unix.NETLINK_ROUTE)
+	if err != nil {
+		return nil, fmt.Errorf("watching rules: %w", err)
+	}
+	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK, Groups: 1 << (unix.RTNLGRP_IPV6_RULE - 1)}); err != nil {
+		_ = unix.Close(fd)
+		return nil, fmt.Errorf("watching rules: %w", err)
+	}
+	// On the runtime's poller, so that Close ends a Read that waits.
+	s := os.NewFile(uintptr(fd), "netlink")
+	go func() {
+		b := make([]byte, 1<<16)
+		for {
+			n, err := s.Read(b)
+			switch {
+			case errors.Is(err, os.ErrClosed):
+				return
+			case errors.Is(err, unix.ENOBUFS): // messages were lost, a deletion maybe
+				f()
+			case err != nil:
+				log.Printf("mesh: watching rules: %v", err)
+				return
+			default:
+				ms, err := syscall.ParseNetlinkMessage(b[:n])
+				if err != nil {
+					log.Printf("mesh: watching rules: %v", err) // a deletion maybe
+				}
+				if err != nil || slices.ContainsFunc(ms, func(m syscall.NetlinkMessage) bool { return m.Header.Type == unix.RTM_DELRULE }) {
+					f()
+				}
+			}
+		}
+	}()
+	return s.Close, nil
+}
+
+// keep puts back a's route and rule when something took them away.
 func keep(tun string, a netip.Prefix) error {
 	p := project(a).String()
 	if err := run("ip", "-6", "route", "replace", p, "dev", tun, "table", table); err != nil {

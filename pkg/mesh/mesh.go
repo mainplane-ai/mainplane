@@ -118,6 +118,10 @@ func Up(dir, harness, url, secret, name string) (*Mesh, error) {
 		return nil, err
 	}
 	rt := &osRouter{tun: tun}
+	if rt.unwatch, err = watchRules(rt.restore); err != nil {
+		_ = dev.Close()
+		return nil, err
+	}
 	// The TUN is read from inside the engine, before eng is set.
 	var eng wgengine.Engine
 	engUp := make(chan struct{})
@@ -152,6 +156,7 @@ func Up(dir, harness, url, secret, name string) (*Mesh, error) {
 		Metrics:       sys.UserMetricsRegistry(),
 	})
 	if err != nil {
+		_ = rt.Close()
 		_ = dev.Close()
 		return nil, err
 	}
@@ -218,14 +223,7 @@ func Up(dir, harness, url, secret, name string) (*Mesh, error) {
 
 // Reroute puts back this node's route and rule if something took them away.
 // The worker calls it when the harness's address is unreachable.
-func (m *Mesh) Reroute() error {
-	m.router.mu.Lock()
-	defer m.router.mu.Unlock()
-	if !m.router.addr.IsValid() {
-		return nil
-	}
-	return keep(m.router.tun, m.router.addr)
-}
+func (m *Mesh) Reroute() error { return m.router.reroute() }
 
 // Removed marks a mesh directory whose node the harness removed. Its keys
 // stay refused, so they stay too, until an install starts the node anew.
@@ -309,9 +307,10 @@ func Clean() error {
 // and routes the address's /48, the project's, to it. Every other route the
 // engine asks for is ignored: no peer has more than its address.
 type osRouter struct {
-	mu   sync.Mutex // Set is the engine's, Reroute the worker's
-	tun  string
-	addr netip.Prefix
+	mu      sync.Mutex // Set is the engine's, reroute the worker's and the rule watch's
+	tun     string
+	addr    netip.Prefix
+	unwatch func() error // ends the rule watch
 }
 
 func (r *osRouter) Set(c *router.Config) error {
@@ -344,7 +343,26 @@ func (r *osRouter) Set(c *router.Config) error {
 	return nil
 }
 
-func (r *osRouter) Close() error { return r.Set(nil) }
+// Close takes the address, route and rule away and ends the rule watch. The
+// engine calls it when it closes.
+func (r *osRouter) Close() error { return errors.Join(r.Set(nil), r.unwatch()) }
+
+// restore is reroute for the rule watch, which has only the log to tell.
+func (r *osRouter) restore() {
+	if err := r.reroute(); err != nil {
+		log.Printf("mesh: reroute: %v", err)
+	}
+}
+
+// reroute puts back the route and rule of r's address if they are gone.
+func (r *osRouter) reroute() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.addr.IsValid() {
+		return nil
+	}
+	return keep(r.tun, r.addr)
+}
 
 // project is the /48 of address a.
 func project(a netip.Prefix) netip.Prefix { return netip.PrefixFrom(a.Addr(), 48).Masked() }
