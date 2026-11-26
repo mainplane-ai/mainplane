@@ -3,9 +3,11 @@ package worker
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"maps"
 	"net"
 	"net/netip"
@@ -14,7 +16,9 @@ import (
 	"os/user"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -31,6 +35,8 @@ const (
 	probeWait = 5 * time.Second
 	mountWait = time.Minute
 	nfsPort   = "2049"
+	// osascript with the bridge starts in well under a second.
+	favWait = 30 * time.Second
 )
 
 // NFSv4.0, the newest the macOS client speaks before macOS 26, so locks are
@@ -69,6 +75,7 @@ func reconcile(want Desired, _ *user.User) []Drive {
 		}
 		have = append(have, d)
 	}
+	favorites(want, have) // before an unmount, while a leaving drive's Favorite still resolves
 	for _, p := range slices.Sorted(maps.Keys(at)) {
 		if ours(p, at[p]) && !wanted[p] {
 			if err := unmount(p, false); err != nil {
@@ -77,6 +84,125 @@ func reconcile(want Desired, _ *user.User) []Drive {
 		}
 	}
 	return have
+}
+
+// favsFile holds, for each user by uid, each drive whose Finder sidebar
+// Favorite the worker saw to, and whether the worker added it, so one the
+// user removed stays removed and one the user made stays theirs.
+var favsFile = filepath.Join(stateDir, "favorites.json")
+
+// favJS adds the Favorite for path, unless one is there, and prints added,
+// or removes it. An item whose volume is not mounted resolves to nothing and
+// is known by its name. LSSharedFileList is deprecated but the only API for
+// the list; it needs no privacy grant, and Finder is not asked, so no prompt
+// shows.
+const favJS = `ObjC.import('CoreServices')
+function run([verb, path]) {
+  const list = $.LSSharedFileListCreate($(), $.kLSSharedFileListFavoriteItems, $())
+  const items = ObjC.castRefToObject($.LSSharedFileListCopySnapshot(list, Ref()))
+  for (let i = 0; i < items.count; i++) {
+    const it = items.objectAtIndex(i)
+    const u = ObjC.castRefToObject($.LSSharedFileListItemCopyResolvedURL(it, $.kLSSharedFileListNoUserInteraction | $.kLSSharedFileListDoNotMountVolumes, $()))
+    const name = ObjC.unwrap(ObjC.castRefToObject($.LSSharedFileListItemCopyDisplayName(it)))
+    if (u.isNil() ? name != path.split('/').pop() : ObjC.unwrap(u.path) != path) continue
+    if (verb == 'add') return
+    if ($.LSSharedFileListItemRemove(list, it)) throw new Error('could not remove ' + name)
+    return
+  }
+  if (verb != 'add') return
+  if (!$.LSSharedFileListInsertItemURL(list, $.kLSSharedFileListItemLast, $(), $(), $.NSURL.fileURLWithPath(path), $(), $())) throw new Error('could not add ' + path)
+  return 'added'
+}`
+
+// favErr is the last Favorite failure logged, so one that repeats each
+// round is logged once.
+var favErr string
+
+// favorites gives the user at the screen a Finder sidebar Favorite for each
+// drive once, when it is first mounted, and takes the ones it added away
+// when the drive is no longer this worker's. A Favorite is only a shortcut:
+// a failure is logged and tried again next round, never the drive's error.
+// With no one logged in at the screen it waits.
+func favorites(want Desired, have []Drive) {
+	if os.Geteuid() != 0 {
+		return
+	}
+	fi, err := os.Stat("/dev/console")
+	if err != nil {
+		favLog(err)
+		return
+	}
+	uid := strconv.FormatUint(uint64(fi.Sys().(*syscall.Stat_t).Uid), 10)
+	if uid == "0" { // the login window
+		return
+	}
+	all := map[string]map[string]bool{}
+	b, err := os.ReadFile(favsFile)
+	if err == nil {
+		err = json.Unmarshal(b, &all)
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		favLog(err)
+		return
+	}
+	seen, changed := all[uid], false
+	if seen == nil {
+		seen = map[string]bool{}
+	}
+	for n, ours := range seen {
+		if slices.ContainsFunc(want.Mount, func(m Mount) bool { return m.Name == n }) {
+			continue
+		}
+		if ours {
+			if _, err := favorite(uid, "remove", filepath.Join(mountsDir, n)); err != nil {
+				favLog(err)
+				continue
+			}
+		}
+		delete(seen, n)
+		changed = true
+	}
+	for _, d := range have {
+		if _, ok := seen[d.Name]; ok || d.State != Mounted {
+			continue
+		}
+		out, err := favorite(uid, "add", d.Path)
+		if err != nil {
+			favLog(err)
+			continue
+		}
+		seen[d.Name], changed = out == "added", true
+	}
+	if !changed {
+		return
+	}
+	all[uid] = seen
+	if b, err = json.Marshal(all); err == nil {
+		err = os.WriteFile(favsFile, b, 0o644)
+	}
+	if err != nil {
+		favLog(err)
+	}
+}
+
+// favorite runs favJS as user uid, in their login session, where their
+// sidebar's list is, and returns what it printed.
+func favorite(uid, verb, path string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), favWait)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "launchctl", "asuser", uid, "/usr/bin/sudo", "-n", "-H", "-u", "#"+uid, "--",
+		"/usr/bin/osascript", "-l", "JavaScript", "-e", favJS, verb, path).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%s %s: %w: %s", verb, path, err, bytes.TrimSpace(out))
+	}
+	return string(bytes.TrimSpace(out)), nil
+}
+
+func favLog(err error) {
+	if s := err.Error(); s != favErr {
+		favErr = s
+		log.Printf("drives: Finder Favorite: %v", err)
+	}
 }
 
 // mount puts drive m at p over NFS from its server. src is what is mounted
