@@ -99,7 +99,7 @@ func add(_ string, a netip.Prefix) error {
 func keep(string, netip.Prefix) error { return nil }
 
 // watchRules has nothing to watch, as keep has nothing to check.
-func watchRules(func()) error { return nil }
+func watchRules(func()) (func() error, error) { return func() error { return nil }, nil }
 
 // dropRule removes the firewall rule, which outlives a worker that was killed.
 func dropRule() { _ = run("netsh", "advfirewall", "firewall", "delete", "rule", "name="+rule) }

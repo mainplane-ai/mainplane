@@ -118,7 +118,7 @@ func Up(dir, harness, url, secret, name string) (*Mesh, error) {
 		return nil, err
 	}
 	rt := &osRouter{tun: tun}
-	if err := watchRules(rt.restore); err != nil {
+	if rt.unwatch, err = watchRules(rt.restore); err != nil {
 		_ = dev.Close()
 		return nil, err
 	}
@@ -156,6 +156,7 @@ func Up(dir, harness, url, secret, name string) (*Mesh, error) {
 		Metrics:       sys.UserMetricsRegistry(),
 	})
 	if err != nil {
+		_ = rt.Close()
 		_ = dev.Close()
 		return nil, err
 	}
@@ -306,9 +307,10 @@ func Clean() error {
 // and routes the address's /48, the project's, to it. Every other route the
 // engine asks for is ignored: no peer has more than its address.
 type osRouter struct {
-	mu   sync.Mutex // Set is the engine's, reroute the worker's and the rule watch's
-	tun  string
-	addr netip.Prefix
+	mu      sync.Mutex // Set is the engine's, reroute the worker's and the rule watch's
+	tun     string
+	addr    netip.Prefix
+	unwatch func() error // ends the rule watch
 }
 
 func (r *osRouter) Set(c *router.Config) error {
@@ -341,7 +343,9 @@ func (r *osRouter) Set(c *router.Config) error {
 	return nil
 }
 
-func (r *osRouter) Close() error { return r.Set(nil) }
+// Close takes the address, route and rule away and ends the rule watch. The
+// engine calls it when it closes.
+func (r *osRouter) Close() error { return errors.Join(r.Set(nil), r.unwatch()) }
 
 // restore is reroute for the rule watch, which has only the log to tell.
 func (r *osRouter) restore() {
