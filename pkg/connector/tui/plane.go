@@ -166,6 +166,9 @@ func (p *plane) flown() bool {
 }
 
 func (p *plane) Draw(a *App, c *Canvas, r Rect) {
+	if a.T.Caps.Linux { // no braille in its fonts
+		return
+	}
 	now := time.Now()
 	if p.last.IsZero() {
 		p.last = now

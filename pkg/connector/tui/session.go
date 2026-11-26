@@ -328,9 +328,9 @@ func (s *session) Key(a *App, k term.Key) bool {
 		}
 	case "ctrl+p", "f1":
 		s.palette(a)
-	case "ctrl+up":
+	case "ctrl+up", "alt+p": // the Linux console sends Ctrl+Up as Up
 		s.list.step(a, -1)
-	case "ctrl+down":
+	case "ctrl+down", "alt+n":
 		s.list.step(a, 1)
 	default:
 		for _, c := range commands() {

@@ -255,6 +255,12 @@ func parseOne(b []byte) (int, Event) {
 	}
 	switch b[1] {
 	case '[':
+		if len(b) > 3 && b[2] == '[' { // the Linux console's F1 to F5: ESC [ [ A to E
+			if b[3] == 'A' {
+				return 4, Key{Code: KeyF1}
+			}
+			return 4, nil
+		}
 		for i := 2; i < len(b); i++ {
 			switch c := b[i]; {
 			case c >= 0x40 && c <= 0x7e:
