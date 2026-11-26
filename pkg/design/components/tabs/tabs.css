@@ -1,4 +1,4 @@
-.tabs { display: flex; gap: 18px; box-shadow: inset 0 calc(-1 * var(--hairline)) 0 var(--color-separator); }
+.tabs { display: flex; gap: 18px; border-bottom: var(--hairline) solid var(--color-separator); }
 .tabs > button { all: unset; cursor: default; position: relative; padding: 8px 0 9px; font: 500 13px/18px var(--font-text); color: var(--color-text-2); display: inline-flex; gap: 5px; align-items: center; }
 .tabs > button:hover { color: var(--color-text); }
 .tabs > button[aria-selected="true"] { color: var(--color-text); font-weight: 600; }
