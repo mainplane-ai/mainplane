@@ -37,7 +37,7 @@ func update(v string) (string, error) {
 	}
 	exe, err := os.Executable()
 	if err == nil {
-		err = Upgrade(exe, v)
+		exe, err = Upgrade(exe, v)
 	}
 	if err != nil {
 		wait := retryMin

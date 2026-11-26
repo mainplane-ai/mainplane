@@ -320,7 +320,7 @@ func update(v string) {
 		_ = os.Remove(f.Name())
 	}
 	fmt.Printf("mainplane %s -> %s, your mainplane-server's release: downloading\n", version.V, v)
-	if err := worker.Upgrade(exe, v); err != nil {
+	if _, err := worker.Upgrade(exe, v); err != nil {
 		log.Fatal(err)
 	}
 }
