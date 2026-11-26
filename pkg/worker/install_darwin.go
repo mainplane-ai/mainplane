@@ -10,6 +10,7 @@ import (
 
 	"github.com/mainplane-ai/mainplane/pkg/release"
 	"github.com/mainplane-ai/mainplane/pkg/version"
+	"golang.org/x/mod/semver"
 )
 
 // launchd removes a daemon a few milliseconds after it exits, which an
@@ -96,12 +97,23 @@ func linked() bool {
 
 // Upgrade makes exe release v's: Bin, once linked, by v's App, whether exe
 // is the link or the binary it points to.
+// Releases before firstApp have no App: Bin becomes their bare binary, as
+// they installed it, and App goes.
 func Upgrade(exe, v string) error {
 	if (exe == Bin || exe == appBin) && linked() {
-		return bundle(v)
+		if semver.Compare(v, firstApp) >= 0 {
+			return bundle(v)
+		}
+		if err := release.Install(Bin, "mainplane", v); err != nil {
+			return err
+		}
+		return os.RemoveAll(App)
 	}
 	return release.Install(exe, "mainplane", v)
 }
+
+// firstApp is the first release with an App.
+const firstApp = "v0.6.1-rc.1"
 
 // Rebundle moves a service that runs a bare Bin, as releases before App
 // left it, into App, and restarts it from there. A build with no release, or
