@@ -1,6 +1,7 @@
 // The composer is where the user writes to an agent (the design system's
 // composer): + adds files, the mic dictates until there is text or a file,
-// then it is send. Enter sends, Shift+Enter is a new line.
+// then it is send. Enter sends, Shift+Enter is a new line. On a touch screen
+// Return is a new line and only the send button sends.
 
 import { acted, api, h, icon } from "./api"
 
@@ -36,6 +37,8 @@ async function shrink(f: File): Promise<File> {
 // sits right on the keyboard (app.css). With no field in focus the page is the screen: an iOS home-screen
 // app can report a stale visual viewport, and a page taller than the screen does not scroll its list.
 const vv = window.visualViewport
+// fingers is a phone or tablet in hand: no hover, a finger. An iPad with a trackpad or mouse hovers, so Enter sends there.
+const fingers = () => matchMedia("(pointer: coarse) and (hover: none)").matches
 const typing = () => document.activeElement?.matches("textarea, input:not([type=checkbox], [type=radio], [type=range], [type=button], [type=submit], [type=file], [type=color]), [contenteditable]") ?? false
 const fit = () => {
   const s = document.documentElement.style
@@ -221,8 +224,9 @@ export function composer(agent: string, placeholder: string): HTMLElement {
     }
   }
   box.oninput = update
+  box.onfocus = () => (box.enterKeyHint = fingers() ? "enter" : "send") // the on-screen key reads return, or send
   box.onkeydown = e => {
-    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return
+    if (e.key !== "Enter" || e.shiftKey || e.isComposing || fingers()) return
     e.preventDefault()
     form.requestSubmit()
   }
