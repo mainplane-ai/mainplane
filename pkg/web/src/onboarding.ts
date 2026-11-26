@@ -15,7 +15,7 @@ export async function setUp() {
   return onboarded()
 }
 
-type Worker = { name: string; refused?: string; drive_server?: boolean }
+export type Worker = { name: string; refused?: string; drive_server?: boolean }
 type Step = "welcome" | "login" | "provider" | "sharing" | "workers" | "device" | "drive"
 
 const script = "https://mainplane.ai/install"
@@ -26,7 +26,7 @@ const lines = (args: string): [string, string, string][] => [
 
 // veil blurs what holds a key until it is clicked, and again on the next click, so a shared screen or a
 // screenshot does not give it away. A click that ends a text selection leaves it as it is.
-function veil<T extends HTMLElement>(el: T, what: string): T {
+export function veil<T extends HTMLElement>(el: T, what: string): T {
   const label = h("span", { className: "veil-label" }, "Show " + what)
   el.classList.add("veil", "veiled")
   el.append(label)
@@ -35,7 +35,7 @@ function veil<T extends HTMLElement>(el: T, what: string): T {
 }
 
 // install is the one-line install with its OS picked, the secret veiled, and Copy.
-function install(args: string): HTMLElement {
+export function install(args: string): HTMLElement {
   const ls = lines(args)
   const code = h("code")
   const copy = h("button", { className: "btn plain sm", type: "button" }, icon("copy"), h("span", null, "Copy"))
@@ -49,6 +49,30 @@ function install(args: string): HTMLElement {
   }
   pick(/Win/.test(navigator.platform) ? 1 : 0)
   return h("div", { className: "install" }, seg, veil(h("pre", null, code), "Command"), h("div", { className: "actions" }, copy))
+}
+
+// workerRows are the connected workers, each with why the harness refused it if it did.
+export const workerRows = (ws: Worker[]) => h("div", { className: "form" }, ...ws.map(w =>
+  h("div", { className: "form-row" }, icon("computer"), h("span", { className: "row-main" }, h("b", null, w.name), ...(w.refused ? [h("small", null, "Refused: " + w.refused)] : [])))))
+
+// deviceKey makes the API key for another device: the first web-N free, as the terminal app makes tui-N.
+export async function deviceKey(): Promise<string> {
+  for (let i = 1; ; i++) {
+    const r = await fetch("/keys", { method: "POST", headers: { Authorization: "Bearer " + key() }, body: JSON.stringify({ name: "web-" + i }) })
+    if (r.status === 409) continue
+    if (!r.ok) throw new Error((await r.text()).trim() || r.statusText)
+    return (await r.json()).key
+  }
+}
+
+// loginLink is the login link of a key as a QR code for a phone's camera, and as text to copy, its key blurred until pointed at.
+export async function loginLink(k: string): Promise<HTMLElement[]> {
+  const at = location.origin + "/#k=", link = at + encodeURIComponent(k)
+  const { renderSVG } = await import(new URL("qrcode.js", import.meta.url).href) as { renderSVG: (s: string, o?: { pixelSize?: number }) => string }
+  const qr = veil(Object.assign(h("div", { className: "qr" }), { innerHTML: renderSVG(link, { pixelSize: 4 }) }), "QR Code")
+  const copy = h("button", { className: "btn plain sm", type: "button" }, icon("copy"), h("span", null, "Copy Link"))
+  copy.onclick = () => navigator.clipboard.writeText(link).then(() => (copy.lastElementChild!.textContent = "Copied"))
+  return [qr, h("div", { className: "install" }, veil(h("pre", null, h("code", null, at, h("span", { className: "secret" }, encodeURIComponent(k)))), "Link"), h("div", { className: "actions" }, copy))]
 }
 
 // again opens it from the start in a browser where it ran (/welcome).
@@ -128,8 +152,7 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, again: 
           if (join && !lines.firstChild) lines.append(install(join)) // the lines stay put while the workers under them change
           box.replaceChildren(
             ...(network && network !== "ready" ? [h("p", { className: "note" }, network === "starting" ? "The network is starting. The lines work once it is ready." : "The network failed: " + network)] : []),
-            ...(ws.length ? [h("p", { className: "section-l" }, "Connected"), h("div", { className: "form" }, ...ws.map(w =>
-              h("div", { className: "form-row" }, icon("computer"), h("span", { className: "row-main" }, h("b", null, w.name), ...(w.refused ? [h("small", null, "Refused: " + w.refused)] : [])))))] : []))
+            ...(ws.length ? [h("p", { className: "section-l" }, "Connected"), workerRows(ws)] : []))
           next.disabled = !ws.some(w => !w.refused)
           later.hidden = !next.disabled
         }
@@ -139,14 +162,7 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, again: 
       case "device": {
         const box = h("div", null, h("p", { className: "note" }, minted ? "" : "Making an API key..."))
         // The login link as a QR code for a phone's camera, and as text to copy, its key blurred until pointed at.
-        const show = async () => {
-          const at = location.origin + "/#k=", link = at + encodeURIComponent(minted)
-          const { renderSVG } = await import(new URL("qrcode.js", import.meta.url).href) as { renderSVG: (s: string, o?: { pixelSize?: number }) => string }
-          const qr = veil(Object.assign(h("div", { className: "qr" }), { innerHTML: renderSVG(link, { pixelSize: 4 }) }), "QR Code")
-          const copy = h("button", { className: "btn plain sm", type: "button" }, icon("copy"), h("span", null, "Copy Link"))
-          copy.onclick = () => navigator.clipboard.writeText(link).then(() => (copy.lastElementChild!.textContent = "Copied"))
-          box.replaceChildren(qr, h("div", { className: "install" }, veil(h("pre", null, h("code", null, at, h("span", { className: "secret" }, encodeURIComponent(minted)))), "Link"), h("div", { className: "actions" }, copy)))
-        }
+        const show = async () => box.replaceChildren(...await loginLink(minted))
         page("Use Mainplane on Another Device", "Your projects and chats are on every device logged in to this harness. Show the code and scan it with a phone's camera, or open the link in another browser.",
           [box], button("Continue", () => move(1)))
         if (minted) void show()
@@ -166,17 +182,9 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, again: 
     live?.()
   }
 
-  // mint makes the API key for another device: the first web-N free, as the terminal app makes tui-N.
+  // mint makes the one key of this onboarding's other device.
   let minting: Promise<void> | null = null
-  const mint = () => (minting ??= (async () => {
-    for (let i = 1; ; i++) {
-      const r = await fetch("/keys", { method: "POST", headers: { Authorization: "Bearer " + key() }, body: JSON.stringify({ name: "web-" + i }) })
-      if (r.status === 409) continue
-      if (!r.ok) { minting = null; throw new Error((await r.text()).trim() || r.statusText) }
-      minted = (await r.json()).key
-      return
-    }
-  })())
+  const mint = () => (minting ??= deviceKey().then(k => void (minted = k), e => { minting = null; throw e }))
 
   // poll reads what the steps show every second and a half while the onboarding is on screen.
   let polling = false

@@ -60,8 +60,8 @@ main > .tabs { margin: 0 16px }
 .onboard .providers .empty { display: none } /* the step's title says it */
 .onboard .form-row > mp-icon { color: var(--color-text-2) }
 .onboard .section-l { margin-top: 20px }
-.onboard .qr { width: 200px; margin: 0 auto 20px; padding: 12px; border-radius: var(--radius-10); background: #fff } /* black on white in dark mode too: cameras read it best */
-.onboard .qr > svg { display: block; width: 100% }
+.qr { width: 200px; margin: 0 auto 20px; padding: 12px; border-radius: var(--radius-10); background: #fff } /* black on white in dark mode too: cameras read it best */
+.qr > svg { display: block; width: 100% }
 /* A veiled thing holds a key: blurred, its Show label over it, until a click (the QR code, the link, an install line) */
 .veil { position: relative; cursor: pointer }
 .veil > :not(.veil-label) { transition: filter .2s, opacity .2s }
