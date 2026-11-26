@@ -170,6 +170,9 @@ func update(conn net.Conn, br *bufio.Reader) error {
 		return err
 	}
 	f, err := worker.Decode(br)
+	for err == nil && f.Kind == worker.Status { // a drive change can come before the answer
+		f, err = worker.Decode(br)
+	}
 	if err != nil {
 		return fmt.Errorf("update: %w", err)
 	}
