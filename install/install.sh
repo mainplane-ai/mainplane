@@ -27,6 +27,11 @@ arm64 | aarch64) arch=arm64 ;;
 *) echo "no mainplane build for $(uname -m)" >&2; exit 1 ;;
 esac
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
+# The Go runtime of the binaries needs macOS 12 or later.
+if [ "$os" = darwin ] && [ "$(sw_vers -productVersion | cut -d. -f1)" -lt 12 ]; then
+  echo "Mainplane needs macOS 12 or later" >&2
+  exit 1
+fi
 t=$(mktemp -d)
 trap 'rm -rf "$t"' EXIT
 cd "$t"
@@ -41,7 +46,7 @@ get() {
   echo "downloading $1 $v"
   fetch "$dl/$1-$os-$arch"
   grep " $1-$os-$arch\$" SHA256SUMS > sum || { echo "release $v has no $1-$os-$arch" >&2; exit 1; }
-  if command -v sha256sum > /dev/null; then sha256sum --quiet -c sum; else shasum -a 256 --quiet -c sum; fi
+  if command -v sha256sum > /dev/null; then sha256sum -c sum; else shasum -a 256 -c sum; fi > /dev/null
   chmod 755 "$1-$os-$arch"
   mv "$1-$os-$arch" "$1"
 }
