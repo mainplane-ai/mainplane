@@ -25,7 +25,8 @@ const (
 	// App is the bundle the service runs from, Bin a link to its binary, so
 	// macOS privacy settings show the worker as Mainplane with its icon, and
 	// keep a grant by its bundle id and Developer ID across releases.
-	App = "/Applications/Mainplane.app"
+	App    = "/Applications/Mainplane.app"
+	appBin = App + "/Contents/MacOS/mainplane"
 )
 
 const plist = `<?xml version="1.0" encoding="UTF-8"?>
@@ -81,7 +82,7 @@ func bundle(v string) error {
 	if err := os.Remove(Bin + ".new"); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	if err := os.Symlink(App+"/Contents/MacOS/mainplane", Bin+".new"); err != nil {
+	if err := os.Symlink(appBin, Bin+".new"); err != nil {
 		return err
 	}
 	return os.Rename(Bin+".new", Bin)
@@ -93,9 +94,10 @@ func linked() bool {
 	return err == nil && fi.Mode()&fs.ModeSymlink != 0
 }
 
-// Upgrade makes exe release v's: Bin, once linked, by v's App.
+// Upgrade makes exe release v's: Bin, once linked, by v's App, whether exe
+// is the link or the binary it points to.
 func Upgrade(exe, v string) error {
-	if exe == Bin && linked() {
+	if (exe == Bin || exe == appBin) && linked() {
 		return bundle(v)
 	}
 	return release.Install(exe, "mainplane", v)
