@@ -298,7 +298,7 @@ main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--compose
 :root:not(.pop)::view-transition-new(root), .pop::view-transition-old(root) { box-shadow: -4px 0 12px rgb(0 0 0 / .06) }
 .tab main > .toolbar:not([hidden]) { view-transition-name: head }
 .tab::view-transition-group(head) { animation: none }
-/* A dashboard's picture opened large (Photos): dark behind it, the whole picture or, when tall, its full width scrolled; a glass close at the top. */
+/* A dashboard's picture opened large (Photos): dark behind it, the whole picture or, when tall, as wide as it fits (never past its own size) and scrolled; a glass close at the top. */
 .lightbox { position: fixed; inset: 0; z-index: var(--z-sheet); display: grid; grid-template: 100% / 100%; overflow: auto; overscroll-behavior: contain; padding: 56px 24px 24px; box-sizing: border-box; background: rgb(0 0 0 / .86); animation: mp-fade var(--duration-fast) var(--ease-standard) }
 .lightbox > canvas { margin: auto; max-width: 100%; max-height: 100%; border-radius: 12px; corner-shape: round }
 .lightbox.tall > canvas { max-height: none }
