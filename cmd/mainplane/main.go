@@ -48,7 +48,7 @@ func main() {
 		return
 	}
 	if len(os.Args) > 2 && os.Args[1] == "worker" && (os.Args[2] == "remove" || os.Args[2] == "rename" || os.Args[2] == "token") {
-		cli("worker "+os.Args[2], os.Args[3:])
+		cli(workerVerb(os.Args[2:]))
 		return
 	}
 	if len(os.Args) > 2 && (os.Args[1] == "agent" || os.Args[1] == "secret" || (os.Args[1] == "app" && len(os.Args) == 4 && (os.Args[2] == "start" || os.Args[2] == "stop"))) {
@@ -409,8 +409,8 @@ func usage() {
   worker     remove <name>           DELETE /workers/{name}: it leaves the mesh for good; mainplane-server join cycle
                                      too keeps the device code it had from joining machines again
   worker     token <name>            POST /workers/tokens: a join token that makes one machine worker <name>, as
-                                     mainplane worker <token> or mainplane install <token>; refused if that worker is
-                                     live, and spent either way. The device code stays off that machine
+                                     mainplane worker <token> or mainplane install <token>; refused if a worker, online
+                                     or not, has that name, and spent either way. The device code stays off that machine
   worker     token revoke <name>     DELETE /workers/tokens/{name}: the unspent token joins no machine
   worker     rename <name> <new>     PUT  /workers/{name}/name: same keys and address; links, drives and sessions
                                      keep naming the old name. Refused for a drive's server

@@ -133,7 +133,7 @@ type Coordinator struct {
 // New loads the Noise key and the nodes from dir, made there the first time.
 // secret is the harness key. join checks a join secret sent from addr and
 // returns the name it gives the node: worker.Admin, a one-time join token's,
-// which no live node may hold, or none. Each
+// which no node may hold, or none. Each
 // ephemeral node loaded has idle from now to poll again.
 func New(dir string, secret []byte, join func(secret, addr string) (string, error)) (*Coordinator, error) {
 	k, err := noiseKey(filepath.Join(dir, "noise.key"))

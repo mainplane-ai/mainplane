@@ -36,7 +36,7 @@ const resultLines = 20
 // number.
 var arity = map[string][2]int{
 	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {0, 1}, "retry": {1, 1}, "stop": {1, 1}, "delete": {1, 1},
-	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "worker remove": {1, 1}, "worker rename": {2, 2}, "worker token": {1, 2}, "providers": {0, 0}, "provider": {3, 4}, "key": {2, 2}, "signin": {1, 1}, "web": {0, 0},
+	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "worker remove": {1, 1}, "worker rename": {2, 2}, "worker token": {1, 1}, "worker token revoke": {1, 1}, "providers": {0, 0}, "provider": {3, 4}, "key": {2, 2}, "signin": {1, 1}, "web": {0, 0},
 	"agents": {0, 1}, "agent new": {0, 0}, "agent info": {1, 1}, "agent message": {2, -1}, "agent retry": {1, 1}, "agent stop": {1, 1}, "agent delete": {1, 1}, "agent name": {1, -1}, "agent config": {1, 1}, "agent apps": {1, -1}, "agent instructions": {1, 1},
 	"apps": {0, 0}, "app start": {1, 1}, "app stop": {1, 1}, "secrets": {0, 0}, "secret set": {1, 2}, "secret delete": {1, 1}, "skill": {0, 1}, "app": {3, 4},
 }
@@ -44,6 +44,15 @@ var arity = map[string][2]int{
 // methods are what the app verb calls an app with: the standard ones. A
 // word that is none of them is a slip, not a method.
 var methods = []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE"}
+
+// workerVerb is the verb and arguments of mainplane worker <args>, where
+// token revoke is a verb of its own.
+func workerVerb(args []string) (string, []string) {
+	if len(args) > 2 && args[0] == "token" && args[1] == "revoke" {
+		return "worker token revoke", args[2:]
+	}
+	return "worker " + args[0], args[1:]
+}
 
 // cli is the harness API as verbs: one verb, one route, its reply printed.
 // The harness and the key come from login; nothing else is remembered or
@@ -131,14 +140,9 @@ func cli(verb string, args []string) {
 		}
 	case "worker remove":
 		c.call("DELETE", "/workers/"+url.PathEscape(args[0]), "", nil, nil)
+	case "worker token revoke":
+		c.call("DELETE", "/workers/tokens/"+url.PathEscape(args[0]), "", nil, nil)
 	case "worker token":
-		if len(args) == 2 && args[0] == "revoke" {
-			c.call("DELETE", "/workers/tokens/"+url.PathEscape(args[1]), "", nil, nil)
-			return
-		}
-		if len(args) == 2 {
-			usage()
-		}
 		b, _ := json.Marshal(map[string]string{"name": args[0]}) // a string: it cannot fail
 		var out struct{ Token string }
 		c.call("POST", "/workers/tokens", "application/json", bytes.NewReader(b), &out)
