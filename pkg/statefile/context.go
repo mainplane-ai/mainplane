@@ -105,7 +105,7 @@ func ContextUsed(chain []Record) int {
 // file's, so a caller that holds the lock knows better than this.
 func Derive(chain []Record) Status {
 	i := len(chain) - 1
-	for chain[i].Kind == Name || chain[i].Kind == System { // a rename or a note leaves status as it was; record 1 is start
+	for chain[i].Kind == Name || chain[i].Kind == System || chain[i].Kind == Config { // a rename, a note or a config change leaves status as it was; record 1 is start
 		i--
 	}
 	if chain[i].Kind == Error {
