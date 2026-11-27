@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -102,16 +103,25 @@ func reconcile(want Desired, _ *user.User) []Drive {
 	return have
 }
 
+// running is each command line bounded started that has not ended.
+var running sync.Map
+
 // bounded runs a command for at most wait. One stuck in the kernel on a mount
 // whose server is gone outlives its kill; it is left behind rather than
-// waited for, so the next round still comes.
+// waited for, so the next round still comes, and is not started again until
+// it ends.
 func bounded(wait time.Duration, name string, args ...string) ([]byte, error) {
+	key := strings.Join(append([]string{name}, args...), " ")
+	if _, ok := running.LoadOrStore(key, true); ok {
+		return nil, fmt.Errorf("%s: still running from an earlier round", name)
+	}
 	type result struct {
 		out []byte
 		err error
 	}
 	done := make(chan result, 1)
 	go func() {
+		defer running.Delete(key)
 		ctx, cancel := context.WithTimeout(context.Background(), wait)
 		defer cancel()
 		out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
