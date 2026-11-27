@@ -244,6 +244,7 @@ export function composer(agent: string, placeholder: string): HTMLElement {
   })
   update()
   // The composer floats (iOS glass): what is above goes on under it, padded by its height.
-  new ResizeObserver(() => form.parentElement?.style.setProperty("--composer-h", form.offsetHeight + "px")).observe(form)
+  // A kept project's composer hidden behind another view says nothing: its 0 would unpad the one shown.
+  new ResizeObserver(() => form.hidden || form.parentElement?.style.setProperty("--composer-h", form.offsetHeight + "px")).observe(form)
   return form
 }
