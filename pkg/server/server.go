@@ -242,6 +242,9 @@ func Harness(ctx context.Context, path string) error {
 		case hmac.Equal([]byte(secret), []byte(auth.Secret(k, c))):
 			return "", nil
 		}
+		if name, ok, err := store.Take(auth.Join, secret); err != nil || ok {
+			return name, err
+		}
 		limit.Refused(addr)
 		return "", errors.New("join secret refused: install again with the network name and the device code")
 	}
