@@ -302,6 +302,13 @@ func (h *Harness) CreateAgent(ctx context.Context, c AgentCreate, via string) (A
 	if a.Config.Conf, _, err = h.valid(a.Config.Conf); err != nil {
 		return a, err
 	}
+	// The session takes the agent's workers and limit before the agent is
+	// seen, so no post steps it on the ones it had.
+	if _, held := h.Holder(c.Session); !held {
+		if err := h.takeConf(c.Session, via, chain, a.Config); err != nil {
+			return a, err
+		}
+	}
 	// The claim and the checks are one step under amu, so two agents adopting
 	// one session at once cannot both pass, and a delete of the session
 	// either sees the claim before it stops anything or refuses this one.
@@ -415,8 +422,7 @@ func (h *Harness) ListAgents(keep func(Agent) bool) []AgentInfo {
 }
 
 // core is what of a config a session cannot change and go on: all but the
-// workers, which a config record changes, and the limit, which is the
-// agent's to judge.
+// workers and the limit, which a config record changes.
 func core(c statefile.Conf) string {
 	c.Workers, c.ContextLimit = nil, 0
 	if c.Tools == "" {
@@ -428,8 +434,8 @@ func core(c statefile.Conf) string {
 
 // SetAgentConfig is PUT /agents/{id}/config. It makes no session: the next
 // post does, if the live session cannot go on under the new config. When
-// only the workers changed, the live session takes them in place and keeps
-// its prompt cache.
+// only the workers or the context limit changed, the live session takes them
+// in place and keeps its prompt cache.
 func (h *Harness) SetAgentConfig(id, via string, c AgentConfig) error {
 	var err error
 	if c.Conf, _, err = h.valid(c.Conf); err != nil {
@@ -451,12 +457,19 @@ func (h *Harness) SetAgentConfig(id, via string, c AgentConfig) error {
 	if err != nil {
 		return err
 	}
+	return h.takeConf(a.live(), via, chain, c)
+}
+
+// takeConf gives session id, of chain, the workers and the limit of c in
+// place, when they are all of c it lacks. Any other change waits for the
+// next post, which goes on in a new session.
+func (h *Harness) takeConf(id, via string, chain []statefile.Record, c AgentConfig) error {
 	conf, err := config(chain)
 	if err != nil {
 		return err
 	}
-	if core(conf) == core(c.Conf) && !slices.Equal(conf.Workers, c.Workers) && statefile.ContextUsed(chain) < c.ContextLimit {
-		_, err = h.SetWorkers(a.live(), via, c.Workers)
+	if core(conf) == core(c.Conf) && (!slices.Equal(conf.Workers, c.Workers) || conf.ContextLimit != c.ContextLimit) {
+		_, err = h.setConf(id, via, func(s *statefile.Conf) { s.Workers, s.ContextLimit = c.Workers, c.ContextLimit })
 	}
 	return err
 }
@@ -619,8 +632,8 @@ func (h *Harness) stale(a Agent, chain []statefile.Record) string {
 	switch {
 	case core(conf) != core(a.Config.Conf):
 		return "the agent's config changed"
-	case used >= a.Config.ContextLimit:
-		return fmt.Sprintf("context %d reached limit %d", used, a.Config.ContextLimit)
+	case used >= conf.ContextLimit:
+		return fmt.Sprintf("context %d reached limit %d", used, conf.ContextLimit)
 	case a.Config.ColdLimit > 0 && used >= a.Config.ColdLimit && !time.Now().Before(cache.Until):
 		return fmt.Sprintf("context %d reached cold limit %d and the prompt cache expired", used, a.Config.ColdLimit)
 	}

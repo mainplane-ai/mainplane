@@ -168,6 +168,12 @@ func (h *Harness) post(ctx context.Context, id, via, key string, parts []Part, k
 // step running keeps the config it started with; the next step lists the new
 // workers to the model as a change.
 func (h *Harness) SetWorkers(id, via string, workers []statefile.Worker) (int, error) {
+	return h.setConf(id, via, func(c *statefile.Conf) { c.Workers = workers })
+}
+
+// setConf appends a config record: the session's config as change leaves it.
+// The model reads what changed at the next step, so nothing wakes.
+func (h *Harness) setConf(id, via string, change func(*statefile.Conf)) (int, error) {
 	s := h.session(id)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -179,7 +185,7 @@ func (h *Harness) SetWorkers(id, via string, workers []statefile.Worker) (int, e
 	if err != nil {
 		return 0, err
 	}
-	conf.Workers = workers
+	change(&conf)
 	if conf.Workers == nil {
 		conf.Workers = []statefile.Worker{}
 	}

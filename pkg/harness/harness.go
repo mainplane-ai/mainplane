@@ -4,6 +4,7 @@
 package harness
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -296,6 +297,22 @@ const (
 	workersChanged = "Workers (changed):\n"
 )
 
+// limitChanged tells the model a new context limit. The start line keeps the
+// first one, so the prompt before it stays the same bytes.
+const limitChanged = "Context limit changed to %d."
+
+// startLimit is the context limit of the session's first config record.
+func startLimit(chain []statefile.Record) int {
+	for _, r := range chain {
+		if r.Kind == statefile.Config {
+			var c statefile.Conf
+			_ = json.Unmarshal(r.Body, &c)
+			return c.ContextLimit
+		}
+	}
+	return 0
+}
+
 // workers is the session's worker list as the model reads it: what each named
 // worker is right now and the drives it mounts, each it also serves marked,
 // or that it is not connected.
@@ -330,7 +347,7 @@ func (h *Harness) workers(workers []statefile.Worker) string {
 // says so, and the session is failed. A
 // retry of a failed session adds resume as a message from retry. The worker
 // list enters as a system record whenever it differs from the last one the
-// model saw.
+// model saw, and so does a context limit other than the one it was last told.
 func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status, err error) {
 	chain, err := h.Sessions.Load(id)
 	if err != nil {
@@ -363,13 +380,13 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	}
 	// An agent's live session answers to the agent's config: past its limit,
 	// or under a config no longer the agent's, the agent goes on in a new one.
-	limit, changed := conf.ContextLimit, false
+	changed := false
 	if a, ok := h.Holder(id); ok {
-		limit, changed = a.Config.ContextLimit, core(conf) != core(a.Config.Conf)
+		changed = core(conf) != core(a.Config.Conf)
 	}
 	why := ""
-	if p := statefile.ContextUsed(chain); p > limit {
-		why = fmt.Sprintf("context %d exceeds limit %d", p, limit)
+	if p := statefile.ContextUsed(chain); p > conf.ContextLimit {
+		why = fmt.Sprintf("context %d exceeds limit %d", p, conf.ContextLimit)
 	} else if changed {
 		why = "the agent's config changed"
 	}
@@ -384,6 +401,9 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	h.await(ctx, conf.Workers)
 	if list := h.workers(conf.Workers); list != strings.TrimPrefix(strings.TrimPrefix(last(chain, "workers"), workersFirst), workersChanged) {
 		add = append(add, system("workers", workersChanged+list))
+	}
+	if note := fmt.Sprintf(limitChanged, conf.ContextLimit); note != cmp.Or(last(chain, "limit"), fmt.Sprintf(limitChanged, startLimit(chain))) {
+		add = append(add, system("limit", note))
 	}
 	for _, r := range add {
 		if _, err := h.append(s, r); err != nil {
@@ -444,7 +464,7 @@ func rebuilt(p provider.Provider, model string, conf statefile.Conf, chain []sta
 		return ""
 	}
 	records, _ := statefile.Build(chain[:last.Upto])
-	records = clock(records, chain[0].Time, conf.ContextLimit, conf.Input)
+	records = clock(records, chain[0].Time, startLimit(chain), conf.Input)
 	body, _, err := p.Envelope.Compile(provider.Request{Model: model, Key: chain[0].ID, Tools: Tools(conf.Tools, conf.Input), Context: records, Params: conf.Params})
 	if err != nil || fmt.Sprintf("sha256:%x", sha256.Sum256(body)) == last.Request {
 		return ""
@@ -487,7 +507,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 		return "", err
 	}
 	records, upto := statefile.Build(chain)
-	records = clock(records, chain[0].Time, conf.ContextLimit, conf.Input)
+	records = clock(records, chain[0].Time, startLimit(chain), conf.Input)
 	// floor is the last step when calls followed it: this step's prompt holds
 	// all of that one's and the results, so a smaller one was cut. After a
 	// turn the model ended, a vendor may drop its thinking, and a prompt may
