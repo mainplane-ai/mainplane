@@ -87,7 +87,6 @@
     {"provider": "xiaomi", "model": "mimo-v2.6-flash", "default": true},
     {"provider": "xiaomi", "model": "mimo-v2.6-pro-ultraspeed"},
     {"provider": "mistral", "model": "mistral-large-4", "effort": "high"},
-    {"provider": "mistral", "model": "mistral-medium-2604", "effort": "high"},
     {"provider": "mistral", "model": "mistral-small-2603", "effort": "high", "default": true},
     {"provider": "bedrock", "model": "global.anthropic.claude-fable-5-2", "effort": "high"},
     {"provider": "bedrock", "model": "global.anthropic.claude-opus-5-5", "effort": "medium"},
