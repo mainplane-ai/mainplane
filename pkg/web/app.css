@@ -107,7 +107,7 @@ main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--compose
 .sidebar > .bar > .mark { flex: 1; min-width: 0; display: flex; justify-content: center; height: var(--control-lg); color: var(--color-text) }
 .sidebar > .bar > .mark > svg { height: 100%; width: auto; max-width: 100% }
 .sidebar > .bar > .filter.on { color: var(--color-accent) }
-/* An update waiting marks Settings with a red dot (iOS badge): the gear, its Update tab, and the version, which links there. */
+/* An update waiting marks Settings with a red dot (iOS badge), on the gear and its Update tab; the version in General links there. */
 .gear.update, [role=tab].update { position: relative }
 .gear.update::after, [role=tab].update::after { content: ""; position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--color-danger) }
 [role=tab].update::after { top: 4px; right: 4px; width: 7px; height: 7px }

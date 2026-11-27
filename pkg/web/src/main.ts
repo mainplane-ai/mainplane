@@ -35,9 +35,13 @@ const menuButton = (button: HTMLElement, menu: HTMLElement) => (button.onclick =
 const gear = h("button", { className: "btn icon ghost gear", ariaLabel: "Settings", onclick: () => go("/settings") }, icon("settings"))
 const waiting = (v: Settings["version"]) => !!v.latest && v.latest !== v.current
 const updated = (v: Settings["version"]) => { gear.classList.toggle("update", waiting(v)); gear.ariaLabel = waiting(v) ? "Settings, update available" : "Settings" }
-// The harness is asked at start and each hour: the dot comes with a release.
-const check = () => void (key() && get<Settings>("/settings").then(s => updated(s.version), () => {}))
-check()
+// The harness is asked at the first view with a key, then each hour: the dot comes with a release.
+let checked = false
+const check = () => {
+  if (!key()) return
+  checked = true
+  get<Settings>("/settings").then(s => updated(s.version), () => {})
+}
 setInterval(check, 36e5)
 const filters = ["", ...statuses].map(s => h("button", { role: "menuitemradio", ariaChecked: String(!s), onclick: () => { only = s; filters.forEach((b, i) => (b.ariaChecked = String(["", ...statuses][i] === s))); filter.classList.toggle("on", !!s); drawList() } } as Partial<HTMLButtonElement>, h("span", null, s ? said[s] : "All projects")))
 const filter = h("button", { className: "btn icon ghost filter", ariaLabel: "Filter", ariaHasPopup: "menu" }, icon("filter"))
@@ -226,6 +230,7 @@ async function render() {
   shown = location.pathname
   const [kind, id, sub, agent, more] = location.pathname.split("/").slice(1)
   if (kind !== "welcome" && key() && !onboarded()) await setUp()
+  if (!checked) check()
   if (signal.aborted) return
   document.body.classList.toggle("out", !key() || !onboarded() || kind === "welcome")
   document.body.classList.toggle("home", /^\/(new(\/\w+)?)?$/.test(location.pathname)) // a phone shows the list under the new project sheet
