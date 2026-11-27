@@ -58,7 +58,8 @@ export const paths = {
 export function path(p: string, ...args: string[]): string {
   const out = p.replace(/\{[^}]+\}/g, () => {
     if (!args.length) throw new Error(`path ${p}: too few args`)
-    return encodeURIComponent(args.shift()!)
+    const s = encodeURIComponent(args.shift()!)
+    return /^\.+$/.test(s) ? s.replace(/\./g, "%2E") : s // as in api.Path: a dot or two is no segment a URL cleans away
   })
   if (args.length) throw new Error(`path ${p}: too many args`)
   return out

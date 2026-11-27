@@ -79,9 +79,9 @@ const day = (into: HTMLElement, time: string) => {
 // sessions load on request.
 export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElement {
   // While the agent works the thread ends in a typing bubble, with a round Stop at the right of its row.
-  const stop = h("button", { className: "btn icon stop", ariaLabel: "Stop", onclick: () => post("stop?via=web")() }, icon("stop"))
+  const stop = h("button", { className: "btn icon stop", ariaLabel: "Stop", onclick: () => post() }, icon("stop"))
   const typing = h("div", { className: "msg first tail typing-row", hidden: true }, h("div", { className: "bubble" }, h("span", { className: "typing", role: "status", ariaLabel: "Working" }, h("i"), h("i"), h("i"))), stop)
-  const post = (what: string) => () => api(`${path(paths.Agent, id)}/${what}`, { method: "POST" }).then(acted, alert)
+  const post = () => api(path(paths.AgentStop, id) + "?via=web", { method: "POST" }).then(acted, alert)
   const log = h("div", { className: "view" })
   const thread = h("div", { className: "thread" })
   log.append(thread)
