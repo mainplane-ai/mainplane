@@ -132,7 +132,8 @@ type Coordinator struct {
 
 // New loads the Noise key and the nodes from dir, made there the first time.
 // secret is the harness key. join checks a join secret sent from addr and
-// returns the reserved name it gives the node, worker.Admin or none. Each
+// returns the name it gives the node: worker.Admin, a one-time join token's,
+// which no node may hold, or none. Each
 // ephemeral node loaded has idle from now to poll again.
 func New(dir string, secret []byte, join func(secret, addr string) (string, error)) (*Coordinator, error) {
 	k, err := noiseKey(filepath.Join(dir, "noise.key"))
@@ -277,8 +278,8 @@ func (c *Coordinator) Rename(old, name string) error {
 	if n == nil || old == worker.Harness || old == worker.Admin {
 		return fmt.Errorf("no worker %q to rename", old)
 	}
-	if name == "" || label(name) != name || name == "xn" || name == worker.Harness || name == worker.Admin {
-		return fmt.Errorf("%q is not a worker name: lower case letters, digits and single dashes, not xn, %s or %s", name, worker.Harness, worker.Admin)
+	if err := Name(name); err != nil {
+		return err
 	}
 	if c.byName(name) != nil {
 		return fmt.Errorf("worker %q exists: mainplane worker remove %s first", name, name)
@@ -418,13 +419,16 @@ func (c *Coordinator) admit(machine key.MachinePublic, secret, addr string, ephe
 		return n, nil
 	}
 	name := reserved
-	if name == "" {
+	switch {
+	case name == "":
 		name = c.name(hi)
+	case name != worker.Harness && name != worker.Admin && c.byName(name) != nil:
+		return nil, fmt.Errorf("worker %s exists, so its join token is spent and refused: mainplane worker remove %s, then a new token", name, name)
 	}
-	// The node that had a reserved name gives it up, and the new node takes
-	// its address too, so a drive mounted from a server that was installed
-	// again still reaches it. Any other name is free (see name).
-	gives := func(p *node) bool { return reserved != "" && p.Name == name }
+	// The node that had the harness's or admin's name gives it up, and the
+	// new node takes its address too, so a drive mounted from a server that
+	// was installed again still reaches it. Any other name is free (see name).
+	gives := func(p *node) bool { return (reserved == worker.Harness || reserved == worker.Admin) && p.Name == name }
 	n := &node{ID: c.st.Next, Name: name, Machine: machine, Ephemeral: ephemeral}
 	if i := slices.IndexFunc(c.st.Nodes, gives); i >= 0 {
 		n.ID = c.st.Nodes[i].ID
@@ -692,6 +696,14 @@ func (c *Coordinator) name(hi *tailcfg.Hostinfo) string {
 		log.Printf("coordinator: worker %s exists, so this machine joins as %s. If %s is this machine with lost keys: mainplane worker remove %s, then mainplane worker rename %s %s", base, name, base, base, name, base)
 	}
 	return name
+}
+
+// Name is why name cannot be a worker's that an operator gives, or nil.
+func Name(name string) error {
+	if name == "" || label(name) != name || name == "xn" || name == worker.Harness || name == worker.Admin {
+		return fmt.Errorf("%q is not a worker name: lower case letters, digits and single dashes, not xn, %s or %s", name, worker.Harness, worker.Admin)
+	}
+	return nil
 }
 
 // label is h with every run of characters other than lower case letters and

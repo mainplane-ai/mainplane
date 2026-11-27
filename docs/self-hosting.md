@@ -184,6 +184,13 @@ case does not matter, nor the hyphen in the code.
 - `mainplane-server rename <name>` changes the network name, to your company's
   or project's, say: a-z, 0-9 and single `-`, 3 to 40 characters. A name
   another harness holds is refused. Workers stay.
+- `mainplane worker token <name>` makes a one-time join token for one
+  machine, such as a sandbox whose user has root and must not learn the
+  device code. `mainplane worker <token>` or `mainplane install <token>` on
+  that machine joins it as worker `<name>`, and spends the token. A worker
+  with that name, online or not, refuses the join and spends the token too:
+  `mainplane worker remove <name>` first. `mainplane worker token revoke
+  <name>` revokes a token not yet spent.
 
 The name is public on `pointer.mainplane.ai`; the code is the secret. The code
 never leaves the machine: the machine and the harness run CPace, a password

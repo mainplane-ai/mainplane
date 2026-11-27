@@ -1,9 +1,10 @@
 // Package auth is the four credentials a harness checks. An api key lets a
 // connector call every HTTP route; api keys live hashed in a table in the
 // harness's directory. A join secret lets a machine join the mesh as a
-// worker; it can add a worker and nothing else. It derives from the device
-// code, which is what a person types (code.go). A session key lets a
-// session's workers reach the apps of the agent whose live session it is,
+// worker; it can add a worker and nothing else. The network's derives from
+// the device code, which is what a person types (code.go); a one-time join
+// secret lives hashed in the table and joins one machine, under its name. A
+// session key lets a session's workers reach the apps of the agent whose live session it is,
 // and an app key lets a daemon app call the routes its entitlements name.
 // No table holds these two: each is its subject and a MAC of it under the
 // harness's key (Sign in code.go), so what the subject may do now is the
@@ -148,6 +149,25 @@ func (s Store) Revoke(kind, name string) error {
 		return fmt.Errorf("no %s %q", kind, name)
 	}
 	return s.save(t)
+}
+
+// Take is the name of the entry of kind whose secret is secret, which it
+// revokes: a secret it takes is good once.
+func (s Store) Take(kind, secret string) (string, bool, error) {
+	writes.Lock()
+	defer writes.Unlock()
+	t, err := s.Load()
+	if err != nil {
+		return "", false, err
+	}
+	h := []byte(Hash(secret))
+	i := slices.IndexFunc(t[kind], func(e Entry) bool { return subtle.ConstantTimeCompare(h, []byte(e.Hash)) == 1 })
+	if i < 0 {
+		return "", false, nil
+	}
+	name := t[kind][i].Name
+	t[kind] = slices.Delete(t[kind], i, i+1)
+	return name, true, s.save(t)
 }
 
 // Check is whether secret is a live entry of kind.

@@ -233,11 +233,13 @@ func Harness(ctx context.Context, path string) error {
 		if err != nil {
 			return "", err
 		}
-		switch {
+		switch name, ok, err := store.Take(auth.Join, secret); {
 		case hmac.Equal([]byte(secret), []byte(adminSecret(k, c))):
 			return worker.Admin, nil
 		case hmac.Equal([]byte(secret), []byte(auth.Secret(k, c))):
 			return "", nil
+		case ok || err != nil:
+			return name, err
 		}
 		limit.Refused(addr)
 		return "", errors.New("join secret refused: install again with the network name and the device code")

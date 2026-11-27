@@ -50,6 +50,10 @@ const (
 //	                          harness the default key
 //	DELETE /keys/{name}    -> 204: the key revoked; the key that asks and the default key
 //	                          are 409, an unknown name 404
+//	POST   /workers/tokens {"name"} -> {"name","token"}: a join token that joins one machine,
+//	                          as worker name; a name with a token is 409. A worker of that
+//	                          name, online or not, refuses the join, and the token is spent
+//	DELETE /workers/tokens/{name} -> 204: the unspent token of that name joins no machine
 //	GET    /drives         -> the drives as the config has them, by name
 //	PUT    /drives/{name}  {"server","workers"} -> {"linked"}: saved in the config and applied,
 //	                          with the links it needs between its server and each worker,
@@ -76,6 +80,14 @@ func (a *api) handle(mux *http.ServeMux) {
 	mux.HandleFunc("POST /keys", a.key)
 	mux.HandleFunc("GET /keys", a.keys)
 	mux.HandleFunc("DELETE /keys/{name}", a.revoke)
+	mux.HandleFunc("POST /workers/tokens", a.token)
+	mux.HandleFunc("DELETE /workers/tokens/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if err := Auth(a.dir).Revoke(auth.Join, r.PathValue("name")); err != nil {
+			fail(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("GET /drives", a.drives)
 	mux.HandleFunc("PUT /drives/{name}", a.setDrive)
 	mux.HandleFunc("DELETE /drives/{name}", a.deleteDrive)
@@ -160,6 +172,36 @@ func (a *api) key(w http.ResponseWriter, r *http.Request) {
 		token = auth.Pin(token, a.at())
 	}
 	reply(w, map[string]string{"name": in.Name, "key": token})
+}
+
+func (a *api) token(w http.ResponseWriter, r *http.Request) {
+	var in struct{ Name string }
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxKey)).Decode(&in); err != nil {
+		fail(w, errors.New(`the body is {"name"}, a worker name`))
+		return
+	}
+	if err := coordinator.Name(in.Name); err != nil {
+		fail(w, err)
+		return
+	}
+	if a.noPointer && a.at() == "" {
+		http.Error(w, "the harness has no URL yet for the token to carry: its tunnel is starting", http.StatusServiceUnavailable)
+		return
+	}
+	secret, err := Auth(a.dir).Issue(auth.Join, in.Name)
+	if errors.Is(err, auth.ErrTaken) {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	token := auth.Token(auth.Join, pointer.Encode(a.k), secret)
+	if a.noPointer {
+		token = auth.Pin(token, a.at())
+	}
+	reply(w, map[string]string{"name": in.Name, "token": token})
 }
 
 // A key's row in GET /keys. Entries of one name, as reinstalls add default
