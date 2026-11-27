@@ -137,14 +137,18 @@ func (g *gen) fields(t reflect.Type) string {
 				continue
 			}
 			if f.Anonymous && name == "" {
+				if f.Type.Kind() == reflect.Pointer {
+					walk(f.Type.Elem())
+					continue
+				}
 				walk(f.Type)
 				continue
 			}
 			opt, null, k := "", "", f.Type.Kind()
-			if strings.Contains(opts, "omitempty") || strings.Contains(opts, "omitzero") || k == reflect.Pointer {
+			if strings.Contains(opts, "omitempty") || strings.Contains(opts, "omitzero") {
 				opt = "?"
-			} else if k == reflect.Slice && f.Type.Elem().Kind() != reflect.Uint8 || k == reflect.Map {
-				null = " | null" // a nil slice or map is sent as null
+			} else if k == reflect.Pointer || k == reflect.Slice && f.Type.Elem().Kind() != reflect.Uint8 || k == reflect.Map {
+				null = " | null" // a nil pointer, slice or map is sent as null
 			}
 			fs = append(fs, fmt.Sprintf("%s%s: %s%s", cmp.Or(name, f.Name), opt, g.ts(f.Type), null))
 		}
