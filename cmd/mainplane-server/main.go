@@ -71,8 +71,7 @@ func main() {
 				os.Exit(code)
 			}
 			if fresh { // the elevated install handed back; from a config file it printed itself
-				logIn(h)
-				done(h, quick)
+				done(h, quick, true)
 			}
 			return
 		}
@@ -100,10 +99,7 @@ func main() {
 			fatal(os.WriteFile(args[1], b, 0o600))
 			return
 		}
-		if fresh {
-			logIn(h)
-		}
-		done(h, quick) // quick only with no config file, so fresh
+		done(h, quick, fresh) // quick only with no config file, so fresh
 	case verb == "tunnel" || verb == "url":
 		move(args)
 	case verb == auth.Key && (len(args) == 2 && args[1] == "list" || len(args) == 3 && (args[1] == "new" || args[1] == "revoke")):
@@ -191,13 +187,14 @@ func install(h handover) (handover, int) {
 // logIn logs in the CLI the admin install placed with the default api key.
 // It finds the harness on loopback, so it needs no tunnel. With no admin
 // worker there is no CLI.
-func logIn(h handover) {
+func logIn(h handover) error {
 	if h.NoAdmin {
-		return
+		return nil
 	}
 	if out, err := exec.Command(worker.Bin, "login", auth.Token(auth.Key, h.Harness, h.Key)).CombinedOutput(); err != nil {
-		log.Fatalf("mainplane login: %v: %s", err, out)
+		return fmt.Errorf("mainplane login: %v: %s", err, out)
 	}
+	return nil
 }
 
 // network waits, behind the spinner, until workers can reach the harness,
@@ -220,10 +217,15 @@ func network(h handover) string {
 // done waits for the network and prints the link that logs a browser in to
 // finish setup: on a terminal with its QR code for a phone, elsewhere, as for
 // a script, with the lines that connect a worker, which carry the harness URL
-// when it has no pointer.
-func done(h handover, quick bool) {
+// when it has no pointer. A fresh install logs the CLI in first; a failed
+// login ends the install only after the link is printed.
+func done(h handover, quick, fresh bool) {
 	fmt.Print(version.Installed())
-	if quick && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
+	var login error
+	if fresh {
+		login = logIn(h)
+	}
+	if login == nil && quick && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
 		if h.URL != "" || h.NoPointer { // the TUI would only say the network is starting
 			network(h)
 		}
@@ -242,14 +244,16 @@ func done(h handover, quick bool) {
 			join = auth.Pin(join, u)
 		}
 		fmt.Printf("\nopen to finish setup: %s\n%s", link, installLines(auth.Join, join))
+		fatal(login)
 		return
 	}
 	code, err := termqr.Draw(link)
 	fatal(err)
 	fmt.Printf("\nOpen this link to finish setup:\n  %s\n\n%sOr scan the code with your phone.\nThe link holds the API key: whoever has it controls the harness.\n", link, code)
-	if !h.NoAdmin {
+	if !h.NoAdmin && login == nil {
 		fmt.Println("\nIn the terminal instead: mainplane")
 	}
+	fatal(login)
 }
 
 // self is the URL the installed harness is reached at, for lines that carry

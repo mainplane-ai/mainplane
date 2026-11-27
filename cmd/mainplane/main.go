@@ -36,6 +36,7 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/version"
 	"github.com/mainplane-ai/mainplane/pkg/worker"
+	"golang.org/x/term"
 )
 
 // startTime bounds finding the harness and asking its release before the TUI
@@ -263,7 +264,7 @@ func work(install bool, args []string) {
 // once the worker has joined, which can take a minute while the network starts.
 // Only a person waits for it: not the harness's install of admin, nor a script.
 func joined(key string) {
-	if st, err := os.Stdout.Stat(); err != nil || st.Mode()&os.ModeCharDevice == 0 {
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
 		return
 	}
 	for end := time.Now().Add(time.Minute); time.Now().Before(end); time.Sleep(time.Second) {

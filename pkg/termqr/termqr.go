@@ -7,7 +7,7 @@ import (
 	"rsc.io/qr"
 )
 
-// Draw is s as a QR code in half blocks, two modules a row, black on white
+// Draw renders s as a QR code in half blocks, two modules a row, black on white
 // with the white edge a reader needs.
 func Draw(s string) (string, error) {
 	code, err := qr.Encode(s, qr.L)

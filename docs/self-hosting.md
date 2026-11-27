@@ -27,7 +27,7 @@ curl -fsSL https://mainplane.ai/install | sh -s -- server
 The install prints a link and its QR code. Open the link in a browser, or
 scan the code with a phone. The page connects a model provider, workers and
 other devices. The link holds an API key: whoever has it controls the
-harness. `mainplane web` prints a new one.
+harness. `mainplane web` prints it again.
 
 In the terminal instead, run `mainplane` on the harness machine, or add
 `quickstart` after `server` to open it right after the install.
