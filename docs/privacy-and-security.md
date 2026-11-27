@@ -44,6 +44,12 @@ What this means for where you connect a worker:
   signed release.
 - Two workers reach each other only when a link in the harness config names
   them ([the mesh](self-hosting.md#the-mesh)).
+- On a Mac, macOS asks for each permission in System Settings > Privacy &
+  Security: Network Volumes for drives, Screen Recording for screenshots,
+  Accessibility for mouse and keyboard. An agent that updates or deletes
+  another app (a browser, a Homebrew app) also needs App Management for
+  Mainplane; without it macOS shows "mainplane was prevented from modifying
+  apps". Mainplane's own updates never need it.
 - Agents read messages, AGENTS.md files, command output and web pages. Text in
   any of them can try to steer an agent. Give a worker only what you would
   give an agent that reads all of them.
