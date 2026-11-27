@@ -38,9 +38,7 @@ const updated = (v: Settings["version"]) => { gear.classList.toggle("update", wa
 // The harness is asked at the first view with a key, then each hour: the dot comes with a release.
 let checked = false
 const check = () => {
-  if (!key()) return
-  checked = true
-  get<Settings>("/settings").then(s => updated(s.version), () => {})
+  if (key()) get<Settings>("/settings").then(s => { checked = true; updated(s.version) }, () => {}) // one that failed is asked again at the next view
 }
 setInterval(check, 36e5)
 const filters = ["", ...statuses].map(s => h("button", { role: "menuitemradio", ariaChecked: String(!s), onclick: () => { only = s; filters.forEach((b, i) => (b.ariaChecked = String(["", ...statuses][i] === s))); filter.classList.toggle("on", !!s); drawList() } } as Partial<HTMLButtonElement>, h("span", null, s ? said[s] : "All projects")))
