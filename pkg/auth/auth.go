@@ -49,12 +49,18 @@ const (
 	window   = time.Minute
 )
 
+// A key's last use is saved this often at most, as Settings > Devices shows
+// it: saving it on every check would rewrite the table on every request.
+const usedEvery = time.Hour
+
 // ErrTaken is a name that already has an entry of its kind.
 var ErrTaken = errors.New("name in use")
 
 type Entry struct {
-	Name string `json:"name"`
-	Hash string `json:"hash"`
+	Name    string    `json:"name"`
+	Hash    string    `json:"hash"`
+	Created time.Time `json:"created,omitzero"` // none for an entry made before it was kept
+	Used    time.Time `json:"used,omitzero"`    // the last check it passed, to usedEvery
 }
 
 // Table is the live entries by kind. A revoked entry is gone, not marked.
@@ -106,7 +112,7 @@ func (s Store) Issue(kind, name string) (string, error) {
 		return "", fmt.Errorf("%s %q: %w", kind, name, ErrTaken)
 	}
 	secret := rand.Text()
-	t[kind] = append(t[kind], Entry{Name: name, Hash: Hash(secret)})
+	t[kind] = append(t[kind], Entry{Name: name, Hash: Hash(secret), Created: time.Now().UTC()})
 	return secret, s.save(t)
 }
 
@@ -118,7 +124,7 @@ func (s Store) Add(kind, name, secret string) error {
 	if err != nil {
 		return err
 	}
-	t[kind] = append(t[kind], Entry{Name: name, Hash: Hash(secret)})
+	t[kind] = append(t[kind], Entry{Name: name, Hash: Hash(secret), Created: time.Now().UTC()})
 	return s.save(t)
 }
 
@@ -146,13 +152,34 @@ func (s Store) Check(kind, secret string) bool {
 		log.Printf("auth: %v", err)
 		return false
 	}
-	h, ok := []byte(Hash(secret)), false
-	for _, e := range t[kind] {
+	h, hit := []byte(Hash(secret)), -1
+	for i, e := range t[kind] {
 		if subtle.ConstantTimeCompare(h, []byte(e.Hash)) == 1 {
-			ok = true
+			hit = i
 		}
 	}
-	return ok
+	if hit >= 0 && time.Since(t[kind][hit].Used) > usedEvery {
+		s.use(kind, string(h))
+	}
+	return hit >= 0
+}
+
+// use saves now as the last use of the entries of kind with hash h.
+func (s Store) use(kind, h string) {
+	writes.Lock()
+	defer writes.Unlock()
+	t, err := s.Load()
+	if err == nil {
+		for i := range t[kind] {
+			if t[kind][i].Hash == h {
+				t[kind][i].Used = time.Now().UTC()
+			}
+		}
+		err = s.save(t)
+	}
+	if err != nil {
+		log.Printf("auth: %v", err)
+	}
 }
 
 // Bearer refuses a request whose Authorization: Bearer is not a live api key,

@@ -87,6 +87,10 @@ type Tunnel struct {
 	Token string `json:"token"` // the tunnel's, as Cloudflare shows it
 }
 
+// DefaultKey names the api key every install makes anew, so the first
+// connector needs no second command.
+const DefaultKey = "default"
+
 // Auth is the auth table of the harness in dir.
 func Auth(dir string) auth.Store { return auth.Store{Path: filepath.Join(dir, "auth.json")} }
 
