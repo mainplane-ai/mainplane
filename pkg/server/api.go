@@ -45,6 +45,11 @@ const (
 //	GET    /join           -> {"join"}: the network name and device code, as a worker
 //	                          installs with them
 //	POST   /keys           {"name"} -> {"name","key"}: a new api key; a name in use is 409
+//	GET    /keys           -> [{"name","created","used","self","harness"}]: the api keys, never a secret
+//	                          or its hash; self is the key that asks,
+//	                          harness the default key
+//	DELETE /keys/{name}    -> 204: the key revoked; the key that asks and the default key
+//	                          are 409, an unknown name 404
 //	GET    /drives         -> the drives as the config has them, by name
 //	PUT    /drives/{name}  {"server","workers"} -> 204: saved in the config and applied;
 //	                          refused when its server cannot serve it now
@@ -68,6 +73,8 @@ func (a *api) handle(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", a.root)
 	mux.HandleFunc("GET /join", a.join)
 	mux.HandleFunc("POST /keys", a.key)
+	mux.HandleFunc("GET /keys", a.keys)
+	mux.HandleFunc("DELETE /keys/{name}", a.revoke)
 	mux.HandleFunc("GET /drives", a.drives)
 	mux.HandleFunc("PUT /drives/{name}", a.setDrive)
 	mux.HandleFunc("DELETE /drives/{name}", a.deleteDrive)
@@ -152,6 +159,68 @@ func (a *api) key(w http.ResponseWriter, r *http.Request) {
 		token = auth.Pin(token, a.at())
 	}
 	reply(w, map[string]string{"name": in.Name, "key": token})
+}
+
+// A key's row in GET /keys. Entries of one name, as reinstalls add default
+// keys, are one row, as DELETE revokes them together.
+type keyRow struct {
+	Name    string    `json:"name"`
+	Created time.Time `json:"created,omitzero"`
+	Used    time.Time `json:"used,omitzero"`
+	Self    bool      `json:"self,omitempty"`
+	Harness bool      `json:"harness,omitempty"` // the default key, the harness machine's own, which DELETE refuses
+}
+
+func (a *api) keys(w http.ResponseWriter, r *http.Request) {
+	t, err := Auth(a.dir).Read()
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	rows := []keyRow{}
+	for _, e := range t[auth.Key] {
+		i := slices.IndexFunc(rows, func(k keyRow) bool { return k.Name == e.Name })
+		if i < 0 {
+			rows, i = append(rows, keyRow{Name: e.Name, Created: e.Created, Harness: e.Name == DefaultKey}), len(rows)
+		}
+		k := &rows[i]
+		k.Self = k.Self || e.Hash == caller(r)
+		if e.Used.After(k.Used) {
+			k.Used = e.Used
+		}
+	}
+	reply(w, rows)
+}
+
+// revoke refuses the default key, which the harness's machine logs in with,
+// and the key that asks: a device logs out instead.
+func (a *api) revoke(w http.ResponseWriter, r *http.Request) {
+	name, store := r.PathValue("name"), Auth(a.dir)
+	t, err := store.Read()
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	switch es := slices.DeleteFunc(slices.Clone(t[auth.Key]), func(e auth.Entry) bool { return e.Name != name }); {
+	case len(es) == 0:
+		http.Error(w, fmt.Sprintf("no key %q", name), http.StatusNotFound)
+	case name == DefaultKey:
+		http.Error(w, "the default key is the harness machine's own: revoke it there, with mainplane-server key revoke "+DefaultKey, http.StatusConflict)
+	case slices.ContainsFunc(es, func(e auth.Entry) bool { return e.Hash == caller(r) }):
+		http.Error(w, "this device is logged in with that key: log out instead", http.StatusConflict)
+	default:
+		if err := store.Revoke(auth.Key, name); err != nil {
+			fail(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// caller is the hash of the api key a request carries.
+func caller(r *http.Request) string {
+	secret, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return auth.Hash(secret)
 }
 
 func (a *api) drives(w http.ResponseWriter, r *http.Request) {

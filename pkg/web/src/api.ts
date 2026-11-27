@@ -5,6 +5,7 @@ export type Project = { id: string; name: string; orchestrator: string; status: 
 export type Conf = { model: string; workers: { name: string }[] | null; preset?: string; [more: string]: unknown }
 export type Agent = { id: string; name?: string; config: Conf; apps: string[]; instructions?: string; sessions: string[]; status: string; updated: string }
 export type Model = { id: string; name: string; provider: string; config: Conf; settings?: { name: string; values: { name: string; params: Record<string, unknown> }[] }[] }
+export type Key = { name: string; created?: string; used?: string; self?: boolean; harness?: boolean }
 export type Rec = { n: number; kind: string; id: string; len: number; type?: string; via?: string; source?: string; for?: string; time: string; body: Uint8Array }
 
 const saved = "mainplane-key"

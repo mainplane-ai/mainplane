@@ -1,7 +1,7 @@
 // The page: a list of projects beside the one in view. A project is seen as
 // its dashboard, with the place to write to its orchestrator always there.
 
-import { type Agent, type Conf, type Model, type Project, acted, api, avatar, avatarColor, avatarColors, file, get, h, icon, initials, key, login, logout, saveAvatar, text } from "./api"
+import { type Agent, type Conf, type Key, type Model, type Project, acted, api, avatar, avatarColor, avatarColors, file, get, h, icon, initials, key, login, logout, saveAvatar, text } from "./api"
 import { chat } from "./chat"
 import { rich } from "./rich"
 import { composer } from "./composer"
@@ -524,6 +524,19 @@ function sheet(title: string, sub: string, close: string, body: Node[], foot: No
   return s
 }
 
+// ask is an alert of two choices, Cancel and a destructive act: true when the act is chosen.
+const ask = (title: string, text: string, act: string) => new Promise<boolean>(done => {
+  const end = (v: boolean) => { s.remove(); removeEventListener("keydown", esc, true); done(v) }
+  const esc = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); end(false) } } // before the sheet's Escape, which closes it
+  const cancel = h("button", { className: "btn lg", onclick: () => end(false) }, "Cancel")
+  const s = h("div", { className: "scrim", onclick: e => { if (e.target === s) end(false) } },
+    h("div", { className: "alert", role: "alertdialog", ariaModal: "true", ariaLabel: title }, h("h2", null, title), h("p", null, text),
+      h("div", { className: "alert-actions" }, cancel, h("button", { className: "btn lg tinted danger", onclick: () => end(true) }, act))))
+  document.body.append(s)
+  addEventListener("keydown", esc, true)
+  cancel.focus()
+})
+
 // row is a form's row: its name and its control. No help text under the name: the name says enough.
 const row = (label: string, control: HTMLElement, tag: "label" | "div" = "label") =>
   h(tag, { className: "form-row" }, h("span", { className: "row-main" }, h("b", null, label)), control)
@@ -786,16 +799,33 @@ async function harnessSettings(tab: string): Promise<HTMLElement> {
     } while (workers.isConnected) // in the page by the first wait
   })()
 
-  // Devices (as onboarding's Another Device): a login link is a new key, so it is made only when asked for.
-  // The keys logged in, each to revoke, will be a list above it.
+  // Devices: the keys logged in, each to revoke but this device's and the harness machine's own, then (as onboarding's
+  // Another Device) a login link, a new key, so it is made only when asked for.
+  const keys = h("div")
+  const day = (at: string) => new Date(at).toDateString() === new Date().toDateString() ? "today" : new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+  let draws = 0 // only the last draw asked for draws: an older answer must not hide a key just made
+  const drawKeys = async () => {
+    const n = ++draws, ks = await get<Key[]>("/keys")
+    if (n === draws) keys.replaceChildren(h("div", { className: "form" }, ...ks.map(k =>
+      h("div", { className: "form-row" }, icon(k.name.startsWith("web-") ? "globe" : k.name.startsWith("tui-") || k.harness ? "terminal" : "computer"),
+        h("span", { className: "row-main" }, h("b", null, k.name), h("small", null, [k.harness && "The harness machine", k.created && "Added " + day(k.created), k.used && "Used " + day(k.used)].filter(Boolean).join(" \u00b7 "))),
+        k.self ? h("span", { className: "row-trail" }, "This device") : k.harness ? "" : h("button", { className: "btn plain sm danger", onclick: attempt(() => revoke(k.name)) }, "Revoke")))))
+  }
+  const revoke = async (name: string) => {
+    if (!await ask(`Revoke "${name}"?`, "That device is logged out. It needs a new login link to log in again.", "Revoke")) return
+    await api("/keys/" + encodeURIComponent(name), { method: "DELETE" })
+    await drawKeys()
+  }
+  drawKeys().catch(alert)
   const link = h("div")
   const make = h("button", { className: "btn filled" }, "Show Login Link")
   make.onclick = attempt(async () => {
     make.disabled = true
     try { link.replaceChildren(...await loginLink(await deviceKey())) } catch (e) { make.disabled = false; throw e }
     make.remove()
+    await drawKeys()
   })
-  const devices = h("div", null, h("p", { className: "section-l" }, "Log In Another Device"), link,
+  const devices = h("div", null, h("p", { className: "section-l" }, "Logged In"), keys, h("p", { className: "section-l" }, "Log In Another Device"), link,
     h("p", { className: "note" }, "Your projects and chats are on every device logged in to this harness. Show the code and scan it with a phone's camera, or open the link in another browser."),
     h("div", { className: "actions" }, make))
 

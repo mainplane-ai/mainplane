@@ -83,7 +83,7 @@ func main() {
 		fatal(err)
 		h.Key = cmp.Or(h.Key, rand.Text())
 		// beside the default keys before it, so a reinstall logs no connector out
-		fatal(server.Auth(server.Dir).Add(auth.Key, defaultName, h.Key))
+		fatal(server.Auth(server.Dir).Add(auth.Key, server.DefaultKey, h.Key))
 		k, err := server.Key(server.Dir)
 		fatal(err)
 		h.Harness = pointer.Encode(k)
@@ -118,10 +118,6 @@ func main() {
 		usage()
 	}
 }
-
-// defaultName names the api key every install makes anew, so the first
-// connector needs no second command.
-const defaultName = "default"
 
 // handover is a config and, from an install that made the config itself, the
 // secret of the api key the install prints, and then what the elevated
