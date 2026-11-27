@@ -415,8 +415,7 @@ func (h *Harness) ListAgents(keep func(Agent) bool) []AgentInfo {
 }
 
 // core is what of a config a session cannot change and go on: all but the
-// workers, which a config record changes, and the limit, which is the
-// agent's to judge.
+// workers and the limit, which a config record changes.
 func core(c statefile.Conf) string {
 	c.Workers, c.ContextLimit = nil, 0
 	if c.Tools == "" {
@@ -428,8 +427,8 @@ func core(c statefile.Conf) string {
 
 // SetAgentConfig is PUT /agents/{id}/config. It makes no session: the next
 // post does, if the live session cannot go on under the new config. When
-// only the workers changed, the live session takes them in place and keeps
-// its prompt cache.
+// only the workers or the context limit changed, the live session takes them
+// in place and keeps its prompt cache.
 func (h *Harness) SetAgentConfig(id, via string, c AgentConfig) error {
 	var err error
 	if c.Conf, _, err = h.valid(c.Conf); err != nil {
@@ -455,8 +454,8 @@ func (h *Harness) SetAgentConfig(id, via string, c AgentConfig) error {
 	if err != nil {
 		return err
 	}
-	if core(conf) == core(c.Conf) && !slices.Equal(conf.Workers, c.Workers) && statefile.ContextUsed(chain) < c.ContextLimit {
-		_, err = h.SetWorkers(a.live(), via, c.Workers)
+	if core(conf) == core(c.Conf) && (!slices.Equal(conf.Workers, c.Workers) || conf.ContextLimit != c.ContextLimit) {
+		_, err = h.setConf(a.live(), via, func(s *statefile.Conf) { s.Workers, s.ContextLimit = c.Workers, c.ContextLimit })
 	}
 	return err
 }
@@ -619,8 +618,8 @@ func (h *Harness) stale(a Agent, chain []statefile.Record) string {
 	switch {
 	case core(conf) != core(a.Config.Conf):
 		return "the agent's config changed"
-	case used >= a.Config.ContextLimit:
-		return fmt.Sprintf("context %d reached limit %d", used, a.Config.ContextLimit)
+	case used >= conf.ContextLimit:
+		return fmt.Sprintf("context %d reached limit %d", used, conf.ContextLimit)
 	case a.Config.ColdLimit > 0 && used >= a.Config.ColdLimit && !time.Now().Before(cache.Until):
 		return fmt.Sprintf("context %d reached cold limit %d and the prompt cache expired", used, a.Config.ColdLimit)
 	}

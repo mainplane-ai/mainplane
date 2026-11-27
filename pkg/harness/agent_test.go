@@ -418,6 +418,26 @@ func TestWarmFastPath(t *testing.T) {
 	if err := r.h.SetAgentApps(a.ID, "web", []string{"nope"}); err == nil {
 		t.Fatal("an agent took an app the harness does not have")
 	}
+
+	// a new context limit too: the model is told it, the start line keeps the first
+	var body string
+	r.step = func(b string) turn { body = b; return turn{input: 140_000, ttl: 300} }
+	if err := r.h.SetAgentConfig(a.ID, "web", *r.conf(400_000, 100_000, "w1", "w2")); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.post(a.ID, "two"); got != s1 || !strings.Contains(body, "Context limit 250000.") || !strings.Contains(body, "Context limit changed to 400000.") {
+		t.Fatalf("after a raise the post landed on %s: %s", got, body)
+	}
+	if got := r.post(a.ID, "three"); got != s1 || len(r.bodies(s1, statefile.System, "limit")) != 1 {
+		t.Fatalf("a limit the model was told was told again: %q", r.bodies(s1, statefile.System, "limit"))
+	}
+	// under what is used, the next post goes on in a new session
+	if err := r.h.SetAgentConfig(a.ID, "web", *r.conf(130_000, 100_000, "w1", "w2")); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.post(a.ID, "four"); got == s1 {
+		t.Fatalf("a limit under the context used kept the session %s", got)
+	}
 }
 
 func TestIdleRollover(t *testing.T) {
