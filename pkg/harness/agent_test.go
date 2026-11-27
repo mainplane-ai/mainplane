@@ -786,6 +786,9 @@ func TestMidRunRollover(t *testing.T) {
 	if statefile.Derive(chain) != statefile.StatusFailed {
 		t.Fatal("s1 would step again after a restart")
 	}
+	if _, err := r.h.SetWorkers(s1, "test", []statefile.Worker{{Name: "w1"}}); err != nil || statefile.Derive(r.chain(s1)) != statefile.StatusFailed {
+		t.Fatalf("a workers change opened failed s1: %v", err)
+	}
 	if !strings.Contains(atS2, `"source":"continue"`) || !strings.Contains(atS2, "exceeds limit") || !strings.Contains(atS2, "also this") {
 		t.Fatalf("the log of s1 was not whole on the worker when s2 stepped: %d bytes", len(atS2))
 	}
