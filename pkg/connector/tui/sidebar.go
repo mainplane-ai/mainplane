@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	"github.com/mainplane-ai/mainplane/pkg/catalog"
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
@@ -41,7 +42,7 @@ type sessionList struct {
 	c      *connector.Client
 	cat    *catalog.Catalog // nil until loaded
 	cur    *session         // the screen showing now
-	infos  []harness.Info
+	infos  []api.Info
 	agents atomic.Bool          // show the sessions of agents too: set on the app's loop, read by each read
 	seen   map[string]time.Time // per session, its update when last read here
 	drafts map[string][]elem    // per session, "" for home, the input it was left with
@@ -74,17 +75,17 @@ func (l *sessionList) read(a *App) {
 }
 
 // theirs is whether an agent made the session.
-func theirs(in harness.Info) bool { return strings.HasPrefix(in.Via, harness.AgentVia) }
+func theirs(in api.Info) bool { return strings.HasPrefix(in.Via, harness.AgentVia) }
 
 // withOpen is a read of the sessions, agents whether it asked for those of
 // agents too, with the open session in it: an agent's session is in the
 // list while it is the open one, asked for or not, at its place by time.
-func (l *sessionList) withOpen(infos []harness.Info, agents bool) []harness.Info {
+func (l *sessionList) withOpen(infos []api.Info, agents bool) []api.Info {
 	cur := l.cur.info
-	if agents || !theirs(cur) || slices.ContainsFunc(infos, func(in harness.Info) bool { return in.ID == cur.ID }) {
+	if agents || !theirs(cur) || slices.ContainsFunc(infos, func(in api.Info) bool { return in.ID == cur.ID }) {
 		return infos
 	}
-	i, _ := slices.BinarySearchFunc(infos, cur.Updated, func(in harness.Info, t time.Time) int { return t.Compare(in.Updated) })
+	i, _ := slices.BinarySearchFunc(infos, cur.Updated, func(in api.Info, t time.Time) int { return t.Compare(in.Updated) })
 	return slices.Insert(infos, i, cur)
 }
 
@@ -92,7 +93,7 @@ func (l *sessionList) withOpen(infos []harness.Info, agents bool) []harness.Info
 // agents too: a read from before /settings changed that is dropped. One is
 // unread only once it changes after it first shows here, as those hidden
 // until now have not.
-func (l *sessionList) update(a *App, infos []harness.Info, agents bool, err error) {
+func (l *sessionList) update(a *App, infos []api.Info, agents bool, err error) {
 	if err != nil {
 		a.SayError(err)
 		return
@@ -111,7 +112,7 @@ func (l *sessionList) update(a *App, infos []harness.Info, agents bool, err erro
 }
 
 // info is the session at i, the open one as its screen last read it.
-func (l *sessionList) info(i int) harness.Info {
+func (l *sessionList) info(i int) api.Info {
 	if in := l.infos[i]; in.ID != l.cur.id || l.cur.info.ID != in.ID {
 		return in
 	}
@@ -119,7 +120,7 @@ func (l *sessionList) info(i int) harness.Info {
 }
 
 // unread is a session that changed since it was last read here, and is done.
-func (l *sessionList) unread(in harness.Info) bool {
+func (l *sessionList) unread(in api.Info) bool {
 	return in.ID != l.cur.id && in.Status != statefile.StatusStepping && in.Updated.After(l.seen[in.ID])
 }
 
@@ -277,7 +278,7 @@ func (l *sessionList) Draw(a *App, c *Canvas, r Rect) {
 // likely. Muted like the row it sits in, steady until the cache's last
 // minute and blinking then, nil once it is cold. In the off half of a blink
 // a blank keeps its place.
-func cacheMark(a *App, c harness.Cache, now time.Time) []Glyph {
+func cacheMark(a *App, c api.Cache, now time.Time) []Glyph {
 	left := c.Until.Sub(now)
 	every := blinkEvery
 	if left <= blinkFastFrom {
@@ -295,7 +296,7 @@ func cacheMark(a *App, c harness.Cache, now time.Time) []Glyph {
 }
 
 // blinks is a cache in its last minute, whose mark needs the tick.
-func blinks(c harness.Cache, now time.Time) bool {
+func blinks(c api.Cache, now time.Time) bool {
 	left := c.Until.Sub(now)
 	return left > 0 && left <= blinkFrom
 }

@@ -3,6 +3,7 @@
 // optional. It keeps only that it ran: the harness's state is the progress.
 
 import { api, get, h, icon, key } from "./api"
+import { path, paths } from "./api.gen"
 import { providersPanel } from "./providers"
 import lockup from "./lockup.svg"
 
@@ -11,7 +12,7 @@ export const onboarded = () => !!localStorage.getItem(ran)
 
 // setUp marks the onboarding done in a browser on a harness that has a provider: it was set up already.
 export async function setUp() {
-  if ((await get<unknown[]>("/providers").catch(() => [])).length) localStorage.setItem(ran, "1")
+  if ((await get<unknown[]>(paths.Providers).catch(() => [])).length) localStorage.setItem(ran, "1")
   return onboarded()
 }
 
@@ -138,7 +139,7 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, again: 
         break
       }
       case "sharing": {
-        const set = (share: boolean) => api("/settings", { json: { data_sharing: { share, via: "web", text: "b1" } } }).then(() => { sharing = false; step = "workers"; draw() }, fail)
+        const set = (share: boolean) => api(paths.Settings, { json: { data_sharing: { share, via: "web", text: "b1" } } }).then(() => { sharing = false; step = "workers"; draw() }, fail)
         page("Help Improve Mainplane", "Allow the use of your sessions to improve Mainplane and train AI models. You can change this in Settings.", [],
           button("Share with Mainplane", () => set(true)), button("Don't Share", () => set(false), false))
         break
@@ -173,7 +174,7 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, again: 
         const make = button("Create Drive", () => {
           const s = servers()
           make.disabled = true
-          api("/drives/shared", { method: "PUT", json: { server: s.includes("admin") ? "admin" : s[0], workers: ["*"] } }).then(finish, e => { make.disabled = false; fail(e) })
+          api(path(paths.Drive, "shared"), { method: "PUT", json: { server: s.includes("admin") ? "admin" : s[0], workers: ["*"] } }).then(finish, e => { make.disabled = false; fail(e) })
         })
         page("Host a Shared Drive", "Mainplane can host files shared among all your workers. Add a shared drive for all workers? Its server is then linked with each worker, so each worker reaches it on the mesh.", [], make, button("Not Now", finish, false))
         break
@@ -191,10 +192,10 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, again: 
   const poll = async () => {
     if (polling || !key()) return
     polling = true
-    const st = await get<{ data_sharing?: unknown; version: { current: string } }>("/settings").catch(() => null)
+    const st = await get<{ data_sharing?: unknown; version: { current: string } }>(paths.Settings).catch(() => null)
     sharing = !!st && !st.data_sharing && st.version.current !== "dev"
     do {
-      const [ws, top, j] = await Promise.all([get<Worker[]>("/workers"), get<{ network: string }>("/"), get<{ join: string }>("/join")]).catch(() => [null, null, null])
+      const [ws, top, j] = await Promise.all([get<Worker[]>(paths.Workers), get<{ network: string }>(paths.Root), get<{ join: string }>(paths.Join)]).catch(() => [null, null, null])
       if (ws) {
         ;[workers, network, join] = [ws, top!.network, j!.join]
         live?.()

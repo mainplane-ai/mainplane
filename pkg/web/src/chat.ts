@@ -1,7 +1,8 @@
 // The chat of one agent: every session it has had reads as one conversation.
 
-import { type Agent, type Rec, acted, api, decode, get, h, icon, records, text } from "./api"
+import { type Rec, acted, api, decode, get, h, icon, records, text } from "./api"
 import { rich, typeset } from "./rich"
+import { path, paths, type AgentInfo } from "./api.gen"
 
 const shown = (r: Rec) => (r.type?.startsWith("text/") ? text(r.body) : `[${r.type}, ${r.len} bytes]`)
 
@@ -78,9 +79,9 @@ const day = (into: HTMLElement, time: string) => {
 // sessions load on request.
 export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElement {
   // While the agent works the thread ends in a typing bubble, with a round Stop at the right of its row.
-  const stop = h("button", { className: "btn icon stop", ariaLabel: "Stop", onclick: () => post("stop?via=web")() }, icon("stop"))
+  const stop = h("button", { className: "btn icon stop", ariaLabel: "Stop", onclick: () => post() }, icon("stop"))
   const typing = h("div", { className: "msg first tail typing-row", hidden: true }, h("div", { className: "bubble" }, h("span", { className: "typing", role: "status", ariaLabel: "Working" }, h("i"), h("i"), h("i"))), stop)
-  const post = (what: string) => () => api(`/agents/${id}/${what}`, { method: "POST" }).then(acted, alert)
+  const post = () => api(path(paths.AgentStop, id) + "?via=web", { method: "POST" }).then(acted, alert)
   const log = h("div", { className: "view" })
   const thread = h("div", { className: "thread" })
   log.append(thread)
@@ -145,7 +146,7 @@ export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElem
     // A turn is one call: the next records of the session followed, which session is the live one, and whether the agent works.
     let session = "", n = 0, status = ""
     const turn = async (wait: string, signal: AbortSignal) => {
-      const r = await api(`/agents/${id}/records?session=${session}&after=${n}&status=${status}${wait && "&wait=" + wait}`, { signal })
+      const r = await api(`${path(paths.AgentRecords, id)}?session=${session}&after=${n}&status=${status}${wait && "&wait=" + wait}`, { signal })
       const recs = await decode(r)
       draw(recs, live)
       n = recs.at(-1)?.n ?? n
@@ -154,9 +155,9 @@ export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElem
       return r.headers.get("Mainplane-Session")!
     }
     // The sessions before the live one are asked for beside its records, not before them.
-    const [agent, first] = await Promise.all([get<Agent>(`/agents/${id}`, signal), turn("", signal)])
+    const [agent, first] = await Promise.all([get<AgentInfo>(path(paths.Agent, id), signal), turn("", signal)])
     live.dataset.session = session = first
-    const earlier = agent.sessions.slice(0, agent.sessions.indexOf(session))
+    const all = agent.sessions ?? [], earlier = all.slice(0, all.indexOf(session))
     // The session before loads as the top of the chat comes near, as in Messages, and what the user reads stays in place.
     let loading = Promise.resolve()
     // A failed load leaves its session in earlier and the queue going: the top coming near again asks again.

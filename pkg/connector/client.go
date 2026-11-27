@@ -25,8 +25,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	"github.com/mainplane-ai/mainplane/pkg/auth"
-	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
 	"github.com/mainplane-ai/mainplane/pkg/provider"
@@ -263,7 +263,7 @@ func (c *Client) Call(ctx context.Context, method, path, ctype string, body io.R
 // Version is the release the harness runs.
 func (c *Client) Version(ctx context.Context) (string, error) {
 	var out struct{ Version string }
-	err := c.Call(ctx, "GET", "/", "", nil, &out)
+	err := c.Call(ctx, "GET", api.RootPath, "", nil, &out)
 	return out.Version, err
 }
 
@@ -273,7 +273,7 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 // to no server. The mesh serves the API only.
 func (c *Client) Web(ctx context.Context) (string, error) {
 	var out struct{ URL string }
-	if err := c.Call(ctx, "GET", "/", "", nil, &out); err != nil {
+	if err := c.Call(ctx, "GET", api.RootPath, "", nil, &out); err != nil {
 		return "", err
 	}
 	u := cmp.Or(out.URL, c.Local)
@@ -284,36 +284,46 @@ func (c *Client) Web(ctx context.Context) (string, error) {
 }
 
 // Create makes a session and returns its id.
-func (c *Client) Create(ctx context.Context, cr harness.Create, via string) (string, error) {
+func (c *Client) Create(ctx context.Context, cr api.Create, via string) (string, error) {
 	b, err := json.Marshal(cr)
 	if err != nil {
 		return "", err
 	}
 	var out struct{ ID string }
-	err = c.Call(ctx, "POST", "/sessions?via="+url.QueryEscape(via), "application/json", bytes.NewReader(b), &out)
+	err = c.Call(ctx, "POST", api.SessionsPath+"?via="+url.QueryEscape(via), "application/json", bytes.NewReader(b), &out)
 	return out.ID, err
 }
 
 // Sessions lists sessions, newest updated first: with plain, only those no
-// agent made.
-func (c *Client) Sessions(ctx context.Context, status string, limit int, plain bool) ([]harness.Info, error) {
-	q := "/sessions?status=" + url.QueryEscape(status) + "&limit=" + strconv.Itoa(limit)
+// agent made. A limit of 0 is no limit.
+func (c *Client) Sessions(ctx context.Context, status string, limit int, plain bool) ([]api.Info, error) {
+	q := api.SessionsPath + "?status=" + url.QueryEscape(status)
+	if limit > 0 {
+		q += "&limit=" + strconv.Itoa(limit)
+	}
 	if plain {
 		q += "&plain=1"
 	}
-	var infos []harness.Info
+	var infos []api.Info
 	err := c.Call(ctx, "GET", q, "", nil, &infos)
 	return infos, err
 }
 
-func (c *Client) Info(ctx context.Context, id string) (harness.Info, error) {
-	var i harness.Info
-	err := c.Call(ctx, "GET", "/sessions/"+id, "", nil, &i)
+func (c *Client) Info(ctx context.Context, id string) (api.Info, error) {
+	var i api.Info
+	err := c.Call(ctx, "GET", api.Path(api.SessionPath, id), "", nil, &i)
 	return i, err
 }
 
+// Retry steps the session from its tip and returns its status.
+func (c *Client) Retry(ctx context.Context, id string) (string, error) {
+	var out struct{ Status string }
+	err := c.Call(ctx, "POST", api.Path(api.SessionRetryPath, id), "", nil, &out)
+	return out.Status, err
+}
+
 func (c *Client) Stop(ctx context.Context, id, via string) error {
-	return c.Call(ctx, "POST", "/sessions/"+id+"/stop?via="+url.QueryEscape(via), "", nil, nil)
+	return c.Call(ctx, "POST", api.Path(api.SessionStopPath, id)+"?via="+url.QueryEscape(via), "", nil, nil)
 }
 
 // Post appends text and files as one turn: a single text/plain body, or one
@@ -321,7 +331,7 @@ func (c *Client) Stop(ctx context.Context, id, via string) error {
 // is refused, not guessed. Returns the last record's n.
 func (c *Client) Post(ctx context.Context, id, via, text string, files []string) (int, error) {
 	var out struct{ N int }
-	err := c.post(ctx, "/sessions/"+id+"/records?via="+url.QueryEscape(via), text, files, &out)
+	err := c.post(ctx, api.Path(api.SessionRecordsPath, id)+"?via="+url.QueryEscape(via), text, files, &out)
 	return out.N, err
 }
 
@@ -358,7 +368,7 @@ func (c *Client) post(ctx context.Context, path, text string, files []string, ou
 
 // Records is the file after record n; with wait, a long poll.
 func (c *Client) Records(ctx context.Context, id string, after int, wait string) ([]statefile.Record, error) {
-	resp, err := c.Do(ctx, "GET", "/sessions/"+id+"/records?after="+strconv.Itoa(after)+"&wait="+wait, "", nil)
+	resp, err := c.Do(ctx, "GET", api.Path(api.SessionRecordsPath, id)+"?after="+strconv.Itoa(after)+"&wait="+wait, "", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -377,45 +387,53 @@ func (c *Client) Records(ctx context.Context, id string, after int, wait string)
 	}
 }
 
-// Worker is a worker as GET /workers lists it: connected, unless refused,
-// and whether it can serve drives.
-type Worker struct {
-	Name        string `json:"name"`
-	Refused     string `json:"refused,omitempty"`
-	DriveServer bool   `json:"drive_server,omitempty"`
-}
-
 // Workers lists the workers the harness knows.
-func (c *Client) Workers(ctx context.Context) ([]Worker, error) {
-	var ws []Worker
-	err := c.Call(ctx, "GET", "/workers", "", nil, &ws)
+func (c *Client) Workers(ctx context.Context) ([]api.Listed, error) {
+	var ws []api.Listed
+	err := c.Call(ctx, "GET", api.WorkersPath, "", nil, &ws)
 	return ws, err
 }
 
-// SetName names the session; an empty name removes it.
-func (c *Client) SetName(ctx context.Context, id, via, name string) error {
-	return c.Call(ctx, "PUT", "/sessions/"+id+"/name?via="+url.QueryEscape(via), "text/plain; charset=utf-8", strings.NewReader(name), nil)
+// RemoveWorker takes the worker off the mesh for good.
+func (c *Client) RemoveWorker(ctx context.Context, name string) error {
+	return c.Call(ctx, "DELETE", api.Path(api.WorkerPath, name), "", nil, nil)
+}
+
+// RenameWorker renames the worker in place.
+func (c *Client) RenameWorker(ctx context.Context, name, to string) error {
+	return c.Call(ctx, "PUT", api.Path(api.WorkerNamePath, name), "text/plain; charset=utf-8", strings.NewReader(to), nil)
+}
+
+// SetName names the session, an empty name removes it, and returns the
+// name record's n.
+func (c *Client) SetName(ctx context.Context, id, via, name string) (int, error) {
+	var out struct{ N int }
+	err := c.Call(ctx, "PUT", api.Path(api.SessionNamePath, id)+"?via="+url.QueryEscape(via), "text/plain; charset=utf-8", strings.NewReader(name), &out)
+	return out.N, err
 }
 
 // Delete removes the session for good.
 func (c *Client) Delete(ctx context.Context, id, via string) error {
-	return c.Call(ctx, "DELETE", "/sessions/"+id+"?via="+url.QueryEscape(via), "", nil, nil)
+	return c.Call(ctx, "DELETE", api.Path(api.SessionPath, id)+"?via="+url.QueryEscape(via), "", nil, nil)
 }
 
-// SetWorkers makes ws the session's workers from its next step on.
-func (c *Client) SetWorkers(ctx context.Context, id, via string, ws []statefile.Worker) error {
+// SetWorkers makes ws the session's workers from its next step on, and
+// returns the config record's n.
+func (c *Client) SetWorkers(ctx context.Context, id, via string, ws []statefile.Worker) (int, error) {
 	b, err := json.Marshal(ws)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return c.Call(ctx, "PUT", "/sessions/"+id+"/workers?via="+url.QueryEscape(via), "application/json", bytes.NewReader(b), nil)
+	var out struct{ N int }
+	err = c.Call(ctx, "PUT", api.Path(api.SessionWorkersPath, id)+"?via="+url.QueryEscape(via), "application/json", bytes.NewReader(b), &out)
+	return out.N, err
 }
 
 // Providers lists the providers the harness serves, by the name a model
 // starts with.
-func (c *Client) Providers(ctx context.Context) ([]harness.ProviderInfo, error) {
-	var ps []harness.ProviderInfo
-	err := c.Call(ctx, "GET", "/providers", "", nil, &ps)
+func (c *Client) Providers(ctx context.Context) ([]api.ProviderInfo, error) {
+	var ps []api.ProviderInfo
+	err := c.Call(ctx, "GET", api.ProvidersPath, "", nil, &ps)
 	return ps, err
 }
 
@@ -423,12 +441,9 @@ func (c *Client) Providers(ctx context.Context) ([]harness.ProviderInfo, error) 
 // the catalog does not have.
 func (c *Client) Models(ctx context.Context, provider string) ([]string, error) {
 	var ids []string
-	err := c.Call(ctx, "GET", "/providers/"+url.PathEscape(provider)+"/models", "", nil, &ids)
+	err := c.Call(ctx, "GET", api.Path(api.ProviderModelsPath, provider), "", nil, &ids)
 	return ids, err
 }
-
-// loginPath is the route of provider name's login.
-func loginPath(name string) string { return "/providers/" + url.PathEscape(name) + "/login" }
 
 // signinPoll is how often a login is asked how it stands.
 const signinPoll = 2 * time.Second
@@ -442,7 +457,7 @@ func (c *Client) SignIn(ctx context.Context, name, shape, u string) (provider.Lo
 	if err != nil {
 		return st, err
 	}
-	if err := c.Call(ctx, "POST", loginPath(name), "application/json", bytes.NewReader(b), &st); err != nil {
+	if err := c.Call(ctx, "POST", api.Path(api.ProviderLoginPath, name), "application/json", bytes.NewReader(b), &st); err != nil {
 		return st, err
 	}
 	st, err = c.signinPoll(ctx, name, st, func(st provider.LoginState) bool { return st.URL != "" })
@@ -458,7 +473,7 @@ func (c *Client) SignInPaste(ctx context.Context, name, text string) error {
 	if err != nil {
 		return err
 	}
-	return c.Call(ctx, "POST", loginPath(name)+"/code", "application/json", bytes.NewReader(b), nil)
+	return c.Call(ctx, "POST", api.Path(api.ProviderLoginCodePath, name), "application/json", bytes.NewReader(b), nil)
 }
 
 // SignInWait waits for the login to end, and is an error unless it signed in.
@@ -480,7 +495,7 @@ func (c *Client) signinPoll(ctx context.Context, name string, st provider.LoginS
 			return st, ctx.Err()
 		}
 		st = provider.LoginState{}
-		if err := c.Call(ctx, "GET", loginPath(name), "", nil, &st); err != nil {
+		if err := c.Call(ctx, "GET", api.Path(api.ProviderLoginPath, name), "", nil, &st); err != nil {
 			return st, err
 		}
 	}
@@ -494,20 +509,20 @@ func (c *Client) SetProvider(ctx context.Context, name, shape, u, region, sessio
 	if err != nil {
 		return err
 	}
-	return c.Call(ctx, "PUT", "/providers/"+url.PathEscape(name), "application/json", bytes.NewReader(b), nil)
+	return c.Call(ctx, "PUT", api.Path(api.ProviderPath, name), "application/json", bytes.NewReader(b), nil)
 }
 
 // Network is the state of the harness's tunnel: starting, ready, or its error.
 func (c *Client) Network(ctx context.Context) (string, error) {
 	var out struct{ Network string }
-	err := c.Call(ctx, "GET", "/", "", nil, &out)
+	err := c.Call(ctx, "GET", api.RootPath, "", nil, &out)
 	return out.Network, err
 }
 
 // Join is the network name and device code that make a machine a worker.
 func (c *Client) Join(ctx context.Context) (string, error) {
 	var out struct{ Join string }
-	err := c.Call(ctx, "GET", "/join", "", nil, &out)
+	err := c.Call(ctx, "GET", api.JoinPath, "", nil, &out)
 	return out.Join, err
 }
 
@@ -519,8 +534,24 @@ func (c *Client) NewKey(ctx context.Context, name string) (string, error) {
 		return "", err
 	}
 	var out struct{ Key string }
-	err = c.Call(ctx, "POST", "/keys", "application/json", bytes.NewReader(b), &out)
+	err = c.Call(ctx, "POST", api.KeysPath, "application/json", bytes.NewReader(b), &out)
 	return out.Key, err
+}
+
+// NewJoinToken returns a one-time join token that makes one machine worker name.
+func (c *Client) NewJoinToken(ctx context.Context, name string) (string, error) {
+	b, err := json.Marshal(map[string]string{"name": name})
+	if err != nil {
+		return "", err
+	}
+	var out struct{ Token string }
+	err = c.Call(ctx, "POST", api.JoinTokensPath, "application/json", bytes.NewReader(b), &out)
+	return out.Token, err
+}
+
+// RevokeJoinToken makes the unspent join token name join no machine.
+func (c *Client) RevokeJoinToken(ctx context.Context, name string) error {
+	return c.Call(ctx, "DELETE", api.Path(api.JoinTokenPath, name), "", nil, nil)
 }
 
 // SetDrive makes or changes the drive name, served by server to workers, "*"
@@ -531,6 +562,6 @@ func (c *Client) SetDrive(ctx context.Context, name, server string, workers []st
 		return nil, err
 	}
 	var out struct{ Linked [][2]string }
-	err = c.Call(ctx, "PUT", "/drives/"+url.PathEscape(name), "application/json", bytes.NewReader(b), &out)
+	err = c.Call(ctx, "PUT", api.Path(api.DrivePath, name), "application/json", bytes.NewReader(b), &out)
 	return out.Linked, err
 }

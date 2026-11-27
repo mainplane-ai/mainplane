@@ -7,63 +7,38 @@ import (
 	"slices"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
+
 	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
-// Info is what GET /sessions/{id} and each entry of GET /sessions say about a
-// session: everything the tip states and its name, no cost. ContextUsed is
-// the last step's prompt in tokens, against Config.ContextLimit. Updated is
-// the newest record that is not a name, so a rename does not reorder a list.
-// Cache is the prompt cache of the newest step that kept one.
-type Info struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name,omitempty"`
-	Via         string           `json:"via,omitempty"` // who made it: a connector, or agent:<id> for an agent's session
-	Status      statefile.Status `json:"status"`
-	Config      statefile.Conf   `json:"config"`
-	Created     time.Time        `json:"created"`
-	Updated     time.Time        `json:"updated"`
-	N           int              `json:"n"`
-	ContextUsed int              `json:"context_used"`
-	Usage       statefile.Usage  `json:"usage"`
-	Cache       Cache            `json:"cache,omitzero"`
-}
-
-// Cache is how long the vendor keeps a session's prompt: warm until Until,
-// or with Likely, probably warm until then, on a vendor that evicts by load.
-// Zero when no step kept one or the vendor states no window.
-type Cache struct {
-	Until  time.Time `json:"until"`
-	Likely bool      `json:"likely,omitempty"`
-}
-
 // cacheOf is the cache a step kept, from its header: its TTL counted from
 // the anchor, the request's start where the anchor is not measured.
-func cacheOf(r statefile.Record) (Cache, bool) {
+func cacheOf(r statefile.Record) (api.Cache, bool) {
 	var c provider.Cache
 	if r.Kind != statefile.Step || len(r.Cache) == 0 || json.Unmarshal(r.Cache, &c) != nil || c.TTL == 0 {
-		return Cache{}, false
+		return api.Cache{}, false
 	}
 	at := r.Sent
 	if c.Anchor == "end" || at.IsZero() {
 		at = r.Time
 	}
-	return Cache{Until: at.Add(time.Duration(c.TTL) * time.Second), Likely: c.Likely}, true
+	return api.Cache{Until: at.Add(time.Duration(c.TTL) * time.Second), Likely: c.Likely}, true
 }
 
 // Info reads one session's file.
-func (h *Harness) Info(id string) (Info, error) {
+func (h *Harness) Info(id string) (api.Info, error) {
 	chain, err := h.Sessions.Load(id)
 	if err != nil {
-		return Info{}, err
+		return api.Info{}, err
 	}
 	conf, err := config(chain)
 	if err != nil {
-		return Info{}, err
+		return api.Info{}, err
 	}
 	tip := chain[len(chain)-1]
-	info := Info{ID: id, Via: chain[0].Via, Status: h.status(id, chain), Config: conf, Created: chain[0].Time, N: tip.N, ContextUsed: statefile.ContextUsed(chain)}
+	info := api.Info{ID: id, Via: chain[0].Via, Status: h.status(id, chain), Config: conf, Created: chain[0].Time, N: tip.N, ContextUsed: statefile.ContextUsed(chain)}
 	for _, r := range chain {
 		if r.Kind == statefile.Name {
 			info.Name = string(r.Body)
@@ -92,7 +67,7 @@ func (h *Harness) Info(id string) (Info, error) {
 // write touched it since the index last read it, or the index has none. A
 // touched file that does not read keeps its mark, so the next call reads it
 // again, and what the index has of it is the answer until then.
-func (h *Harness) cached(id string) (Info, error) {
+func (h *Harness) cached(id string) (api.Info, error) {
 	h.lockIndex()
 	info, ok := h.index[id]
 	stale := h.dirty[id]
@@ -114,7 +89,7 @@ func (h *Harness) cached(id string) (Info, error) {
 func (h *Harness) lockIndex() {
 	h.imu.Lock()
 	if h.index == nil {
-		h.index, h.dirty, h.gone = map[string]Info{}, map[string]bool{}, map[string]bool{}
+		h.index, h.dirty, h.gone = map[string]api.Info{}, map[string]bool{}, map[string]bool{}
 	}
 }
 
@@ -132,7 +107,7 @@ func (h *Harness) touch(id string) {
 // the read marks it again. A file that does not read is logged and left out
 // until its next write. Resume fills the index on start, and touch adds a
 // created session.
-func (h *Harness) List() ([]Info, error) {
+func (h *Harness) List() ([]api.Info, error) {
 	h.lockIndex()
 	ids := make([]string, 0, len(h.index)+len(h.dirty))
 	for id := range h.index {
@@ -144,7 +119,7 @@ func (h *Harness) List() ([]Info, error) {
 		}
 	}
 	h.imu.Unlock()
-	infos := make([]Info, 0, len(ids))
+	infos := make([]api.Info, 0, len(ids))
 	for _, id := range ids {
 		h.imu.Lock()
 		info, ok := h.index[id]
@@ -164,7 +139,7 @@ func (h *Harness) List() ([]Info, error) {
 		}
 		infos = append(infos, info)
 	}
-	slices.SortFunc(infos, func(a, b Info) int { return b.Updated.Compare(a.Updated) })
+	slices.SortFunc(infos, func(a, b api.Info) int { return b.Updated.Compare(a.Updated) })
 	return infos, nil
 }
 

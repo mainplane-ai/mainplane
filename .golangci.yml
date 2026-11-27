@@ -53,6 +53,9 @@ linters:
           files: ["**/pkg/api/**"]
           allow:
             - $gostd
+            - github.com/mainplane-ai/mainplane/pkg/api
+            - github.com/mainplane-ai/mainplane/pkg/statefile
+            - github.com/mainplane-ai/mainplane/pkg/worker
 
 formatters:
   enable:

@@ -22,6 +22,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
@@ -57,7 +58,7 @@ type App struct {
 // create is the body of POST /agents: the harness's, and what only
 // orchestrate takes.
 type create struct {
-	harness.AgentCreate
+	api.AgentCreate
 	Message      string `json:"message"`
 	NotifyOnStop bool   `json:"notify_on_stop"`
 }
@@ -99,10 +100,10 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("orchestrate: %s: %w", o.path, err)
 	}
-	api, mux := harness.Handler(ctx, h), http.NewServeMux()
+	harnessAPI, mux := harness.Handler(ctx, h), http.NewServeMux()
 	// handle answers fn's error: 403 for more than the caller has, 404 for
 	// an agent that is not the caller's, as if it were not there.
-	handle := func(pattern string, fn func(w http.ResponseWriter, r *http.Request, caller harness.Agent) error) {
+	handle := func(pattern string, fn func(w http.ResponseWriter, r *http.Request, caller api.Agent) error) {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			caller, err := h.Agent(r.Header.Get("X-Mainplane-Agent"))
 			if err == nil {
@@ -121,17 +122,17 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 	}
 	// pass gives the request to the harness's route of the same path, with
 	// the caller as its via. On a list, via is the filter: the caller's own.
-	pass := func(w http.ResponseWriter, r *http.Request, caller harness.Agent) error {
+	pass := func(w http.ResponseWriter, r *http.Request, caller api.Agent) error {
 		q := r.URL.Query()
 		q.Set("via", harness.AgentVia+caller.ID)
 		r.URL.RawQuery = q.Encode()
-		api.ServeHTTP(w, r)
+		harnessAPI.ServeHTTP(w, r)
 		return nil
 	}
 	// owned is pass for an agent the caller created, once check, if any,
 	// allows the request.
-	owned := func(pattern string, check func(r *http.Request, caller, a harness.Agent) error) {
-		handle(pattern, func(w http.ResponseWriter, r *http.Request, caller harness.Agent) error {
+	owned := func(pattern string, check func(r *http.Request, caller, a api.Agent) error) {
+		handle(pattern, func(w http.ResponseWriter, r *http.Request, caller api.Agent) error {
 			a, err := o.own(r, caller)
 			if err == nil && check != nil {
 				err = check(r, caller, a)
@@ -142,26 +143,26 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 			return pass(w, r, caller)
 		})
 	}
-	handle("POST /agents", o.create)
-	handle("GET /agents", pass)
-	owned("GET /agents/{id}", nil)
-	owned("GET /agents/{id}/records", func(r *http.Request, _, a harness.Agent) error {
-		sid := cmp.Or(r.URL.Query().Get("session"), a.Sessions[len(a.Sessions)-1])
+	handle("POST "+api.AgentsPath, o.create)
+	handle("GET "+api.AgentsPath, pass)
+	owned("GET "+api.AgentPath, nil)
+	owned("GET "+api.AgentRecordsPath, func(r *http.Request, _, a api.Agent) error {
+		sid := cmp.Or(r.URL.Query().Get("session"), a.Live())
 		if !slices.Contains(a.Sessions, sid) {
 			return fmt.Errorf("session %s is not agent %s's", sid, a.ID)
 		}
-		r.URL.Path = "/sessions/" + sid + "/records" // where the harness serves a session's records
+		r.URL.Path = api.Path(api.SessionRecordsPath, sid) // where the harness serves a session's records
 		return nil
 	})
-	owned("PUT /agents/{id}/name", nil)
-	owned("PUT /agents/{id}/config", func(r *http.Request, caller, a harness.Agent) error {
-		var c harness.AgentConfig
+	owned("PUT "+api.AgentNamePath, nil)
+	owned("PUT "+api.AgentConfigPath, func(r *http.Request, caller, a api.Agent) error {
+		var c api.AgentConfig
 		if err := peek(r, &c); err != nil {
 			return err
 		}
 		return within(caller, &c, a.Apps)
 	})
-	owned("PUT /agents/{id}/apps", func(r *http.Request, caller, _ harness.Agent) error {
+	owned("PUT "+api.AgentAppsPath, func(r *http.Request, caller, _ api.Agent) error {
 		var apps []string
 		if err := peek(r, &apps); err != nil {
 			return err
@@ -170,7 +171,7 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 	})
 	// What an agent is told at the start of each session is its own to keep
 	// right: it grants nothing, as a config or a list of apps would.
-	handle("PUT /agents/{id}/instructions", func(w http.ResponseWriter, r *http.Request, caller harness.Agent) error {
+	handle("PUT "+api.AgentInstructionsPath, func(w http.ResponseWriter, r *http.Request, caller api.Agent) error {
 		if r.PathValue("id") != caller.ID {
 			if _, err := o.own(r, caller); err != nil {
 				return err
@@ -179,14 +180,14 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 		return pass(w, r, caller)
 	})
 	handle("PUT /agents/{id}/notify_on_stop", o.notify)
-	owned("POST /agents/{id}/stop", nil)
-	handle("DELETE /agents/{id}", o.remove)
+	owned("POST "+api.AgentStopPath, nil)
+	handle("DELETE "+api.AgentPath, o.remove)
 	o.Handler = mux
 	return o, nil
 }
 
 // own is the agent the path names, if the caller created it.
-func (o *App) own(r *http.Request, caller harness.Agent) (harness.Agent, error) {
+func (o *App) own(r *http.Request, caller api.Agent) (api.Agent, error) {
 	a, err := o.h.Agent(r.PathValue("id"))
 	if err == nil && a.Via != harness.AgentVia+caller.ID {
 		err = fmt.Errorf("%w: %s", harness.ErrNoAgent, a.ID)
@@ -195,7 +196,7 @@ func (o *App) own(r *http.Request, caller harness.Agent) (harness.Agent, error) 
 }
 
 // notify sets whether the caller is told when the agent next stops.
-func (o *App) notify(w http.ResponseWriter, r *http.Request, caller harness.Agent) error {
+func (o *App) notify(w http.ResponseWriter, r *http.Request, caller api.Agent) error {
 	a, err := o.own(r, caller)
 	if err != nil {
 		return err
@@ -216,7 +217,7 @@ func (o *App) notify(w http.ResponseWriter, r *http.Request, caller harness.Agen
 }
 
 // remove deletes the agent as the harness's route does, then its watch.
-func (o *App) remove(w http.ResponseWriter, r *http.Request, caller harness.Agent) error {
+func (o *App) remove(w http.ResponseWriter, r *http.Request, caller api.Agent) error {
 	a, err := o.own(r, caller)
 	if err == nil {
 		err = o.h.DeleteAgent(o.ctx, a.ID, harness.AgentVia+caller.ID)
@@ -244,7 +245,7 @@ func peek(r *http.Request, v any) error {
 // create makes an agent of the caller's: with no config it gets the
 // caller's, a config is filled in by fill, and with no cold limit it gets
 // coldLimit. It adopts no session: the caller's key reaches none.
-func (o *App) create(w http.ResponseWriter, r *http.Request, caller harness.Agent) error {
+func (o *App) create(w http.ResponseWriter, r *http.Request, caller api.Agent) error {
 	var c create
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
 		return err
@@ -296,7 +297,7 @@ func (o *App) create(w http.ResponseWriter, r *http.Request, caller harness.Agen
 // fill gives a config what it leaves out: the caller's workers, and the
 // context limit, tools, input and params of its model's preset. A model
 // with no preset keeps what it has, and the harness says what is missing.
-func (o *App) fill(ctx context.Context, c *harness.AgentConfig, caller harness.Agent) error {
+func (o *App) fill(ctx context.Context, c *api.AgentConfig, caller api.Agent) error {
 	if c.Workers == nil {
 		c.Workers = caller.Config.Workers
 	}
@@ -319,7 +320,7 @@ func (o *App) fill(ctx context.Context, c *harness.AgentConfig, caller harness.A
 
 // within is errEscalate unless a config's workers and a list of apps are all
 // among the caller's own. A nil config asks for no worker.
-func within(caller harness.Agent, c *harness.AgentConfig, apps []string) error {
+func within(caller api.Agent, c *api.AgentConfig, apps []string) error {
 	if c != nil && slices.ContainsFunc(c.Workers, func(w statefile.Worker) bool { return !slices.Contains(caller.Config.Workers, w) }) ||
 		slices.ContainsFunc(apps, func(a string) bool { return !slices.Contains(caller.Apps, a) }) {
 		return errEscalate
@@ -360,7 +361,7 @@ func (o *App) Unwatch(agent string) error { return o.watch(agent, "") }
 // Stopped is the harness's word that an agent's live session ended a run
 // closed or failed. The agent that asked is told once; a rollover never
 // gets here.
-func (o *App) Stopped(a harness.Agent, st statefile.Status) {
+func (o *App) Stopped(a api.Agent, st statefile.Status) {
 	o.mu.Lock()
 	parent, ok := o.watches[a.ID]
 	o.mu.Unlock()
@@ -374,7 +375,7 @@ func (o *App) Stopped(a harness.Agent, st statefile.Status) {
 	if a.Name != "" {
 		name = " (" + a.Name + ")"
 	}
-	text := fmt.Sprintf(stopped, a.ID, name, a.Sessions[len(a.Sessions)-1], st)
+	text := fmt.Sprintf(stopped, a.ID, name, a.Live(), st)
 	if _, _, err := o.h.PostAgent(o.ctx, parent, "app:orchestrate", "", []harness.Part{{Type: "text/plain", Body: []byte(text)}}); err != nil {
 		log.Printf("orchestrate: telling agent %s that %s stopped: %v", parent, a.ID, err)
 	}

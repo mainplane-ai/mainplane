@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"filippo.io/cpace"
+	"github.com/mainplane-ai/mainplane/pkg/api"
 )
 
 // A device code is what a person types beside a network name to make a
@@ -154,7 +155,7 @@ func Redeem(ctx context.Context, url, key, code string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+"/join", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+api.JoinPath, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -165,7 +166,7 @@ func Redeem(ctx context.Context, url, key, code string) (string, error) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxJoin))
-		return "", fmt.Errorf("%s/join: %s: %s", url, resp.Status, bytes.TrimSpace(b))
+		return "", fmt.Errorf("%s%s: %s: %s", url, api.JoinPath, resp.Status, bytes.TrimSpace(b))
 	}
 	var m joinMsg
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxJoin)).Decode(&m); err != nil {

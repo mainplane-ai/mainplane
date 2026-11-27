@@ -17,6 +17,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
+
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
@@ -34,54 +36,6 @@ func Person(via string) bool {
 // MaxInstructions is the most bytes of instructions an agent holds: every
 // session of the agent reads them whole, so they are a cost each one pays.
 const MaxInstructions = 4 << 10
-
-// Agent is agents/<id>.json: an identity that outlives a session. It holds
-// the config of its next session, the apps it may use, the instructions
-// every session of it starts with, and every session it has had, oldest
-// first. The last one is live: the one a post lands on, and the only one
-// whose key reaches the agent's apps. There is always one.
-type Agent struct {
-	ID           string      `json:"id"`
-	Name         string      `json:"name,omitempty"`
-	Via          string      `json:"via,omitempty"` // who made it: a connector, or agent:<id> for one an agent created
-	Created      time.Time   `json:"created"`
-	Config       AgentConfig `json:"config"`
-	Apps         []string    `json:"apps"`
-	Instructions string      `json:"instructions,omitempty"`
-	Sessions     []string    `json:"sessions"`
-}
-
-// AgentConfig is a session's config and the limit that is the agent's alone.
-// Past ColdLimit a post that finds the prompt cache expired goes to a new
-// session: the old one would be paid for again in full. Zero is no such limit.
-type AgentConfig struct {
-	statefile.Conf
-	ColdLimit int `json:"cold_limit,omitempty"`
-}
-
-// AgentInfo is an agent as GET /agents shows it. Status, ContextUsed and
-// Updated are its live session's. Usage is the agent's: the sum over every
-// session it has had whose file is still there. The live session's own is
-// in GET /sessions/{current_session}.
-type AgentInfo struct {
-	Agent
-	Updated        time.Time        `json:"updated"`
-	Status         statefile.Status `json:"status"`
-	CurrentSession string           `json:"current_session"`
-	ContextUsed    int              `json:"context_used"`
-	Usage          statefile.Usage  `json:"usage"`
-}
-
-// AgentCreate is the body of POST /agents. With Session the agent adopts that
-// session, and takes its config when it names none; without, Config is
-// required and the first session is made from it.
-type AgentCreate struct {
-	Name         string       `json:"name,omitempty"`
-	Config       *AgentConfig `json:"config,omitempty"`
-	Apps         []string     `json:"apps,omitempty"`
-	Instructions string       `json:"instructions,omitempty"`
-	Session      string       `json:"session,omitempty"`
-}
 
 // ErrNoAgent is an agent id no file has. ErrLive is a delete of the session
 // an agent lives in.
@@ -104,13 +58,11 @@ const (
 // record's body and nothing of its header, so the body says what it is.
 const instructionsHead = "This agent's instructions:\n"
 
-func (a Agent) live() string { return a.Sessions[len(a.Sessions)-1] }
-
 // lockAgents takes amu with the maps ready.
 func (h *Harness) lockAgents() {
 	h.amu.Lock()
 	if h.agents == nil {
-		h.agents, h.live, h.alocks = map[string]Agent{}, map[string]string{}, map[string]*sync.Mutex{}
+		h.agents, h.live, h.alocks = map[string]api.Agent{}, map[string]string{}, map[string]*sync.Mutex{}
 	}
 }
 
@@ -132,7 +84,7 @@ func (h *Harness) LoadAgents() error {
 		if !ok {
 			continue
 		}
-		var a Agent
+		var a api.Agent
 		b, err := os.ReadFile(filepath.Join(h.Agents, e.Name()))
 		if err == nil {
 			err = json.Unmarshal(b, &a)
@@ -141,13 +93,13 @@ func (h *Harness) LoadAgents() error {
 			log.Printf("agent %s: not read: %v", id, err)
 			continue
 		}
-		h.agents[id], h.live[a.live()] = a, id
+		h.agents[id], h.live[a.Live()] = a, id
 	}
 	return nil
 }
 
 // Agent is the agent as its file has it now.
-func (h *Harness) Agent(id string) (Agent, error) {
+func (h *Harness) Agent(id string) (api.Agent, error) {
 	h.lockAgents()
 	defer h.amu.Unlock()
 	a, ok := h.agents[id]
@@ -159,7 +111,7 @@ func (h *Harness) Agent(id string) (Agent, error) {
 
 // Holder is the agent whose live session is session: none for a plain
 // session, and none for a session its agent has moved on from.
-func (h *Harness) Holder(session string) (Agent, bool) {
+func (h *Harness) Holder(session string) (api.Agent, bool) {
 	h.lockAgents()
 	defer h.amu.Unlock()
 	a, ok := h.agents[h.live[session]]
@@ -168,12 +120,12 @@ func (h *Harness) Holder(session string) (Agent, bool) {
 
 // holdAgent takes the agent's lock, under which one post or change at a time
 // reads the agent and writes it, and returns the agent and the unlock.
-func (h *Harness) holdAgent(id string) (Agent, func(), error) {
+func (h *Harness) holdAgent(id string) (api.Agent, func(), error) {
 	h.lockAgents()
 	mu, ok := h.alocks[id]
 	if _, is := h.agents[id]; !ok && !is { // no lock is kept for an id a caller made up
 		h.amu.Unlock()
-		return Agent{}, nil, fmt.Errorf("%w: %s", ErrNoAgent, id)
+		return api.Agent{}, nil, fmt.Errorf("%w: %s", ErrNoAgent, id)
 	}
 	if !ok {
 		mu = &sync.Mutex{}
@@ -191,7 +143,7 @@ func (h *Harness) holdAgent(id string) (Agent, func(), error) {
 // save writes the agent's file whole, as a temporary file renamed over it,
 // so a reader never sees half of one, then makes memory agree. The caller
 // holds the agent's lock.
-func (h *Harness) save(a Agent) error {
+func (h *Harness) save(a api.Agent) error {
 	b, err := json.MarshalIndent(a, "", "  ")
 	if err != nil {
 		return err
@@ -206,16 +158,16 @@ func (h *Harness) save(a Agent) error {
 	h.lockAgents()
 	defer h.amu.Unlock()
 	if old, ok := h.agents[a.ID]; ok {
-		delete(h.live, old.live())
+		delete(h.live, old.Live())
 	}
-	h.agents[a.ID], h.live[a.live()] = a, a.ID
+	h.agents[a.ID], h.live[a.Live()] = a, a.ID
 	return nil
 }
 
 // apps is the body of the apps system record: who the agent is, how it calls
 // an app, and line 1 of each app's skill. An app the harness does not have
 // is an error.
-func (h *Harness) apps(a Agent) (string, error) {
+func (h *Harness) apps(a api.Agent) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, appsHead, a.ID)
 	for _, name := range a.Apps {
@@ -236,7 +188,7 @@ func (h *Harness) apps(a Agent) (string, error) {
 
 // opening is the system records every session of an agent starts with, and
 // one it adopts gets: its apps, then its instructions if it has any.
-func (h *Harness) opening(a Agent) ([]statefile.Record, error) {
+func (h *Harness) opening(a api.Agent) ([]statefile.Record, error) {
 	apps, err := h.apps(a)
 	if err != nil {
 		return nil, err
@@ -260,8 +212,8 @@ func checkInstructions(text string) error {
 // CreateAgent is POST /agents. The agent has a session from the start: one
 // made from its config, which calls no model until a message comes, or the
 // one it adopts. A session has one agent at most.
-func (h *Harness) CreateAgent(ctx context.Context, c AgentCreate, via string) (Agent, error) {
-	a := Agent{ID: statefile.NewID(), Name: c.Name, Via: via, Created: time.Now().UTC().Truncate(time.Millisecond), Apps: slices.Compact(slices.Sorted(slices.Values(c.Apps))), Instructions: c.Instructions}
+func (h *Harness) CreateAgent(ctx context.Context, c api.AgentCreate, via string) (api.Agent, error) {
+	a := api.Agent{ID: statefile.NewID(), Name: c.Name, Via: via, Created: time.Now().UTC().Truncate(time.Millisecond), Apps: slices.Compact(slices.Sorted(slices.Values(c.Apps))), Instructions: c.Instructions}
 	if a.Apps == nil {
 		a.Apps = []string{}
 	}
@@ -344,23 +296,23 @@ func (h *Harness) CreateAgent(ctx context.Context, c AgentCreate, via string) (A
 
 // next makes session id for the agent from its config, with the records
 // every session of an agent starts with. It does not step.
-func (h *Harness) next(ctx context.Context, a Agent, id string) (string, error) {
+func (h *Harness) next(ctx context.Context, a api.Agent, id string) (string, error) {
 	opening, err := h.opening(a)
 	if err != nil {
 		return "", err
 	}
 	c := a.Config
-	if err := h.create(ctx, id, Create{Model: c.Model, ContextLimit: c.ContextLimit, Workers: c.Workers, Tools: c.Tools, Input: c.Input, Params: c.Params, Preset: c.Preset}, AgentVia+a.ID); err != nil {
+	if err := h.create(ctx, id, api.Create{Model: c.Model, ContextLimit: c.ContextLimit, Workers: c.Workers, Tools: c.Tools, Input: c.Input, Params: c.Params, Preset: c.Preset}, AgentVia+a.ID); err != nil {
 		return "", err
 	}
 	return id, h.note(h.session(id), id, opening...)
 }
 
 // AgentInfo is GET /agents/{id}.
-func (h *Harness) AgentInfo(id string) (AgentInfo, error) {
+func (h *Harness) AgentInfo(id string) (api.AgentInfo, error) {
 	a, err := h.Agent(id)
 	if err != nil {
-		return AgentInfo{}, err
+		return api.AgentInfo{}, err
 	}
 	return h.agentInfo(a)
 }
@@ -371,14 +323,14 @@ func (h *Harness) AgentInfo(id string) (AgentInfo, error) {
 // step of the session before: until that run ends, the agent is stepping.
 // When another session became the live one under the read, the read is of
 // a session that ended, and is made again.
-func (h *Harness) agentInfo(a Agent) (AgentInfo, error) {
+func (h *Harness) agentInfo(a api.Agent) (api.AgentInfo, error) {
 	n := len(a.Sessions)
 	handing := n > 1 && h.handing(a.Sessions[n-2]) // asked first: once that run ends, the live session's status is the agent's
-	i, err := h.Info(a.live())
-	if now, nerr := h.Agent(a.ID); nerr == nil && now.live() != a.live() {
+	i, err := h.Info(a.Live())
+	if now, nerr := h.Agent(a.ID); nerr == nil && now.Live() != a.Live() {
 		return h.agentInfo(now)
 	}
-	info := AgentInfo{Agent: a, Updated: i.Updated, Status: i.Status, CurrentSession: a.live(), ContextUsed: i.ContextUsed, Usage: i.Usage}
+	info := api.AgentInfo{Agent: a, Updated: i.Updated, Status: i.Status, CurrentSession: a.Live(), ContextUsed: i.ContextUsed, Usage: i.Usage}
 	if handing {
 		info.Status = statefile.StatusStepping
 	}
@@ -398,16 +350,16 @@ func (h *Harness) agentInfo(a Agent) (AgentInfo, error) {
 // ListAgents is every agent keep says yes to, newest updated first. Only
 // their live sessions' files are read. One whose live session does not read
 // is logged and left out.
-func (h *Harness) ListAgents(keep func(Agent) bool) []AgentInfo {
+func (h *Harness) ListAgents(keep func(api.Agent) bool) []api.AgentInfo {
 	h.lockAgents()
-	agents := make([]Agent, 0, len(h.agents))
+	agents := make([]api.Agent, 0, len(h.agents))
 	for _, a := range h.agents {
 		if keep(a) {
 			agents = append(agents, a)
 		}
 	}
 	h.amu.Unlock()
-	infos := make([]AgentInfo, 0, len(agents))
+	infos := make([]api.AgentInfo, 0, len(agents))
 	for _, a := range agents {
 		i, err := h.agentInfo(a)
 		if err != nil {
@@ -417,7 +369,7 @@ func (h *Harness) ListAgents(keep func(Agent) bool) []AgentInfo {
 		infos = append(infos, i)
 	}
 	// Two updated in one millisecond keep one order, so a page after an id is the same page each time.
-	slices.SortFunc(infos, func(a, b AgentInfo) int { return cmp.Or(b.Updated.Compare(a.Updated), cmp.Compare(a.ID, b.ID)) })
+	slices.SortFunc(infos, func(a, b api.AgentInfo) int { return cmp.Or(b.Updated.Compare(a.Updated), cmp.Compare(a.ID, b.ID)) })
 	return infos
 }
 
@@ -436,7 +388,7 @@ func core(c statefile.Conf) string {
 // post does, if the live session cannot go on under the new config. When
 // only the workers or the context limit changed, the live session takes them
 // in place and keeps its prompt cache.
-func (h *Harness) SetAgentConfig(id, via string, c AgentConfig) error {
+func (h *Harness) SetAgentConfig(id, via string, c api.AgentConfig) error {
 	var err error
 	if c.Conf, _, err = h.valid(c.Conf); err != nil {
 		return err
@@ -453,17 +405,17 @@ func (h *Harness) SetAgentConfig(id, via string, c AgentConfig) error {
 	if err := h.save(a); err != nil {
 		return err
 	}
-	chain, err := h.Sessions.Load(a.live())
+	chain, err := h.Sessions.Load(a.Live())
 	if err != nil {
 		return err
 	}
-	return h.takeConf(a.live(), via, chain, c)
+	return h.takeConf(a.Live(), via, chain, c)
 }
 
 // takeConf gives session id, of chain, the workers and the limit of c in
 // place, when they are all of c it lacks. Any other change waits for the
 // next post, which goes on in a new session.
-func (h *Harness) takeConf(id, via string, chain []statefile.Record, c AgentConfig) error {
+func (h *Harness) takeConf(id, via string, chain []statefile.Record, c api.AgentConfig) error {
 	conf, err := config(chain)
 	if err != nil {
 		return err
@@ -495,7 +447,7 @@ func (h *Harness) SetAgentApps(id, via string, apps []string) error {
 	}
 	note := system("apps", text)
 	note.Via = via
-	return h.note(h.session(a.live()), a.live(), note)
+	return h.note(h.session(a.Live()), a.Live(), note)
 }
 
 // SetAgentInstructions is PUT /agents/{id}/instructions. Empty removes them.
@@ -517,7 +469,7 @@ func (h *Harness) SetAgentInstructions(id, via, text string) error {
 	}
 	note := system("instructions", instructionsHead+cmp.Or(text, "none"))
 	note.Via = via
-	return h.note(h.session(a.live()), a.live(), note)
+	return h.note(h.session(a.Live()), a.Live(), note)
 }
 
 // SetAgentName is PUT /agents/{id}/name. Empty removes the name. The
@@ -557,7 +509,7 @@ func (h *Harness) DeleteAgent(ctx context.Context, id, via string) error {
 		err = nil
 		h.lockAgents()
 		delete(h.agents, id)
-		delete(h.live, a.live())
+		delete(h.live, a.Live())
 		delete(h.alocks, id)
 		h.amu.Unlock()
 	}
@@ -565,12 +517,12 @@ func (h *Harness) DeleteAgent(ctx context.Context, id, via string) error {
 	if err != nil {
 		return err
 	}
-	release, err := h.halt(ctx, h.session(a.live()), via, nil)
+	release, err := h.halt(ctx, h.session(a.Live()), via, nil)
 	if err != nil {
 		return err
 	}
 	release()
-	h.Kick(context.WithoutCancel(ctx), a.live())
+	h.Kick(context.WithoutCancel(ctx), a.Live())
 	log.Printf("agent %s: deleted by %s", id, via)
 	return nil
 }
@@ -590,7 +542,7 @@ func (h *Harness) postAgent(ctx context.Context, id, via, key string, parts []Pa
 		return "", 0, err
 	}
 	defer unlock()
-	s := a.live()
+	s := a.Live()
 	chain, err := h.Sessions.Load(s)
 	if err != nil {
 		return "", 0, err
@@ -617,13 +569,13 @@ func (h *Harness) postAgent(ctx context.Context, id, via, key string, parts []Pa
 // its config is not the agent's, it is at the limit, its prompt cache has
 // expired and it is at the cold limit, or this harness no longer builds its
 // request as the last step sent it.
-func (h *Harness) stale(a Agent, chain []statefile.Record) string {
+func (h *Harness) stale(a api.Agent, chain []statefile.Record) string {
 	conf, err := config(chain)
 	if err != nil {
 		return err.Error()
 	}
 	used := statefile.ContextUsed(chain)
-	var cache Cache
+	var cache api.Cache
 	for _, r := range chain {
 		if c, ok := cacheOf(r); ok {
 			cache = c
@@ -646,8 +598,8 @@ func (h *Harness) stale(a Agent, chain []statefile.Record) string {
 // roll makes session next the agent's live session, which revokes the key
 // of the one before: made from the agent's config, told what it continues
 // and where that session's log is. The caller holds the agent's lock.
-func (h *Harness) roll(ctx context.Context, a *Agent, next, why string) error {
-	prev := a.live()
+func (h *Harness) roll(ctx context.Context, a *api.Agent, next, why string) error {
+	prev := a.Live()
 	if _, err := h.next(ctx, *a, next); err != nil {
 		return err
 	}
@@ -676,7 +628,7 @@ func (h *Harness) handoff(ctx context.Context, s *session, why, text string) (st
 		return fail(why)
 	}
 	a, unlock, err := h.holdAgent(a.ID)
-	if err != nil || a.live() != s.id { // the agent moved on, or went, while this step waited
+	if err != nil || a.Live() != s.id { // the agent moved on, or went, while this step waited
 		if err == nil {
 			unlock()
 		}
@@ -749,7 +701,7 @@ func (s *session) takeCarry() string {
 }
 
 // AllAgents is every agent as its file has it now. No session is read.
-func (h *Harness) AllAgents() []Agent {
+func (h *Harness) AllAgents() []api.Agent {
 	h.lockAgents()
 	defer h.amu.Unlock()
 	return slices.Collect(maps.Values(h.agents))
@@ -758,11 +710,11 @@ func (h *Harness) AllAgents() []Agent {
 // Working is whether the agent steps now: a runner holds its live session,
 // or the one before it hands its task over. A run of an earlier session for
 // a post of its own is not the agent's. No file is read.
-func (h *Harness) Working(a Agent) bool {
+func (h *Harness) Working(a api.Agent) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, id := range a.Sessions[max(len(a.Sessions)-2, 0):] {
-		if s, ok := h.s[id]; ok && (s.handoff || s.running && id == a.live()) {
+		if s, ok := h.s[id]; ok && (s.handoff || s.running && id == a.Live()) {
 			return true
 		}
 	}
@@ -779,5 +731,5 @@ func (h *Harness) NoteAgent(id, via, source, text string) error {
 	defer unlock()
 	note := system(source, text)
 	note.Via = via
-	return h.note(h.session(a.live()), a.live(), note)
+	return h.note(h.session(a.Live()), a.Live(), note)
 }

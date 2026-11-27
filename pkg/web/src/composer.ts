@@ -4,6 +4,7 @@
 // Return is a new line and only the send button sends.
 
 import { acted, api, h, icon } from "./api"
+import { path, paths } from "./api.gen"
 
 declare const MPMenu: { open: (menu: HTMLElement, at: Element) => void }
 type Recognition = { lang: string; interimResults: boolean; continuous: boolean; start(): void; stop(): void; onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null }
@@ -197,7 +198,7 @@ export function composer(agent: string, placeholder: string): HTMLElement {
         if (typeof p !== "string") body.append("file", p, p.name)
         // A post that hangs (a phone that lost its network) ends in two minutes, so the next message is not held up for good.
         const signal = AbortSignal.timeout(120e3)
-        await api(`/agents/${agent}/records?via=web${left.length > 1 ? "&more=1" : ""}`, typeof p === "string" ? { text: p, signal } : { form: body, signal })
+        await api(`${path(paths.AgentRecords, agent)}?via=web${left.length > 1 ? "&more=1" : ""}`, typeof p === "string" ? { text: p, signal } : { form: body, signal })
         left.shift()
       }
     })

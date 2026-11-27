@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	continueapp "github.com/mainplane-ai/mainplane/pkg/apps/continue"
 	"github.com/mainplane-ai/mainplane/pkg/apps/message"
 	"github.com/mainplane-ai/mainplane/pkg/apps/orchestrate"
@@ -339,9 +340,9 @@ func missing(s Spec, secrets map[string]string) []string {
 // and the project app's own, which project.App.Routes lists.
 func (m *Manager) Routes(mux *http.ServeMux) {
 	m.project.Routes(mux)
-	mux.HandleFunc("GET /skills", func(w http.ResponseWriter, r *http.Request) { m.skills(w, m.names()) })
-	mux.HandleFunc("GET /skills/{app}", func(w http.ResponseWriter, r *http.Request) { m.skill(w, r.PathValue("app")) })
-	mux.HandleFunc("GET /apps", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET "+api.SkillsPath, func(w http.ResponseWriter, r *http.Request) { m.skills(w, m.names()) })
+	mux.HandleFunc("GET "+api.SkillPath, func(w http.ResponseWriter, r *http.Request) { m.skill(w, r.PathValue("app")) })
+	mux.HandleFunc("GET "+api.AppsPath, func(w http.ResponseWriter, r *http.Request) {
 		out := []Info{}
 		for _, n := range m.names() {
 			i, err := m.info(n)
@@ -360,9 +361,9 @@ func (m *Manager) Routes(mux *http.ServeMux) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
-	mux.HandleFunc("POST /apps/{name}/start", func(w http.ResponseWriter, r *http.Request) { done(w, m.enable(r.PathValue("name"), true)) })
-	mux.HandleFunc("POST /apps/{name}/stop", func(w http.ResponseWriter, r *http.Request) { done(w, m.enable(r.PathValue("name"), false)) })
-	mux.HandleFunc("GET /secrets", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST "+api.AppStartPath, func(w http.ResponseWriter, r *http.Request) { done(w, m.enable(r.PathValue("name"), true)) })
+	mux.HandleFunc("POST "+api.AppStopPath, func(w http.ResponseWriter, r *http.Request) { done(w, m.enable(r.PathValue("name"), false)) })
+	mux.HandleFunc("GET "+api.SecretsPath, func(w http.ResponseWriter, r *http.Request) {
 		s, err := m.secrets()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -370,7 +371,7 @@ func (m *Manager) Routes(mux *http.ServeMux) {
 		}
 		reply(w, append([]string{}, slices.Sorted(maps.Keys(s))...)) // a list, with no secrets too
 	})
-	mux.HandleFunc("PUT /secrets/{name}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("PUT "+api.SecretPath, func(w http.ResponseWriter, r *http.Request) {
 		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSecret))
 		v := string(b)
 		if err == nil && strings.TrimSpace(v) == "" { // an empty one would count as there, and start its apps with nothing
@@ -381,7 +382,7 @@ func (m *Manager) Routes(mux *http.ServeMux) {
 		}
 		done(w, err)
 	})
-	mux.HandleFunc("DELETE /secrets/{name}", func(w http.ResponseWriter, r *http.Request) { done(w, m.setSecret(r.PathValue("name"), nil)) })
+	mux.HandleFunc("DELETE "+api.SecretPath, func(w http.ResponseWriter, r *http.Request) { done(w, m.setSecret(r.PathValue("name"), nil)) })
 }
 
 // Handler is the harness's front door. A session's key reaches the skills
@@ -447,17 +448,17 @@ func (m *Manager) app(w http.ResponseWriter, r *http.Request, token string, rout
 	}
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	switch {
-	case r.Method == http.MethodGet && r.URL.Path == "/agents" && slices.Contains(a.spec.Entitlements, entList):
+	case r.Method == http.MethodGet && r.URL.Path == api.AgentsPath && slices.Contains(a.spec.Entitlements, entList):
 		type agent struct {
 			ID   string `json:"id"`
 			Name string `json:"name"`
 		}
 		out := []agent{}
-		for _, i := range m.h.ListAgents(func(a harness.Agent) bool { return slices.Contains(a.Apps, name) }) {
+		for _, i := range m.h.ListAgents(func(a api.Agent) bool { return slices.Contains(a.Apps, name) }) {
 			out = append(out, agent{i.ID, i.Name})
 		}
 		reply(w, out)
-	case r.Method == http.MethodPost && len(parts) == 3 && parts[0] == "agents" && parts[2] == "records" && slices.Contains(a.spec.Entitlements, entPost):
+	case r.Method == http.MethodPost && len(parts) == 3 && r.URL.Path == api.Path(api.AgentRecordsPath, parts[1]) && slices.Contains(a.spec.Entitlements, entPost):
 		if t, err := m.h.Agent(parts[1]); err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return

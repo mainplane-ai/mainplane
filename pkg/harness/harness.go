@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
+
 	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/version"
@@ -48,24 +50,24 @@ type Harness struct {
 	Sessions  statefile.Sessions
 	Providers map[string]provider.Provider // read and replaced under pmu once the harness runs
 	Workers   *Pool
-	Remove    func(name string) error            // the coordinator's: the worker leaves the mesh for good
-	Rename    func(old, name string) error       // the coordinator's: the worker takes another name
-	Prompt    func() ([]string, error)           // the config's prompt lines, read once per new session
-	Agents    string                             // the directory of agents/<id>.json
-	Skill     func(app string) (string, bool)    // line 1 of an app's skill, if the harness has the app
-	Stopped   func(a Agent, st statefile.Status) // an agent's live session ended a run closed or failed; a rollover is not one
+	Remove    func(name string) error                // the coordinator's: the worker leaves the mesh for good
+	Rename    func(old, name string) error           // the coordinator's: the worker takes another name
+	Prompt    func() ([]string, error)               // the config's prompt lines, read once per new session
+	Agents    string                                 // the directory of agents/<id>.json
+	Skill     func(app string) (string, bool)        // line 1 of an app's skill, if the harness has the app
+	Stopped   func(a api.Agent, st statefile.Status) // an agent's live session ended a run closed or failed; a rollover is not one
 
 	pmu sync.RWMutex
 	mu  sync.Mutex
 	s   map[string]*session
 
 	imu   sync.Mutex
-	index map[string]Info
+	index map[string]api.Info
 	dirty map[string]bool
 	gone  map[string]bool // deleted; ids are never reused
 
 	amu    sync.Mutex
-	agents map[string]Agent       // a cache of the agents' files
+	agents map[string]api.Agent   // a cache of the agents' files
 	live   map[string]string      // live session -> its agent
 	alocks map[string]*sync.Mutex // an agent's lock: one post or change at a time
 
@@ -103,24 +105,6 @@ func (h *Harness) providers() map[string]provider.Provider {
 	return h.Providers
 }
 
-// Create is the body of POST /sessions. From set is a copy of records 1
-// through N-1 of that session; otherwise a fresh session from Model,
-// ContextLimit, and Workers. Workers are not checked: the config is the
-// whitelist, and a worker named before it dials in is a worker the session
-// waits for.
-type Create struct {
-	From         string                     `json:"from,omitempty"`
-	N            int                        `json:"n,omitempty"`
-	Model        string                     `json:"model,omitempty"`
-	ContextLimit int                        `json:"context_limit,omitempty"`
-	Workers      []statefile.Worker         `json:"workers,omitempty"`
-	Tools        string                     `json:"tools,omitempty"`
-	Input        []string                   `json:"input,omitempty"`
-	Params       map[string]json.RawMessage `json:"params,omitempty"`
-	Preset       string                     `json:"preset,omitempty"`
-	Name         string                     `json:"name,omitempty"`
-}
-
 func system(source, body string) statefile.Record {
 	return statefile.Record{Header: statefile.Header{Kind: statefile.System, Type: "text/plain", Source: source}, Body: []byte(body)}
 }
@@ -131,7 +115,7 @@ func system(source, body string) statefile.Record {
 // system text ahead of the first message. A copy is byte for byte but for
 // who made it, and gets nothing appended but a result for each call still
 // open at its cut. It does not step until a message or retry comes.
-func (h *Harness) Create(ctx context.Context, c Create, via string) (string, error) {
+func (h *Harness) Create(ctx context.Context, c api.Create, via string) (string, error) {
 	id := statefile.NewID()
 	if c.From != "" {
 		if c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Tools != "" || c.Input != nil || c.Params != nil || c.Preset != "" || c.Name != "" {
@@ -178,7 +162,7 @@ func (h *Harness) valid(conf statefile.Conf) (statefile.Conf, string, error) {
 }
 
 // create makes the fresh session id.
-func (h *Harness) create(ctx context.Context, id string, c Create, via string) error {
+func (h *Harness) create(ctx context.Context, id string, c api.Create, via string) error {
 	conf, model, err := h.valid(statefile.Conf{Model: c.Model, Tools: c.Tools, Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params, Preset: c.Preset})
 	if err != nil {
 		return err

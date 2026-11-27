@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
-	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/release"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
@@ -63,8 +63,8 @@ type quickstart struct {
 	step   int
 	polled bool // the providers were read once: a new one after that moves on
 
-	providers []harness.ProviderInfo
-	workers   []connector.Worker
+	providers []api.ProviderInfo
+	workers   []api.Listed
 	network   string
 	join      string
 	key       string // the api key minted for a connector
@@ -120,7 +120,7 @@ func (q *quickstart) poll(a *App) {
 		for q.ctx.Err() == nil {
 			ctx, cancel := context.WithTimeout(q.ctx, callTime)
 			ps, err := c.Providers(ctx)
-			var ws []connector.Worker
+			var ws []api.Listed
 			var network, join string
 			if err == nil {
 				ws, err = c.Workers(ctx)

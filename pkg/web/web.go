@@ -24,6 +24,7 @@ import (
 //go:generate go run ../design/gen ../design dist/ds
 //go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 ../design/css/mainplane.css --bundle --minify --loader:.woff2=file --asset-names=fonts/[name] --outdir=dist/ds --log-level=warning
 //go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 ../design/js/mainplane.js --bundle --minify --format=iife --target=es2022 --outfile=dist/ds/mainplane.js --log-level=warning
+//go:generate go run ../api/tsgen ../api/routes.go src/api.gen.ts
 //go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 src/main.ts --bundle --minify --loader:.svg=text --format=esm --target=es2022 --log-level=warning --outfile=dist/app.js
 //go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 vendor/temml.mjs --minify --format=esm --target=es2022 --log-level=warning --outfile=dist/math.js
 //go:generate go run github.com/evanw/esbuild/cmd/esbuild@v0.28.2 vendor/jsqr.mjs --minify --format=esm --target=es2022 --log-level=warning --outfile=dist/qr.js

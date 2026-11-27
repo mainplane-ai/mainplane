@@ -11,7 +11,7 @@ import (
 )
 
 func TestKeys(t *testing.T) {
-	a, routes := &api{dir: t.TempDir()}, http.NewServeMux()
+	a, routes := &machine{dir: t.TempDir()}, http.NewServeMux()
 	a.handle(routes)
 	store := Auth(a.dir)
 	mux := store.Bearer(&auth.Limit{}, routes)

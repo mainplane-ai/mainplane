@@ -67,6 +67,7 @@ import (
 	"tailscale.com/net/tsaddr"
 	"tailscale.com/tsnet"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/coordinator"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
@@ -838,7 +839,7 @@ func phase(listen, url, code, v string, oses []string, mode, text string) {
 	}()
 	fmt.Printf("%s == harness %s: %s %s\n", stamp(), v, mode, text)
 	start := time.Now()
-	got := map[string]harness.Listed{}
+	got := map[string]api.Listed{}
 	for len(got) < len(oses) {
 		if time.Since(start) > phaseWait {
 			check(strings.Join(oses, ","), "every worker in "+phaseWait.String(), false, fmt.Sprint(p.List()))
@@ -960,7 +961,7 @@ func checks(r *harness.Remote, goos string) {
 // its harness responsive. No node offers a Tailscale or mesh address as an endpoint,
 // in the registry or as a direct path. One machine at a time: two peers that
 // first ping each other at once wait 5-10s for a path, past ping's deadline.
-func mesh(p *harness.Pool, got map[string]harness.Listed, oses []string) {
+func mesh(p *harness.Pool, got map[string]api.Listed, oses []string) {
 	ctx := context.Background()
 	var bad []string
 	for _, o := range oses {
@@ -1020,7 +1021,7 @@ func mesh(p *harness.Pool, got map[string]harness.Listed, oses []string) {
 
 // unlinked checks that each worker, with no links, has only itself and the
 // harness in its hosts block, once the block is written.
-func unlinked(p *harness.Pool, got map[string]harness.Listed, oses []string) {
+func unlinked(p *harness.Pool, got map[string]api.Listed, oses []string) {
 	for _, o := range oses {
 		r, ok := p.Get(got[o].Name)
 		if !ok {
@@ -1040,7 +1041,7 @@ func unlinked(p *harness.Pool, got map[string]harness.Listed, oses []string) {
 // waits until each one's hosts block lists every node. It reads the block over
 // ssh, not through the worker: a prev worker may be one that cannot read files
 // as its operator, as v0.5.3 on macOS 26.6 cannot (#122).
-func link(coord *coordinator.Coordinator, p *harness.Pool, got map[string]harness.Listed, oses []string) {
+func link(coord *coordinator.Coordinator, p *harness.Pool, got map[string]api.Listed, oses []string) {
 	var pairs [][2]string
 	for _, a := range oses {
 		for _, b := range oses {
@@ -1072,7 +1073,7 @@ func link(coord *coordinator.Coordinator, p *harness.Pool, got map[string]harnes
 // held on the macOS client refusing the Windows client's and the other way,
 // then removal: the clients' mounts and mappings go, then the server's
 // exports, smbd and bind mount.
-func drives(coord *coordinator.Coordinator, p *harness.Pool, got map[string]harness.Listed, oses []string) {
+func drives(coord *coordinator.Coordinator, p *harness.Pool, got map[string]api.Listed, oses []string) {
 	if !slices.Contains(oses, "linux") {
 		return
 	}
@@ -1129,7 +1130,7 @@ const driveName = "e2e"
 type drive struct {
 	coord   *coordinator.Coordinator
 	p       *harness.Pool
-	got     map[string]harness.Listed
+	got     map[string]api.Listed
 	at      map[string]string // the drive's path on each OS, with its separator
 	session string            // the session its shells run in
 }
@@ -1270,7 +1271,7 @@ func ephemeral(listen, secret string) ([]string, error) {
 // remove takes the worker on goos off the mesh, as mainplane worker remove
 // does. Every other worker's hosts block loses it within removeWait, and it
 // does not come back to the pool.
-func remove(coord *coordinator.Coordinator, p *harness.Pool, got map[string]harness.Listed, oses []string, goos string) {
+func remove(coord *coordinator.Coordinator, p *harness.Pool, got map[string]api.Listed, oses []string, goos string) {
 	ctx := context.Background()
 	name := got[goos].Name
 	err := coord.Remove(name)

@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	"github.com/mainplane-ai/mainplane/pkg/apps/project"
 	"github.com/mainplane-ai/mainplane/pkg/apps/schedule"
 	"github.com/mainplane-ai/mainplane/pkg/auth"
@@ -147,7 +148,7 @@ func (r *rig) project() project.Project {
 }
 
 // under is an agent that the agent of key makes, with the apps to make more.
-func (r *rig) under(key string) harness.Agent {
+func (r *rig) under(key string) api.Agent {
 	r.t.Helper()
 	time.Sleep(2 * time.Millisecond) // an agent's time is to the millisecond, and a project lists its agents oldest first
 	var v struct{ ID string }
@@ -159,17 +160,17 @@ func (r *rig) under(key string) harness.Agent {
 	return a
 }
 
-func conf(workers ...string) *harness.AgentConfig {
-	c := &harness.AgentConfig{Conf: statefile.Conf{Model: "fake/m1", ContextLimit: 1000, Workers: []statefile.Worker{}}}
+func conf(workers ...string) *api.AgentConfig {
+	c := &api.AgentConfig{Conf: statefile.Conf{Model: "fake/m1", ContextLimit: 1000, Workers: []statefile.Worker{}}}
 	for _, w := range workers {
 		c.Workers = append(c.Workers, statefile.Worker{Name: w})
 	}
 	return c
 }
 
-func (r *rig) agent(c *harness.AgentConfig, apps ...string) harness.Agent {
+func (r *rig) agent(c *api.AgentConfig, apps ...string) api.Agent {
 	r.t.Helper()
-	a, err := r.h.CreateAgent(context.Background(), harness.AgentCreate{Config: c, Apps: apps}, "test")
+	a, err := r.h.CreateAgent(context.Background(), api.AgentCreate{Config: c, Apps: apps}, "test")
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -177,7 +178,7 @@ func (r *rig) agent(c *harness.AgentConfig, apps ...string) harness.Agent {
 }
 
 // key is the session key a worker of the agent's live session holds.
-func (r *rig) key(a harness.Agent) string {
+func (r *rig) key(a api.Agent) string {
 	return auth.Sign(r.k, auth.Session, "hk", a.Sessions[len(a.Sessions)-1])
 }
 
@@ -280,7 +281,7 @@ func TestSessionKeyRevokes(t *testing.T) {
 	r.want(403, k1, "PUT", "/secrets/K", "v")
 	r.want(401, k1+"x", "GET", "/skills", "")
 	r.want(401, "", "GET", "/skills", "")
-	plain, err := r.h.Create(context.Background(), harness.Create{Model: "fake/m1", ContextLimit: 1000}, "tui")
+	plain, err := r.h.Create(context.Background(), api.Create{Model: "fake/m1", ContextLimit: 1000}, "tui")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -531,11 +532,11 @@ func TestOrchestrateRoutes(t *testing.T) {
 	r.want(400, key, "POST", u, `{"session":"`+made.Session+`"}`) // it adopts no session
 
 	// reads: the harness's replies, and its filters on the list
-	var info harness.AgentInfo
+	var info api.AgentInfo
 	if err := json.Unmarshal([]byte(r.want(200, key, "GET", c, "")), &info); err != nil || info.ID != made.ID || info.Status != statefile.StatusClosed || info.CurrentSession != made.Session {
 		t.Fatalf("get: %+v %v", info, err)
 	}
-	var infos []harness.AgentInfo
+	var infos []api.AgentInfo
 	if err := json.Unmarshal([]byte(r.want(200, key, "GET", u+"?via=test&status=closed&limit=5", "")), &infos); err != nil || len(infos) != 1 || infos[0].ID != made.ID {
 		t.Fatalf("list: %+v %v", infos, err) // the via is the caller, whatever the query says
 	}
@@ -619,7 +620,7 @@ func TestCreateUndone(t *testing.T) {
 	r := newRig(t)
 	a := r.agent(conf("w1"), "orchestrate")
 	key := r.key(a)
-	all := func(harness.Agent) bool { return true }
+	all := func(api.Agent) bool { return true }
 	block := filepath.Join(r.dir, "app-data", "orchestrate", "watches.json.tmp") // the watch cannot be written
 	if err := os.Mkdir(block, 0o755); err != nil {
 		t.Fatal(err)
@@ -817,14 +818,14 @@ func TestProject(t *testing.T) {
 	child := r.under(okey)
 	grand := r.under(r.key(child))
 	outsider := r.agent(conf("w1"), "project")
-	for _, a := range []harness.Agent{orch, child, grand} {
+	for _, a := range []api.Agent{orch, child, grand} {
 		if got := r.want(200, r.key(a), "GET", "/apps/project/", ""); !strings.Contains(got, `"id":"`+p.ID+`"`) {
 			t.Fatalf("project of %s: %s", a.ID, got)
 		}
 	}
 	r.want(404, r.key(outsider), "GET", "/apps/project/", "")
 	r.want(404, r.key(outsider), "PUT", "/apps/project/files/x", "x")
-	var members []harness.AgentInfo
+	var members []api.AgentInfo
 	_ = json.Unmarshal([]byte(r.want(200, "full", "GET", "/projects/"+p.ID+"/agents", "")), &members)
 	if len(members) != 3 || members[0].ID != orch.ID || members[1].ID != child.ID || members[2].ID != grand.ID {
 		t.Fatalf("members: %+v", members)
@@ -912,7 +913,7 @@ func testAvatarRename(t *testing.T, r *rig, id string, updated time.Time, notes 
 func TestProjectStore(t *testing.T) {
 	r := newRig(t)
 	p := r.project()
-	orchestrator := func(p project.Project) harness.Agent {
+	orchestrator := func(p project.Project) api.Agent {
 		a, err := r.h.Agent(p.Orchestrator)
 		if err != nil {
 			t.Fatal(err)
@@ -1062,7 +1063,7 @@ func TestProjectStop(t *testing.T) {
 	var v struct{ ID string }
 	_ = json.Unmarshal([]byte(r.want(200, r.key(orch), "POST", "/apps/orchestrate/agents", `{"apps":["schedule"],"notify_on_stop":true}`)), &v)
 	child, _ := r.h.Agent(v.ID)
-	for _, a := range []harness.Agent{orch, child} {
+	for _, a := range []api.Agent{orch, child} {
 		r.want(200, r.key(a), "POST", "/apps/schedule", `{"in":"1h","text":"wake"}`)
 	}
 	watches := filepath.Join(r.dir, "app-data", "orchestrate", "watches.json")
@@ -1071,7 +1072,7 @@ func TestProjectStop(t *testing.T) {
 	}
 	r.want(400, "full", "POST", "/projects/"+p.ID+"/stop", "")
 	r.want(204, "full", "POST", "/projects/"+p.ID+"/stop?via=web", "")
-	for _, a := range []harness.Agent{orch, child} {
+	for _, a := range []api.Agent{orch, child} {
 		if got := r.want(200, r.key(a), "GET", "/apps/schedule", ""); strings.TrimSpace(got) != "[]" {
 			t.Fatalf("timers of %s after the stop: %s", a.ID, got)
 		}

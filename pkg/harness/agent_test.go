@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
+
 	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 	"github.com/mainplane-ai/mainplane/pkg/version"
@@ -82,10 +84,10 @@ func newRig(t *testing.T) *rig {
 		Prompt:    func() ([]string, error) { return nil, nil },
 		Agents:    filepath.Join(r.dir, "agents"),
 		Skill:     func(app string) (string, bool) { return "what " + app + " does", app != "nope" },
-		Stopped: func(a Agent, st statefile.Status) {
+		Stopped: func(a api.Agent, st statefile.Status) {
 			r.mu.Lock()
 			defer r.mu.Unlock()
-			r.stopped = append(r.stopped, a.live()+" "+string(st))
+			r.stopped = append(r.stopped, a.Live()+" "+string(st))
 		},
 	}
 	if err := os.MkdirAll(r.h.Sessions.Dir, 0o755); err != nil {
@@ -162,15 +164,15 @@ func (r *rig) serve(conn net.Conn) {
 	}
 }
 
-func (r *rig) conf(limit, cold int, workers ...string) *AgentConfig {
-	c := &AgentConfig{Conf: statefile.Conf{Model: "fake/m1", ContextLimit: limit, Workers: []statefile.Worker{}}, ColdLimit: cold}
+func (r *rig) conf(limit, cold int, workers ...string) *api.AgentConfig {
+	c := &api.AgentConfig{Conf: statefile.Conf{Model: "fake/m1", ContextLimit: limit, Workers: []statefile.Worker{}}, ColdLimit: cold}
 	for _, w := range workers {
 		c.Workers = append(c.Workers, statefile.Worker{Name: w})
 	}
 	return c
 }
 
-func (r *rig) create(c AgentCreate, via string) Agent {
+func (r *rig) create(c api.AgentCreate, via string) api.Agent {
 	r.t.Helper()
 	a, err := r.h.CreateAgent(context.Background(), c, via)
 	if err != nil {
@@ -242,8 +244,8 @@ func (r *rig) sessions(id string) []string {
 // create-1trip, create-2trip and via-start.
 func TestCreateAgent(t *testing.T) {
 	r := newRig(t)
-	a := r.create(AgentCreate{Name: "one", Config: r.conf(1000, 0), Apps: []string{"schedule", "message", "message"}}, "web")
-	var onDisk Agent
+	a := r.create(api.AgentCreate{Name: "one", Config: r.conf(1000, 0), Apps: []string{"schedule", "message", "message"}}, "web")
+	var onDisk api.Agent
 	b, err := os.ReadFile(filepath.Join(r.h.Agents, a.ID+".json"))
 	if err != nil || json.Unmarshal(b, &onDisk) != nil {
 		t.Fatalf("agent file: %v", err)
@@ -262,15 +264,15 @@ func TestCreateAgent(t *testing.T) {
 	if notes := r.bodies(a.Sessions[0], statefile.System, "apps"); len(notes) != 1 || !strings.Contains(notes[0], "message: what message does\nschedule: what schedule does\n") || !strings.Contains(notes[0], a.ID) {
 		t.Fatalf("apps note: %q", notes)
 	}
-	if _, err := r.h.CreateAgent(context.Background(), AgentCreate{Config: r.conf(1000, 0), Apps: []string{"nope"}}, "web"); err == nil {
+	if _, err := r.h.CreateAgent(context.Background(), api.AgentCreate{Config: r.conf(1000, 0), Apps: []string{"nope"}}, "web"); err == nil {
 		t.Fatal("an agent was made with an app the harness does not have")
 	}
-	if _, err := r.h.CreateAgent(context.Background(), AgentCreate{}, "web"); err == nil {
+	if _, err := r.h.CreateAgent(context.Background(), api.AgentCreate{}, "web"); err == nil {
 		t.Fatal("an agent was made with no config and no session")
 	}
 
 	// a plain session, then an agent that adopts it
-	s1, err := r.h.Create(context.Background(), Create{Model: "fake/m1", ContextLimit: 777, Workers: []statefile.Worker{{Name: "w1"}}}, "tui")
+	s1, err := r.h.Create(context.Background(), api.Create{Model: "fake/m1", ContextLimit: 777, Workers: []statefile.Worker{{Name: "w1"}}}, "tui")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +287,7 @@ func TestCreateAgent(t *testing.T) {
 	if _, ok := r.h.Holder(s1); ok {
 		t.Fatal("a plain session has an agent")
 	}
-	two := r.create(AgentCreate{Session: s1, Apps: []string{"message"}}, "desktop")
+	two := r.create(api.AgentCreate{Session: s1, Apps: []string{"message"}}, "desktop")
 	if !slices.Equal(two.Sessions, []string{s1}) || two.Config.Model != "fake/m1" || two.Config.ContextLimit != 777 || len(two.Config.Workers) != 1 || two.Config.Tools != "default" {
 		t.Fatalf("adopted: %+v", two)
 	}
@@ -295,7 +297,7 @@ func TestCreateAgent(t *testing.T) {
 	if h, ok := r.h.Holder(s1); !ok || h.ID != two.ID {
 		t.Fatalf("holder: %+v", h)
 	}
-	if _, err := r.h.CreateAgent(context.Background(), AgentCreate{Session: s1}, "desktop"); err == nil || !strings.Contains(err.Error(), two.ID) {
+	if _, err := r.h.CreateAgent(context.Background(), api.AgentCreate{Session: s1}, "desktop"); err == nil || !strings.Contains(err.Error(), two.ID) {
 		t.Fatalf("a second agent took the session: %v", err)
 	}
 	if r.steps != 0 {
@@ -307,16 +309,16 @@ func TestCreateAgent(t *testing.T) {
 	if err := r.h.LoadAgents(); err != nil {
 		t.Fatal(err)
 	}
-	if h, ok := r.h.Holder(s1); !ok || h.ID != two.ID || len(r.h.ListAgents(func(Agent) bool { return true })) != 2 {
+	if h, ok := r.h.Holder(s1); !ok || h.ID != two.ID || len(r.h.ListAgents(func(api.Agent) bool { return true })) != 2 {
 		t.Fatalf("after a reload: %+v", h)
 	}
 
 	// one that adopts with a config of its own limit gives the session that limit
-	s2, err := r.h.Create(context.Background(), Create{Model: "fake/m1", ContextLimit: 777, Workers: []statefile.Worker{{Name: "w1"}}}, "tui")
+	s2, err := r.h.Create(context.Background(), api.Create{Model: "fake/m1", ContextLimit: 777, Workers: []statefile.Worker{{Name: "w1"}}}, "tui")
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.create(AgentCreate{Session: s2, Config: r.conf(999, 0, "w1")}, "desktop")
+	r.create(api.AgentCreate{Session: s2, Config: r.conf(999, 0, "w1")}, "desktop")
 	if conf, _ := config(r.chain(s2)); conf.ContextLimit != 999 {
 		t.Fatalf("an adopted session kept limit %d", conf.ContextLimit)
 	}
@@ -328,7 +330,7 @@ func TestCreateAgent(t *testing.T) {
 func TestInstructions(t *testing.T) {
 	r := newRig(t)
 	told := func(session string) []string { return r.bodies(session, statefile.System, "instructions") }
-	a := r.create(AgentCreate{Config: r.conf(1000, 0), Instructions: "You review PRs."}, "web")
+	a := r.create(api.AgentCreate{Config: r.conf(1000, 0), Instructions: "You review PRs."}, "web")
 	s1 := a.Sessions[0]
 	if got := told(s1); !slices.Equal(got, []string{instructionsHead + "You review PRs."}) {
 		t.Fatalf("instructions of s1: %q", got)
@@ -337,19 +339,19 @@ func TestInstructions(t *testing.T) {
 	if system, _ := provider.Split(built); !strings.Contains(string(system[len(system)-1].Body), "You review PRs.") {
 		t.Fatal("the instructions are not in the system prompt")
 	}
-	plain := r.create(AgentCreate{Config: r.conf(1000, 0)}, "web")
+	plain := r.create(api.AgentCreate{Config: r.conf(1000, 0)}, "web")
 	if got := told(plain.Sessions[0]); len(got) != 0 {
 		t.Fatalf("an agent with no instructions was told %q", got)
 	}
 	big := strings.Repeat("x", MaxInstructions+1)
-	if _, err := r.h.CreateAgent(context.Background(), AgentCreate{Config: r.conf(1000, 0), Instructions: big}, "web"); err == nil {
+	if _, err := r.h.CreateAgent(context.Background(), api.AgentCreate{Config: r.conf(1000, 0), Instructions: big}, "web"); err == nil {
 		t.Fatal("an agent was made with instructions over the limit")
 	}
-	s, err := r.h.Create(context.Background(), Create{Model: "fake/m1", ContextLimit: 777}, "tui")
+	s, err := r.h.Create(context.Background(), api.Create{Model: "fake/m1", ContextLimit: 777}, "tui")
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.create(AgentCreate{Session: s, Instructions: "adopted"}, "tui")
+	r.create(api.AgentCreate{Session: s, Instructions: "adopted"}, "tui")
 	if got := told(s); !slices.Equal(got, []string{instructionsHead + "adopted"}) {
 		t.Fatalf("instructions of an adopted session: %q", got)
 	}
@@ -404,7 +406,7 @@ func TestInstructions(t *testing.T) {
 func TestWarmFastPath(t *testing.T) {
 	r := newRig(t)
 	r.step = func(string) turn { return turn{input: 140_000, ttl: 300} }
-	a := r.create(AgentCreate{Config: r.conf(250_000, 100_000, "w1"), Apps: []string{"message"}}, "web")
+	a := r.create(api.AgentCreate{Config: r.conf(250_000, 100_000, "w1"), Apps: []string{"message"}}, "web")
 	s1 := a.Sessions[0]
 	if got := r.post(a.ID, "one"); got != s1 {
 		t.Fatalf("first post landed on %s", got)
@@ -454,7 +456,7 @@ func TestIdleRollover(t *testing.T) {
 	r := newRig(t)
 	ttl := 300
 	r.step = func(string) turn { return turn{input: 140_000, ttl: ttl} }
-	a := r.create(AgentCreate{Config: r.conf(250_000, 100_000, "w1"), Apps: []string{"message"}}, "web")
+	a := r.create(api.AgentCreate{Config: r.conf(250_000, 100_000, "w1"), Apps: []string{"message"}}, "web")
 	s1 := a.Sessions[0]
 	if got := r.post(a.ID, "one"); got != s1 {
 		t.Fatalf("first post landed on %s", got)
@@ -519,7 +521,7 @@ func TestIdleRollover(t *testing.T) {
 func TestLimitRollover(t *testing.T) {
 	r := newRig(t)
 	r.step = func(string) turn { return turn{input: 140_000, ttl: 300} }
-	a := r.create(AgentCreate{Config: r.conf(140_000, 100_000, "w1")}, "web")
+	a := r.create(api.AgentCreate{Config: r.conf(140_000, 100_000, "w1")}, "web")
 	s1 := a.Sessions[0]
 	if got := r.post(a.ID, "one"); got != s1 {
 		t.Fatalf("first post landed on %s", got)
@@ -545,7 +547,7 @@ func TestLimitRollover(t *testing.T) {
 func TestAgentUsage(t *testing.T) {
 	r := newRig(t)
 	r.step = func(string) turn { return turn{input: 140_000} }
-	a := r.create(AgentCreate{Config: r.conf(140_000, 0, "w1")}, "web")
+	a := r.create(api.AgentCreate{Config: r.conf(140_000, 0, "w1")}, "web")
 	s1 := r.post(a.ID, "one")
 	s2 := r.post(a.ID, "two")
 	s3 := r.post(a.ID, "three")
@@ -577,7 +579,7 @@ func TestAgentUsage(t *testing.T) {
 	if got := usage(); got != 420_000 {
 		t.Fatalf("usage with an earlier session's file away: %d", got)
 	}
-	if list := r.h.ListAgents(func(Agent) bool { return true }); len(list) != 1 || list[0].Usage.Input != 420_000 {
+	if list := r.h.ListAgents(func(api.Agent) bool { return true }); len(list) != 1 || list[0].Usage.Input != 420_000 {
 		t.Fatalf("list: %+v", list)
 	}
 	move(r.h.Sessions.Path(s1)+".away", r.h.Sessions.Path(s1))
@@ -622,7 +624,7 @@ func TestWorkersMidStep(t *testing.T) {
 		second = body
 		return turn{input: 1000}
 	}
-	a := r.create(AgentCreate{Config: r.conf(1001, 0, "w1")}, "web")
+	a := r.create(api.AgentCreate{Config: r.conf(1001, 0, "w1")}, "web")
 	if _, _, err := r.h.PostAgent(context.Background(), a.ID, "web", "", []Part{{Type: "text/plain", Body: []byte("start")}}); err != nil {
 		t.Fatal(err)
 	}
@@ -655,7 +657,7 @@ func TestShrinkAcrossUpdate(t *testing.T) {
 		}
 		return turn{input: 900}
 	}
-	a := r.create(AgentCreate{Config: r.conf(100000, 0, "w1")}, "web")
+	a := r.create(api.AgentCreate{Config: r.conf(100000, 0, "w1")}, "web")
 	if _, _, err := r.h.PostAgent(context.Background(), a.ID, "web", "", []Part{{Type: "text/plain", Body: []byte("start")}}); err != nil {
 		t.Fatal(err)
 	}
@@ -670,7 +672,7 @@ func TestShrinkAcrossUpdate(t *testing.T) {
 func TestShutdownMidCall(t *testing.T) {
 	r := newRig(t)
 	r.step = func(string) turn { return turn{code: "wait", input: 10} }
-	id, err := r.h.Create(context.Background(), Create{Model: "fake/m1", ContextLimit: 1000, Workers: []statefile.Worker{{Name: "w1"}}}, "test")
+	id, err := r.h.Create(context.Background(), api.Create{Model: "fake/m1", ContextLimit: 1000, Workers: []statefile.Worker{{Name: "w1"}}}, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -697,7 +699,7 @@ func TestResumeAfterUpdate(t *testing.T) {
 	old := version.V
 	t.Cleanup(func() { version.V = old })
 	version.V = "v-old"
-	a := r.create(AgentCreate{Config: r.conf(100000, 0, "w1", "late")}, "web")
+	a := r.create(api.AgentCreate{Config: r.conf(100000, 0, "w1", "late")}, "web")
 	s := r.post(a.ID, "hi")
 	version.V = "v-new"
 	var body string
@@ -739,7 +741,7 @@ func TestResumeAfterUpdate(t *testing.T) {
 // the task off.
 func TestHandoffStepping(t *testing.T) {
 	r := newRig(t)
-	a := r.create(AgentCreate{Config: r.conf(1000, 0, "w1")}, "web")
+	a := r.create(api.AgentCreate{Config: r.conf(1000, 0, "w1")}, "web")
 	next, seen := make(chan struct{}), make(chan struct{})
 	r.step = func(body string) turn {
 		if strings.Contains(body, "hit its limit mid-task") {
@@ -785,7 +787,7 @@ func TestHandoffStepping(t *testing.T) {
 func TestMidRunRollover(t *testing.T) {
 	r := newRig(t)
 	var atS2 string // the log of s1 on the worker when s2 first stepped
-	a := r.create(AgentCreate{Config: r.conf(1000, 0, "w1", "away")}, "web")
+	a := r.create(api.AgentCreate{Config: r.conf(1000, 0, "w1", "away")}, "web")
 	s1 := a.Sessions[0]
 	log := filepath.Join(r.dir, "scratch", "logs", s1+".log")
 	r.step = func(body string) turn {
@@ -858,7 +860,7 @@ func TestDeleteAgent(t *testing.T) {
 	r := newRig(t)
 	t.Cleanup(func() { close(r.release) })
 	r.step = func(string) turn { return turn{code: "wait", input: 10} }
-	a := r.create(AgentCreate{Config: r.conf(1000, 0, "w1")}, "web")
+	a := r.create(api.AgentCreate{Config: r.conf(1000, 0, "w1")}, "web")
 	s1 := a.Sessions[0]
 	if _, _, err := r.h.PostAgent(context.Background(), a.ID, "web", "", []Part{{Type: "text/plain", Body: []byte("start")}}); err != nil {
 		t.Fatal(err)
@@ -899,11 +901,11 @@ func TestDeleteAgent(t *testing.T) {
 // sessions tells an agent's from a plain one.
 func TestSessionVia(t *testing.T) {
 	r := newRig(t)
-	a := r.create(AgentCreate{Config: r.conf(1000, 0)}, "web")
-	if info, err := r.h.Info(a.live()); err != nil || info.Via != AgentVia+a.ID {
+	a := r.create(api.AgentCreate{Config: r.conf(1000, 0)}, "web")
+	if info, err := r.h.Info(a.Live()); err != nil || info.Via != AgentVia+a.ID {
 		t.Fatalf("an agent's session: via %q %v", info.Via, err)
 	}
-	id, err := r.h.Create(context.Background(), Create{Model: r.conf(1000, 0).Model, ContextLimit: 1000}, "tui")
+	id, err := r.h.Create(context.Background(), api.Create{Model: r.conf(1000, 0).Model, ContextLimit: 1000}, "tui")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -912,7 +914,7 @@ func TestSessionVia(t *testing.T) {
 		t.Fatalf("list: %+v %v", infos, err)
 	}
 	for _, info := range infos {
-		if want := map[string]string{id: "tui", a.live(): AgentVia + a.ID}[info.ID]; info.Via != want {
+		if want := map[string]string{id: "tui", a.Live(): AgentVia + a.ID}[info.ID]; info.Via != want {
 			t.Fatalf("session %s: via %q, want %q", info.ID, info.Via, want)
 		}
 	}
@@ -921,12 +923,12 @@ func TestSessionVia(t *testing.T) {
 	r.post(a.ID, "newer")
 	srv := httptest.NewServer(Handler(context.Background(), r.h))
 	defer srv.Close()
-	for q, want := range map[string]string{"?limit=1": a.live(), "?limit=1&plain=1": id} {
+	for q, want := range map[string]string{"?limit=1": a.Live(), "?limit=1&plain=1": id} {
 		resp, err := http.Get(srv.URL + "/sessions" + q)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var got []Info
+		var got []api.Info
 		err = json.NewDecoder(resp.Body).Decode(&got)
 		_ = resp.Body.Close()
 		if err != nil || len(got) != 1 || got[0].ID != want {
@@ -939,12 +941,12 @@ func TestSessionVia(t *testing.T) {
 // holds it: record 1 says who made the copy, the rest is the source's.
 func TestCopyVia(t *testing.T) {
 	r := newRig(t)
-	a := r.create(AgentCreate{Config: r.conf(1000, 0)}, "web")
+	a := r.create(api.AgentCreate{Config: r.conf(1000, 0)}, "web")
 	r.post(a.ID, "one")
-	src := r.chain(a.live())
+	src := r.chain(a.Live())
 	first := slices.IndexFunc(src, func(rec statefile.Record) bool { return rec.Kind == statefile.Message })
 	for _, n := range []int{first + 1, len(src) + 1} {
-		id, err := r.h.Create(context.Background(), Create{From: a.live(), N: n}, "tui")
+		id, err := r.h.Create(context.Background(), api.Create{From: a.Live(), N: n}, "tui")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -957,7 +959,7 @@ func TestCopyVia(t *testing.T) {
 			t.Fatalf("copy to %d: %d records differ from the source's first %d", n, len(got), n-1)
 		}
 	}
-	if via := r.chain(a.live())[0].Via; via != AgentVia+a.ID {
+	if via := r.chain(a.Live())[0].Via; via != AgentVia+a.ID {
 		t.Fatalf("the source after its copies: via %q", via)
 	}
 }
@@ -967,7 +969,7 @@ func TestAgentPostParts(t *testing.T) {
 	r := newRig(t)
 	srv := httptest.NewServer(Handler(context.Background(), r.h))
 	defer srv.Close()
-	a := r.create(AgentCreate{Config: r.conf(1000, 0)}, "web")
+	a := r.create(api.AgentCreate{Config: r.conf(1000, 0)}, "web")
 	post := func(code int, query, ctype, body string) string {
 		t.Helper()
 		resp, err := http.Post(srv.URL+"/agents/"+a.ID+"/records?via=web"+query, ctype, strings.NewReader(body))
@@ -983,12 +985,12 @@ func TestAgentPostParts(t *testing.T) {
 	}
 	// A part that more parts follow waits for them: the session wakes once, at the last.
 	post(200, "&more=1", "text/plain", "a photo")
-	if info, _ := r.h.AgentInfo(a.ID); info.Status == statefile.StatusStepping || len(r.bodies(a.live(), statefile.Step, "")) != 0 {
+	if info, _ := r.h.AgentInfo(a.ID); info.Status == statefile.StatusStepping || len(r.bodies(a.Live(), statefile.Step, "")) != 0 {
 		t.Fatalf("a post that more follow woke the session: %+v", info)
 	}
 	post(200, "", "text/plain", "the text")
 	r.settled(a.ID)
-	if n := len(r.bodies(a.live(), statefile.Step, "")); n != 1 {
+	if n := len(r.bodies(a.Live(), statefile.Step, "")); n != 1 {
 		t.Fatalf("steps after the last part: %d, want 1", n)
 	}
 	var mp strings.Builder
@@ -1030,15 +1032,15 @@ func TestAgentRoutes(t *testing.T) {
 	}
 	do(400, "POST", "/agents?via=web", `{"name":"no config"}`)
 	time.Sleep(2 * time.Millisecond) // a record's time is to the millisecond, and the list is newest first
-	sub := r.create(AgentCreate{Config: r.conf(1000, 0)}, "agent:"+made.ID)
+	sub := r.create(api.AgentCreate{Config: r.conf(1000, 0)}, "agent:"+made.ID)
 
-	var info AgentInfo
+	var info api.AgentInfo
 	if err := json.Unmarshal([]byte(do(200, "GET", "/agents/"+made.ID, "")), &info); err != nil || info.Status != statefile.StatusClosed || info.CurrentSession != made.Session || info.Name != "boss" || info.Via != "web" || !slices.Equal(info.Sessions, []string{made.Session}) || info.Updated.IsZero() {
 		t.Fatalf("get: %+v %v", info, err)
 	}
 	ids := func(query string) []string {
 		t.Helper()
-		var infos []AgentInfo
+		var infos []api.AgentInfo
 		if err := json.Unmarshal([]byte(do(200, "GET", "/agents"+query, "")), &infos); err != nil {
 			t.Fatal(err)
 		}
@@ -1125,7 +1127,7 @@ func TestDeleteLiveSession(t *testing.T) {
 		Handler(ctx, r.h).ServeHTTP(w, httptest.NewRequest("DELETE", "/sessions/"+id+"?via=test", nil))
 		return w.Code, w.Body.String()
 	}
-	a := r.create(AgentCreate{Config: r.conf(1000, 0, "w1")}, "web")
+	a := r.create(api.AgentCreate{Config: r.conf(1000, 0, "w1")}, "web")
 	s1 := a.Sessions[0]
 	before := len(r.chain(s1))
 	if code, body := del(s1); code != http.StatusConflict || !strings.Contains(body, "agent "+a.ID) {
@@ -1150,11 +1152,11 @@ func TestDeleteLiveSession(t *testing.T) {
 		t.Fatalf("delete of the new live session: %d", code)
 	}
 	// an adopted session is its agent's live one too, until the agent goes
-	plain, err := r.h.Create(ctx, Create{Model: "fake/m1", ContextLimit: 1000}, "web")
+	plain, err := r.h.Create(ctx, api.Create{Model: "fake/m1", ContextLimit: 1000}, "web")
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := r.create(AgentCreate{Session: plain}, "web")
+	b := r.create(api.AgentCreate{Session: plain}, "web")
 	if code, _ := del(plain); code != http.StatusConflict {
 		t.Fatalf("delete of an adopted session: %d", code)
 	}
@@ -1180,7 +1182,7 @@ func TestDeleteExcludesAdopt(t *testing.T) {
 		return turn{input: 10}
 	}
 	r.mu.Unlock()
-	id, err := r.h.Create(ctx, Create{Model: "fake/m1", ContextLimit: 1000}, "web")
+	id, err := r.h.Create(ctx, api.Create{Model: "fake/m1", ContextLimit: 1000}, "web")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1196,7 +1198,7 @@ func TestDeleteExcludesAdopt(t *testing.T) {
 		defer r.h.mu.Unlock()
 		return s.deleting
 	})
-	if a, err := r.h.CreateAgent(ctx, AgentCreate{Session: id}, "web"); err == nil {
+	if a, err := r.h.CreateAgent(ctx, api.AgentCreate{Session: id}, "web"); err == nil {
 		t.Fatalf("agent %s adopted a session that is being deleted", a.ID)
 	}
 	close(hold)
@@ -1206,7 +1208,7 @@ func TestDeleteExcludesAdopt(t *testing.T) {
 	if _, err := r.h.Sessions.Load(id); err == nil {
 		t.Fatal("the session is still there")
 	}
-	if agents := r.h.ListAgents(func(Agent) bool { return true }); len(agents) != 0 {
+	if agents := r.h.ListAgents(func(api.Agent) bool { return true }); len(agents) != 0 {
 		t.Fatalf("agents: %v", agents)
 	}
 }
@@ -1217,7 +1219,7 @@ func TestMadeUpIDs(t *testing.T) {
 	t.Cleanup(func() { close(r.release) })
 	ctx := context.Background()
 	for _, s := range []string{"../agents/x", "..", "a/b", "ABCDEFGH", strings.Repeat("a", 300)} {
-		if _, err := r.h.CreateAgent(ctx, AgentCreate{Session: s}, "web"); err == nil || !strings.Contains(err.Error(), "bad session id") {
+		if _, err := r.h.CreateAgent(ctx, api.AgentCreate{Session: s}, "web"); err == nil || !strings.Contains(err.Error(), "bad session id") {
 			t.Fatalf("adopting %q: %v", s, err)
 		}
 	}
@@ -1242,7 +1244,7 @@ func TestMadeUpIDs(t *testing.T) {
 // and the old session ends as at a rollover.
 func TestContinueAgent(t *testing.T) {
 	r := newRig(t)
-	a := r.create(AgentCreate{Config: r.conf(100_000, 0, "w1")}, "web")
+	a := r.create(api.AgentCreate{Config: r.conf(100_000, 0, "w1")}, "web")
 	s1 := a.Sessions[0]
 	if err := r.h.ContinueAgent(s1, "early"); err == nil {
 		t.Fatal("a continue with no turn running was taken")

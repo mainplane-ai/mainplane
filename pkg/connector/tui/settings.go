@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/mod/semver"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
 )
@@ -48,7 +49,7 @@ func getSettings(c *connector.Client) (settings, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), callTime)
 	defer cancel()
 	var s settings
-	return s, c.Call(ctx, http.MethodGet, "/settings", "", nil, &s)
+	return s, c.Call(ctx, http.MethodGet, api.SettingsPath, "", nil, &s)
 }
 
 // postSettings is bounded by the harness's own time for an update.
@@ -56,7 +57,7 @@ func postSettings(c *connector.Client, v any) error {
 	b, _ := json.Marshal(v)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	return c.Call(ctx, http.MethodPost, "/settings", "application/json", strings.NewReader(string(b)), nil)
+	return c.Call(ctx, http.MethodPost, api.SettingsPath, "application/json", strings.NewReader(string(b)), nil)
 }
 
 // askHarness asks what the harness does not know yet: whether to update to its

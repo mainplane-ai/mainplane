@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	"github.com/mainplane-ai/mainplane/pkg/auth"
 	"github.com/mainplane-ai/mainplane/pkg/coordinator"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
@@ -36,7 +37,7 @@ const (
 	ready    = "ready"
 )
 
-// api is the routes of the harness's machine and config, beside the
+// machine is the routes of the harness's machine and config, beside the
 // sessions' in harness.Handler:
 //
 //	GET    /               -> {"version","network"}: network is "ready" once a worker can
@@ -63,7 +64,7 @@ const (
 //	POST   /settings       {"data_sharing":{"share","via","text"}} -> 204: saved in the config
 //	                       {"version"} -> the admin worker makes the harness that release
 //	                          and restarts it, so a success never answers
-type api struct {
+type machine struct {
 	dir, path string
 	k         ed25519.PrivateKey
 	noPointer bool          // the config's NoPointer: join lines and keys carry the harness URL
@@ -74,28 +75,28 @@ type api struct {
 	pool      *harness.Pool
 }
 
-func (a *api) handle(mux *http.ServeMux) {
-	mux.HandleFunc("GET /{$}", a.root)
-	mux.HandleFunc("GET /join", a.join)
-	mux.HandleFunc("POST /keys", a.key)
-	mux.HandleFunc("GET /keys", a.keys)
-	mux.HandleFunc("DELETE /keys/{name}", a.revoke)
-	mux.HandleFunc("POST /workers/tokens", a.token)
-	mux.HandleFunc("DELETE /workers/tokens/{name}", func(w http.ResponseWriter, r *http.Request) {
+func (a *machine) handle(mux *http.ServeMux) {
+	mux.HandleFunc("GET "+api.RootPath+"{$}", a.root)
+	mux.HandleFunc("GET "+api.JoinPath, a.join)
+	mux.HandleFunc("POST "+api.KeysPath, a.key)
+	mux.HandleFunc("GET "+api.KeysPath, a.keys)
+	mux.HandleFunc("DELETE "+api.KeyPath, a.revoke)
+	mux.HandleFunc("POST "+api.JoinTokensPath, a.token)
+	mux.HandleFunc("DELETE "+api.JoinTokenPath, func(w http.ResponseWriter, r *http.Request) {
 		if err := Auth(a.dir).Revoke(auth.Join, r.PathValue("name")); err != nil {
 			fail(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.HandleFunc("GET /drives", a.drives)
-	mux.HandleFunc("PUT /drives/{name}", a.setDrive)
-	mux.HandleFunc("DELETE /drives/{name}", a.deleteDrive)
-	mux.HandleFunc("GET /settings", a.settings)
-	mux.HandleFunc("POST /settings", a.setSettings)
+	mux.HandleFunc("GET "+api.DrivesPath, a.drives)
+	mux.HandleFunc("PUT "+api.DrivePath, a.setDrive)
+	mux.HandleFunc("DELETE "+api.DrivePath, a.deleteDrive)
+	mux.HandleFunc("GET "+api.SettingsPath, a.settings)
+	mux.HandleFunc("POST "+api.SettingsPath, a.setSettings)
 }
 
-func (a *api) root(w http.ResponseWriter, r *http.Request) {
+func (a *machine) root(w http.ResponseWriter, r *http.Request) {
 	network, at := starting, a.at()
 	if u, _ := a.reached.Load().(string); u != "" && u == at {
 		network = ready
@@ -114,7 +115,7 @@ func (a *api) root(w http.ResponseWriter, r *http.Request) {
 // on the mesh: the pointer names url, url proves the harness key and passes
 // the WebSocket upgrade the coordinator and the relay need. It gives up when the harness moves to another URL. A
 // tunnel that starts again at the same URL proves it once.
-func (a *api) prove(ctx context.Context, url string) {
+func (a *machine) prove(ctx context.Context, url string) {
 	if old, _ := a.proving.Swap(url).(string); old == url {
 		return
 	}
@@ -135,7 +136,7 @@ func (a *api) prove(ctx context.Context, url string) {
 	}
 }
 
-func (a *api) join(w http.ResponseWriter, r *http.Request) {
+func (a *machine) join(w http.ResponseWriter, r *http.Request) {
 	n, err := LoadNetwork(a.dir)
 	if err != nil {
 		fail(w, err)
@@ -148,7 +149,7 @@ func (a *api) join(w http.ResponseWriter, r *http.Request) {
 	reply(w, map[string]string{"join": join})
 }
 
-func (a *api) key(w http.ResponseWriter, r *http.Request) {
+func (a *machine) key(w http.ResponseWriter, r *http.Request) {
 	var in struct{ Name string }
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxKey)).Decode(&in); err != nil || strings.TrimSpace(in.Name) == "" || strings.ContainsAny(in.Name, "\r\n") {
 		fail(w, errors.New(`the body is {"name"}, a name of one line`))
@@ -174,7 +175,7 @@ func (a *api) key(w http.ResponseWriter, r *http.Request) {
 	reply(w, map[string]string{"name": in.Name, "key": token})
 }
 
-func (a *api) token(w http.ResponseWriter, r *http.Request) {
+func (a *machine) token(w http.ResponseWriter, r *http.Request) {
 	var in struct{ Name string }
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxKey)).Decode(&in); err != nil {
 		fail(w, errors.New(`the body is {"name"}, a worker name`))
@@ -214,7 +215,7 @@ type keyRow struct {
 	Harness bool      `json:"harness,omitempty"` // the default key, the harness machine's own, which DELETE refuses
 }
 
-func (a *api) keys(w http.ResponseWriter, r *http.Request) {
+func (a *machine) keys(w http.ResponseWriter, r *http.Request) {
 	t, err := Auth(a.dir).Read()
 	if err != nil {
 		fail(w, err)
@@ -237,7 +238,7 @@ func (a *api) keys(w http.ResponseWriter, r *http.Request) {
 
 // revoke refuses the default key, which the harness's machine logs in with,
 // and the key that asks: a device logs out instead.
-func (a *api) revoke(w http.ResponseWriter, r *http.Request) {
+func (a *machine) revoke(w http.ResponseWriter, r *http.Request) {
 	name, store := r.PathValue("name"), Auth(a.dir)
 	t, err := store.Read()
 	if err != nil {
@@ -266,7 +267,7 @@ func caller(r *http.Request) string {
 	return auth.Hash(secret)
 }
 
-func (a *api) drives(w http.ResponseWriter, r *http.Request) {
+func (a *machine) drives(w http.ResponseWriter, r *http.Request) {
 	c, err := loadConfig(a.path)
 	if err != nil {
 		fail(w, err)
@@ -275,7 +276,7 @@ func (a *api) drives(w http.ResponseWriter, r *http.Request) {
 	reply(w, orEmpty(c.Drives))
 }
 
-func (a *api) setDrive(w http.ResponseWriter, r *http.Request) {
+func (a *machine) setDrive(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	var d coordinator.Drive
 	dec := json.NewDecoder(io.LimitReader(r.Body, maxDrive))
@@ -301,7 +302,7 @@ func (a *api) setDrive(w http.ResponseWriter, r *http.Request) {
 	reply(w, map[string][][2]string{"linked": linked})
 }
 
-func (a *api) deleteDrive(w http.ResponseWriter, r *http.Request) {
+func (a *machine) deleteDrive(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if err := a.edit(func(c *Config) error {
 		if _, ok := c.Drives[name]; !ok {
@@ -318,13 +319,13 @@ func (a *api) deleteDrive(w http.ResponseWriter, r *http.Request) {
 
 // serves is why drive d, named name, cannot be served now, or nil: its
 // server must be a connected worker that says it can serve drives.
-func (a *api) serves(name string, d coordinator.Drive) error {
+func (a *machine) serves(name string, d coordinator.Drive) error {
 	server, err := a.coord.Check(name, d)
 	if err != nil {
 		return err
 	}
 	ws := a.pool.List()
-	i := slices.IndexFunc(ws, func(l harness.Listed) bool { return l.Name == server && l.Refused == "" })
+	i := slices.IndexFunc(ws, func(l api.Listed) bool { return l.Name == server && l.Refused == "" })
 	switch {
 	case i < 0:
 		return fmt.Errorf("drive %s: its server %s is not connected", name, server)
@@ -336,7 +337,7 @@ func (a *api) serves(name string, d coordinator.Drive) error {
 
 // edit changes the config's drives and links with fn, saves the config and
 // applies them. keyMu holds the read and write against any other config write.
-func (a *api) edit(fn func(*Config) error) error {
+func (a *machine) edit(fn func(*Config) error) error {
 	keyMu.Lock()
 	defer keyMu.Unlock()
 	c, err := Load(a.path)
