@@ -27,18 +27,24 @@ const list = h("div", { className: "list side separated", role: "listbox", ariaL
 const pins = h("div", { className: "pins" })
 const pinned = () => JSON.parse(localStorage.getItem("pins") ?? "[]") as string[]
 const pin = (id: string) => localStorage.setItem("pins", JSON.stringify(pinned().includes(id) ? pinned().filter(x => x !== id) : [...pinned(), id]))
-// The list's bar (Messages): Edit opens what is about this harness and Log out; the filter shows one status.
+// The list's bar (Messages): Settings, with a dot while an update waits (iOS); the filter shows one status.
 let only = ""
 // mark is the Mainplane icon and wordmark, its ink in the text color so it shows in dark too.
 const mark = () => Object.assign(h("span", { className: "mark" }), { innerHTML: lockup })
 const menuButton = (button: HTMLElement, menu: HTMLElement) => (button.onclick = () => MPMenu.open(menu, button), [button, menu])
-const editMenu = h("div", { className: "menu", role: "menu", hidden: true },
-  h("button", { role: "menuitem", onclick: () => go("/settings") } as Partial<HTMLButtonElement>, icon("settings"), h("span", null, "Settings")),
-  h("button", { role: "menuitem", className: "danger", onclick: () => logout() } as Partial<HTMLButtonElement>, h("span", null, "Log out")))
+const gear = h("button", { className: "btn icon ghost gear", ariaLabel: "Settings", onclick: () => go("/settings") }, icon("settings"))
+const waiting = (v: Settings["version"]) => !!v.latest && v.latest !== v.current
+const updated = (v: Settings["version"]) => { gear.classList.toggle("update", waiting(v)); gear.ariaLabel = waiting(v) ? "Settings, update available" : "Settings" }
+// The harness is asked at the first view with a key, then each hour: the dot comes with a release.
+let checked = false
+const check = () => {
+  if (key()) get<Settings>("/settings").then(s => { checked = true; updated(s.version) }, () => {}) // one that failed is asked again at the next view
+}
+setInterval(check, 36e5)
 const filters = ["", ...statuses].map(s => h("button", { role: "menuitemradio", ariaChecked: String(!s), onclick: () => { only = s; filters.forEach((b, i) => (b.ariaChecked = String(["", ...statuses][i] === s))); filter.classList.toggle("on", !!s); drawList() } } as Partial<HTMLButtonElement>, h("span", null, s ? said[s] : "All projects")))
 const filter = h("button", { className: "btn icon ghost filter", ariaLabel: "Filter", ariaHasPopup: "menu" }, icon("filter"))
 const side = h("nav", { className: "sidebar" },
-  h("div", { className: "bar" }, ...menuButton(h("button", { className: "btn plain sm edit", ariaHasPopup: "menu" }, "Edit"), editMenu), mark(), ...menuButton(filter, h("div", { className: "menu", role: "menu", hidden: true }, ...filters))),
+  h("div", { className: "bar" }, gear, mark(), ...menuButton(filter, h("div", { className: "menu", role: "menu", hidden: true }, ...filters))),
   h("div", { className: "top" }, h("label", { className: "search lg" }, icon("search"), search), h("a", { href: "/new", className: "btn icon ghost", ariaLabel: "New project" }, icon("compose"))),
   h("div", { className: "scroll" }, pins, list))
 const main = h("main")
@@ -222,6 +228,7 @@ async function render() {
   shown = location.pathname
   const [kind, id, sub, agent, more] = location.pathname.split("/").slice(1)
   if (kind !== "welcome" && key() && !onboarded()) await setUp()
+  if (!checked) check()
   if (signal.aborted) return
   document.body.classList.toggle("out", !key() || !onboarded() || kind === "welcome")
   document.body.classList.toggle("home", /^\/(new(\/\w+)?)?$/.test(location.pathname)) // a phone shows the list under the new project sheet
@@ -692,7 +699,9 @@ async function harnessSettings(tab: string): Promise<HTMLElement> {
   const [st, root] = await Promise.all([get<Settings>("/settings"), get<{ name: string; version: string }>("/")])
   const post = (body: object) => api("/settings", { method: "POST", json: body })
   const value = (v: string) => h("span", { className: "value" }, v)
-  const general = h("div", null, h("div", { className: "form" }, row("Network", value(root.name), "div"), row("Address", value(location.host), "div"), row("Version", value(st.version.current), "div")),
+  updated(st.version)
+  const version = waiting(st.version) ? h("a", { className: "value update", href: "/settings/update" }, `${st.version.current}, update to ${st.version.latest}`) : value(st.version.current)
+  const general = h("div", null, h("div", { className: "form" }, row("Network", value(root.name), "div"), row("Address", value(location.host), "div"), row("Version", version, "div")),
     h("button", { className: "btn danger delete", onclick: () => logout() }, "Log Out"))
 
   // Software Update (iOS): the release, its notes and Update Now, or that this one is the latest.
@@ -792,7 +801,9 @@ async function harnessSettings(tab: string): Promise<HTMLElement> {
 
   const head = toolbar("Settings", "", null)
   head.querySelector(".avatar")!.remove()
-  return tabbed("Settings", "/settings", "/", [["general", "General", general], ["update", "Update", update], ["providers", "Providers", provs], ["workers", "Workers", workers], ["devices", "Devices", devices], ["instructions", "Instructions", told], ["privacy", "Privacy", privacy]], tab, [], [], [], head)
+  const s = tabbed("Settings", "/settings", "/", [["general", "General", general], ["update", "Update", update], ["providers", "Providers", provs], ["workers", "Workers", workers], ["devices", "Devices", devices], ["instructions", "Instructions", told], ["privacy", "Privacy", privacy]], tab, [], [], [], head)
+  s.querySelector("[role=tab][value=update]")!.classList.toggle("update", waiting(st.version))
+  return s
 }
 
 // tabbed is a large sheet with one section in view at a time, as in Slack's channel details. The tab is in the path

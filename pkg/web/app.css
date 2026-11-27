@@ -99,15 +99,19 @@ main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--compose
 .composer .quote { display: flex; align-items: center; gap: 6px; padding: 6px 4px 0 14px; color: var(--color-text-2); font-size: 13px }
 .composer .quote > span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis }
 .composer .quote mp-icon { --icon-size: 14px }
-/* The list's bar (Messages): Edit at the left, the filter at the right. A filter in use is tinted. */
+/* The list's bar (Messages): Settings at the left, the filter at the right. A filter in use is tinted. */
 .sidebar > .bar { display: flex; align-items: center; gap: 8px; padding: 0 10px 18px } /* Messages macOS: a wide gap between the top row and search */
-/* Rounded like the compose circle under them (Messages macOS 26 toolbar): Edit a capsule, the filter a circle, ink. */
+/* Rounded like the compose circle under them (Messages macOS 26 toolbar): circles, ink. */
 .sidebar > .bar > .btn { --bg: var(--color-fill); --bg-h: var(--color-fill-hover); --fg: var(--color-text); --h: var(--control-lg); border-radius: calc(var(--h) / 2); corner-shape: round }
-.sidebar > .bar > .edit { padding-inline: 14px; font: var(--text-body) }
 .sidebar > .bar > .btn.icon { width: var(--h); padding: 0; justify-content: center }
 .sidebar > .bar > .mark { flex: 1; min-width: 0; display: flex; justify-content: center; height: var(--control-lg); color: var(--color-text) }
 .sidebar > .bar > .mark > svg { height: 100%; width: auto; max-width: 100% }
 .sidebar > .bar > .filter.on { color: var(--color-accent) }
+/* An update waiting marks Settings with a red dot (iOS badge), on the gear and its Update tab; the version in General links there. */
+.gear.update, [role=tab].update { position: relative }
+.gear.update::after, [role=tab].update::after { content: ""; position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--color-danger) }
+[role=tab].update::after { top: 4px; right: 4px; width: 7px; height: 7px }
+a.value.update { color: var(--color-accent); text-decoration: none }
 .sidebar a.row { color: inherit; text-decoration: none }
 .thread { padding: 16px; min-height: 100%; box-sizing: border-box; justify-content: flex-end } /* a short chat sits on the composer, as in Messages */
 .thread .bubble:not(.rt-inline) { white-space: pre-wrap }
@@ -189,8 +193,7 @@ main:has(> .composer:not([hidden])) .thread { padding-bottom: calc(var(--compose
   .sidebar > .bar > .btn { height: 44px; min-width: 44px; padding-inline: 16px; border-radius: 22px; corner-shape: round; background: var(--color-floating); box-shadow: var(--shadow-1); color: var(--color-text); font: var(--text-body) }
   .sidebar > .bar > .btn.icon { padding: 0; justify-content: center }
   .sidebar > .bar mp-icon { --icon-size: 22px }
-  .sidebar > .bar > .edit { font-size: 17px }
-  .sidebar > .bar > .mark { height: 44px; padding-inline: 8px } /* as on a desktop: the lockup between Edit and the filter, as tall as they are */
+  .sidebar > .bar > .mark { height: 44px; padding-inline: 8px } /* as on a desktop: the lockup between Settings and the filter, as tall as they are */
   .list.side > .row, .pin { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none } /* a long press opens the project's menu, not the link's */
   /* A project's title opened (Slack iPhone, his sketch): a larger glass island over the toolbar, its views as rows (the one shown filled), then Pin and Delete. */
   .island-scrim { position: fixed; inset: 0; z-index: var(--z-sheet) }
