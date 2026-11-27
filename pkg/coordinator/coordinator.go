@@ -582,10 +582,10 @@ func (c *Coordinator) delta(n *node, sent map[tailcfg.NodeID]uint64, host *strin
 
 // sees is whether a and b are in each other's map, which is the whole access
 // rule: WireGuard takes packets only from peers in the map, at both ends. The
-// harness sees every node and every node sees it. A drive's server sees each
-// worker that mounts it; two workers on one drive do not see each other for
-// it. Two workers see each other otherwise only when linked. A removed node
-// sees none and is seen by none.
+// harness sees every node and every node sees it. Two workers see each other
+// only when linked; a link to "*" is to every persistent worker. A drive's
+// server and its workers are linked like any others. A removed node sees
+// none and is seen by none.
 func (c *Coordinator) sees(a, b *node) bool {
 	switch {
 	case a.Removed || b.Removed:
@@ -593,7 +593,7 @@ func (c *Coordinator) sees(a, b *node) bool {
 	case a.Name == worker.Harness || b.Name == worker.Harness:
 		return true
 	}
-	return c.links[pair(a.Name, b.Name)] || c.serves(a, b) || c.serves(b, a)
+	return c.links[pair(a.Name, b.Name)] || c.links[pair(a.Name, everyone)] && !b.Ephemeral || c.links[pair(b.Name, everyone)] && !a.Ephemeral
 }
 
 // Link makes each pair of workers, by name, see each other, and no others,

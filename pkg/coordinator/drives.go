@@ -80,14 +80,28 @@ func on(d Drive, n *node) bool {
 	return !n.Removed && n.Name != worker.Harness && (slices.Contains(d.Workers, n.Name) || !n.Ephemeral && slices.Contains(d.Workers, everyone))
 }
 
-// serves is whether a serves a drive that b mounts. The caller holds mu.
-func (c *Coordinator) serves(a, b *node) bool {
-	for name, d := range c.drives {
-		if s, err := c.check(name, d); err == nil && s == a && on(d, b) {
-			return true
+// Unlinked is each link drives ds need that links lacks: the server of a
+// drive and each worker that mounts it, "*" for every persistent one. A
+// drive opens no path on the mesh by itself; the links are the one rule.
+func Unlinked(links [][2]string, ds map[string]Drive) [][2]string {
+	have := map[[2]string]bool{}
+	for _, p := range links {
+		have[pair(p[0], p[1])] = true
+	}
+	var out [][2]string
+	for _, name := range slices.Sorted(maps.Keys(ds)) {
+		server := ds[name].Server
+		if name == worker.Sessions {
+			server = worker.Admin
+		}
+		for _, w := range ds[name].Workers {
+			if p := pair(server, w); w != server && !have[p] {
+				have[p] = true
+				out = append(out, p)
+			}
 		}
 	}
-	return false
+	return out
 }
 
 // Desired is what the worker named name should serve, to which addresses,

@@ -394,6 +394,14 @@ server. Nothing is shared until the harness config names a drive:
   machine there are no drives: add a Linux worker, or use Mainplane cloud.
   Each drive names its one server; any number of workers can be servers.
 - `"*"` is every persistent worker. An ephemeral worker must be named.
+- A drive opens no path on the mesh by itself: its server and each worker
+  that mounts it must be linked, and a link to `"*"`, such as
+  `["linuxbox", "*"]`, links a worker with every persistent one.
+  `PUT /drives/{name}` adds the links a drive needs and lists them in its
+  reply, `{"linked": [["linuxbox", "*"]]}`. A config saved by hand with a
+  drive whose links are missing is refused, and the config before it holds.
+  On its first start after an update, the harness adds the missing links to
+  the config and logs them.
 - The first drive on a server installs `nfs-kernel-server` and `samba`. A
   machine that already exports anything over NFS, or has a program on port
   445, is refused, in `mainplane status` and the harness log. Samba's own

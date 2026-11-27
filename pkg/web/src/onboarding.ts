@@ -175,7 +175,7 @@ export function onboarding(loginForm: (done: () => void) => HTMLElement, again: 
           make.disabled = true
           api("/drives/shared", { method: "PUT", json: { server: s.includes("admin") ? "admin" : s[0], workers: ["*"] } }).then(finish, e => { make.disabled = false; fail(e) })
         })
-        page("Host a Shared Drive", "Mainplane can host files shared among all your workers. Add a shared drive for all workers?", [], make, button("Not Now", finish, false))
+        page("Host a Shared Drive", "Mainplane can host files shared among all your workers. Add a shared drive for all workers? Its server is then linked with every worker, so they reach each other on the mesh.", [], make, button("Not Now", finish, false))
         break
       }
     }
