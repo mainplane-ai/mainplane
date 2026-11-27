@@ -563,8 +563,8 @@ async function options(cur?: AgentInfo): Promise<{ el: HTMLElement[]; over: HTML
   const names = new Set([...workers.filter(w => !w.refused).map(w => w.name), ...has.map(w => w.name)])
   const ws = section("Workers", ...(names.size ? [...names].map(n => box(n, !cur || has.some(w => w.name === n))) : [none("No workers connected")]))
   // Only the apps there is a choice of: the ones every orchestrator has are kept as they are. None, and the section is hidden.
-  const fixed = required.filter(r => (cur ? cur.apps : apps.map(a => a.name)).includes(r))
-  const as = section("Apps", ...apps.filter(a => !required.includes(a.name)).map(a => box(a.name, !cur || cur.apps.includes(a.name))))
+  const fixed = required.filter(r => (cur ? cur.apps ?? [] : apps.map(a => a.name)).includes(r))
+  const as = section("Apps", ...apps.filter(a => !required.includes(a.name)).map(a => box(a.name, !cur || (cur.apps ?? []).includes(a.name))))
   return {
     el: [h("div", { className: "form" }, row("Model", pk.trigger, "div")), ...ws, ...as],
     over: pk.pops,

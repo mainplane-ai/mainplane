@@ -503,7 +503,7 @@ func (a *App) stop(w http.ResponseWriter, r *http.Request, p Project) error {
 	}
 	done := map[string]bool{}
 	for {
-		members := slices.DeleteFunc(a.members()[p.ID], func(g api.Agent) bool { return done[g.Sessions[len(g.Sessions)-1]] })
+		members := slices.DeleteFunc(a.members()[p.ID], func(g api.Agent) bool { return done[g.Live()] })
 		if len(members) == 0 {
 			break
 		}
@@ -513,7 +513,7 @@ func (a *App) stop(w http.ResponseWriter, r *http.Request, p Project) error {
 			}
 		}
 		for _, g := range slices.Backward(members) {
-			live := g.Sessions[len(g.Sessions)-1]
+			live := g.Live()
 			if err := a.h.Stop(r.Context(), live, by); err != nil {
 				return err
 			}

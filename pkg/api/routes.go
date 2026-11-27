@@ -58,8 +58,9 @@ const (
 	SecretPath   = "/secrets/{name}"
 )
 
-// Path is path p with each {wildcard} filled by the next of args, escaped.
-// A count of args that does not match is a bug in the caller.
+// Path is path p with each {wildcard} filled by the next of args, escaped,
+// and a dot or two as %2E, so no arg is a segment a server cleans away. A
+// count of args that does not match is a bug in the caller.
 func Path(p string, args ...string) string {
 	parts := strings.Split(p, "/")
 	for i, s := range parts {
@@ -68,6 +69,9 @@ func Path(p string, args ...string) string {
 				panic(fmt.Sprintf("api.Path %s: too few args", p))
 			}
 			parts[i], args = url.PathEscape(args[0]), args[1:]
+			if strings.Trim(parts[i], ".") == "" {
+				parts[i] = strings.ReplaceAll(parts[i], ".", "%2E")
+			}
 		}
 	}
 	if len(args) > 0 {

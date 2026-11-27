@@ -166,7 +166,7 @@ func Redeem(ctx context.Context, url, key, code string) (string, error) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxJoin))
-		return "", fmt.Errorf("%s/join: %s: %s", url, resp.Status, bytes.TrimSpace(b))
+		return "", fmt.Errorf("%s%s: %s: %s", url, api.JoinPath, resp.Status, bytes.TrimSpace(b))
 	}
 	var m joinMsg
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxJoin)).Decode(&m); err != nil {

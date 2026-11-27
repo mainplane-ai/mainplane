@@ -102,7 +102,7 @@ export function dashboard(p: Project, signal: AbortSignal): HTMLElement {
       const a = (await get<AgentInfo[]>(at + "/agents", signal)).find(a => a.id === d.agent)
       if (!a) throw new Error(`no agent "${d.agent}" in this project`)
       // With n, the chat opens at that record of the session, as agents tells them.
-      return go((a.id === p.orchestrator ? at + "/chat" : "/agents/" + a.id) + (d.n === undefined ? "" : `#${a.sessions.includes(String(d.session)) ? d.session : a.sessions.at(-1)}.${Number(d.n)}`))
+      return go((a.id === p.orchestrator ? at + "/chat" : "/agents/" + a.id) + (d.n === undefined ? "" : `#${(a.sessions ?? []).includes(String(d.session)) ? d.session : a.sessions?.at(-1)}.${Number(d.n)}`))
     },
     // reply puts a question's title over the chat box under the dashboard, and the cursor in the box.
     reply: d => void dispatchEvent(new CustomEvent("reply", { detail: { agent: p.orchestrator, title: String(d.title) } })),

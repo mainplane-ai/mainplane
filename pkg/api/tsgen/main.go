@@ -96,6 +96,8 @@ func (g *gen) ts(t reflect.Type) string {
 		return "boolean"
 	case k >= reflect.Int && k <= reflect.Uint64 && k != reflect.Uintptr, k == reflect.Float32, k == reflect.Float64:
 		return "number"
+	case k == reflect.Slice && t.Elem().Kind() == reflect.Uint8:
+		return "string" // base64
 	case k == reflect.Slice, k == reflect.Array:
 		return g.ts(t.Elem()) + "[]"
 	case k == reflect.Map:
@@ -137,11 +139,13 @@ func (g *gen) fields(t reflect.Type) string {
 				walk(f.Type)
 				continue
 			}
-			opt := ""
-			if strings.Contains(opts, "omitempty") || strings.Contains(opts, "omitzero") || f.Type.Kind() == reflect.Pointer {
+			opt, null, k := "", "", f.Type.Kind()
+			if strings.Contains(opts, "omitempty") || strings.Contains(opts, "omitzero") || k == reflect.Pointer {
 				opt = "?"
+			} else if k == reflect.Slice && f.Type.Elem().Kind() != reflect.Uint8 || k == reflect.Map {
+				null = " | null" // a nil slice or map is sent as null
 			}
-			fs = append(fs, fmt.Sprintf("%s%s: %s", cmp.Or(name, f.Name), opt, g.ts(f.Type)))
+			fs = append(fs, fmt.Sprintf("%s%s: %s%s", cmp.Or(name, f.Name), opt, g.ts(f.Type), null))
 		}
 	}
 	walk(t)

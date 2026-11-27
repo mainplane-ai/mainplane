@@ -157,7 +157,7 @@ export function chat(id: string, signal: AbortSignal, on = () => true): HTMLElem
     // The sessions before the live one are asked for beside its records, not before them.
     const [agent, first] = await Promise.all([get<AgentInfo>(path(paths.Agent, id), signal), turn("", signal)])
     live.dataset.session = session = first
-    const earlier = agent.sessions.slice(0, agent.sessions.indexOf(session))
+    const all = agent.sessions ?? [], earlier = all.slice(0, all.indexOf(session))
     // The session before loads as the top of the chat comes near, as in Messages, and what the user reads stays in place.
     let loading = Promise.resolve()
     // A failed load leaves its session in earlier and the queue going: the top coming near again asks again.

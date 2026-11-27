@@ -147,7 +147,7 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 	handle("GET "+api.AgentsPath, pass)
 	owned("GET "+api.AgentPath, nil)
 	owned("GET "+api.AgentRecordsPath, func(r *http.Request, _, a api.Agent) error {
-		sid := cmp.Or(r.URL.Query().Get("session"), a.Sessions[len(a.Sessions)-1])
+		sid := cmp.Or(r.URL.Query().Get("session"), a.Live())
 		if !slices.Contains(a.Sessions, sid) {
 			return fmt.Errorf("session %s is not agent %s's", sid, a.ID)
 		}
@@ -375,7 +375,7 @@ func (o *App) Stopped(a api.Agent, st statefile.Status) {
 	if a.Name != "" {
 		name = " (" + a.Name + ")"
 	}
-	text := fmt.Sprintf(stopped, a.ID, name, a.Sessions[len(a.Sessions)-1], st)
+	text := fmt.Sprintf(stopped, a.ID, name, a.Live(), st)
 	if _, _, err := o.h.PostAgent(o.ctx, parent, "app:orchestrate", "", []harness.Part{{Type: "text/plain", Body: []byte(text)}}); err != nil {
 		log.Printf("orchestrate: telling agent %s that %s stopped: %v", parent, a.ID, err)
 	}

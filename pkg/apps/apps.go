@@ -458,7 +458,7 @@ func (m *Manager) app(w http.ResponseWriter, r *http.Request, token string, rout
 			out = append(out, agent{i.ID, i.Name})
 		}
 		reply(w, out)
-	case r.Method == http.MethodPost && len(parts) == 3 && parts[0] == "agents" && parts[2] == "records" && slices.Contains(a.spec.Entitlements, entPost):
+	case r.Method == http.MethodPost && len(parts) == 3 && r.URL.Path == api.Path(api.AgentRecordsPath, parts[1]) && slices.Contains(a.spec.Entitlements, entPost):
 		if t, err := m.h.Agent(parts[1]); err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
