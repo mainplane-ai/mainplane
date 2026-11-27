@@ -302,6 +302,13 @@ func (h *Harness) CreateAgent(ctx context.Context, c AgentCreate, via string) (A
 	if a.Config.Conf, _, err = h.valid(a.Config.Conf); err != nil {
 		return a, err
 	}
+	// The session takes the agent's workers and limit before the agent is
+	// seen, so no post steps it on the ones it had.
+	if _, held := h.Holder(c.Session); !held {
+		if err := h.takeConf(c.Session, via, chain, a.Config); err != nil {
+			return a, err
+		}
+	}
 	// The claim and the checks are one step under amu, so two agents adopting
 	// one session at once cannot both pass, and a delete of the session
 	// either sees the claim before it stops anything or refuses this one.
@@ -324,9 +331,6 @@ func (h *Harness) CreateAgent(ctx context.Context, c AgentCreate, via string) (A
 	h.agents[a.ID], h.live[c.Session] = a, a.ID
 	h.amu.Unlock()
 	if err = h.note(s, c.Session, opening...); err == nil {
-		err = h.takeConf(c.Session, via, chain, a.Config)
-	}
-	if err == nil {
 		err = h.save(a)
 	}
 	if err != nil {
