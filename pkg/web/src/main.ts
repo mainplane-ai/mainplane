@@ -281,7 +281,8 @@ async function content(kind: string, id: string, sub: string, signal: AbortSigna
     const to = projects.find(p => p.id === localStorage.getItem(last)) ?? projects[0]
     if (!kind && to && !matchMedia("(max-width: 700px)").matches) {
       history.replaceState(null, "", `/projects/${to.id}`)
-      return content("projects", to.id, "", signal)
+      void render() // as the project's own path: this render, which would draw for /, ends
+      return []
     }
     return [none]
   }
