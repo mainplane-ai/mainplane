@@ -11,9 +11,10 @@ import (
 )
 
 func TestKeys(t *testing.T) {
-	a, mux := &api{dir: t.TempDir()}, http.NewServeMux()
-	a.handle(mux)
+	a, routes := &api{dir: t.TempDir()}, http.NewServeMux()
+	a.handle(routes)
 	store := Auth(a.dir)
+	mux := store.Bearer(&auth.Limit{}, routes)
 	self, err := store.Issue(auth.Key, "web-1")
 	if err != nil {
 		t.Fatal(err)
@@ -27,11 +28,15 @@ func TestKeys(t *testing.T) {
 	if !store.Check(auth.Key, self) {
 		t.Fatal("web-1 refused")
 	}
-	call := func(method, path string) *httptest.ResponseRecorder {
+	as := func(secret, method, path string) *httptest.ResponseRecorder {
 		w, r := httptest.NewRecorder(), httptest.NewRequest(method, path, nil)
-		r.Header.Set("Authorization", "Bearer "+self)
+		r.Header.Set("Authorization", "Bearer "+secret)
 		mux.ServeHTTP(w, r)
 		return w
+	}
+	call := func(method, path string) *httptest.ResponseRecorder { return as(self, method, path) }
+	if as("wrong", "GET", "/keys").Code != http.StatusUnauthorized || as("wrong", "DELETE", "/keys/web-2").Code != http.StatusUnauthorized {
+		t.Fatal("a wrong key got past")
 	}
 
 	w := call("GET", "/keys")

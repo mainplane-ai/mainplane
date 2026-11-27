@@ -803,10 +803,14 @@ async function harnessSettings(tab: string): Promise<HTMLElement> {
   // Another Device) a login link, a new key, so it is made only when asked for.
   const keys = h("div")
   const day = (at: string) => new Date(at).toDateString() === new Date().toDateString() ? "today" : new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" })
-  const drawKeys = async () => keys.replaceChildren(h("div", { className: "form" }, ...(await get<Key[]>("/keys")).map(k =>
-    h("div", { className: "form-row" }, icon(k.name.startsWith("web-") ? "globe" : k.name.startsWith("tui-") || k.harness ? "terminal" : "computer"),
-      h("span", { className: "row-main" }, h("b", null, k.name), h("small", null, [k.harness && "The harness machine", k.created && "Added " + day(k.created), k.used && "Used " + day(k.used)].filter(Boolean).join(" \u00b7 "))),
-      k.self ? h("span", { className: "row-trail" }, "This device") : k.harness ? "" : h("button", { className: "btn plain sm danger", onclick: attempt(() => revoke(k.name)) }, "Revoke")))))
+  let draws = 0 // only the last draw asked for draws: an older answer must not hide a key just made
+  const drawKeys = async () => {
+    const n = ++draws, ks = await get<Key[]>("/keys")
+    if (n === draws) keys.replaceChildren(h("div", { className: "form" }, ...ks.map(k =>
+      h("div", { className: "form-row" }, icon(k.name.startsWith("web-") ? "globe" : k.name.startsWith("tui-") || k.harness ? "terminal" : "computer"),
+        h("span", { className: "row-main" }, h("b", null, k.name), h("small", null, [k.harness && "The harness machine", k.created && "Added " + day(k.created), k.used && "Used " + day(k.used)].filter(Boolean).join(" \u00b7 "))),
+        k.self ? h("span", { className: "row-trail" }, "This device") : k.harness ? "" : h("button", { className: "btn plain sm danger", onclick: attempt(() => revoke(k.name)) }, "Revoke")))))
+  }
   const revoke = async (name: string) => {
     if (!await ask(`Revoke "${name}"?`, "That device is logged out. It needs a new login link to log in again.", "Revoke")) return
     await api("/keys/" + encodeURIComponent(name), { method: "DELETE" })

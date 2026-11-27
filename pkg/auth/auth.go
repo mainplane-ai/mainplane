@@ -89,6 +89,13 @@ func (s Store) Load() (Table, error) {
 	return t, json.Unmarshal(b, &t)
 }
 
+// Read is the table, never one this process is half way through writing.
+func (s Store) Read() (Table, error) {
+	writes.RLock()
+	defer writes.RUnlock()
+	return s.Load()
+}
+
 func (s Store) save(t Table) error {
 	b, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {
@@ -145,9 +152,7 @@ func (s Store) Revoke(kind, name string) error {
 
 // Check is whether secret is a live entry of kind.
 func (s Store) Check(kind, secret string) bool {
-	writes.RLock()
-	t, err := s.Load()
-	writes.RUnlock()
+	t, err := s.Read()
 	if err != nil {
 		log.Printf("auth: %v", err)
 		return false
@@ -164,20 +169,26 @@ func (s Store) Check(kind, secret string) bool {
 	return hit >= 0
 }
 
-// use saves now as the last use of the entries of kind with hash h.
+// use saves now as the last use of the entries of kind with hash h, unless
+// a check at the same time saved it first.
 func (s Store) use(kind, h string) {
 	writes.Lock()
 	defer writes.Unlock()
 	t, err := s.Load()
-	if err == nil {
-		for i := range t[kind] {
-			if t[kind][i].Hash == h {
-				t[kind][i].Used = time.Now().UTC()
-			}
-		}
-		err = s.save(t)
-	}
 	if err != nil {
+		log.Printf("auth: %v", err)
+		return
+	}
+	stale := false
+	for i, e := range t[kind] {
+		if e.Hash == h && time.Since(e.Used) > usedEvery {
+			t[kind][i].Used, stale = time.Now().UTC(), true
+		}
+	}
+	if !stale {
+		return
+	}
+	if err := s.save(t); err != nil {
 		log.Printf("auth: %v", err)
 	}
 }

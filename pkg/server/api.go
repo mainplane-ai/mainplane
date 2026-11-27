@@ -172,7 +172,7 @@ type keyRow struct {
 }
 
 func (a *api) keys(w http.ResponseWriter, r *http.Request) {
-	t, err := Auth(a.dir).Load()
+	t, err := Auth(a.dir).Read()
 	if err != nil {
 		fail(w, err)
 		return
@@ -196,7 +196,7 @@ func (a *api) keys(w http.ResponseWriter, r *http.Request) {
 // and the key that asks: a device logs out instead.
 func (a *api) revoke(w http.ResponseWriter, r *http.Request) {
 	name, store := r.PathValue("name"), Auth(a.dir)
-	t, err := store.Load()
+	t, err := store.Read()
 	if err != nil {
 		fail(w, err)
 		return
