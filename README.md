@@ -4,23 +4,25 @@
 </picture>
 <div><h3>Mainplane is an open-source agent harness</h3></div>
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/tui-dark.svg">
-  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/tui-light.svg" alt="The Mainplane TUI: a sidebar of sessions on different models, and an agent that moves a Qwen fine-tune from a GPU server to a Mac Studio and quantizes it to run there" width="960">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/web-ui-v2-dark.png">
+  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/web-ui-v2-light.png" alt="The Mainplane web UI: a project dashboard on the desktop, and the project's chat on a phone" width="960">
 </picture>
 
-# Self-Hosting Quickstart
+# Get started
 
-Run this command on your server machine (any always-on machine will do):
+Run this on the computer that will host your agents. Any always-on machine works. Your laptop is fine to try it.
 
 ```shell
 # Linux, macOS
-curl -fsSL https://mainplane.ai/install | sh -s -- server quickstart
+curl -fsSL https://mainplane.ai/install | sh -s -- server
 
 # Windows
-& ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) server quickstart
+& ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) server
 ```
 
-The quickstart walks you through adding a provider, workers (computers your agents control) and connectors (ways to message your agents).
+The install prints a link and a QR code. Open the link in a browser, or scan the code with your phone. The page then helps you connect a model provider, your other computers and your phone.
+
+Prefer the terminal? Run `mainplane` on the same machine.
 
 Read more in [docs/self-hosting.md](docs/self-hosting.md), and [docs/privacy-and-security.md](docs/privacy-and-security.md).
 
@@ -28,12 +30,15 @@ Read more in [docs/self-hosting.md](docs/self-hosting.md), and [docs/privacy-and
 
 # Features
 ### Access from anywhere
+- Use Mainplane in a browser on any device. Run `mainplane web` for a new link and its QR code.
+
+### Terminal app
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/web-ui-v2-dark.png">
-  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/web-ui-v2-light.png" alt="The Mainplane web UI: a project dashboard on the desktop, and the project's chat on a phone" width="960">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainplane-ai/github-media/main/tui-dark.svg">
+  <img src="https://raw.githubusercontent.com/mainplane-ai/github-media/main/tui-light.svg" alt="The Mainplane TUI: a sidebar of sessions on different models, and an agent that moves a Qwen fine-tune from a GPU server to a Mac Studio and quantizes it to run there" width="960">
 </picture>
 
-- Run `mainplane web` to get the link to the web interface, or its QR code to open it on your phone.
+- Run `mainplane` for the same sessions in the terminal.
 
 ### Model agnostic
 - Mainplane can use any model from any provider, including Anthropic, OpenAI, Google, and more.

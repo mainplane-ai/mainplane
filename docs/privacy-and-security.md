@@ -31,12 +31,12 @@ What this means for where you connect a worker:
 - Connect a worker on a machine whose contents you trust agents with: a
   server, a VM, a cloud machine or a spare computer. Keep passwords, wallets
   and personal files that you do not trust agents with off it.
-- The quickstart makes the harness machine a worker, `admin`. `admin` can
+- The install makes the harness machine a worker, `admin`. `admin` can
   read the harness config, which holds your provider keys. Run the harness on
   a machine that you trust agents with, or
   [with no admin worker](#a-harness-with-no-admin-worker).
 - A machine that only sends messages to agents needs no worker. Log in with an
-  API key ([without the quickstart](self-hosting.md#without-the-quickstart)).
+  API key ([without a terminal](self-hosting.md#without-a-terminal)).
 - The worker service, `mainplaned`, runs as root. Agent code runs as the user
   who connected the worker, except on a machine with only a root shell and no
   sudo, where it runs as root. The root actions the harness can

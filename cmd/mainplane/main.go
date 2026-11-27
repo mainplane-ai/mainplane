@@ -241,6 +241,7 @@ func work(install bool, args []string) {
 		if err := worker.Install(token); err != nil {
 			log.Fatal(err)
 		}
+		joined(key)
 		return
 	}
 	name, err := os.Hostname()
@@ -256,6 +257,22 @@ func work(install bool, args []string) {
 	if err := worker.Work(key, worker.Local{Name: name, URL: url, Secret: secret, Scratch: filepath.Join(dir, ".mainplane"), Interps: worker.Default[runtime.GOOS], Operator: op}); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// joined says the worker name this machine joined the harness with key as,
+// once the worker has joined, which can take a minute while the network starts.
+// Only a person waits for it: not the harness's install of admin, nor a script.
+func joined(key string) {
+	if st, err := os.Stdout.Stat(); err != nil || st.Mode()&os.ModeCharDevice == 0 {
+		return
+	}
+	for end := time.Now().Add(time.Minute); time.Now().Before(end); time.Sleep(time.Second) {
+		if h, name, err := mesh.Joined(); err == nil && h == key {
+			fmt.Printf("This machine is worker %s.\n", name)
+			return
+		}
+	}
+	fmt.Println("This machine joins once the harness answers: mainplane status shows it.")
 }
 
 // redeem trades device code for the join token of the harness that holds
