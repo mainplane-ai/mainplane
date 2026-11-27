@@ -51,8 +51,9 @@ const (
 //	DELETE /keys/{name}    -> 204: the key revoked; the key that asks and the default key
 //	                          are 409, an unknown name 404
 //	GET    /drives         -> the drives as the config has them, by name
-//	PUT    /drives/{name}  {"server","workers"} -> 204: saved in the config and applied;
-//	                          refused when its server cannot serve it now
+//	PUT    /drives/{name}  {"server","workers"} -> {"linked"}: saved in the config and applied,
+//	                          with the links it needs between its server and each worker,
+//	                          which linked lists; refused when its server cannot serve it now
 //	DELETE /drives/{name}  -> 204
 //	GET    /settings       -> {"version":{"current","latest"},"data_sharing"}
 //	POST   /settings       {"data_sharing":{"share","via","text"}} -> 204: saved in the config
@@ -245,23 +246,26 @@ func (a *api) setDrive(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	if err := a.edit(func(ds map[string]coordinator.Drive) error {
-		ds[name] = d
+	var linked [][2]string
+	if err := a.edit(func(c *Config) error {
+		c.Drives[name] = d
+		linked = append([][2]string{}, coordinator.Unlinked(c.Links, c.Drives)...)
+		c.Links = append(c.Links, linked...)
 		return nil
 	}); err != nil {
 		fail(w, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	reply(w, map[string][][2]string{"linked": linked})
 }
 
 func (a *api) deleteDrive(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if err := a.edit(func(ds map[string]coordinator.Drive) error {
-		if _, ok := ds[name]; !ok {
+	if err := a.edit(func(c *Config) error {
+		if _, ok := c.Drives[name]; !ok {
 			return fmt.Errorf("no drive %q", name)
 		}
-		delete(ds, name)
+		delete(c.Drives, name)
 		return nil
 	}); err != nil {
 		fail(w, err)
@@ -288,9 +292,9 @@ func (a *api) serves(name string, d coordinator.Drive) error {
 	return nil
 }
 
-// edit changes the config's drives with fn, saves the config and applies
-// them. keyMu holds the read and write against any other config write.
-func (a *api) edit(fn func(map[string]coordinator.Drive) error) error {
+// edit changes the config's drives and links with fn, saves the config and
+// applies them. keyMu holds the read and write against any other config write.
+func (a *api) edit(fn func(*Config) error) error {
 	keyMu.Lock()
 	defer keyMu.Unlock()
 	c, err := Load(a.path)
@@ -298,12 +302,13 @@ func (a *api) edit(fn func(map[string]coordinator.Drive) error) error {
 		return err
 	}
 	c.Drives = orEmpty(c.Drives)
-	if err := fn(c.Drives); err != nil {
+	if err := fn(&c); err != nil {
 		return err
 	}
 	if err := saveConfig(a.path, c); err != nil {
 		return err
 	}
+	a.coord.Link(c.Links)
 	setDrives(a.coord, a.pool, c.Drives)
 	return nil
 }

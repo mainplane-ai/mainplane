@@ -524,11 +524,13 @@ func (c *Client) NewKey(ctx context.Context, name string) (string, error) {
 }
 
 // SetDrive makes or changes the drive name, served by server to workers, "*"
-// for all.
-func (c *Client) SetDrive(ctx context.Context, name, server string, workers []string) error {
+// for all, and returns the links the harness added for it.
+func (c *Client) SetDrive(ctx context.Context, name, server string, workers []string) ([][2]string, error) {
 	b, err := json.Marshal(map[string]any{"server": server, "workers": workers})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return c.Call(ctx, "PUT", "/drives/"+url.PathEscape(name), "application/json", bytes.NewReader(b), nil)
+	var out struct{ Linked [][2]string }
+	err = c.Call(ctx, "PUT", "/drives/"+url.PathEscape(name), "application/json", bytes.NewReader(b), &out)
+	return out.Linked, err
 }

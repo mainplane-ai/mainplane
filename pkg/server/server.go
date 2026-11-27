@@ -193,11 +193,8 @@ func providers(dir string, cfg map[string]Provider) (map[string]provider.Provide
 // at path is read again when it changes: providers, links and drives apply
 // at once.
 func Harness(ctx context.Context, path string) error {
-	c, err := Load(path)
+	c, err := startConfig(path)
 	if err != nil {
-		return err
-	}
-	if err := c.way(); err != nil {
 		return err
 	}
 	dir := filepath.Dir(path)
@@ -519,6 +516,37 @@ func removeProvider(path, name string, serve func(map[string]provider.Provider))
 	return nil
 }
 
+// linked is why the config's drives cannot be served on its links, or nil.
+func (c Config) linked() error {
+	if l := coordinator.Unlinked(c.Links, c.Drives); len(l) > 0 {
+		return fmt.Errorf("a drive's server and its workers must be linked: add %v to links", l)
+	}
+	return nil
+}
+
+// startConfig is the config at path as the harness starts on it. Each link
+// its drives need and do not have is added to the file, and the log says
+// so: a config from before drives needed links has them after its first
+// start.
+func startConfig(path string) (Config, error) {
+	c, err := Load(path)
+	if err != nil {
+		return c, err
+	}
+	if err := c.way(); err != nil {
+		return c, err
+	}
+	l := coordinator.Unlinked(c.Links, c.Drives)
+	if len(l) == 0 {
+		return c, nil
+	}
+	log.Printf("harness: config: the drives need links; added %v", l)
+	c.Links = append(c.Links, l...)
+	keyMu.Lock()
+	defer keyMu.Unlock()
+	return c, saveConfig(path, c)
+}
+
 // setDrives applies the drives and sends each worker its own. A drive that
 // cannot be served is a config error in the log; the others are served.
 func setDrives(coord *coordinator.Coordinator, pool *harness.Pool, ds map[string]coordinator.Drive) {
@@ -573,6 +601,9 @@ func watch(ctx context.Context, path string, apply func(Config) error) {
 		}
 		mod = fi.ModTime()
 		c, err := loadConfig(path)
+		if err == nil {
+			err = c.linked()
+		}
 		if err == nil {
 			err = apply(c)
 		}
