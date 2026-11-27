@@ -324,6 +324,9 @@ func (h *Harness) CreateAgent(ctx context.Context, c AgentCreate, via string) (A
 	h.agents[a.ID], h.live[c.Session] = a, a.ID
 	h.amu.Unlock()
 	if err = h.note(s, c.Session, opening...); err == nil {
+		err = h.takeConf(c.Session, via, chain, a.Config)
+	}
+	if err == nil {
 		err = h.save(a)
 	}
 	if err != nil {
@@ -450,12 +453,19 @@ func (h *Harness) SetAgentConfig(id, via string, c AgentConfig) error {
 	if err != nil {
 		return err
 	}
+	return h.takeConf(a.live(), via, chain, c)
+}
+
+// takeConf gives session id, of chain, the workers and the limit of c in
+// place, when they are all of c it lacks. Any other change waits for the
+// next post, which goes on in a new session.
+func (h *Harness) takeConf(id, via string, chain []statefile.Record, c AgentConfig) error {
 	conf, err := config(chain)
 	if err != nil {
 		return err
 	}
 	if core(conf) == core(c.Conf) && (!slices.Equal(conf.Workers, c.Workers) || conf.ContextLimit != c.ContextLimit) {
-		_, err = h.setConf(a.live(), via, func(s *statefile.Conf) { s.Workers, s.ContextLimit = c.Workers, c.ContextLimit })
+		_, err = h.setConf(id, via, func(s *statefile.Conf) { s.Workers, s.ContextLimit = c.Workers, c.ContextLimit })
 	}
 	return err
 }

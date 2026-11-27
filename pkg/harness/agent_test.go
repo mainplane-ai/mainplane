@@ -310,6 +310,16 @@ func TestCreateAgent(t *testing.T) {
 	if h, ok := r.h.Holder(s1); !ok || h.ID != two.ID || len(r.h.ListAgents(func(Agent) bool { return true })) != 2 {
 		t.Fatalf("after a reload: %+v", h)
 	}
+
+	// one that adopts with a config of its own limit gives the session that limit
+	s2, err := r.h.Create(context.Background(), Create{Model: "fake/m1", ContextLimit: 777, Workers: []statefile.Worker{{Name: "w1"}}}, "tui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.create(AgentCreate{Session: s2, Config: r.conf(999, 0, "w1")}, "desktop")
+	if conf, _ := config(r.chain(s2)); conf.ContextLimit != 999 {
+		t.Fatalf("an adopted session kept limit %d", conf.ContextLimit)
+	}
 }
 
 // Every session of an agent starts with its instructions: the one it is made
