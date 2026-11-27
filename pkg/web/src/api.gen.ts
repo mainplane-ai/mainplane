@@ -39,6 +39,8 @@ export const paths = {
   Workers: "/workers",
   Worker: "/workers/{name}",
   WorkerName: "/workers/{name}/name",
+  JoinTokens: "/workers/tokens",
+  JoinToken: "/workers/tokens/{name}",
   Providers: "/providers",
   Provider: "/providers/{name}",
   ProviderModels: "/providers/{name}/models",
