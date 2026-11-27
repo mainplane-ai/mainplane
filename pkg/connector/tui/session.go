@@ -10,10 +10,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	"github.com/mainplane-ai/mainplane/pkg/catalog"
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
-	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
@@ -47,7 +47,7 @@ type session struct {
 	c      *connector.Client
 	list   *sessionList
 	id     string
-	info   harness.Info
+	info   api.Info
 	asked  []*msgBlock // the messages, for /rollback and /goto
 	second int64       // the clock's second at the last tick, to redraw the times of running calls
 
@@ -209,7 +209,7 @@ func (s *session) askHome(a *App) {
 		return
 	}
 	s.homeAsked = true
-	s.withProviders(a, func(cat *catalog.Catalog, ps []harness.ProviderInfo) {
+	s.withProviders(a, func(cat *catalog.Catalog, ps []api.ProviderInfo) {
 		if d, err := defaultConf(cat, ps, s.list.infos); err == nil {
 			s.home = &d
 		}
@@ -380,7 +380,7 @@ func (s *session) follow(a *App) {
 		for s.ctx.Err() == nil {
 			ctx, cancel := context.WithTimeout(s.ctx, pollWait+callTime)
 			recs, err := s.c.Records(ctx, id, after, wait)
-			var info harness.Info
+			var info api.Info
 			if err == nil {
 				info, err = s.c.Info(ctx, id)
 			}
@@ -410,7 +410,7 @@ func (s *session) follow(a *App) {
 	})
 }
 
-func (s *session) add(a *App, recs []statefile.Record, info harness.Info) {
+func (s *session) add(a *App, recs []statefile.Record, info api.Info) {
 	for _, r := range recs {
 		s.show(r)
 	}
@@ -572,7 +572,7 @@ func (s *session) open(cf *statefile.Conf, cat *catalog.Catalog) (string, error)
 		}
 		cf = &d
 	}
-	return s.c.Create(ctx, harness.Create{Model: cf.Model, Tools: cf.Tools, ContextLimit: cf.ContextLimit, Workers: cf.Workers, Input: cf.Input, Params: cf.Params, Preset: cf.Preset}, via)
+	return s.c.Create(ctx, api.Create{Model: cf.Model, Tools: cf.Tools, ContextLimit: cf.ContextLimit, Workers: cf.Workers, Input: cf.Input, Params: cf.Params, Preset: cf.Preset}, via)
 }
 
 // stop asks the harness to stop. The status line says so until the status

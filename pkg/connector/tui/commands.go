@@ -17,10 +17,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	"github.com/mainplane-ai/mainplane/pkg/catalog"
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
-	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
 	"github.com/mainplane-ai/mainplane/pkg/provider"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
@@ -356,7 +356,7 @@ func (s *session) sessions(a *App) {
 }
 
 // sessionMenu is the menu of infos: a pick opens its session.
-func (s *session) sessionMenu(infos []harness.Info) *Menu {
+func (s *session) sessionMenu(infos []api.Info) *Menu {
 	m := &Menu{}
 	for _, in := range infos {
 		id := in.ID
@@ -390,7 +390,7 @@ func (s *session) workers(a *App) {
 		s.homeWorkers(a, *s.cfg)
 		return
 	}
-	s.withProviders(a, func(cat *catalog.Catalog, ps []harness.ProviderInfo) {
+	s.withProviders(a, func(cat *catalog.Catalog, ps []api.ProviderInfo) {
 		d, err := defaultConf(cat, ps, s.list.infos)
 		if err != nil {
 			a.SayError(err)
@@ -662,7 +662,7 @@ func (s *session) remove(a *App, id string) {
 				return
 			}
 			delete(s.list.drafts, id)
-			s.list.infos = slices.DeleteFunc(s.list.infos, func(in harness.Info) bool { return in.ID == id })
+			s.list.infos = slices.DeleteFunc(s.list.infos, func(in api.Info) bool { return in.ID == id })
 			a.Say("Deleted session " + id)
 			if s.ctx.Err() == nil {
 				s.fresh(a)
@@ -679,7 +679,7 @@ func (s *session) copyBefore(a *App, n int, input []elem, taken bool) {
 	a.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), callTime)
 		defer cancel()
-		to, err := s.c.Create(ctx, harness.Create{From: id, N: n}, via)
+		to, err := s.c.Create(ctx, api.Create{From: id, N: n}, via)
 		a.Post(func() {
 			if err != nil {
 				a.SayError(err)
@@ -741,7 +741,7 @@ func (s *session) rename(a *App, name string) {
 
 // withProviders runs then with the catalog and the providers the harness
 // serves.
-func (s *session) withProviders(a *App, then func(cat *catalog.Catalog, ps []harness.ProviderInfo)) {
+func (s *session) withProviders(a *App, then func(cat *catalog.Catalog, ps []api.ProviderInfo)) {
 	cat := s.list.cat
 	if cat == nil {
 		a.SayError(errors.New("the catalog is not loaded"))
@@ -769,7 +769,7 @@ func (s *session) withProviders(a *App, then func(cat *catalog.Catalog, ps []har
 // the catalog does not have lists. Picking one makes the next session from
 // its preset, or from the model and its provider's context limit.
 func (s *session) models(a *App) {
-	s.withProviders(a, func(cat *catalog.Catalog, ps []harness.ProviderInfo) {
+	s.withProviders(a, func(cat *catalog.Catalog, ps []api.ProviderInfo) {
 		m := &Menu{}
 		cur := s.base()
 		for _, id := range connected(cat, ps) {
@@ -806,7 +806,7 @@ func (s *session) models(a *App) {
 // customItems is the menu items of the models the servers of providers own
 // list, under Custom, cur marked. A server that does not answer gives an
 // error and no items.
-func (s *session) customItems(own []harness.ProviderInfo, cur statefile.Conf) ([]MenuItem, []error) {
+func (s *session) customItems(own []api.ProviderInfo, cur statefile.Conf) ([]MenuItem, []error) {
 	ctx, cancel := context.WithTimeout(context.Background(), callTime)
 	defer cancel()
 	var items []MenuItem
@@ -832,12 +832,12 @@ func (s *session) customItems(own []harness.ProviderInfo, cur statefile.Conf) ([
 // group once. Picking one asks for its key, and the harness serves it, and
 // each provider that takes the same key, with the catalog's shape and url.
 func (s *session) providers(a *App) {
-	s.withProviders(a, func(cat *catalog.Catalog, ps []harness.ProviderInfo) {
+	s.withProviders(a, func(cat *catalog.Catalog, ps []api.ProviderInfo) {
 		m := &Menu{}
 		for _, e := range cat.Offered() {
 			id := e.ID
 			p, hint := cat.Providers[id], ""
-			if slices.ContainsFunc(ps, func(x harness.ProviderInfo) bool { return x.Name == id }) {
+			if slices.ContainsFunc(ps, func(x api.ProviderInfo) bool { return x.Name == id }) {
 				hint = "connected"
 			}
 			pick := func(a *App, _ *MenuItem) { s.keyDialog(a, cat, id) }
@@ -1049,7 +1049,7 @@ func (s *session) config(a *App) {
 		a.Say("The session is still loading")
 		return
 	}
-	s.withProviders(a, func(cat *catalog.Catalog, ps []harness.ProviderInfo) {
+	s.withProviders(a, func(cat *catalog.Catalog, ps []api.ProviderInfo) {
 		cf := s.base()
 		if s.id == "" && s.cfg == nil {
 			d, err := defaultConf(cat, ps, s.list.infos)

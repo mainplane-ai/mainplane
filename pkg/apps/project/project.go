@@ -27,6 +27,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	"github.com/mainplane-ai/mainplane/pkg/catalog"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
@@ -168,7 +169,7 @@ type App struct {
 	catAt    time.Time
 	listed   []Model
 	listedAt time.Time
-	served   []harness.ProviderInfo // what listed was made for
+	served   []api.ProviderInfo // what listed was made for
 }
 
 // New loads the projects in dir and is the app. An agent of a project
@@ -366,10 +367,10 @@ func (a *App) of(agent string) (Project, bool) {
 }
 
 // members is every agent by the project it is in, the orchestrator first.
-func (a *App) members() map[string][]harness.Agent {
+func (a *App) members() map[string][]api.Agent {
 	all := a.h.AllAgents()
-	slices.SortFunc(all, func(x, y harness.Agent) int { return x.Created.Compare(y.Created) })
-	out := map[string][]harness.Agent{}
+	slices.SortFunc(all, func(x, y api.Agent) int { return x.Created.Compare(y.Created) })
+	out := map[string][]api.Agent{}
 	for _, g := range all {
 		if p, ok := a.of(g.ID); ok {
 			out[p.ID] = append(out[p.ID], g)
@@ -378,8 +379,8 @@ func (a *App) members() map[string][]harness.Agent {
 	return out
 }
 
-func (a *App) agents(p Project) []harness.AgentInfo {
-	out := []harness.AgentInfo{}
+func (a *App) agents(p Project) []api.AgentInfo {
+	out := []api.AgentInfo{}
 	for _, g := range a.members()[p.ID] {
 		if i, err := a.h.AgentInfo(g.ID); err == nil {
 			out = append(out, i)
@@ -406,10 +407,10 @@ func (a *App) list(w http.ResponseWriter, r *http.Request) error {
 
 func (a *App) create(w http.ResponseWriter, r *http.Request) error {
 	var in struct {
-		Name   string               `json:"name"`
-		Note   string               `json:"note"`
-		Config *harness.AgentConfig `json:"config"`
-		Apps   []string             `json:"apps"`
+		Name   string           `json:"name"`
+		Note   string           `json:"note"`
+		Config *api.AgentConfig `json:"config"`
+		Apps   []string         `json:"apps"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, harness.MaxPost)).Decode(&in); err != nil {
 		return err
@@ -422,7 +423,7 @@ func (a *App) create(w http.ResponseWriter, r *http.Request) error {
 	if err := first.Execute(&text, map[string]any{"Name": in.Name, "Note": in.Note, "Models": a.connected(r.Context())}); err != nil {
 		return err
 	}
-	g, err := a.h.CreateAgent(a.ctx, harness.AgentCreate{Name: in.Name, Config: in.Config, Apps: append(in.Apps, required...)}, by)
+	g, err := a.h.CreateAgent(a.ctx, api.AgentCreate{Name: in.Name, Config: in.Config, Apps: append(in.Apps, required...)}, by)
 	if err != nil {
 		return err
 	}
@@ -502,7 +503,7 @@ func (a *App) stop(w http.ResponseWriter, r *http.Request, p Project) error {
 	}
 	done := map[string]bool{}
 	for {
-		members := slices.DeleteFunc(a.members()[p.ID], func(g harness.Agent) bool { return done[g.Sessions[len(g.Sessions)-1]] })
+		members := slices.DeleteFunc(a.members()[p.ID], func(g api.Agent) bool { return done[g.Sessions[len(g.Sessions)-1]] })
 		if len(members) == 0 {
 			break
 		}
@@ -780,7 +781,7 @@ func (a *App) presets(ctx context.Context) ([]Model, error) {
 	}
 	out := []Model{}
 	for _, id := range a.cat.Groups[catalog.SelfHosted] {
-		if p := a.cat.Presets[id]; slices.ContainsFunc(served, func(s harness.ProviderInfo) bool { return s.Name == p.Provider }) {
+		if p := a.cat.Presets[id]; slices.ContainsFunc(served, func(s api.ProviderInfo) bool { return s.Name == p.Provider }) {
 			out = append(out, Model{id, p.Name, a.cat.Providers[p.Provider].Name, statefile.Conf{Model: p.Provider + "/" + p.Model, Tools: p.Tools, ContextLimit: p.ContextLimit, Input: p.Input, Params: p.Params, Preset: id}, p.Settings})
 		}
 	}
@@ -868,7 +869,7 @@ func (a *App) usage(w http.ResponseWriter, r *http.Request, p Project) error {
 	if err != nil {
 		return err
 	}
-	byID := map[string]harness.Info{}
+	byID := map[string]api.Info{}
 	for _, i := range infos {
 		byID[i.ID] = i
 	}

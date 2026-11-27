@@ -10,8 +10,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	"github.com/mainplane-ai/mainplane/pkg/apps"
-	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
@@ -25,20 +25,20 @@ func Session() (*Client, bool) {
 
 // Agents lists agents, newest updated first; via and status, when given,
 // keep the agents made by that caller and in that status.
-func (c *Client) Agents(ctx context.Context, via, status string) ([]harness.AgentInfo, error) {
-	var infos []harness.AgentInfo
+func (c *Client) Agents(ctx context.Context, via, status string) ([]api.AgentInfo, error) {
+	var infos []api.AgentInfo
 	err := c.Call(ctx, "GET", "/agents?via="+url.QueryEscape(via)+"&status="+url.QueryEscape(status), "", nil, &infos)
 	return infos, err
 }
 
-func (c *Client) Agent(ctx context.Context, id string) (harness.AgentInfo, error) {
-	var i harness.AgentInfo
+func (c *Client) Agent(ctx context.Context, id string) (api.AgentInfo, error) {
+	var i api.AgentInfo
 	err := c.Call(ctx, "GET", "/agents/"+id, "", nil, &i)
 	return i, err
 }
 
 // CreateAgent makes an agent and returns its id and its first session.
-func (c *Client) CreateAgent(ctx context.Context, cr harness.AgentCreate, via string) (id, session string, err error) {
+func (c *Client) CreateAgent(ctx context.Context, cr api.AgentCreate, via string) (id, session string, err error) {
 	b, err := json.Marshal(cr)
 	if err != nil {
 		return "", "", err
@@ -83,7 +83,7 @@ func (c *Client) SetAgentName(ctx context.Context, id, via, name string) error {
 
 // SetAgentConfig is the config of the agent's next session. No session is
 // made until a post finds the live one cannot go on.
-func (c *Client) SetAgentConfig(ctx context.Context, id, via string, conf harness.AgentConfig) error {
+func (c *Client) SetAgentConfig(ctx context.Context, id, via string, conf api.AgentConfig) error {
 	return c.put(ctx, "/agents/"+id+"/config?via="+url.QueryEscape(via), conf)
 }
 

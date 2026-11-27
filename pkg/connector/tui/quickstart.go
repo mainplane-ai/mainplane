@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/connector/tui/term"
-	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/release"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
@@ -63,7 +63,7 @@ type quickstart struct {
 	step   int
 	polled bool // the providers were read once: a new one after that moves on
 
-	providers []harness.ProviderInfo
+	providers []api.ProviderInfo
 	workers   []connector.Worker
 	network   string
 	join      string

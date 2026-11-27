@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
+
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
@@ -137,7 +139,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		reply(w, page(infos, r.URL.Query()))
 	})
 	mux.HandleFunc("POST /sessions", func(w http.ResponseWriter, r *http.Request) {
-		var c Create
+		var c api.Create
 		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
 			fail(w, err)
 			return
@@ -224,7 +226,7 @@ func (h *Harness) agentRoutes(ctx context.Context, mux *http.ServeMux, handle fu
 			fail(w, err)
 			return
 		}
-		h.Retry(ctx, a.live())
+		h.Retry(ctx, a.Live())
 		reply(w, map[string]statefile.Status{"status": statefile.StatusStepping})
 	})
 	// act is a change to an agent that says who made it and answers nothing.
@@ -247,7 +249,7 @@ func (h *Harness) agentRoutes(ctx context.Context, mux *http.ServeMux, handle fu
 		if err != nil {
 			return err
 		}
-		return h.Stop(ctx, a.live(), via)
+		return h.Stop(ctx, a.Live(), via)
 	})
 	act("DELETE /agents/{id}", func(r *http.Request, id, via string) error { return h.DeleteAgent(r.Context(), id, via) })
 	act("PUT /agents/{id}/name", func(r *http.Request, id, via string) error {
@@ -258,7 +260,7 @@ func (h *Harness) agentRoutes(ctx context.Context, mux *http.ServeMux, handle fu
 		return h.SetAgentName(id, via, string(b))
 	})
 	act("PUT /agents/{id}/config", func(r *http.Request, id, via string) error {
-		var c AgentConfig
+		var c api.AgentConfig
 		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
 			return err
 		}
@@ -282,9 +284,9 @@ func (h *Harness) agentRoutes(ctx context.Context, mux *http.ServeMux, handle fu
 
 func (h *Harness) serveAgents(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	infos := h.ListAgents(func(a Agent) bool { return q.Get("via") == "" || a.Via == q.Get("via") })
-	infos = slices.DeleteFunc(infos, func(i AgentInfo) bool { return q.Get("status") != "" && string(i.Status) != q.Get("status") })
-	if i := slices.IndexFunc(infos, func(i AgentInfo) bool { return i.ID == q.Get("after") }); i >= 0 {
+	infos := h.ListAgents(func(a api.Agent) bool { return q.Get("via") == "" || a.Via == q.Get("via") })
+	infos = slices.DeleteFunc(infos, func(i api.AgentInfo) bool { return q.Get("status") != "" && string(i.Status) != q.Get("status") })
+	if i := slices.IndexFunc(infos, func(i api.AgentInfo) bool { return i.ID == q.Get("after") }); i >= 0 {
 		infos = infos[i+1:]
 	}
 	if n, err := strconv.Atoi(q.Get("limit")); err == nil && n >= 0 && n < len(infos) {
@@ -294,7 +296,7 @@ func (h *Harness) serveAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Harness) serveAgentCreate(ctx context.Context, w http.ResponseWriter, r *http.Request) {
-	var c AgentCreate
+	var c api.AgentCreate
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, MaxPost)).Decode(&c); err != nil {
 		fail(w, err)
 		return
@@ -304,7 +306,7 @@ func (h *Harness) serveAgentCreate(ctx context.Context, w http.ResponseWriter, r
 		fail(w, err)
 		return
 	}
-	reply(w, map[string]string{"id": a.ID, "session": a.live()})
+	reply(w, map[string]string{"id": a.ID, "session": a.Live()})
 }
 
 func (h *Harness) serveAgentPost(ctx context.Context, w http.ResponseWriter, r *http.Request) {
@@ -349,25 +351,17 @@ func fail(w http.ResponseWriter, err error) {
 	http.Error(w, err.Error(), code)
 }
 
-// ProviderInfo is a provider as GET /providers shows it: no key.
-type ProviderInfo struct {
-	Name         string `json:"name"`
-	Shape        string `json:"shape"`
-	URL          string `json:"url"`
-	ContextLimit int    `json:"context_limit,omitempty"`
-}
-
 // ProviderInfos is every provider the harness serves now, by name.
-func (h *Harness) ProviderInfos() ([]ProviderInfo, error) {
+func (h *Harness) ProviderInfos() ([]api.ProviderInfo, error) {
 	ps := h.providers()
-	out := []ProviderInfo{}
+	out := []api.ProviderInfo{}
 	for _, name := range slices.Sorted(maps.Keys(ps)) {
 		u, err := url.Parse(ps[name].URL)
 		if err != nil {
 			return nil, err
 		}
 		u.User, u.RawQuery = nil, "" // where a URL may carry a secret
-		out = append(out, ProviderInfo{name, ps[name].Envelope.Name(), u.String(), ps[name].ContextLimit})
+		out = append(out, api.ProviderInfo{Name: name, Shape: ps[name].Envelope.Name(), URL: u.String(), ContextLimit: ps[name].ContextLimit})
 	}
 	return out, nil
 }
@@ -504,16 +498,16 @@ func (h *Harness) serveName(w http.ResponseWriter, r *http.Request) {
 // by ?after, and cuts it to ?limit. Empty means no filter, no skip, no cut.
 // The filters come before the cut, so a page of plain sessions is full
 // however many sessions of agents are newer.
-func page(infos []Info, q url.Values) []Info {
+func page(infos []api.Info, q url.Values) []api.Info {
 	status, after := q.Get("status"), q.Get("after")
 	if status != "" {
-		infos = slices.DeleteFunc(infos, func(i Info) bool { return string(i.Status) != status })
+		infos = slices.DeleteFunc(infos, func(i api.Info) bool { return string(i.Status) != status })
 	}
 	if q.Get("plain") == "1" {
-		infos = slices.DeleteFunc(infos, func(i Info) bool { return strings.HasPrefix(i.Via, AgentVia) })
+		infos = slices.DeleteFunc(infos, func(i api.Info) bool { return strings.HasPrefix(i.Via, AgentVia) })
 	}
 	if after != "" {
-		if i := slices.IndexFunc(infos, func(i Info) bool { return i.ID == after }); i >= 0 {
+		if i := slices.IndexFunc(infos, func(i api.Info) bool { return i.ID == after }); i >= 0 {
 			infos = infos[i+1:]
 		}
 	}
@@ -596,7 +590,7 @@ func (h *Harness) serveAgentRecords(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	session := cmp.Or(q.Get("session"), a.live())
+	session := cmp.Or(q.Get("session"), a.Live())
 	if !slices.Contains(a.Sessions, session) {
 		fail(w, fmt.Errorf("agent %s has no session %q", a.ID, session))
 		return

@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	"github.com/mainplane-ai/mainplane/pkg/catalog"
-	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
 )
 
@@ -84,8 +84,8 @@ func presetConf(id string, p catalog.Preset) statefile.Conf {
 
 // custom is the openai-chat providers the harness serves that the catalog
 // does not have, such as a local server: their servers list their models.
-func custom(cat *catalog.Catalog, ps []harness.ProviderInfo) []harness.ProviderInfo {
-	var out []harness.ProviderInfo
+func custom(cat *catalog.Catalog, ps []api.ProviderInfo) []api.ProviderInfo {
+	var out []api.ProviderInfo
 	for _, p := range ps {
 		if _, ok := cat.Providers[p.Name]; !ok && p.Shape == "openai-chat" {
 			out = append(out, p)
@@ -96,17 +96,17 @@ func custom(cat *catalog.Catalog, ps []harness.ProviderInfo) []harness.ProviderI
 
 // customConf is the config a session on model of custom provider p has, but
 // its workers.
-func customConf(p harness.ProviderInfo, model string) statefile.Conf {
+func customConf(p api.ProviderInfo, model string) statefile.Conf {
 	return statefile.Conf{Model: p.Name + "/" + model, Tools: "default", ContextLimit: cmp.Or(p.ContextLimit, customLimit), Input: []string{}}
 }
 
 // connected is the presets of the group whose provider the harness serves,
 // in the group's order.
-func connected(cat *catalog.Catalog, ps []harness.ProviderInfo) []string {
+func connected(cat *catalog.Catalog, ps []api.ProviderInfo) []string {
 	var ids []string
 	for _, id := range cat.Groups[group] {
 		p := cat.Presets[id]
-		if slices.ContainsFunc(ps, func(x harness.ProviderInfo) bool { return x.Name == p.Provider }) {
+		if slices.ContainsFunc(ps, func(x api.ProviderInfo) bool { return x.Name == p.Provider }) {
 			ids = append(ids, id)
 		}
 	}
@@ -118,12 +118,12 @@ func connected(cat *catalog.Catalog, ps []harness.ProviderInfo) []string {
 // newest session, else the first of defaults, else the first one
 // connected, each only when the harness serves its provider. The workers are
 // the newest session's.
-func defaultConf(cat *catalog.Catalog, ps []harness.ProviderInfo, newest []harness.Info) (statefile.Conf, error) {
+func defaultConf(cat *catalog.Catalog, ps []api.ProviderInfo, newest []api.Info) (statefile.Conf, error) {
 	if len(newest) > 0 {
 		cf := newest[0].Config
 		name, model, _ := strings.Cut(cf.Model, "/")
 		own := custom(cat, ps)
-		if i := slices.IndexFunc(own, func(p harness.ProviderInfo) bool { return p.Name == name }); i >= 0 {
+		if i := slices.IndexFunc(own, func(p api.ProviderInfo) bool { return p.Name == name }); i >= 0 {
 			cf.ContextLimit = customConf(own[i], model).ContextLimit // the provider's now
 			return cf, nil
 		}

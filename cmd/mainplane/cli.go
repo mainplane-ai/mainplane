@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	"github.com/mainplane-ai/mainplane/pkg/catalog"
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
@@ -104,7 +105,7 @@ func cli(verb string, args []string) {
 	case "info":
 		c.raw("/sessions/" + args[0])
 	case "sessions":
-		var infos []harness.Info
+		var infos []api.Info
 		c.call("GET", "/sessions?status="+strings.Join(args, ""), "", nil, &infos)
 		for _, i := range infos {
 			fmt.Printf("%s  %-11s  %-40s  n=%-5d context=%d/%d  %s  %s\n", i.ID, i.Status, i.Config.Model, i.N, i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime), i.Name)
@@ -181,7 +182,7 @@ func (c client) agent(verb string, args []string) {
 			fmt.Printf("%s  %-11s  %-40s  session=%s  context=%d/%d  %s  %-14s  %s\n", i.ID, i.Status, i.Config.Model, i.CurrentSession, i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime), i.Via, i.Name)
 		}
 	case "agent new":
-		var cr harness.AgentCreate
+		var cr api.AgentCreate
 		if err := json.NewDecoder(os.Stdin).Decode(&cr); err != nil {
 			die(err)
 		}
@@ -211,7 +212,7 @@ func (c client) agent(verb string, args []string) {
 	case "agent name":
 		err = c.SetAgentName(ctx, args[0], via, strings.Join(args[1:], " "))
 	case "agent config":
-		var conf harness.AgentConfig
+		var conf api.AgentConfig
 		if err = json.NewDecoder(os.Stdin).Decode(&conf); err == nil {
 			err = c.SetAgentConfig(ctx, args[0], via, conf)
 		}
@@ -333,7 +334,7 @@ func (c client) key(name, key string) {
 	if strings.TrimSpace(key) == "" { // sent with the catalog's url, it would make a provider with no key
 		die(errors.New("a key is one line"))
 	}
-	var have []harness.ProviderInfo
+	var have []api.ProviderInfo
 	c.call("GET", "/providers", "", nil, &have)
 	cat, err := catalog.Fetch(context.Background())
 	if err != nil {
@@ -341,7 +342,7 @@ func (c client) key(name, key string) {
 	}
 	for _, k := range cat.Keyed(name) {
 		p := cat.Providers[k]
-		if slices.ContainsFunc(have, func(h harness.ProviderInfo) bool { return h.Name == k }) {
+		if slices.ContainsFunc(have, func(h api.ProviderInfo) bool { return h.Name == k }) {
 			p = catalog.Provider{}
 		}
 		body, _ := json.Marshal(map[string]string{"shape": p.Shape, "url": p.URL, "session": p.Session, "key": key})
@@ -352,9 +353,9 @@ func (c client) key(name, key string) {
 // catalogProvider is the shape and url to send for provider name: none for a
 // provider the harness has, which keeps its own, the catalog's for a new one.
 func (c client) catalogProvider(name string) catalog.Provider {
-	var have []harness.ProviderInfo
+	var have []api.ProviderInfo
 	c.call("GET", "/providers", "", nil, &have)
-	if slices.ContainsFunc(have, func(h harness.ProviderInfo) bool { return h.Name == name }) {
+	if slices.ContainsFunc(have, func(h api.ProviderInfo) bool { return h.Name == name }) {
 		return catalog.Provider{}
 	}
 	cat, err := catalog.Fetch(context.Background())
@@ -481,7 +482,7 @@ func (c client) records(id string, after int, wait string) []statefile.Record {
 // With no id, it follows the session updated last.
 func (c client) chat(id string) {
 	if id == "" {
-		var infos []harness.Info
+		var infos []api.Info
 		c.call("GET", "/sessions?limit=1", "", nil, &infos)
 		if len(infos) == 0 {
 			die(errors.New("no sessions: mainplane new"))

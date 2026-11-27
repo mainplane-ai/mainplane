@@ -25,8 +25,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	"github.com/mainplane-ai/mainplane/pkg/auth"
-	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/mesh"
 	"github.com/mainplane-ai/mainplane/pkg/pointer"
 	"github.com/mainplane-ai/mainplane/pkg/provider"
@@ -284,7 +284,7 @@ func (c *Client) Web(ctx context.Context) (string, error) {
 }
 
 // Create makes a session and returns its id.
-func (c *Client) Create(ctx context.Context, cr harness.Create, via string) (string, error) {
+func (c *Client) Create(ctx context.Context, cr api.Create, via string) (string, error) {
 	b, err := json.Marshal(cr)
 	if err != nil {
 		return "", err
@@ -296,18 +296,18 @@ func (c *Client) Create(ctx context.Context, cr harness.Create, via string) (str
 
 // Sessions lists sessions, newest updated first: with plain, only those no
 // agent made.
-func (c *Client) Sessions(ctx context.Context, status string, limit int, plain bool) ([]harness.Info, error) {
+func (c *Client) Sessions(ctx context.Context, status string, limit int, plain bool) ([]api.Info, error) {
 	q := "/sessions?status=" + url.QueryEscape(status) + "&limit=" + strconv.Itoa(limit)
 	if plain {
 		q += "&plain=1"
 	}
-	var infos []harness.Info
+	var infos []api.Info
 	err := c.Call(ctx, "GET", q, "", nil, &infos)
 	return infos, err
 }
 
-func (c *Client) Info(ctx context.Context, id string) (harness.Info, error) {
-	var i harness.Info
+func (c *Client) Info(ctx context.Context, id string) (api.Info, error) {
+	var i api.Info
 	err := c.Call(ctx, "GET", "/sessions/"+id, "", nil, &i)
 	return i, err
 }
@@ -413,8 +413,8 @@ func (c *Client) SetWorkers(ctx context.Context, id, via string, ws []statefile.
 
 // Providers lists the providers the harness serves, by the name a model
 // starts with.
-func (c *Client) Providers(ctx context.Context) ([]harness.ProviderInfo, error) {
-	var ps []harness.ProviderInfo
+func (c *Client) Providers(ctx context.Context) ([]api.ProviderInfo, error) {
+	var ps []api.ProviderInfo
 	err := c.Call(ctx, "GET", "/providers", "", nil, &ps)
 	return ps, err
 }

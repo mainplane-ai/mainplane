@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
 	continueapp "github.com/mainplane-ai/mainplane/pkg/apps/continue"
 	"github.com/mainplane-ai/mainplane/pkg/apps/message"
 	"github.com/mainplane-ai/mainplane/pkg/apps/orchestrate"
@@ -453,7 +454,7 @@ func (m *Manager) app(w http.ResponseWriter, r *http.Request, token string, rout
 			Name string `json:"name"`
 		}
 		out := []agent{}
-		for _, i := range m.h.ListAgents(func(a harness.Agent) bool { return slices.Contains(a.Apps, name) }) {
+		for _, i := range m.h.ListAgents(func(a api.Agent) bool { return slices.Contains(a.Apps, name) }) {
 			out = append(out, agent{i.ID, i.Name})
 		}
 		reply(w, out)
