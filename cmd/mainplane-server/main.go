@@ -192,7 +192,7 @@ func logIn(h handover) error {
 		return nil
 	}
 	if out, err := exec.Command(worker.Bin, "login", auth.Token(auth.Key, h.Harness, h.Key)).CombinedOutput(); err != nil {
-		return fmt.Errorf("mainplane login: %v: %s", err, out)
+		return fmt.Errorf("mainplane login: %w: %s", err, out)
 	}
 	return nil
 }
