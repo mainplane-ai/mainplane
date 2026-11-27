@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -75,15 +76,63 @@ func reconcile(want Desired, _ *user.User) []Drive {
 		}
 		have = append(have, d)
 	}
-	favorites(want, have) // before an unmount, while a leaving drive's Favorite still resolves
+	// A drive no longer this worker's is often one whose server no longer
+	// serves it, so it is forced off when it does not go, before anything
+	// asks it for a file: everything that does hangs.
+	stuck := false
 	for _, p := range slices.Sorted(maps.Keys(at)) {
 		if ours(p, at[p]) && !wanted[p] {
-			if err := unmount(p, false); err != nil {
+			err := unmount(p, false)
+			if err != nil {
+				if ferr := unmount(p, true); ferr != nil {
+					err = fmt.Errorf("%w; forced: %w", err, ferr)
+				} else {
+					log.Printf("drives: %v; forced it off", err)
+					err = nil
+				}
+			}
+			if err != nil {
 				have = append(have, Drive{Name: filepath.Base(p), Path: p, State: Failed, Error: "no longer this worker's, still mounted: " + err.Error()})
+				stuck = true
 			}
 		}
 	}
+	if !stuck { // a Favorite's lookup asks every mount, a stuck one too
+		favorites(want, have)
+	}
 	return have
+}
+
+// running is each command line bounded started that has not ended.
+var running sync.Map
+
+// bounded runs a command for at most wait. One stuck in the kernel on a mount
+// whose server is gone outlives its kill; it is left behind rather than
+// waited for, so the next round still comes, and is not started again until
+// it ends.
+func bounded(wait time.Duration, name string, args ...string) ([]byte, error) {
+	key := strings.Join(append([]string{name}, args...), " ")
+	if _, ok := running.LoadOrStore(key, true); ok {
+		return nil, fmt.Errorf("%s: still running from an earlier round", name)
+	}
+	type result struct {
+		out []byte
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		defer running.Delete(key)
+		ctx, cancel := context.WithTimeout(context.Background(), wait)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+		done <- result{out, err}
+	}()
+	select {
+	case r := <-done:
+		return r.out, r.err
+	case <-time.After(wait + probeWait):
+		return nil, fmt.Errorf("%s: still running %v after it was killed", name, probeWait)
+	}
 }
 
 // favsFile holds, for each user by uid, each drive whose Finder sidebar
@@ -188,10 +237,8 @@ func favorites(want Desired, have []Drive) {
 // favorite runs favJS as user uid, in their login session, where their
 // sidebar's list is, and returns what it printed.
 func favorite(uid, verb, path string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), favWait)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "launchctl", "asuser", uid, "/usr/bin/sudo", "-n", "-H", "-u", "#"+uid, "--",
-		"/usr/bin/osascript", "-l", "JavaScript", "-e", favJS, verb, path).CombinedOutput()
+	out, err := bounded(favWait, "launchctl", "asuser", uid, "/usr/bin/sudo", "-n", "-H", "-u", "#"+uid, "--",
+		"/usr/bin/osascript", "-l", "JavaScript", "-e", favJS, verb, path)
 	if err != nil {
 		return "", fmt.Errorf("%s %s: %w: %s", verb, path, err, bytes.TrimSpace(out))
 	}
@@ -246,9 +293,7 @@ func mount(m Mount, p, src string) Drive {
 		d.State, d.Error = Failed, fmt.Sprintf("sysctl: %v: %s", err, bytes.TrimSpace(out))
 		return d
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), mountWait)
-	defer cancel()
-	if out, err := exec.CommandContext(ctx, "mount", "-t", "nfs", "-o", opts, nfs, p).CombinedOutput(); err != nil {
+	if out, err := bounded(mountWait, "mount", "-t", "nfs", "-o", opts, nfs, p); err != nil {
 		d.State, d.Error = Failed, fmt.Sprintf("mount: %v: %s", err, bytes.TrimSpace(out))
 		return d
 	}
@@ -302,9 +347,7 @@ func unmount(p string, force bool) error {
 	if force {
 		args = []string{"-f", p}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), mountWait)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "umount", args...).CombinedOutput()
+	out, err := bounded(mountWait, "umount", args...)
 	if _, ok := mountpoints()[p]; ok {
 		var hint string
 		if bytes.Contains(out, []byte("Operation not permitted")) {
