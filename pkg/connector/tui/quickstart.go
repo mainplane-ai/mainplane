@@ -64,7 +64,7 @@ type quickstart struct {
 	polled bool // the providers were read once: a new one after that moves on
 
 	providers []api.ProviderInfo
-	workers   []connector.Worker
+	workers   []api.Listed
 	network   string
 	join      string
 	key       string // the api key minted for a connector
@@ -120,7 +120,7 @@ func (q *quickstart) poll(a *App) {
 		for q.ctx.Err() == nil {
 			ctx, cancel := context.WithTimeout(q.ctx, callTime)
 			ps, err := c.Providers(ctx)
-			var ws []connector.Worker
+			var ws []api.Listed
 			var network, join string
 			if err == nil {
 				ws, err = c.Workers(ctx)

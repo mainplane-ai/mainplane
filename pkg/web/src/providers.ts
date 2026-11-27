@@ -3,6 +3,7 @@
 // a sign-in or a local server, and a provider's page with its models and Disconnect.
 
 import { type Model, api, get, h, icon } from "./api"
+import { path, paths } from "./api.gen"
 import codeMotion from "./signin-claude.svg"
 import addressMotion from "./signin-chatgpt.svg"
 
@@ -55,7 +56,7 @@ export function providersPanel(host?: Host): HTMLElement {
     return go
   }
   const succeed = () => (host ? host.done() : void reload())
-  const load = async () => ([offers, infos] = await Promise.all([get<Offer[]>("/catalog/providers"), get<Info[]>("/providers")]))
+  const load = async () => ([offers, infos] = await Promise.all([get<Offer[]>("/catalog/providers"), get<Info[]>(paths.Providers)]))
   const connected = (): Connected[] => {
     const out: Connected[] = []
     for (const info of infos) {
@@ -107,7 +108,7 @@ export function providersPanel(host?: Host): HTMLElement {
       e.preventDefault()
       if (!k.value.trim()) return k.focus()
       go.disabled = true
-      Promise.all(Object.entries(o.keyed).map(([id, p]) => api("/providers/" + id, { method: "PUT", json: { shape: p.shape, url: p.url, session: p.session, key: k.value.trim(), region: region.value.trim() || (bedrock ? "us-east-1" : "") } })))
+      Promise.all(Object.entries(o.keyed).map(([id, p]) => api(path(paths.Provider, id), { method: "PUT", json: { shape: p.shape, url: p.url, session: p.session, key: k.value.trim(), region: region.value.trim() || (bedrock ? "us-east-1" : "") } })))
         .then(succeed, e => { go.disabled = false; fail(e) })
     }
     show("Key for " + o.name, add, [form], go)
@@ -138,7 +139,7 @@ export function providersPanel(host?: Host): HTMLElement {
     const watch = async () => {
       while (live && steps.isConnected) {
         await new Promise(t => setTimeout(t, 1500))
-        const st = await get<Login>("/providers/" + id + "/login").catch(() => null)
+        const st = await get<Login>(path(paths.ProviderLogin, id)).catch(() => null)
         if (live && st && st.state !== "pending") end(st)
       }
     }
@@ -148,10 +149,10 @@ export function providersPanel(host?: Host): HTMLElement {
       if (!text) return paste.focus()
       go.disabled = true
       status.textContent = "Signing in..."
-      api("/providers/" + id + "/login/code", { json: { code: text } }).catch(e => { go.disabled = false; status.textContent = ""; fail(e) })
+      api(path(paths.ProviderLoginCode, id), { json: { code: text } }).catch(e => { go.disabled = false; status.textContent = ""; fail(e) })
     }
     show("Sign in to " + o.name, add, [motion, steps, open, form, status], go)
-    api("/providers/" + id + "/login", { json: { shape: p.shape, url: p.url } }).then(r => r.json() as Promise<Login>).then(st => {
+    api(path(paths.ProviderLogin, id), { json: { shape: p.shape, url: p.url } }).then(r => r.json() as Promise<Login>).then(st => {
       if (st.state !== "pending") return end(st)
       const loopback = new URL(st.url).searchParams.get("redirect_uri")?.startsWith("http://")
       const vendor = o.name.split(" ")[0]
@@ -187,7 +188,7 @@ export function providersPanel(host?: Host): HTMLElement {
       const n = name.value.trim()
       if (infos.some(i => i.name === n) || offers.some(o => n in o.keyed)) return fail(`The name "${n}" is taken.`)
       go.disabled = true
-      api("/providers/" + n, { method: "PUT", json: { shape: "openai-chat", url: url.value.trim(), key: k.value.trim(), context_limit: Number(limit.value) || 0 } })
+      api(path(paths.Provider, n), { method: "PUT", json: { shape: "openai-chat", url: url.value.trim(), key: k.value.trim(), context_limit: Number(limit.value) || 0 } })
         .then(load).then(() => (host ? host.done() : detail(connected().find(c => c.name === n)!)), e => { go.disabled = false; fail(e) })
     }
     show("Local Server", add, [form], go)
@@ -201,14 +202,14 @@ export function providersPanel(host?: Host): HTMLElement {
     out.onclick = () => {
       if (!confirm(`Disconnect ${c.name}? ${c.offer?.sign_in ? "Its sign-in is deleted from the harness, and sessions" : "Sessions"} on its models stop working.`)) return
       out.disabled = true
-      Promise.all(c.names.map(n => api("/providers/" + n, { method: "DELETE" }))).then(reload, e => { out.disabled = false; fail(e) })
+      Promise.all(c.names.map(n => api(path(paths.Provider, n), { method: "DELETE" }))).then(reload, e => { out.disabled = false; fail(e) })
     }
     show(c.name, list, [h("div", { className: "form" },
       h("div", { className: "form-row" }, h("span", { className: "row-main" }, h("b", null, "Type")), h("span", { className: "value" }, c.offer ? kind(c) : "Local server")),
       ...(c.offer ? [] : [h("div", { className: "form-row" }, h("span", { className: "row-main" }, h("b", null, "Address")), h("span", { className: "value" }, c.info.url.replace(/\/chat\/completions$/, "")))])), models, out])
     const names = c.offer
       ? get<Model[]>("/models").then(ms => ms.filter(m => c.names.includes(m.config.model.split("/")[0])).map(m => m.name))
-      : get<string[]>("/providers/" + c.info.name + "/models")
+      : get<string[]>(path(paths.ProviderModels, c.info.name))
     names.then(ns => models.replaceChildren(...group("Models", ...ns.map(n => h("div", { className: "form-row" }, h("span", { className: "row-main" }, h("b", null, n)))))),
       e => models.replaceChildren(h("p", { className: "note" }, "Could not list its models: " + (e instanceof Error ? e.message : e))))
   }

@@ -143,26 +143,26 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 			return pass(w, r, caller)
 		})
 	}
-	handle("POST /agents", o.create)
-	handle("GET /agents", pass)
-	owned("GET /agents/{id}", nil)
-	owned("GET /agents/{id}/records", func(r *http.Request, _, a api.Agent) error {
+	handle("POST "+api.AgentsPath, o.create)
+	handle("GET "+api.AgentsPath, pass)
+	owned("GET "+api.AgentPath, nil)
+	owned("GET "+api.AgentRecordsPath, func(r *http.Request, _, a api.Agent) error {
 		sid := cmp.Or(r.URL.Query().Get("session"), a.Sessions[len(a.Sessions)-1])
 		if !slices.Contains(a.Sessions, sid) {
 			return fmt.Errorf("session %s is not agent %s's", sid, a.ID)
 		}
-		r.URL.Path = "/sessions/" + sid + "/records" // where the harness serves a session's records
+		r.URL.Path = api.Path(api.SessionRecordsPath, sid) // where the harness serves a session's records
 		return nil
 	})
-	owned("PUT /agents/{id}/name", nil)
-	owned("PUT /agents/{id}/config", func(r *http.Request, caller, a api.Agent) error {
+	owned("PUT "+api.AgentNamePath, nil)
+	owned("PUT "+api.AgentConfigPath, func(r *http.Request, caller, a api.Agent) error {
 		var c api.AgentConfig
 		if err := peek(r, &c); err != nil {
 			return err
 		}
 		return within(caller, &c, a.Apps)
 	})
-	owned("PUT /agents/{id}/apps", func(r *http.Request, caller, _ api.Agent) error {
+	owned("PUT "+api.AgentAppsPath, func(r *http.Request, caller, _ api.Agent) error {
 		var apps []string
 		if err := peek(r, &apps); err != nil {
 			return err
@@ -171,7 +171,7 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 	})
 	// What an agent is told at the start of each session is its own to keep
 	// right: it grants nothing, as a config or a list of apps would.
-	handle("PUT /agents/{id}/instructions", func(w http.ResponseWriter, r *http.Request, caller api.Agent) error {
+	handle("PUT "+api.AgentInstructionsPath, func(w http.ResponseWriter, r *http.Request, caller api.Agent) error {
 		if r.PathValue("id") != caller.ID {
 			if _, err := o.own(r, caller); err != nil {
 				return err
@@ -180,8 +180,8 @@ func New(ctx context.Context, h *harness.Harness, dir string) (*App, error) {
 		return pass(w, r, caller)
 	})
 	handle("PUT /agents/{id}/notify_on_stop", o.notify)
-	owned("POST /agents/{id}/stop", nil)
-	handle("DELETE /agents/{id}", o.remove)
+	owned("POST "+api.AgentStopPath, nil)
+	handle("DELETE "+api.AgentPath, o.remove)
 	o.Handler = mux
 	return o, nil
 }

@@ -1,7 +1,8 @@
 // A project's dashboard: a page its agents made, shown where it cannot reach
 // the key. It asks this page for what it needs of its project.
 
-import { type Agent, type Project, acted, api, decode, file, get, h, icon, named, text } from "./api"
+import { type Project, acted, api, decode, file, get, h, icon, named, text } from "./api"
+import { path, paths, type AgentInfo } from "./api.gen"
 
 export const frameURL = new URL("frame.html", import.meta.url).href
 type Stored = { name: string; size: number; modified: string; body?: string }
@@ -89,16 +90,16 @@ export function dashboard(p: Project, signal: AbortSignal): HTMLElement {
       return api(files + named(d.name), { method: "PUT", body: d.body }).then(acted)
     },
     delete: d => api(files + named(d.name), { method: "DELETE" }).then(acted),
-    send: d => api(`/agents/${p.orchestrator}/records?via=web`, { text: d.data === undefined ? String(d.text) : JSON.stringify(d.data) }).then(acted),
+    send: d => api(`${path(paths.AgentRecords, p.orchestrator)}?via=web`, { text: d.data === undefined ? String(d.text) : JSON.stringify(d.data) }).then(acted),
     status: d => api(at + "/status?via=web", { method: "PUT", json: { status: d.status, line: d.line ?? "" } }).then(acted),
-    agents: async () => Promise.all((await get<Agent[]>(at + "/agents", signal)).map(async a => {
-      const r = await api(`/agents/${a.id}/records?tail=${tail}`, { signal })
+    agents: async () => Promise.all((await get<AgentInfo[]>(at + "/agents", signal)).map(async a => {
+      const r = await api(`${path(paths.AgentRecords, a.id)}?tail=${tail}`, { signal })
       const recent = (await decode(r)).filter(r => ["message", "text", "call", "error"].includes(r.kind)).map(r => ({ n: r.n, kind: r.kind, time: r.time, via: r.via, text: /^text\/|json/.test(r.type ?? "") ? text(r.body.subarray(0, 400)) : "" }))
       return { id: a.id, name: a.name, model: a.config.model, status: a.status, updated: a.updated, session: r.headers.get("Mainplane-Session"), recent }
     })),
     open: async d => {
       if (d.file !== undefined) return go(files + named(d.file))
-      const a = (await get<Agent[]>(at + "/agents", signal)).find(a => a.id === d.agent)
+      const a = (await get<AgentInfo[]>(at + "/agents", signal)).find(a => a.id === d.agent)
       if (!a) throw new Error(`no agent "${d.agent}" in this project`)
       // With n, the chat opens at that record of the session, as agents tells them.
       return go((a.id === p.orchestrator ? at + "/chat" : "/agents/" + a.id) + (d.n === undefined ? "" : `#${a.sessions.includes(String(d.session)) ? d.session : a.sessions.at(-1)}.${Number(d.n)}`))

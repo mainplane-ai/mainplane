@@ -1,9 +1,9 @@
 // The harness's API as the page calls it. The key goes in a header of each
 // call and is kept in this origin's storage: no cookie holds it.
 
+import { path, paths, type Conf } from "./api.gen"
+
 export type Project = { id: string; name: string; orchestrator: string; status: string; line: string; color?: string; monogram?: string; updated: string; counter: number; working: boolean }
-export type Conf = { model: string; workers: { name: string }[] | null; preset?: string; [more: string]: unknown }
-export type Agent = { id: string; name?: string; config: Conf; apps: string[]; instructions?: string; sessions: string[]; status: string; updated: string }
 export type Model = { id: string; name: string; provider: string; config: Conf; settings?: { name: string; values: { name: string; params: Record<string, unknown> }[] }[] }
 export type Key = { name: string; created?: string; used?: string; self?: boolean; harness?: boolean }
 export type Rec = { n: number; kind: string; id: string; len: number; type?: string; via?: string; source?: string; for?: string; time: string; body: Uint8Array }
@@ -52,7 +52,7 @@ export async function api(path: string, o: Options = {}): Promise<Response> {
 export const get = async <T>(path: string, signal?: AbortSignal) => (await api(path, { signal })).json() as Promise<T>
 
 // records is a session's records after record n.
-export const records = async (session: string, after: number, signal?: AbortSignal) => decode(await api(`/sessions/${session}/records?after=${after}`, { signal }))
+export const records = async (session: string, after: number, signal?: AbortSignal) => decode(await api(`${path(paths.SessionRecords, session)}?after=${after}`, { signal }))
 
 // decode is the records of an answer. Each is a line of JSON, then len bytes of body, then a newline.
 export async function decode(r: Response): Promise<Rec[]> {

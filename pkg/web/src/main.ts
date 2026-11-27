@@ -1,7 +1,7 @@
 // The page: a list of projects beside the one in view. A project is seen as
 // its dashboard, with the place to write to its orchestrator always there.
 
-import { type Agent, type Conf, type Key, type Model, type Project, acted, api, avatar, avatarColor, avatarColors, file, get, h, icon, initials, key, login, logout, saveAvatar, text } from "./api"
+import { type Key, type Model, type Project, acted, api, avatar, avatarColor, avatarColors, file, get, h, icon, initials, key, login, logout, saveAvatar, text } from "./api"
 import { chat } from "./chat"
 import { rich } from "./rich"
 import { composer } from "./composer"
@@ -10,6 +10,7 @@ import { picker } from "./picker"
 import { providersPanel } from "./providers"
 import { type Worker, deviceKey, install, loginLink, onboarded, onboarding, setUp, workerRows } from "./onboarding"
 import lockup from "./lockup.svg"
+import { path, paths, type AgentInfo, type Conf } from "./api.gen"
 declare const MPMenu: { open: (menu: HTMLElement, at: Element | { x: number; y: number }, target?: Element) => void }
 
 const statuses = ["open", "waiting", "closed"]
@@ -38,7 +39,7 @@ const updated = (v: Settings["version"]) => { gear.classList.toggle("update", wa
 // The harness is asked at the first view with a key, then each hour: the dot comes with a release.
 let checked = false
 const check = () => {
-  if (key()) get<Settings>("/settings").then(s => { checked = true; updated(s.version) }, () => {}) // one that failed is asked again at the next view
+  if (key()) get<Settings>(paths.Settings).then(s => { checked = true; updated(s.version) }, () => {}) // one that failed is asked again at the next view
 }
 setInterval(check, 36e5)
 const filters = ["", ...statuses].map(s => h("button", { role: "menuitemradio", ariaChecked: String(!s), onclick: () => { only = s; filters.forEach((b, i) => (b.ariaChecked = String(["", ...statuses][i] === s))); filter.classList.toggle("on", !!s); drawList() } } as Partial<HTMLButtonElement>, h("span", null, s ? said[s] : "All projects")))
@@ -315,7 +316,7 @@ async function stored(p: Project, name: string, signal: AbortSignal) {
 
 // agentView is an agent's chat at the path at. One of a project's agents has back to the project's agents (a Slack thread's back).
 async function agentView(id: string, at: string, sub: string, signal: AbortSignal, up = ""): Promise<HTMLElement[]> {
-  const a = await get<Agent>(`/agents/${id}`, signal)
+  const a = await get<AgentInfo>(path(paths.Agent, id), signal)
   const name = a.name || a.id
   // A project's agent wears the project's color with its own letters: the avatar is saved on the project only.
   const proj = projects.find(q => q.id === up.split("/")[2])
@@ -329,7 +330,7 @@ async function agentView(id: string, at: string, sub: string, signal: AbortSigna
   // The name saves when it is left or on Return (Finder); the instructions have their own Save.
   const field = h("input", { className: "input", value: a.name ?? "", placeholder: a.id, maxLength: 200, ariaLabel: "Name" })
   field.onchange = attempt(async () => {
-    await api(`/agents/${a.id}/name?via=web`, { method: "PUT", text: field.value.trim() })
+    await api(`${path(paths.AgentName, a.id)}?via=web`, { method: "PUT", text: field.value.trim() })
     acted()
     void render() // the header and the sheet show the new name
   })
@@ -379,7 +380,7 @@ function keep(p: Project) {
     ;["", "chat"].forEach((name, i) => (tabs.children[i].ariaSelected = String(sub === name)))
     log.scrollTop = top
     // The agents are counted again behind each view shown.
-    if (on) void get<Agent[]>(at + "/agents", signal).then(list => (count.textContent = String(list.length)), () => {})
+    if (on) void get<AgentInfo[]>(at + "/agents", signal).then(list => (count.textContent = String(list.length)), () => {})
   }
   main.append(...nodes)
   show(null)
@@ -390,7 +391,7 @@ function keep(p: Project) {
 // agentsSheet is a project's agents as a sheet over it, as its settings are: rows as the project list has them, the last active first.
 async function agentsSheet(p: Project, signal: AbortSignal): Promise<HTMLElement> {
   const at = `/projects/${p.id}`
-  const list = (await get<Agent[]>(at + "/agents", signal)).sort((a, b) => +new Date(b.updated) - +new Date(a.updated))
+  const list = (await get<AgentInfo[]>(at + "/agents", signal)).sort((a, b) => +new Date(b.updated) - +new Date(a.updated))
   const rows = list.map(a => h("a", { href: `${at}/agents/${a.id}`, className: "row" }, avatar({ id: p.id, color: p.color, name: a.name || a.id }),
     h("span", { className: "row-main" }, h("span", { className: "h" }, h("b", null, a.name || a.id), h("span", { className: "row-trail" }, when(a.updated))), h("small", null, `${a.status} · ${a.config.model}`))))
   return sheet("Agents", p.name, at, [h("div", { className: "list side separated" }, ...rows)], [])
@@ -545,8 +546,8 @@ const section = (label: string, ...rows: HTMLElement[]) => [h("p", { className: 
 
 // options is the choice of an orchestrator's model, workers and apps: for a
 // new project everything connected, for one there is what its orchestrator has.
-async function options(cur?: Agent): Promise<{ el: HTMLElement[]; over: HTMLElement[]; value: () => Promise<{ config: Conf; apps: string[] }> }> {
-  const [workers, apps] = await Promise.all([get<{ name: string; refused?: string }[]>("/workers"), get<{ name: string }[]>("/apps")])
+async function options(cur?: AgentInfo): Promise<{ el: HTMLElement[]; over: HTMLElement[]; value: () => Promise<{ config: Conf; apps: string[] }> }> {
+  const [workers, apps] = await Promise.all([get<{ name: string; refused?: string }[]>(paths.Workers), get<{ name: string }[]>(paths.Apps)])
   // The sheet does not wait for the models, which a provider may be slow to list: the picker is made again when they come.
   let pk = picker([], cur?.config, null)
   const listed = get<Model[]>("/models").then(models => {
@@ -600,13 +601,13 @@ async function createForm(tab: string): Promise<HTMLElement> {
 
 // instructions is the text every session of the agent starts with. The
 // agent's live session is told of a change; no new session is made for it.
-function instructions(a: Agent): HTMLElement {
+function instructions(a: AgentInfo): HTMLElement {
   const box = h("textarea", { className: "input textarea", rows: 8, value: a.instructions ?? "", ariaLabel: "Instructions" })
   const save = h("button", { className: "btn" }, "Save instructions")
   const form = h("form", { className: "stack" }, h("small", { className: "field-help" }, "Every session of this agent starts with them."), box, h("div", { className: "actions" }, save))
   box.oninput = () => (save.textContent = "Save instructions")
   form.onsubmit = attempt(async () => {
-    await api(`/agents/${a.id}/instructions?via=web`, { method: "PUT", text: box.value })
+    await api(`${path(paths.AgentInstructions, a.id)}?via=web`, { method: "PUT", text: box.value })
     save.textContent = "Saved"
   })
   return form
@@ -615,7 +616,7 @@ function instructions(a: Agent): HTMLElement {
 // settings is the project's status and its orchestrator's own config, apps
 // and instructions. Its agents keep theirs: the orchestrator changes them when asked.
 async function settings(p: Project, signal: AbortSignal, tab = ""): Promise<HTMLElement> {
-  const orchestrator = await get<Agent>(`/agents/${p.orchestrator}`, signal)
+  const orchestrator = await get<AgentInfo>(path(paths.Agent, p.orchestrator), signal)
   const o = await options(orchestrator)
   const at = `/projects/${p.id}`
   // Status is a pop-up button (Apple), not a select: the browser's own list did not line up with it.
@@ -642,14 +643,14 @@ async function settings(p: Project, signal: AbortSignal, tab = ""): Promise<HTML
     const nm = named.value.trim()
     if (nm && nm !== p.name) {
       await api(`/projects/${p.id}/name?via=web`, { method: "PUT", json: { name: nm } })
-      await api(`/agents/${p.orchestrator}/name?via=web`, { method: "PUT", text: nm })
+      await api(`${path(paths.AgentName, p.orchestrator)}?via=web`, { method: "PUT", text: nm })
     }
     if (col !== avatarColor(p) || mono.value.trim() !== (p.monogram ?? "")) await saveAvatar(p.id, col, mono.value)
     const v = await o.value()
     if (st !== p.status || text.value !== p.line) await api(`/projects/${p.id}/status?via=web`, { method: "PUT", json: { status: st, line: text.value } })
-    await api(`/agents/${p.orchestrator}/config?via=web`, { method: "PUT", json: v.config })
-    await api(`/agents/${p.orchestrator}/apps?via=web`, { method: "PUT", json: v.apps })
-    if (told.value !== (orchestrator.instructions ?? "")) await api(`/agents/${p.orchestrator}/instructions?via=web`, { method: "PUT", text: told.value })
+    await api(`${path(paths.AgentConfig, p.orchestrator)}?via=web`, { method: "PUT", json: v.config })
+    await api(`${path(paths.AgentApps, p.orchestrator)}?via=web`, { method: "PUT", json: v.apps })
+    if (told.value !== (orchestrator.instructions ?? "")) await api(`${path(paths.AgentInstructions, p.orchestrator)}?via=web`, { method: "PUT", text: told.value })
     acted()
     go(at)
   })
@@ -710,8 +711,8 @@ function usageView(u: Usage): HTMLElement[] {
 // providers, the instructions every session gets, and data sharing. Each part saves on its own (iOS Settings).
 type Settings = { version: { current: string; latest?: string; notes?: string }; data_sharing?: { share: boolean; at?: string; via?: string }; prompt: { lines: string[]; default?: boolean } }
 async function harnessSettings(tab: string): Promise<HTMLElement> {
-  const [st, root] = await Promise.all([get<Settings>("/settings"), get<{ name: string; version: string }>("/")])
-  const post = (body: object) => api("/settings", { method: "POST", json: body })
+  const [st, root] = await Promise.all([get<Settings>(paths.Settings), get<{ name: string; version: string }>(paths.Root)])
+  const post = (body: object) => api(paths.Settings, { method: "POST", json: body })
   const value = (v: string) => h("span", { className: "value" }, v)
   updated(st.version)
   const version = waiting(st.version) ? h("a", { className: "value update", href: "/settings/update" }, `${st.version.current}, update to ${st.version.latest}`) : value(st.version.current)
@@ -733,14 +734,14 @@ async function harnessSettings(tab: string): Promise<HTMLElement> {
       now.textContent = "Updating..."
       line.textContent = "Mainplane restarts on " + latest + ". This page reloads when it is back."
       // A success seldom answers: the harness restarts under the call. Only an error the harness wrote is one.
-      const r = await fetch("/settings", { method: "POST", headers: { Authorization: "Bearer " + key() }, body: JSON.stringify({ version: latest }) }).catch(() => null)
+      const r = await fetch(paths.Settings, { method: "POST", headers: { Authorization: "Bearer " + key() }, body: JSON.stringify({ version: latest }) }).catch(() => null)
       if (r?.status === 500) {
         Object.assign(now, { disabled: false, textContent: "Update Now" })
         line.textContent = ""
         throw new Error((await r.text()).trim())
       }
       for (const end = Date.now() + 180e3; Date.now() < end; await new Promise(t => setTimeout(t, 2000)))
-        if ((await get<{ version: string }>("/").catch(() => null))?.version === latest) return location.reload()
+        if ((await get<{ version: string }>(paths.Root).catch(() => null))?.version === latest) return location.reload()
       throw new Error("The update did not finish in 3 minutes.")
     })
     // The notes show their start; Learn more shows them whole, in place.
@@ -764,7 +765,7 @@ async function harnessSettings(tab: string): Promise<HTMLElement> {
     if (text !== saved) { await post({ prompt: { lines: text ? text.split("\n") : [] } }); saved = text; reset.hidden = false }
     if (box.value === text) save.textContent = "Saved"
   })
-  reset.onclick = attempt(async () => { await post({ prompt: { default: true } }); saved = box.value = (await get<Settings>("/settings")).prompt.lines.join("\n"); reset.hidden = true })
+  reset.onclick = attempt(async () => { await post({ prompt: { default: true } }); saved = box.value = (await get<Settings>(paths.Settings)).prompt.lines.join("\n"); reset.hidden = true })
   const told = h("div", null, h("div", { className: "form" }, h("div", { className: "form-row" }, box)),
     h("p", { className: "note" }, "Every new session starts with them, after the system prompt."), h("div", { className: "actions" }, reset, save))
 
@@ -789,7 +790,7 @@ async function harnessSettings(tab: string): Promise<HTMLElement> {
     h("p", { className: "section-l" }, "Connect a Worker"), state, lines, h("p", { className: "note" }, "A worker is a machine your agents use. Run this one-line install on a machine to connect it."))
   void (async () => {
     do {
-      const [ws, top, j] = await Promise.all([get<Worker[]>("/workers"), get<{ network: string }>("/"), get<{ join: string }>("/join")]).catch(() => [null, null, null])
+      const [ws, top, j] = await Promise.all([get<Worker[]>(paths.Workers), get<{ network: string }>(paths.Root), get<{ join: string }>(paths.Join)]).catch(() => [null, null, null])
       if (ws) {
         const named = ws.filter(w => w.name)
         connected.replaceChildren(named.length ? workerRows(named) : h("div", { className: "form" }, h("div", { className: "form-row" }, h("span", { className: "row-main" }, h("small", null, "No workers connected")))))
@@ -806,7 +807,7 @@ async function harnessSettings(tab: string): Promise<HTMLElement> {
   const day = (at: string) => new Date(at).toDateString() === new Date().toDateString() ? "today" : new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" })
   let draws = 0 // only the last draw asked for draws: an older answer must not hide a key just made
   const drawKeys = async () => {
-    const n = ++draws, ks = await get<Key[]>("/keys")
+    const n = ++draws, ks = await get<Key[]>(paths.Keys)
     if (n === draws) keys.replaceChildren(h("div", { className: "form" }, ...ks.map(k =>
       h("div", { className: "form-row" }, icon(k.name.startsWith("web-") ? "globe" : k.name.startsWith("tui-") || k.harness ? "terminal" : "computer"),
         h("span", { className: "row-main" }, h("b", null, k.name), h("small", null, [k.harness && "The harness machine", k.created && "Added " + day(k.created), k.used && "Used " + day(k.used)].filter(Boolean).join(" \u00b7 "))),
@@ -814,7 +815,7 @@ async function harnessSettings(tab: string): Promise<HTMLElement> {
   }
   const revoke = async (name: string) => {
     if (!await ask(`Revoke "${name}"?`, "That device is logged out. It needs a new login link to log in again.", "Revoke")) return
-    await api("/keys/" + encodeURIComponent(name), { method: "DELETE" })
+    await api(path(paths.Key, name), { method: "DELETE" })
     await drawKeys()
   }
   drawKeys().catch(alert)

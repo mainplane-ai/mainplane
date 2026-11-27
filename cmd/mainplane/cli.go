@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"net/url"
 	"os"
 	"os/signal"
 	"slices"
@@ -72,11 +71,14 @@ func cli(verb string, args []string) {
 		die(err)
 	}
 	hv := c.version()
+	ctx := context.Background()
 	switch verb {
 	case "new":
-		var out struct{ ID string }
-		c.call("POST", "/sessions?via="+via, "application/json", os.Stdin, &out)
-		fmt.Println(out.ID)
+		var cr api.Create
+		if err := json.NewDecoder(os.Stdin).Decode(&cr); err != nil {
+			die(err)
+		}
+		fmt.Println(must(c.Create(ctx, cr, via)))
 	case "message":
 		fmt.Println(c.post(args[0], args[1], args[2:]))
 	case "tail":
@@ -93,40 +95,27 @@ func cli(verb string, args []string) {
 	case "chat":
 		c.chat(strings.Join(args, ""))
 	case "retry":
-		var out struct{ Status string }
-		c.call("POST", "/sessions/"+args[0]+"/retry", "", nil, &out)
-		fmt.Println(out.Status)
+		fmt.Println(must(c.Retry(ctx, args[0])))
 	case "stop":
-		c.call("POST", "/sessions/"+args[0]+"/stop?via="+via, "", nil, nil)
+		must(0, c.Stop(ctx, args[0], via))
 	case "delete":
-		if err := c.Delete(context.Background(), args[0], via); err != nil {
-			die(err)
-		}
+		must(0, c.Delete(ctx, args[0], via))
 	case "info":
-		c.raw("/sessions/" + args[0])
+		c.raw(api.Path(api.SessionPath, args[0]))
 	case "sessions":
-		var infos []api.Info
-		c.call("GET", "/sessions?status="+strings.Join(args, ""), "", nil, &infos)
-		for _, i := range infos {
+		for _, i := range must(c.Sessions(ctx, strings.Join(args, ""), 0, false)) {
 			fmt.Printf("%s  %-11s  %-40s  n=%-5d context=%d/%d  %s  %s\n", i.ID, i.Status, i.Config.Model, i.N, i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime), i.Name)
 		}
 	case "name":
-		var out struct{ N int }
-		c.call("PUT", "/sessions/"+args[0]+"/name?via="+via, "text/plain", strings.NewReader(strings.Join(args[1:], " ")), &out)
-		fmt.Println(out.N)
+		fmt.Println(must(c.SetName(ctx, args[0], via, strings.Join(args[1:], " "))))
 	case "workers set":
 		ws := make([]statefile.Worker, 0, len(args)-1)
 		for _, name := range args[1:] {
 			ws = append(ws, statefile.Worker{Name: name})
 		}
-		b, _ := json.Marshal(ws) // names are strings: it cannot fail
-		var out struct{ N int }
-		c.call("PUT", "/sessions/"+args[0]+"/workers?via="+via, "application/json", bytes.NewReader(b), &out)
-		fmt.Println(out.N)
+		fmt.Println(must(c.SetWorkers(ctx, args[0], via, ws)))
 	case "workers":
-		var ws []harness.Listed
-		c.call("GET", "/workers", "", nil, &ws)
-		for _, w := range ws {
+		for _, w := range must(c.Workers(ctx)) {
 			state := "connected"
 			if w.Refused != "" {
 				state = "refused: " + w.Refused
@@ -140,21 +129,17 @@ func cli(verb string, args []string) {
 			}
 		}
 	case "worker remove":
-		c.call("DELETE", "/workers/"+url.PathEscape(args[0]), "", nil, nil)
+		must(0, c.RemoveWorker(ctx, args[0]))
 	case "worker token revoke":
-		c.call("DELETE", "/workers/tokens/"+url.PathEscape(args[0]), "", nil, nil)
+		must(0, c.RevokeJoinToken(ctx, args[0]))
 	case "worker token":
-		b, _ := json.Marshal(map[string]string{"name": args[0]}) // a string: it cannot fail
-		var out struct{ Token string }
-		c.call("POST", "/workers/tokens", "application/json", bytes.NewReader(b), &out)
-		fmt.Println(out.Token)
+		fmt.Println(must(c.NewJoinToken(ctx, args[0])))
 	case "worker rename":
-		c.call("PUT", "/workers/"+url.PathEscape(args[0])+"/name", "text/plain", strings.NewReader(args[1]), nil)
+		must(0, c.RenameWorker(ctx, args[0], args[1]))
 	case "providers":
-		c.raw("/providers")
+		c.raw(api.ProvidersPath)
 	case "provider":
-		body, _ := json.Marshal(map[string]string{"shape": args[1], "url": args[2], "key": strings.Join(args[3:], "")})
-		c.call("PUT", "/providers/"+url.PathEscape(args[0]), "application/json", bytes.NewReader(body), nil)
+		must(0, c.SetProvider(ctx, args[0], args[1], args[2], "", "", strings.Join(args[3:], "")))
 	case "key":
 		c.key(args[0], args[1])
 	case "signin":
@@ -192,7 +177,7 @@ func (c client) agent(verb string, args []string) {
 		}
 		fmt.Println(id, session)
 	case "agent info":
-		c.raw("/agents/" + args[0]) // printed as it came, as info prints a session
+		c.raw(api.Path(api.AgentPath, args[0])) // printed as it came, as info prints a session
 	case "agent message":
 		s, n, err := c.PostAgent(ctx, args[0], via, args[1], args[2:])
 		if err != nil {
@@ -334,9 +319,9 @@ func (c client) key(name, key string) {
 	if strings.TrimSpace(key) == "" { // sent with the catalog's url, it would make a provider with no key
 		die(errors.New("a key is one line"))
 	}
-	var have []api.ProviderInfo
-	c.call("GET", "/providers", "", nil, &have)
-	cat, err := catalog.Fetch(context.Background())
+	ctx := context.Background()
+	have := must(c.Providers(ctx))
+	cat, err := catalog.Fetch(ctx)
 	if err != nil {
 		die(err)
 	}
@@ -345,16 +330,14 @@ func (c client) key(name, key string) {
 		if slices.ContainsFunc(have, func(h api.ProviderInfo) bool { return h.Name == k }) {
 			p = catalog.Provider{}
 		}
-		body, _ := json.Marshal(map[string]string{"shape": p.Shape, "url": p.URL, "session": p.Session, "key": key})
-		c.call("PUT", "/providers/"+url.PathEscape(k), "application/json", bytes.NewReader(body), nil)
+		must(0, c.SetProvider(ctx, k, p.Shape, p.URL, "", p.Session, key))
 	}
 }
 
 // catalogProvider is the shape and url to send for provider name: none for a
 // provider the harness has, which keeps its own, the catalog's for a new one.
 func (c client) catalogProvider(name string) catalog.Provider {
-	var have []api.ProviderInfo
-	c.call("GET", "/providers", "", nil, &have)
+	have := must(c.Providers(context.Background()))
 	if slices.ContainsFunc(have, func(h api.ProviderInfo) bool { return h.Name == name }) {
 		return catalog.Provider{}
 	}
@@ -406,17 +389,18 @@ func login() (client, error) {
 	return client{c}, err
 }
 
-// call does one request. A JSON reply lands in out when out is given.
-func (c client) call(method, path, ctype string, body io.Reader, out any) {
-	if err := c.Call(context.Background(), method, path, ctype, body, out); err != nil {
+// must is v, or the end of the verb on err.
+func must[T any](v T, err error) T {
+	if err != nil {
 		die(err)
 	}
+	return v
 }
 
 // raw prints a JSON reply as the harness sent it, indented.
 func (c client) raw(path string) {
 	var v json.RawMessage
-	c.call("GET", path, "", nil, &v)
+	must(0, c.Call(context.Background(), "GET", path, "", nil, &v))
 	var b bytes.Buffer
 	if err := json.Indent(&b, v, "", "  "); err != nil {
 		die(err)
@@ -482,8 +466,7 @@ func (c client) records(id string, after int, wait string) []statefile.Record {
 // With no id, it follows the session updated last.
 func (c client) chat(id string) {
 	if id == "" {
-		var infos []api.Info
-		c.call("GET", "/sessions?limit=1", "", nil, &infos)
+		infos := must(c.Sessions(context.Background(), "", 1, false))
 		if len(infos) == 0 {
 			die(errors.New("no sessions: mainplane new"))
 		}

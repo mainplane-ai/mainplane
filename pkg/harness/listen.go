@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
+
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
@@ -20,22 +22,15 @@ import (
 type Pool struct {
 	mu      sync.Mutex
 	m       map[string]*Remote
-	refused map[string]Listed // admitted workers the last connection of which was refused
+	refused map[string]api.Listed // admitted workers the last connection of which was refused
 
 	smu     sync.Mutex                  // one Resend at a time, so an older one never lands last
 	desired func(string) worker.Desired // the drives of the worker by name
 	key     func(session string) string // a session's MAINPLANE_KEY, which every run carries to the worker
 }
 
-// Listed is a worker as GET /workers shows it: its hello, and why its last
-// connection was refused, when it was.
-type Listed struct {
-	worker.Header
-	Refused string `json:"refused,omitempty"`
-}
-
 func NewPool(desired func(string) worker.Desired, key func(session string) string) *Pool {
-	return &Pool{m: map[string]*Remote{}, refused: map[string]Listed{}, desired: desired, key: key}
+	return &Pool{m: map[string]*Remote{}, refused: map[string]api.Listed{}, desired: desired, key: key}
 }
 
 // Resend sends each connected worker its drives when they changed: after
@@ -80,12 +75,12 @@ func (p *Pool) Get(name string) (*Remote, bool) {
 
 // List is every connected worker and every refused one not connected now,
 // sorted by name.
-func (p *Pool) List() []Listed {
+func (p *Pool) List() []api.Listed {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	out := make([]Listed, 0, len(p.m)+len(p.refused))
+	out := make([]api.Listed, 0, len(p.m)+len(p.refused))
 	for _, r := range p.m {
-		l := Listed{Header: r.Header}
+		l := api.Listed{Header: r.Header}
 		l.Drives = r.Drives()
 		out = append(out, l)
 	}
@@ -94,7 +89,7 @@ func (p *Pool) List() []Listed {
 			out = append(out, l)
 		}
 	}
-	slices.SortFunc(out, func(a, b Listed) int { return strings.Compare(a.Name, b.Name) })
+	slices.SortFunc(out, func(a, b api.Listed) int { return strings.Compare(a.Name, b.Name) })
 	return out
 }
 
@@ -134,7 +129,7 @@ func (p *Pool) serve(conn net.Conn, node func(netip.Addr) (string, bool)) {
 		if r != nil {
 			who = r.Name + " at " + who
 			p.mu.Lock()
-			p.refused[r.Name] = Listed{Header: r.Header, Refused: err.Error()}
+			p.refused[r.Name] = api.Listed{Header: r.Header, Refused: err.Error()}
 			p.mu.Unlock()
 		}
 		log.Printf("worker %s refused: %v", who, err)

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"filippo.io/cpace"
+	"github.com/mainplane-ai/mainplane/pkg/api"
 )
 
 // A device code is what a person types beside a network name to make a
@@ -154,7 +155,7 @@ func Redeem(ctx context.Context, url, key, code string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+"/join", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+api.JoinPath, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}

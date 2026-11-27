@@ -102,10 +102,10 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 			fn(w, r)
 		})
 	}
-	mux.HandleFunc("GET /workers", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET "+api.WorkersPath, func(w http.ResponseWriter, r *http.Request) {
 		reply(w, h.Workers.List())
 	})
-	mux.HandleFunc("DELETE /workers/{name}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("DELETE "+api.WorkerPath, func(w http.ResponseWriter, r *http.Request) {
 		if err := h.Remove(r.PathValue("name")); err != nil {
 			fail(w, err)
 			return
@@ -113,8 +113,8 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		h.Workers.Drop(r.PathValue("name"))
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.HandleFunc("PUT /workers/{name}/name", h.serveRename)
-	mux.HandleFunc("GET /providers", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("PUT "+api.WorkerNamePath, h.serveRename)
+	mux.HandleFunc("GET "+api.ProvidersPath, func(w http.ResponseWriter, r *http.Request) {
 		out, err := h.ProviderInfos()
 		if err != nil {
 			fail(w, err)
@@ -122,7 +122,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		}
 		reply(w, out)
 	})
-	mux.HandleFunc("GET /providers/{name}/models", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET "+api.ProviderModelsPath, func(w http.ResponseWriter, r *http.Request) {
 		ids, err := h.Models(r.Context(), r.PathValue("name"))
 		if err != nil {
 			fail(w, err)
@@ -130,7 +130,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		}
 		reply(w, ids)
 	})
-	mux.HandleFunc("GET /sessions", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET "+api.SessionsPath, func(w http.ResponseWriter, r *http.Request) {
 		infos, err := h.List()
 		if err != nil {
 			fail(w, err)
@@ -138,7 +138,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		}
 		reply(w, page(infos, r.URL.Query()))
 	})
-	mux.HandleFunc("POST /sessions", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST "+api.SessionsPath, func(w http.ResponseWriter, r *http.Request) {
 		var c api.Create
 		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
 			fail(w, err)
@@ -151,7 +151,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		}
 		reply(w, map[string]string{"id": id})
 	})
-	handle("GET /sessions/{id}", func(w http.ResponseWriter, r *http.Request) {
+	handle("GET "+api.SessionPath, func(w http.ResponseWriter, r *http.Request) {
 		info, err := h.Info(r.PathValue("id"))
 		if err != nil {
 			fail(w, err)
@@ -159,8 +159,8 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		}
 		reply(w, info)
 	})
-	handle("GET /sessions/{id}/records", h.serveRecords)
-	handle("POST /sessions/{id}/records", func(w http.ResponseWriter, r *http.Request) {
+	handle("GET "+api.SessionRecordsPath, h.serveRecords)
+	handle("POST "+api.SessionRecordsPath, func(w http.ResponseWriter, r *http.Request) {
 		via, err := via(r)
 		if err != nil {
 			fail(w, err)
@@ -178,7 +178,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		}
 		reply(w, map[string]int{"n": n})
 	})
-	handle("POST /sessions/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
+	handle("POST "+api.SessionRetryPath, func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if _, err := h.Info(id); err != nil {
 			fail(w, err)
@@ -187,7 +187,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		h.Retry(ctx, id)
 		reply(w, map[string]statefile.Status{"status": statefile.StatusStepping})
 	})
-	handle("POST /sessions/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
+	handle("POST "+api.SessionStopPath, func(w http.ResponseWriter, r *http.Request) {
 		via, err := via(r)
 		if err != nil {
 			fail(w, err)
@@ -199,20 +199,20 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	handle("DELETE /sessions/{id}", h.serveDelete)
-	handle("PUT /sessions/{id}/workers", h.serveWorkers)
-	handle("PUT /sessions/{id}/name", h.serveName)
+	handle("DELETE "+api.SessionPath, h.serveDelete)
+	handle("PUT "+api.SessionWorkersPath, h.serveWorkers)
+	handle("PUT "+api.SessionNamePath, h.serveName)
 	h.agentRoutes(ctx, mux, handle)
 	return mux
 }
 
 // agentRoutes are the twelve verbs on an agent.
 func (h *Harness) agentRoutes(ctx context.Context, mux *http.ServeMux, handle func(string, http.HandlerFunc)) {
-	mux.HandleFunc("GET /agents", h.serveAgents)
-	mux.HandleFunc("POST /agents", func(w http.ResponseWriter, r *http.Request) { h.serveAgentCreate(ctx, w, r) })
-	handle("GET /agents/{id}/records", h.serveAgentRecords)
-	handle("POST /agents/{id}/records", func(w http.ResponseWriter, r *http.Request) { h.serveAgentPost(ctx, w, r) })
-	handle("GET /agents/{id}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET "+api.AgentsPath, h.serveAgents)
+	mux.HandleFunc("POST "+api.AgentsPath, func(w http.ResponseWriter, r *http.Request) { h.serveAgentCreate(ctx, w, r) })
+	handle("GET "+api.AgentRecordsPath, h.serveAgentRecords)
+	handle("POST "+api.AgentRecordsPath, func(w http.ResponseWriter, r *http.Request) { h.serveAgentPost(ctx, w, r) })
+	handle("GET "+api.AgentPath, func(w http.ResponseWriter, r *http.Request) {
 		info, err := h.AgentInfo(r.PathValue("id"))
 		if err != nil {
 			fail(w, err)
@@ -220,7 +220,7 @@ func (h *Harness) agentRoutes(ctx context.Context, mux *http.ServeMux, handle fu
 		}
 		reply(w, info)
 	})
-	handle("POST /agents/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
+	handle("POST "+api.AgentRetryPath, func(w http.ResponseWriter, r *http.Request) {
 		a, err := h.Agent(r.PathValue("id"))
 		if err != nil {
 			fail(w, err)
@@ -244,36 +244,36 @@ func (h *Harness) agentRoutes(ctx context.Context, mux *http.ServeMux, handle fu
 			w.WriteHeader(http.StatusNoContent)
 		})
 	}
-	act("POST /agents/{id}/stop", func(r *http.Request, id, via string) error {
+	act("POST "+api.AgentStopPath, func(r *http.Request, id, via string) error {
 		a, err := h.Agent(id)
 		if err != nil {
 			return err
 		}
 		return h.Stop(ctx, a.Live(), via)
 	})
-	act("DELETE /agents/{id}", func(r *http.Request, id, via string) error { return h.DeleteAgent(r.Context(), id, via) })
-	act("PUT /agents/{id}/name", func(r *http.Request, id, via string) error {
+	act("DELETE "+api.AgentPath, func(r *http.Request, id, via string) error { return h.DeleteAgent(r.Context(), id, via) })
+	act("PUT "+api.AgentNamePath, func(r *http.Request, id, via string) error {
 		b, err := io.ReadAll(r.Body)
 		if err != nil {
 			return err
 		}
 		return h.SetAgentName(id, via, string(b))
 	})
-	act("PUT /agents/{id}/config", func(r *http.Request, id, via string) error {
+	act("PUT "+api.AgentConfigPath, func(r *http.Request, id, via string) error {
 		var c api.AgentConfig
 		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
 			return err
 		}
 		return h.SetAgentConfig(id, via, c)
 	})
-	act("PUT /agents/{id}/apps", func(r *http.Request, id, via string) error {
+	act("PUT "+api.AgentAppsPath, func(r *http.Request, id, via string) error {
 		var apps []string
 		if err := json.NewDecoder(r.Body).Decode(&apps); err != nil {
 			return err
 		}
 		return h.SetAgentApps(id, via, apps)
 	})
-	act("PUT /agents/{id}/instructions", func(r *http.Request, id, via string) error {
+	act("PUT "+api.AgentInstructionsPath, func(r *http.Request, id, via string) error {
 		b, err := io.ReadAll(r.Body)
 		if err != nil {
 			return err

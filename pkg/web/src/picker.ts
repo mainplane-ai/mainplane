@@ -1,7 +1,8 @@
 // The model picker of the design system: the connected models in provider
 // sections with the default effort of each, and the effort of the one picked.
 
-import { type Conf, type Model, h, icon } from "./api"
+import { type Model, h, icon } from "./api"
+import { type Conf } from "./api.gen"
 
 type Params = Record<string, unknown>
 declare const MPPicker: { init: (p: HTMLElement, t: HTMLElement, sub: HTMLElement) => void }

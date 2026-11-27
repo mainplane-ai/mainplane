@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mainplane-ai/mainplane/pkg/api"
+
 	"golang.org/x/net/http/httpguts"
 
 	"github.com/mainplane-ai/mainplane/pkg/apps"
@@ -274,25 +276,25 @@ func Harness(ctx context.Context, path string) error {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/id", pointer.ID(k, func() string { return at.Load().(string) }, coord.Public().String()))
-	mux.Handle("POST /join", auth.JoinHandler(k, pointer.Encode(k), code, limit))
+	mux.Handle("POST "+api.JoinPath, auth.JoinHandler(k, pointer.Encode(k), code, limit))
 	coord.Handle(mux)
 	derp := relay.New()
 	derp.SetVerifyClientFunc(coord.Known)
 	relay.Handle(mux, derp)
 	routes := http.NewServeMux()
 	routes.Handle("/", harness.Handler(ctx, h))
-	routes.HandleFunc("PUT /providers/{name}", noContent(func(r *http.Request) error {
+	routes.HandleFunc("PUT "+api.ProviderPath, noContent(func(r *http.Request) error {
 		return setProvider(path, r.PathValue("name"), r.Body, h.SetProviders)
 	}))
 	logins := &logins{ctx: ctx, path: path, serve: h.SetProviders, m: map[string]*login{}}
-	routes.HandleFunc("DELETE /providers/{name}", noContent(func(r *http.Request) error {
+	routes.HandleFunc("DELETE "+api.ProviderPath, noContent(func(r *http.Request) error {
 		logins.stop(r.PathValue("name"))
 		return removeProvider(path, r.PathValue("name"), h.SetProviders)
 	}))
-	routes.HandleFunc("POST /providers/{name}/login", logins.start)
-	routes.HandleFunc("POST /providers/{name}/login/code", logins.paste)
-	routes.HandleFunc("GET /providers/{name}/login", logins.get)
-	a := &api{dir: dir, path: path, k: k, noPointer: c.NoPointer, at: func() string { return at.Load().(string) }, coord: coord, pool: pool}
+	routes.HandleFunc("POST "+api.ProviderLoginPath, logins.start)
+	routes.HandleFunc("POST "+api.ProviderLoginCodePath, logins.paste)
+	routes.HandleFunc("GET "+api.ProviderLoginPath, logins.get)
+	a := &machine{dir: dir, path: path, k: k, noPointer: c.NoPointer, at: func() string { return at.Load().(string) }, coord: coord, pool: pool}
 	a.handle(routes)
 	go ship(ctx, dir, path)
 	// The port is taken before the apps start: a daemon that calls
@@ -307,8 +309,8 @@ func Harness(ctx context.Context, path string) error {
 	}
 	defer am.Close()
 	am.Routes(routes)
-	api := am.Handler(store.Bearer(limit, routes), routes)
-	mux.Handle("/", web.Handler(api))
+	handler := am.Handler(store.Bearer(limit, routes), routes)
+	mux.Handle("/", web.Handler(handler))
 	srv := &http.Server{Addr: c.HTTP, Handler: mux}
 	if c.URL != "" {
 		srv.Handler = proxied(mux)
@@ -335,7 +337,7 @@ func Harness(ctx context.Context, path string) error {
 		go func() {
 			errs <- http.Serve(ls[1], http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				r.Header.Del("CF-Connecting-IP")
-				api.ServeHTTP(w, r)
+				handler.ServeHTTP(w, r)
 			}))
 		}()
 		errs <- pool.Serve(ls[0], coord.Node)

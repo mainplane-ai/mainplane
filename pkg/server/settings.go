@@ -58,7 +58,7 @@ func doNotTrack() bool {
 	return v != "" && v != "0" && v != "false"
 }
 
-func (a *api) settings(w http.ResponseWriter, r *http.Request) {
+func (a *machine) settings(w http.ResponseWriter, r *http.Request) {
 	c, err := loadConfig(a.path)
 	if err != nil {
 		fail(w, err)
@@ -97,7 +97,7 @@ func (a *api) settings(w http.ResponseWriter, r *http.Request) {
 	reply(w, settings{&vs, u, &Prompt{c.prompt(), c.Prompt == nil}})
 }
 
-func (a *api) setSettings(w http.ResponseWriter, r *http.Request) {
+func (a *machine) setSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		settings
 		Version string `json:"version"`
@@ -155,7 +155,7 @@ func checkPrompt(p Prompt) error {
 
 // update has the admin worker, which runs as root on this machine, make the
 // harness release v.
-func (a *api) update(ctx context.Context, v string) error {
+func (a *machine) update(ctx context.Context, v string) error {
 	r, ok := a.pool.Get(worker.Admin)
 	if !ok {
 		return errors.New("the admin worker is not connected: update on the harness's machine with mainplane-server update")
@@ -166,7 +166,7 @@ func (a *api) update(ctx context.Context, v string) error {
 }
 
 // save changes the config at path with fn.
-func (a *api) save(fn func(*Config)) error {
+func (a *machine) save(fn func(*Config)) error {
 	keyMu.Lock()
 	defer keyMu.Unlock()
 	c, err := Load(a.path)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
+	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
 // Create is the body of POST /sessions. From set is a copy of records 1
@@ -109,6 +110,13 @@ type ProviderInfo struct {
 	Shape        string `json:"shape"`
 	URL          string `json:"url"`
 	ContextLimit int    `json:"context_limit,omitempty"`
+}
+
+// Listed is a worker as GET /workers shows it: its hello, and why its last
+// connection was refused, when it was.
+type Listed struct {
+	worker.Header
+	Refused string `json:"refused,omitempty"`
 }
 
 // Live is the agent's live session.
