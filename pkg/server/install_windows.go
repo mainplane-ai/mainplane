@@ -212,7 +212,7 @@ func start() error {
 	if err := s.Start(); err != nil {
 		return err
 	}
-	fmt.Println("note: the harness stops while this machine sleeps; powercfg /change standby-timeout-ac 0 keeps it awake on power")
+	fmt.Println("\rnote: the harness stops while this machine sleeps; powercfg /change standby-timeout-ac 0 keeps it awake on power")
 	return path(true)
 }
 

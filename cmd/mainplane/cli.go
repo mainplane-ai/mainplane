@@ -22,8 +22,8 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/connector"
 	"github.com/mainplane-ai/mainplane/pkg/harness"
 	"github.com/mainplane-ai/mainplane/pkg/statefile"
+	"github.com/mainplane-ai/mainplane/pkg/termqr"
 	"github.com/mainplane-ai/mainplane/pkg/version"
-	"rsc.io/qr"
 )
 
 // via is what this connector writes on every record it causes.
@@ -419,26 +419,12 @@ func (c client) web() {
 	if st, err := os.Stdout.Stat(); err != nil || st.Mode()&os.ModeCharDevice == 0 {
 		return
 	}
-	code, err := qr.Encode(link, qr.L)
+	code, err := termqr.Draw(link)
 	if err != nil {
 		die(err)
 	}
-	const quiet = 4 // the white edge a reader needs
-	for y := -quiet; y < code.Size+quiet; y += 2 {
-		fmt.Print("\x1b[30;47m")
-		for x := -quiet; x < code.Size+quiet; x++ {
-			fmt.Print([]string{" ", "▄", "▀", "█"}[b2i(code.Black(x, y))<<1|b2i(code.Black(x, y+1))])
-		}
-		fmt.Println("\x1b[0m")
-	}
+	fmt.Print(code)
 	fmt.Println("The link holds the API key: whoever has it controls the harness.")
-}
-
-func b2i(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }
 
 // version refuses a harness from another release, and returns the one it runs.

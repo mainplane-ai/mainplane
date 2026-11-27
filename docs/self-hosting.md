@@ -14,10 +14,7 @@ carry the harness key, not the URL. A worker or the CLI finds the URL through
 `pointer.mainplane.ai`, and the harness proves its key there before a secret
 goes to it.
 
-## Without the quickstart
-
-On a machine with no terminal, or for an automated install, leave out
-`quickstart`:
+## Get started
 
 ```shell
 # Linux, macOS
@@ -27,11 +24,19 @@ curl -fsSL https://mainplane.ai/install | sh -s -- server
 & ([scriptblock]::Create((irm https://mainplane.ai/install.ps1))) server
 ```
 
-It prints commands with your network name and device code, and an API key
-(`mp_key_...`). Save these. Run `mainplane quickstart` there later to open the
-quickstart, or go on by hand.
+The install prints a link and its QR code. Open the link in a browser, or
+scan the code with a phone. The page connects a model provider, workers and
+other devices. The link holds an API key: whoever has it controls the
+harness. `mainplane web` prints it again.
 
-Connect more machines. Your agents can use them.
+In the terminal instead, run `mainplane` on the harness machine, or add
+`quickstart` after `server` to open it right after the install.
+
+## Without a terminal
+
+With no terminal, as from a script, the install prints the link and the
+lines that connect a worker. `mainplane-server join` prints those lines
+again.
 
 ```shell
 # Linux, macOS
@@ -57,8 +62,10 @@ Add an LLM key (`openai`, `anthropic` or `google`), then start a session on `adm
 ```shell
 mainplane key openai sk-...
 echo '{"model":"openai/gpt-6.2-sol","tools":"patch","context_limit":250000,"workers":[{"name":"admin"}],"params":{"reasoning":{"effort":"medium","summary":"auto"}}}' | mainplane new
-mainplane chat
 ```
+
+It prints the session's id. `mainplane message <id> <text>` sends it a
+message, and `mainplane tail <id>` shows the session.
 
 ## The temporary URL
 
@@ -71,8 +78,7 @@ domain, a name like `https://four-random-words.trycloudflare.com`.
   minute after the new tunnel starts.
 - Cloudflare offers quick tunnels for testing and development, with no SLA.
 - A quick tunnel carries at most 200 requests at once. Each worker holds two
-  open (its map poll and its relay connection), and each `mainplane chat`
-  one, so about 95 workers fit. For more, use your own domain.
+  open (its map poll and its relay connection), so about 95 workers fit. For more, use your own domain.
 
 ## The config
 
