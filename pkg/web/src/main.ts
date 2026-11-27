@@ -279,9 +279,10 @@ async function content(kind: string, id: string, sub: string, signal: AbortSigna
   if (kind === "projects" && sub === "agents" && agent) return agentView(agent, `/projects/${id}/agents/${agent}`, more, signal, `/projects/${id}/agents`)
   if (kind !== "projects") {
     const to = projects.find(p => p.id === localStorage.getItem(last)) ?? projects[0]
-    if (!kind && to && !matchMedia("(max-width: 700px)").matches) {
+    if (!kind && to && !signal.aborted && !matchMedia("(max-width: 700px)").matches) {
       history.replaceState(null, "", `/projects/${to.id}`)
-      return content("projects", to.id, "", signal)
+      void render() // as the project's own path: this render, which would draw for /, ends
+      return []
     }
     return [none]
   }
