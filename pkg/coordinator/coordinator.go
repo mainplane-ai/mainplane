@@ -597,7 +597,8 @@ func (c *Coordinator) sees(a, b *node) bool {
 }
 
 // Link makes each pair of workers, by name, see each other, and no others,
-// and wakes every map poll to send the change.
+// and wakes every map poll to send the change. A pair with "*" makes its
+// worker see every persistent worker.
 func (c *Coordinator) Link(pairs [][2]string) {
 	links := map[[2]string]bool{}
 	for _, p := range pairs {

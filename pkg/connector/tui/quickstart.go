@@ -31,7 +31,7 @@ const (
 	qsProviders   = "Connect a model provider to begin"
 	qsWorkers     = "## OPTIONAL: Connect workers\n\nA worker is a machine your agents use. Run this one-line install on a machine to connect it."
 	qsConnectors  = "## OPTIONAL: Message Mainplane on another device\n\nYour sessions sync across any device with a Mainplane API key. Run this one-line install to add the TUI to another device, then run `mainplane` there."
-	qsDrives      = "## OPTIONAL: Host a shared drive\n\nMainplane can host files shared among all your workers. Add a shared drive for all workers? Its server is then linked with every worker, so they reach each other on the mesh."
+	qsDrives      = "## OPTIONAL: Host a shared drive\n\nMainplane can host files shared among all your workers. Add a shared drive for all workers? Its server is then linked with each worker, so each worker reaches it on the mesh."
 	qsConnected   = "Connected: "
 	qsNetStarting = "The network is starting. The lines work once it is ready."
 	qsNetFailed   = "The network failed: "

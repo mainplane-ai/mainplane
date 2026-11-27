@@ -81,8 +81,9 @@ func on(d Drive, n *node) bool {
 }
 
 // Unlinked is each link drives ds need that links lacks: the server of a
-// drive and each worker that mounts it, "*" for every persistent one. A
-// drive opens no path on the mesh by itself; the links are the one rule.
+// drive and each worker that mounts it, "*" for every persistent one. A drive
+// a check refuses gets none. A drive opens no path on the mesh by itself;
+// the links are the one rule.
 func Unlinked(links [][2]string, ds map[string]Drive) [][2]string {
 	have := map[[2]string]bool{}
 	for _, p := range links {
@@ -91,7 +92,10 @@ func Unlinked(links [][2]string, ds map[string]Drive) [][2]string {
 	var out [][2]string
 	for _, name := range slices.Sorted(maps.Keys(ds)) {
 		server := ds[name].Server
-		if name == worker.Sessions {
+		switch {
+		case name == worker.Sessions && slices.Contains(ds[name].Workers, everyone), name != worker.Sessions && server == "":
+			continue // a drive check refuses it, and it gets no links
+		case name == worker.Sessions:
 			server = worker.Admin
 		}
 		for _, w := range ds[name].Workers {
