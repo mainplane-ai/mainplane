@@ -27,7 +27,6 @@ import (
 // the login's access token as the key.
 const (
 	issuer      = "https://auth.openai.com"
-	tokenURL    = issuer + "/api/accounts/oauth/token"
 	resource    = openaiURL                   // the audience of the token, and where requests go
 	planScope   = "chatgpt.tokens.use.direct" // the grant to use the plan; a login without it can sign in but not infer
 	scopes      = "openid profile email offline_access resource.invoke " + planScope
@@ -46,6 +45,9 @@ const (
 	// tokenTime bounds a token call, which holds refreshMu.
 	tokenTime = 30 * time.Second
 )
+
+// tokenURL is a var for tests.
+var tokenURL = issuer + "/api/accounts/oauth/token"
 
 // refreshMu serializes refreshes: a refresh rotates the refresh token, and the
 // harness rebuilds providers on every config change, so the lock is not one
@@ -81,7 +83,7 @@ func ChatGPT(url, dir string) Provider {
 		// first 30 minutes, 20% to 45, and never after 60. Clock not measured.
 		Envelope: openai{ttl: 1800, likely: true},
 		Headers:  bearer,
-		Token:    func(ctx context.Context) (string, error) { return chatgptToken(ctx, dir) },
+		Token:    func(ctx context.Context, stale string) (string, error) { return chatgptToken(ctx, dir, stale) },
 		// The prompt cache hit every time with it and about half the time
 		// with prompt_cache_key alone; Codex and opencode send it.
 		Session: "session-id",
@@ -89,8 +91,10 @@ func ChatGPT(url, dir string) Provider {
 	}
 }
 
-// chatgptToken is the access token, refreshed first when it expires soon.
-func chatgptToken(ctx context.Context, dir string) (string, error) {
+// chatgptToken is the access token, refreshed first when it expires soon or
+// is stale, the token a request was refused with. A stale token another call
+// already replaced is not refreshed again.
+func chatgptToken(ctx context.Context, dir, stale string) (string, error) {
 	refreshMu.Lock()
 	defer refreshMu.Unlock()
 	c, err := loadCreds(dir)
@@ -100,10 +104,13 @@ func chatgptToken(ctx context.Context, dir string) (string, error) {
 	if err != nil {
 		return "", configError{err}
 	}
-	if time.Until(c.Expires) > refreshEarly {
+	if time.Until(c.Expires) > refreshEarly && c.AccessToken != stale {
 		return c.AccessToken, nil
 	}
 	t, err := postToken(ctx, neturl.Values{"grant_type": {"refresh_token"}, "client_id": {c.ClientID}, "refresh_token": {c.RefreshToken}, "resource": {resource}})
+	if errors.As(err, new(*httpError)) && !transient(err) {
+		return "", configError{fmt.Errorf("%w\nThe ChatGPT sign-in is no longer valid. Sign in again: mainplane signin <provider>, or /providers in the TUI", err)}
+	}
 	if err != nil {
 		return "", err
 	}
