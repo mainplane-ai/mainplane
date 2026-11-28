@@ -2,6 +2,22 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## v0.6.2
+
+- Join tokens: `mainplane worker token <name>` makes a one-time join token bound to one worker name (`POST /workers/tokens`). The machine joins with `mainplane worker <token>` or `mainplane install <token>`. The token is spent at the join, and a spent one is refused like a wrong secret. `mainplane worker token revoke <name>` (`DELETE /workers/tokens/{name}`) revokes one not yet spent. Before, the only way to stop a machine that had read the device code from joining more machines was `mainplane-server join cycle`, which changes the code for everyone
+- Links: the config's links are the one rule of who sees whom on the mesh. Before, a drive also let its server and each worker that mounts it see each other. `PUT /drives/{name}` now adds the links a drive needs and lists them in its reply (`{"linked": [...]}`). A config saved by hand with a drive whose links are missing is refused at reload. At start the harness adds the missing links to the config file and logs them, so an older config keeps the same reachability. A link to `"*"` links a worker with every persistent worker
+- Web interface: Settings > Devices lists the logged-in devices, one row per API key, with when each was added and last used, and revokes one (`GET /keys`, `DELETE /keys/{name}`). The key of this browser and the harness's `default` key cannot be revoked there
+- Web interface: a settings gear replaces the Edit menu. A red dot on it and on the Update tab shows while an update waits
+- Web interface: on a desktop, `/` shows the last project, not an empty page. A chat opened again is padded for its composer, so its end is no longer under it. A tall picture in a dashboard opens at full width and scrolls, at once and in one lightbox
+- Install: `mainplane-server install` ends on the link that logs a browser in, with its QR code, and `In the terminal instead: mainplane`. With no terminal it prints the link and the worker lines. A worker install on a terminal says `This machine is worker <name>.` once it has joined. The README starts on the web interface
+- Agents: a new context limit set with `PUT /agents/{id}/config` goes into the live session in place, and the model reads `Context limit changed to <n>.` at its next step. Before, the model kept the old limit
+- Harness: a session whose config names a worker that left the harness or was removed goes on. The model reads that the worker is gone, a call to it fails at once, and a step after a restart no longer waits up to 5 minutes for it. A worker that is only offline is still `not connected`
+- Sessions: a config record leaves a session's status as it was. Before, changing the workers of a failed session made it read as open
+- macOS workers: a worker taken off a drive unmounts it first and forces it off when a normal unmount fails, then removes its Finder Favorite. A command stuck on a stale mount no longer stops the worker's drive rounds for good
+- API: the new package `pkg/api` owns the HTTP API's paths and wire types. The CLI, the connector and the web interface (`api.gen.ts`) use it
+- Catalog: the deprecated Mistral Medium 2604 preset is gone
+- Docs: the README and `docs/privacy-and-security.md` say that Mainplane is its own harness, what a worker on your own computer can reach, how the network works, and which macOS permissions a worker uses (App Management only for agents that update other apps)
+
 ## v0.6.1
 
 - macOS workers run from `/Applications/Mainplane.app`, with `/usr/local/bin/mainplane` a link into it. Privacy settings and their prompts now show Mainplane with its icon, and the grants hold across updates. A worker moves into the app at its first start after this update. Each Mac must grant once again: until someone clicks Allow in that Mac's Network Volumes dialog, its drives wait. Accessibility and Screen Recording need a new grant too. The old "mainplane" rows can be removed. Releases add `mainplane-darwin-<arch>.app.zip`. A Mac worker in the app can still move to a release before v0.6.1, which has no app, as it does when it joins an older harness: it goes back to the bare binary
