@@ -258,7 +258,7 @@ func Harness(ctx context.Context, path string) error {
 		c, err := loadConfig(path)
 		return c.prompt(), err
 	}
-	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove, Rename: coord.Rename, Prompt: prompt, Agents: filepath.Join(dir, "agents")}
+	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove, Exists: coord.Has, Rename: coord.Rename, Prompt: prompt, Agents: filepath.Join(dir, "agents")}
 	go watch(ctx, path, func(c Config) error {
 		ps, err := providers(dir, c.Providers)
 		if err == nil {
