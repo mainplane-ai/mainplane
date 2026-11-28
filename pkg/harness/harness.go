@@ -304,7 +304,9 @@ func startLimit(chain []statefile.Record) int {
 func (h *Harness) workers(workers []statefile.Worker) string {
 	var b strings.Builder
 	for _, w := range workers {
-		if r, ok := h.Workers.Get(w.Name); ok {
+		if h.left(w.Name) {
+			fmt.Fprintf(&b, "worker %s: %s\n", w.Name, goneWorker)
+		} else if r, ok := h.Workers.Get(w.Name); ok {
 			fmt.Fprintf(&b, "worker %s: %s, %s, scratch %s\n", w.Name, r.OS, strings.Join(r.Interps, " "), r.Scratch)
 			ds := r.Drives()
 			for _, d := range ds {
@@ -317,8 +319,6 @@ func (h *Harness) workers(workers []statefile.Worker) string {
 				}
 				b.WriteString("\n")
 			}
-		} else if h.left(w.Name) {
-			fmt.Fprintf(&b, "worker %s: %s\n", w.Name, goneWorker)
 		} else {
 			fmt.Fprintf(&b, "worker %s: not connected\n", w.Name)
 		}
@@ -420,7 +420,7 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 // await waits until every worker not gone is connected, the restart's wait
 // is over, or ctx ends.
 func (h *Harness) await(ctx context.Context, workers []statefile.Worker) {
-	for time.Now().Before(h.rejoined) && slices.ContainsFunc(workers, func(w statefile.Worker) bool { _, ok := h.Workers.Get(w.Name); return !ok && !h.left(w.Name) }) {
+	for time.Now().Before(h.rejoined) && slices.ContainsFunc(workers, func(w statefile.Worker) bool { _, ok := h.Workers.Get(w.Name); return !h.left(w.Name) && !ok }) {
 		select {
 		case <-ctx.Done():
 			return
@@ -699,10 +699,10 @@ func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, c
 	if !slices.ContainsFunc(conf.Workers, func(w statefile.Worker) bool { return w.Name == a.Worker }) {
 		return result(call.ID, "error: unknown worker "+a.Worker)
 	}
-	w, ok := h.Workers.Get(a.Worker)
-	if !ok && h.left(a.Worker) {
+	if h.left(a.Worker) {
 		return result(call.ID, "error: worker "+a.Worker+" is "+goneWorker)
 	}
+	w, ok := h.Workers.Get(a.Worker)
 	if !ok {
 		return result(call.ID, "error: worker "+a.Worker+" is not connected")
 	}

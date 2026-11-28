@@ -677,7 +677,7 @@ func TestGoneWorker(t *testing.T) {
 	if got := r.h.workers(r.conf(1, 0, "away").Workers); got != "worker away: not connected\n" {
 		t.Fatalf("an offline worker: %q", got)
 	}
-	if conf, _ := config(r.chain(a.Sessions[0])); len(conf.Workers) != 2 {
+	if conf, _ := config(r.chain(a.Sessions[0])); !slices.Equal(conf.Workers, r.conf(1, 0, "w1", "gone").Workers) {
 		t.Fatalf("workers %v", conf.Workers)
 	}
 }
