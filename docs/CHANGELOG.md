@@ -4,7 +4,7 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 
 ## v0.6.2
 
-- Join tokens: `mainplane worker token <name>` makes a one-time join token bound to one worker name (`POST /workers/tokens`). The machine joins with `mainplane worker <token>` or `mainplane install <token>`. The token is spent at the join, and a spent one is refused like a wrong secret. `mainplane worker token revoke <name>` (`DELETE /workers/tokens/{name}`) revokes one not yet spent. Before, the only way to stop a machine that had read the device code from joining more machines was `mainplane-server join cycle`, which changes the code for everyone
+- Join tokens: `mainplane worker token <name>` makes a one-time join token bound to one worker name (`POST /workers/tokens`). The machine joins with `mainplane worker <token>` or `mainplane install <token>`. The token is spent at the join, and a spent one is refused like a wrong secret. A token for a name a worker already holds, online or offline, is refused at the join and spent too: `mainplane worker remove <name>` first. `mainplane worker token revoke <name>` (`DELETE /workers/tokens/{name}`) revokes one not yet spent. Before, the only way to stop a machine that had read the device code from joining more machines was `mainplane-server join cycle`, which changes the code for everyone
 - Links: the config's links are the one rule of who sees whom on the mesh. Before, a drive also let its server and each worker that mounts it see each other. `PUT /drives/{name}` now adds the links a drive needs and lists them in its reply (`{"linked": [...]}`). A config saved by hand with a drive whose links are missing is refused at reload. At start the harness adds the missing links to the config file and logs them, so an older config keeps the same reachability. A link to `"*"` links a worker with every persistent worker
 - Web interface: Settings > Devices lists the logged-in devices, one row per API key, with when each was added and last used, and revokes one (`GET /keys`, `DELETE /keys/{name}`). The key of this browser and the harness's `default` key cannot be revoked there
 - Web interface: a settings gear replaces the Edit menu. A red dot on it and on the Update tab shows while an update waits
@@ -16,7 +16,7 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 - macOS workers: a worker taken off a drive unmounts it first and forces it off when a normal unmount fails, then removes its Finder Favorite. A command stuck on a stale mount no longer stops the worker's drive rounds for good
 - API: the new package `pkg/api` owns the HTTP API's paths and wire types. The CLI, the connector and the web interface (`api.gen.ts`) use it
 - Catalog: the deprecated Mistral Medium 2604 preset is gone
-- Docs: the README and `docs/privacy-and-security.md` say that Mainplane is its own harness, what a worker on your own computer can reach, how the network works, and which macOS permissions a worker uses (App Management only for agents that update other apps)
+- Docs: the README and `docs/privacy-and-security.md` say that Mainplane is its own harness, what a worker on your own computer can reach, how the network works, and which macOS permissions a worker uses (App Management only for agents that update or delete other apps)
 
 ## v0.6.1
 
