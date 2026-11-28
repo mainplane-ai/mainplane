@@ -78,6 +78,9 @@ func (h *Harness) scan(ctx context.Context, id string, conf statefile.Conf) stri
 // scratch is the section of a worker's scratch, which only the worker knows.
 func (h *Harness) scratch(ctx context.Context, id, name string) string {
 	r, ok := h.Workers.Get(name)
+	if !ok && h.left(name) {
+		return fmt.Sprintf("\nworker %s, scratch: %s\n", name, goneWorker)
+	}
 	if !ok {
 		return fmt.Sprintf("\nworker %s, scratch: not connected\n", name)
 	}

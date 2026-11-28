@@ -249,6 +249,14 @@ func (c *Coordinator) Node(a netip.Addr) (string, bool) {
 	return c.st.Nodes[i].Name, true
 }
 
+// Has is whether a worker named name is on the mesh, connected or not. One
+// that left or was removed is not.
+func (c *Coordinator) Has(name string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.byName(name) != nil
+}
+
 // Remove takes the worker named name off the mesh for good. Its poll ends
 // and peers drop it at once. Its next poll finds it no longer authorized,
 // which its worker takes as the word to leave. Its keys stay refused; the

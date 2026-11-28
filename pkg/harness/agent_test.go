@@ -2,6 +2,7 @@ package harness
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -29,11 +30,11 @@ import (
 	"github.com/mainplane-ai/mainplane/pkg/worker"
 )
 
-// turn is what the test's model answers a step with: a run of code on w1,
-// or with no code the text "ok" and the turn's end. input is the prompt's
+// turn is what the test's model answers a step with: a run of code on w1 or
+// on, or with no code the text "ok" and the turn's end. input is the prompt's
 // size as the step reports it, ttl how long its prompt cache lasts.
 type turn struct {
-	code       string
+	code, on   string
 	input, ttl int
 }
 
@@ -74,7 +75,7 @@ func newRig(t *testing.T) *rig {
 			return hdr, nil
 		}
 		hdr.Stop = "tool_use"
-		emit(statefile.Record{Header: statefile.Header{Kind: statefile.Call, Type: "application/json"}, Body: fmt.Appendf(nil, `{"name":"run","arguments":{"worker":"w1","interpreter":"bash","code":%q}}`, tn.code)})
+		emit(statefile.Record{Header: statefile.Header{Kind: statefile.Call, Type: "application/json"}, Body: fmt.Appendf(nil, `{"name":"run","arguments":{"worker":%q,"interpreter":"bash","code":%q}}`, cmp.Or(tn.on, "w1"), tn.code)})
 		return hdr, nil
 	}
 	r.h = &Harness{
@@ -641,6 +642,43 @@ func TestWorkersMidStep(t *testing.T) {
 	}
 	if !strings.Contains(second, "Workers (changed)") || !strings.Contains(second, "worker away") {
 		t.Fatalf("the step after the change was not told of the workers: %s", second)
+	}
+}
+
+// A worker that left the harness is no reason to wait or fail: a step just
+// after a restart waits for none of the agent's workers that are gone, the
+// model reads that it is gone, and a call to it says so. One only offline is
+// still not connected. The configs keep its name.
+func TestGoneWorker(t *testing.T) {
+	r := newRig(t)
+	r.h.Exists = func(name string) bool { return name != "gone" }
+	r.h.rejoined = time.Now().Add(time.Hour)
+	var mu sync.Mutex
+	var bodies []string
+	r.step = func(body string) turn {
+		mu.Lock()
+		defer mu.Unlock()
+		bodies = append(bodies, body)
+		if len(bodies) == 1 {
+			return turn{code: "ls", on: "gone", input: 1000}
+		}
+		return turn{input: 1000}
+	}
+	a := r.create(api.AgentCreate{Config: r.conf(100_000, 0, "w1", "gone")}, "web")
+	if _, _, err := r.h.PostAgent(context.Background(), a.ID, "web", "", []Part{{Type: "text/plain", Body: []byte("start")}}); err != nil {
+		t.Fatal(err)
+	}
+	r.settled(a.ID)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 2 || !strings.Contains(bodies[0], "worker gone: "+goneWorker) || !strings.Contains(bodies[1], "error: worker gone is "+goneWorker) {
+		t.Fatalf("the model was not told the worker is gone: %v", bodies)
+	}
+	if got := r.h.workers(r.conf(1, 0, "away").Workers); got != "worker away: not connected\n" {
+		t.Fatalf("an offline worker: %q", got)
+	}
+	if conf, _ := config(r.chain(a.Sessions[0])); len(conf.Workers) != 2 {
+		t.Fatalf("workers %v", conf.Workers)
 	}
 }
 

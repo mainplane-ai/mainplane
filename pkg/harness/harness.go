@@ -51,6 +51,7 @@ type Harness struct {
 	Providers map[string]provider.Provider // read and replaced under pmu once the harness runs
 	Workers   *Pool
 	Remove    func(name string) error                // the coordinator's: the worker leaves the mesh for good
+	Exists    func(name string) bool                 // the coordinator's: a worker of this name is on the mesh, connected or not
 	Rename    func(old, name string) error           // the coordinator's: the worker takes another name
 	Prompt    func() ([]string, error)               // the config's prompt lines, read once per new session
 	Agents    string                                 // the directory of agents/<id>.json
@@ -299,7 +300,7 @@ func startLimit(chain []statefile.Record) int {
 
 // workers is the session's worker list as the model reads it: what each named
 // worker is right now and the drives it mounts, each it also serves marked,
-// or that it is not connected.
+// or that it is not connected or gone.
 func (h *Harness) workers(workers []statefile.Worker) string {
 	var b strings.Builder
 	for _, w := range workers {
@@ -316,11 +317,24 @@ func (h *Harness) workers(workers []statefile.Worker) string {
 				}
 				b.WriteString("\n")
 			}
+		} else if h.left(w.Name) {
+			fmt.Fprintf(&b, "worker %s: %s\n", w.Name, goneWorker)
 		} else {
 			fmt.Fprintf(&b, "worker %s: not connected\n", w.Name)
 		}
 	}
 	return b.String()
+}
+
+// goneWorker says a worker of the session left the harness for good, not
+// just for now.
+const goneWorker = "gone, it left this harness or was removed"
+
+// left is whether the worker named name left the mesh or was removed, so no
+// step waits for it and the model is told. A worker that is only offline is
+// not gone. Sessions and agents that name it keep the name.
+func (h *Harness) left(name string) bool {
+	return h.Exists != nil && !h.Exists(name)
 }
 
 // Step runs one cycle and returns the status after it. A failed session is
@@ -403,10 +417,10 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	return h.carryOn(ctx, s, chain, st, err)
 }
 
-// await waits until every worker is connected, the restart's wait is over,
-// or ctx ends.
+// await waits until every worker not gone is connected, the restart's wait
+// is over, or ctx ends.
 func (h *Harness) await(ctx context.Context, workers []statefile.Worker) {
-	for time.Now().Before(h.rejoined) && slices.ContainsFunc(workers, func(w statefile.Worker) bool { _, ok := h.Workers.Get(w.Name); return !ok }) {
+	for time.Now().Before(h.rejoined) && slices.ContainsFunc(workers, func(w statefile.Worker) bool { _, ok := h.Workers.Get(w.Name); return !ok && !h.left(w.Name) }) {
 		select {
 		case <-ctx.Done():
 			return
@@ -686,6 +700,9 @@ func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, c
 		return result(call.ID, "error: unknown worker "+a.Worker)
 	}
 	w, ok := h.Workers.Get(a.Worker)
+	if !ok && h.left(a.Worker) {
+		return result(call.ID, "error: worker "+a.Worker+" is "+goneWorker)
+	}
 	if !ok {
 		return result(call.ID, "error: worker "+a.Worker+" is not connected")
 	}
