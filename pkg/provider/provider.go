@@ -161,11 +161,11 @@ type Provider struct {
 	URL      string // full endpoint. gemini and bedrock take the model in the path, see Endpoint
 	Key      string
 	Envelope Envelope
-	Headers  func(req *http.Request, key string)       // auth and version headers
-	Endpoint func(url, model string) string            // nil means URL as is
-	Token    func(ctx context.Context) (string, error) // the key of each request, for a login's key that expires; nil means Key
-	Session  string                                    // the header that carries Request.Key, where the vendor routes its cache on a header
-	Socket   bool                                      // steps go over the session's WebSocket, see Conn: the openai envelope at OpenAI's own endpoint
+	Headers  func(req *http.Request, key string)                     // auth and version headers
+	Endpoint func(url, model string) string                          // nil means URL as is
+	Token    func(ctx context.Context, stale string) (string, error) // the key of each request, for a login's key that expires; nil means Key. stale is a key the vendor refused with 401: a new one replaces it
+	Session  string                                                  // the header that carries Request.Key, where the vendor routes its cache on a header
+	Socket   bool                                                    // steps go over the session's WebSocket, see Conn: the openai envelope at OpenAI's own endpoint
 	// Run, if set, makes the step instead of an HTTP request: claude-code's
 	// process. It retries what it can itself.
 	Run func(ctx context.Context, body []byte, cache *Cache, emit func(statefile.Record)) (statefile.Header, error)
@@ -218,6 +218,11 @@ func transient(err error) bool {
 	return !errors.As(err, new(configError)) // network or early stream failure
 }
 
+func unauthorized(err error) bool {
+	var he *httpError
+	return errors.As(err, &he) && he.code == http.StatusUnauthorized
+}
+
 func backoff(attempt int, err error) time.Duration {
 	var he *httpError
 	if errors.As(err, &he) && he.after > 0 {
@@ -261,12 +266,27 @@ func (p Provider) Step(ctx context.Context, conn *Conn, req Request, emit func(s
 	if u, err := neturl.Parse(url); err != nil || u.Host == "" || u.Scheme != "http" && u.Scheme != "https" {
 		return statefile.Header{}, fmt.Errorf("bad url %q", url) // configuration, not transient: checked before the retry loop
 	}
+	key, stale := p.Key, ""
 	for attempt := 0; ; attempt++ {
 		sent := time.Now().UTC().Truncate(time.Millisecond)
 		c := cache
-		h, emitted, err := p.once(ctx, conn, url, req.Key, body, &c, emit)
+		var h statefile.Header
+		var emitted bool
+		var err error
+		if p.Token != nil {
+			key, err = p.Token(ctx, stale)
+		}
+		if err == nil {
+			h, emitted, err = p.once(ctx, conn, url, req.Key, key, body, &c, emit)
+		}
 		if err == nil {
 			return p.done(h, req.Model, body, c, sent)
+		}
+		// A login's token can be revoked before its expiry, as when a ChatGPT
+		// plan changes: refresh it once and try again.
+		if p.Token != nil && stale == "" && !emitted && unauthorized(err) {
+			stale = key
+			continue
 		}
 		if emitted || attempt == retries || !transient(err) {
 			return statefile.Header{}, err
@@ -294,9 +314,9 @@ func (p Provider) done(h statefile.Header, model string, body []byte, cache Cach
 // once is one HTTP attempt, or a Socket provider's over conn. emitted reports
 // whether any block reached emit. An idle timeout cancels the request, and its
 // cause is the error.
-func (p Provider) once(ctx context.Context, conn *Conn, url, session string, body []byte, cache *Cache, emit func(statefile.Record)) (h statefile.Header, emitted bool, err error) {
+func (p Provider) once(ctx context.Context, conn *Conn, url, session, key string, body []byte, cache *Cache, emit func(statefile.Record)) (h statefile.Header, emitted bool, err error) {
 	if p.Socket {
-		return p.socket(ctx, conn, url, session, body, emit)
+		return p.socket(ctx, conn, url, session, key, body, emit)
 	}
 	name := p.Envelope.Name()
 	ctx, cancel := context.WithCancelCause(ctx)
@@ -313,9 +333,7 @@ func (p Provider) once(ctx context.Context, conn *Conn, url, session string, bod
 		return h, false, err
 	}
 	hr.Header.Set("Content-Type", "application/json")
-	if err := p.header(ctx, hr, session); err != nil {
-		return h, false, err
-	}
+	p.header(hr, session, key)
 	resp, err := http.DefaultClient.Do(hr)
 	if err != nil {
 		return h, false, err
@@ -339,20 +357,12 @@ func (p Provider) once(ctx context.Context, conn *Conn, url, session string, bod
 }
 
 // header sets the request's name, auth and session headers.
-func (p Provider) header(ctx context.Context, hr *http.Request, session string) error {
+func (p Provider) header(hr *http.Request, session, key string) {
 	hr.Header.Set("User-Agent", "mainplane/"+version.V) // servers that watch for abuse ask clients to name themselves
-	key := p.Key
-	if p.Token != nil {
-		var err error
-		if key, err = p.Token(ctx); err != nil {
-			return err
-		}
-	}
 	p.Headers(hr, key)
 	if p.Session != "" {
 		hr.Header.Set(p.Session, session)
 	}
-	return nil
 }
 
 // idleReader restarts the idle timer on every read that returns bytes.

@@ -53,7 +53,7 @@ func (c *Conn) Close() {
 // socket is one attempt over the session's socket, the WebSocket twin of once.
 // A continuation that fails is not httpError, so it is retried, whole, on a
 // new socket: the server may have dropped the response it chained from.
-func (p Provider) socket(ctx context.Context, c *Conn, url, session string, body []byte, emit func(statefile.Record)) (h statefile.Header, emitted bool, err error) {
+func (p Provider) socket(ctx context.Context, c *Conn, url, session, key string, body []byte, emit func(statefile.Record)) (h statefile.Header, emitted bool, err error) {
 	defer func() {
 		if err != nil {
 			c.Close()
@@ -77,9 +77,7 @@ func (p Provider) socket(ctx context.Context, c *Conn, url, session string, body
 	if err != nil {
 		return h, false, err
 	}
-	if err := p.header(ctx, hr, session); err != nil {
-		return h, false, err
-	}
+	p.header(hr, session, key)
 	if c.ws != nil && (c.url != url || !maps.EqualFunc(c.header, hr.Header, slices.Equal) || time.Since(c.opened) > socketLife) {
 		c.Close()
 	}
