@@ -17,6 +17,8 @@ const completed = `data: {"type":"response.completed","response":{"id":"r","stat
 // A token revoked before its expiry is refreshed once on a 401 and the step
 // goes through; a refusal of the refresh asks for a new sign-in.
 func TestChatGPTRefreshOn401(t *testing.T) {
+	u := tokenURL
+	t.Cleanup(func() { tokenURL = u })
 	for _, refused := range []bool{false, true} {
 		var refreshes, calls atomic.Int32
 		auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
